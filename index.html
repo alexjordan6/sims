@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>sims</title>
+    <style>
+      body { margin: 0; background: #101014; color: #ddd; font-family: system-ui, sans-serif; padding: 40px; }
+      h1 { font-weight: 500; margin: 0 0 24px; }
+      ul { list-style: none; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+      a { display: block; padding: 18px; border: 1px solid #2a2a33; border-radius: 8px; color: #cfe; text-decoration: none; background: #17171d; }
+      a:hover { border-color: #5ad; }
+      small { color: #778; display: block; margin-top: 30px; }
+    </style>
+  </head>
+  <body>
+    <h1>sims</h1>
+    <ul id="games"></ul>
+    <small>Space pause · 1/2/3 speed · R reset · N new seed</small>
+    <script type="module" src="/src/gallery.ts"></script>
+  </body>
+</html>
