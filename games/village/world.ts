@@ -15,6 +15,8 @@ export interface Tile {
   stage: number;
   /** trees: chop progress accumulated by workers */
   work: number;
+  /** visual variant (grass/tree frame choice), picked when the tile is set */
+  v: number;
   house?: House;
 }
 
@@ -28,9 +30,11 @@ export class World {
   tiles: Tile[] = [];
   houses: House[] = [];
   barracks: TilePos[] = [];
+  /** tile indices changed since the renderer last drained this */
+  dirty = new Set<number>();
 
   constructor(public readonly cols = COLS, public readonly rows = ROWS) {
-    for (let i = 0; i < cols * rows; i++) this.tiles.push({ kind: 'grass', stage: 0, work: 0 });
+    for (let i = 0; i < cols * rows; i++) { this.tiles.push({ kind: 'grass', stage: 0, work: 0, v: (i * 7919) % 97 }); this.dirty.add(i); }
   }
 
   inBounds(tx: number, ty: number): boolean {
@@ -40,8 +44,10 @@ export class World {
     return this.inBounds(tx, ty) ? this.tiles[ty * this.cols + tx] : undefined;
   }
   set(tx: number, ty: number, kind: TileKind): Tile {
-    const t = this.tiles[ty * this.cols + tx];
-    t.kind = kind; t.stage = 0; t.work = 0; t.house = undefined;
+    const i = ty * this.cols + tx;
+    const t = this.tiles[i];
+    t.kind = kind; t.stage = 0; t.work = 0; t.house = undefined; t.v = (t.v + 31) % 97;
+    this.dirty.add(i);
     return t;
   }
   isBlocked(tx: number, ty: number): boolean {

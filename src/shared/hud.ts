@@ -4,6 +4,7 @@ import Phaser from 'phaser';
 export class Hud {
   private text: Phaser.GameObjects.Text;
   private extra: Record<string, string | number> = {};
+  visible = true;
 
   constructor(scene: Phaser.Scene) {
     this.text = scene.add
@@ -18,12 +19,19 @@ export class Hud {
       .setDepth(1000);
   }
 
+  /** Games that draw their own HUD can hide this one. */
+  setVisible(v: boolean): void {
+    this.visible = v;
+    this.text.setVisible(v);
+  }
+
   /** Extra lines you want shown, e.g. hud.set('prey', prey.length). */
   set(key: string, value: string | number): void {
     this.extra[key] = value;
   }
 
   render(lines: Record<string, string | number>): void {
+    if (!this.visible) return;
     const all = { ...lines, ...this.extra };
     this.text.setText(
       Object.entries(all)

@@ -1,39 +1,48 @@
 import Phaser from 'phaser';
 import { SimScene, launch } from '@shared/index';
 import { World } from './world';
-import { Villager, Raider, Player, Mover, type Role } from './agents';
-import { p, TILE, COLS, ROWS, COST, HOUSE_CAP, CROP_YIELD, TREE_YIELD } from './config';
+import { Villager, Raider, Player, Mover, type Role, type BuildItem } from './agents';
+import { p, TILE, COLS, ROWS, ZOOM, COST, HOUSE_CAP, CROP_YIELD, TREE_YIELD } from './config';
+import { Renderer, preloadArt } from './render';
+import { UI } from './ui/ui';
 
 const NAMES = ['Ada', 'Bram', 'Cass', 'Dov', 'Eli', 'Fen', 'Gil', 'Hana', 'Ivo', 'Juno', 'Kai', 'Lior', 'Mara', 'Nils', 'Orla', 'Pim', 'Quin', 'Rue', 'Sol', 'Tova', 'Uli', 'Vera', 'Wren', 'Xan', 'Yael', 'Zed'];
 
-const COLORS = {
-  grass: 0x2f5d34, grassAlt: 0x2b5630, tilled: 0x5a4030, crop: 0x3a6b2a, sprout: 0x8fd35a, ripe: 0xf0c83c,
-  tree: 0x1d3f22, trunk: 0x4a3320, house: 0x8a5a3a, roof: 0xb03a2e, barracks: 0x555a66, barracksTrim: 0xc0392b,
-};
+export type EventKind = 'birth' | 'grow' | 'soldier' | 'raid' | 'death' | 'build' | 'info' | 'food' | 'wood';
+export interface GameEvent { kind: EventKind; text: string; toast: boolean; day: number }
+export type Screen = 'title' | 'playing' | 'paused' | 'over';
 
 export class VillageScene extends SimScene {
-  neighborRadius = 260; // soldier aggro radius = largest grid query
+  neighborRadius = 130; // soldier aggro radius = largest grid query
 
   world!: World;
   player!: Player;
   food = 0;
   wood = 0;
   day = 1;
-  /** 0..1 within the day; night around 0.85..0.15 */
+  /** 0..1 within the day; night around 0.8..0.2 */
   dayTime = 0.3;
   raidActive = false;
-  gameOver = false;
-  private nameIdx = 0;
-  private logs: string[] = [];
-  private banner: { text: string; ttl: number } | null = null;
+  screen: Screen = 'title';
+  selected: Mover | null = null;
+  journal: GameEvent[] = [];
+  stats = { peakPop: 0, soldiersRaised: 0, raidsRepelled: 0 };
 
-  private hintText!: Phaser.GameObjects.Text;
-  private logText!: Phaser.GameObjects.Text;
-  private bannerText!: Phaser.GameObjects.Text;
-  private overText!: Phaser.GameObjects.Text;
-  private night!: Phaser.GameObjects.Rectangle;
+  private nameIdx = 0;
+  private hovered: Mover | null = null;
+  private view?: Renderer;
+  private ui?: UI;
+  private wasd!: Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>;
+
+  get nextRaidDay(): number {
+    return (Math.floor(this.day / p.raidEvery) + 1) * p.raidEvery;
+  }
 
   // ---- setup ----------------------------------------------------------------
+
+  preload(): void {
+    preloadArt(this);
+  }
 
   setup(): void {
     this.world = new World();
@@ -43,10 +52,10 @@ export class VillageScene extends SimScene {
     this.day = 1;
     this.dayTime = 0.3;
     this.raidActive = false;
-    this.gameOver = false;
+    this.selected = null;
+    this.journal = [];
+    this.stats = { peakPop: 0, soldiersRaised: 0, raidsRepelled: 0 };
     this.nameIdx = this.rng.int(0, NAMES.length - 1);
-    this.logs = [];
-    this.banner = null;
 
     const home = this.world.houses[0];
     const c = World.center(home.tx, home.ty + 1);
@@ -56,53 +65,118 @@ export class VillageScene extends SimScene {
     this.addVillager(home, 'farmer', 22);
     this.addVillager(home, 'woodcutter', 22);
     this.addVillager(home, 'kid', 4);
-    this.log('Day 1. WASD move · E use · Q build');
+    this.event('info', 'A new village. Till soil, plant, and keep everyone fed.');
   }
 
   private addVillager(home: (typeof this.world.houses)[number], role: Role, age: number): Villager {
     const c = World.center(home.tx, home.ty + 1);
-    const v = new Villager(c.x + this.rng.range(-8, 8), c.y + this.rng.range(-8, 8), home, role, age, this.nextName());
+    const v = new Villager(c.x + this.rng.range(-4, 4), c.y + this.rng.range(-4, 4), home, role, age, NAMES[this.nameIdx++ % NAMES.length]);
     home.residents++;
     return this.spawn(v);
   }
 
-  private nextName(): string {
-    return NAMES[this.nameIdx++ % NAMES.length];
+  event(kind: EventKind, text: string, toast = false): void {
+    this.journal.push({ kind, text, toast, day: this.day });
   }
-
-  log(msg: string): void {
-    this.logs.push(msg);
-    if (this.logs.length > 6) this.logs.shift();
-  }
-
-  private wasd!: Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>;
 
   create(): void {
     const kb = this.input.keyboard!;
     this.wasd = kb.addKeys('W,A,S,D') as typeof this.wasd;
     kb.on('keydown-E', () => this.interact());
     kb.on('keydown-Q', () => this.player.cycleBuild());
+    kb.on('keydown-ESC', () => this.togglePause());
 
     super.create(); // creates gfx + hud, then calls reset() -> setup()
+    kb.removeAllListeners('keydown-SPACE'); // Esc handles pause; Space is free for later
+    this.hud.setVisible(false);
 
-    this.night = this.add.rectangle(0, 0, this.W, this.H, 0x060612, 0).setOrigin(0).setDepth(5);
-    const mono = 'ui-monospace, Menlo, Consolas, monospace';
-    this.hintText = this.add.text(this.W / 2, this.H - 10, '', { fontFamily: mono, fontSize: '13px', color: '#fff', backgroundColor: 'rgba(0,0,0,.5)', padding: { x: 8, y: 4 } }).setOrigin(0.5, 1).setDepth(10);
-    this.logText = this.add.text(this.W - 8, this.H - 8, '', { fontFamily: mono, fontSize: '11px', color: '#bcc', align: 'right', backgroundColor: 'rgba(0,0,0,.4)', padding: { x: 6, y: 4 } }).setOrigin(1, 1).setDepth(10);
-    this.bannerText = this.add.text(this.W / 2, 60, '', { fontFamily: mono, fontSize: '34px', color: '#ff5a5a', fontStyle: 'bold' }).setOrigin(0.5).setDepth(10);
-    this.overText = this.add.text(this.W / 2, this.H / 2, '', { fontFamily: mono, fontSize: '24px', color: '#fff', align: 'center', backgroundColor: 'rgba(0,0,0,.7)', padding: { x: 20, y: 14 } }).setOrigin(0.5).setDepth(20).setVisible(false);
+    this.view = new Renderer(this);
+    this.view.rebuild();
+    this.ui = new UI(this);
+    this.ui.mount();
+
+    // hover / click on the map
+    this.input.on('pointermove', (ptr: Phaser.Input.Pointer) => this.onPointerMove(ptr));
+    this.input.on('pointerdown', (_ptr: Phaser.Input.Pointer, objs: unknown[]) => { if (objs.length === 0) this.select(null); });
+    this.input.on('gameout', () => { this.hovered = null; this.ui?.tooltip(null); });
+
+    this.goTitle();
   }
 
   reset(newSeed?: number): void {
-    this.paused = false;
-    this.overText?.setVisible(false);
     super.reset(newSeed);
+    this.view?.rebuild();
+    this.ui?.clear();
+    if (this.screen !== 'title') { this.screen = 'playing'; this.paused = false; this.ui?.showScreen(null); }
+  }
+
+  // ---- screens / flow -------------------------------------------------------
+
+  startGame(seed?: number): void {
+    this.screen = 'playing';
+    if (seed !== undefined && seed !== this.seed) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('seed', String(seed >>> 0));
+      window.history.replaceState(null, '', url);
+    }
+    this.reset(seed !== undefined ? seed >>> 0 : this.seed);
+  }
+
+  goTitle(): void {
+    this.screen = 'title';
+    this.paused = true;
+    this.ui?.showScreen('title');
+  }
+
+  togglePause(): void {
+    if (this.screen === 'playing') { this.screen = 'paused'; this.paused = true; this.ui?.showScreen('pause'); }
+    else if (this.screen === 'paused') { this.screen = 'playing'; this.paused = false; this.ui?.showScreen(null); }
+  }
+
+  private endGame(): void {
+    this.screen = 'over';
+    this.paused = true;
+    this.ui?.showScreen('over');
+  }
+
+  setBuild(item: BuildItem): void {
+    this.player.build = item;
+  }
+
+  select(m: Mover | null): void {
+    this.selected = m;
+  }
+
+  hoverAgent(m: Mover | null): void {
+    this.hovered = m;
+  }
+
+  private onPointerMove(ptr: Phaser.Input.Pointer): void {
+    if (!this.ui || (this.screen !== 'playing' && this.screen !== 'paused')) { this.ui?.tooltip(null); return; }
+    const ev = ptr.event as MouseEvent;
+    const m = this.hovered;
+    if (m && !m.dead && !m.hidden) {
+      const name = m instanceof Villager ? m.name : m instanceof Player ? 'You' : 'Raider';
+      const sub = m instanceof Villager ? m.role : m.task;
+      this.ui.tooltip(`<div class="t">${name}</div><div class="d">${sub} · ${Math.max(0, m.hp)}/${m.maxHp} hp</div>`, ev.clientX, ev.clientY);
+      return;
+    }
+    const t = this.world.get(Math.floor(ptr.worldX / TILE), Math.floor(ptr.worldY / TILE));
+    let html: string | null = null;
+    switch (t?.kind) {
+      case 'crop': html = `<div class="t">${t.stage >= p.cropDays ? 'Ripe crop' : 'Growing crop'}</div><div class="d">${Math.min(t.stage, p.cropDays)}/${p.cropDays} days · yields ${CROP_YIELD} food</div>`; break;
+      case 'tilled': html = `<div class="t">Tilled soil</div><div class="d">plant with E, or a farmer will</div>`; break;
+      case 'tree': html = `<div class="t">Tree</div><div class="d">${t.work}/3 chopped · yields ${TREE_YIELD} wood</div>`; break;
+      case 'house': html = `<div class="t">House</div><div class="d">${t.house?.residents ?? 0}/${HOUSE_CAP} residents · couples here have children</div>`; break;
+      case 'barracks': html = `<div class="t">Barracks</div><div class="d">children raised nearby grow into soldiers</div>`; break;
+    }
+    this.ui.tooltip(html, ev.clientX, ev.clientY);
   }
 
   // ---- simulation -----------------------------------------------------------
 
   tick(dt: number): void {
-    if (this.gameOver) return;
+    if (this.screen !== 'playing') return;
 
     this.dayTime += dt / p.dayLength;
     if (this.dayTime >= 1) {
@@ -119,9 +193,10 @@ export class VillageScene extends SimScene {
 
     if (this.raidActive && !this.agents.some((a) => a instanceof Raider)) {
       this.raidActive = false;
-      this.log('Raid repelled!');
+      this.stats.raidsRepelled++;
+      this.event('raid', 'Raid repelled!', true);
     }
-    if (this.banner && (this.banner.ttl -= dt) <= 0) this.banner = null;
+    this.stats.peakPop = Math.max(this.stats.peakPop, this.villagers().length);
     if (this.player.dead) this.endGame();
   }
 
@@ -129,24 +204,24 @@ export class VillageScene extends SimScene {
     // a night's rest
     this.player.hp = Math.min(this.player.maxHp, this.player.hp + 30);
     // crops grow
-    for (const t of this.world.tiles) if (t.kind === 'crop') t.stage++;
-    // occasional sapling next to an existing tree
+    this.world.tiles.forEach((t, i) => { if (t.kind === 'crop') { t.stage++; this.world.dirty.add(i); } });
+    // saplings: next to a tree, or rarely anywhere
     for (let i = 0; i < 3; i++) {
       const tx = this.rng.int(0, COLS - 1), ty = this.rng.int(0, ROWS - 1);
       const t = this.world.get(tx, ty);
       const nearTree = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => this.world.get(tx + dx, ty + dy)?.kind === 'tree');
-      if (t?.kind === 'grass' && (nearTree || this.rng.chance(0.15)))
-        this.world.set(tx, ty, 'tree');
+      if (t?.kind === 'grass' && (nearTree || this.rng.chance(0.15))) this.world.set(tx, ty, 'tree');
     }
 
     // villagers: eat, age, grow up, grow old
     const villagers = this.villagers();
     for (const v of villagers) {
       if (this.food >= p.foodPerDay) { this.food -= p.foodPerDay; v.hungerDays = 0; }
-      else if (++v.hungerDays >= 3) { v.dead = true; this.log(`${v.name} starved`); continue; }
+      else if (++v.hungerDays >= 3) { v.dead = true; v.hp = 0; this.event('death', `${v.name} starved`, true); continue; }
+      else this.event('food', `${v.name} went hungry`);
       v.age++;
       if (v.role === 'kid' && v.age >= p.adultAge) v.comeOfAge(this);
-      else if (v.age >= p.oldAge && this.rng.chance(0.25)) { v.dead = true; this.log(`${v.name} died of old age`); }
+      else if (v.age >= p.oldAge && this.rng.chance(0.25)) { v.dead = true; this.event('death', `${v.name} died of old age`); }
     }
 
     // births: a couple sharing a house with room and food to spare
@@ -154,55 +229,45 @@ export class VillageScene extends SimScene {
       const adults = villagers.filter((v) => v.home === h && v.isAdult && !v.dead);
       if (adults.length >= 2 && h.residents < HOUSE_CAP && this.food > 10 && this.rng.chance(p.birthChance)) {
         const kid = this.addVillager(h, 'kid', 0);
-        this.log(`${kid.name} was born`);
+        this.event('birth', `${kid.name} was born`, true);
       }
     }
 
     // move-ins: adults from crowded houses take a spare room elsewhere
     for (const h of this.world.houses) {
       if (h.residents >= HOUSE_CAP) continue;
-      const mover = villagers.find((v) => v.isAdult && !v.dead && v.home !== h && v.home.residents > 2 && villagers.filter((o) => o.home === v.home && o.isAdult).length > 2);
-      if (mover) { mover.home.residents--; mover.home = h; h.residents++; }
+      const mover = villagers.find((v) => v.isAdult && !v.dead && v.home !== h && villagers.filter((o) => o.home === v.home && o.isAdult).length > 2);
+      if (mover) { mover.home.residents--; mover.home = h; h.residents++; this.event('info', `${mover.name} moved into a new house`); }
     }
 
     if (this.day % p.raidEvery === 0) this.spawnRaid();
-    else if ((this.day + 1) % p.raidEvery === 0) this.showBanner('Raiders sighted — they arrive tomorrow', 4);
+    else if ((this.day + 1) % p.raidEvery === 0) this.event('raid', 'Raiders sighted — they arrive tomorrow', true);
   }
 
-  private spawnRaid(): void {
+  spawnRaid(): void {
     const n = 1 + Math.floor(this.day / 5);
     const side = this.rng.int(0, 3);
     for (let i = 0; i < n; i++) {
       let tx = side === 0 ? 0 : side === 1 ? COLS - 1 : this.rng.int(0, COLS - 1);
       let ty = side === 2 ? 0 : side === 3 ? ROWS - 1 : this.rng.int(0, ROWS - 1);
-      // step inward until we find open ground
       const dx = side === 0 ? 1 : side === 1 ? -1 : 0, dy = side === 2 ? 1 : side === 3 ? -1 : 0;
       while (this.world.isBlocked(tx, ty) && this.world.inBounds(tx + dx, ty + dy)) { tx += dx; ty += dy; }
       const c = World.center(tx, ty);
       this.spawn(new Raider(c.x, c.y));
     }
     this.raidActive = true;
-    this.showBanner(`RAID! ${n} raiders`, 5);
-    this.log(`Day ${this.day}: ${n} raiders attack`);
+    this.event('raid', `RAID! ${n} raider${n > 1 ? 's' : ''} from the ${['west', 'east', 'north', 'south'][side]}`, true);
   }
 
   private onDeath(a: Mover): void {
+    if (a === this.selected) this.selected = null;
+    if (a === this.hovered) this.hovered = null;
     if (a instanceof Villager) {
       a.home.residents--;
-      if (a.hp <= 0) this.log(`${a.name} the ${a.role} was killed`);
+      if (a.hp <= 0 && a.hungerDays < 3) this.event('death', `${a.name} the ${a.role} was killed`, true);
     } else if (a instanceof Raider && a.hp <= 0) {
-      this.log('Raider slain');
+      this.event('raid', 'Raider slain');
     }
-  }
-
-  private endGame(): void {
-    this.gameOver = true;
-    this.paused = true;
-    this.overText.setText(`You died on day ${this.day}\n\n${this.villagers().length} villagers remain\n\nR to restart`).setVisible(true);
-  }
-
-  private showBanner(text: string, ttl: number): void {
-    this.banner = { text, ttl };
   }
 
   // ---- queries used by agents -----------------------------------------------
@@ -241,21 +306,21 @@ export class VillageScene extends SimScene {
   // ---- player actions -------------------------------------------------------
 
   private interact(): void {
-    if (this.gameOver || this.paused) return;
+    if (this.screen !== 'playing') return;
     const pl = this.player;
-    const raider = this.nearestRaider(pl.x, pl.y, 40);
-    if (raider) { pl.tryAttack(raider, 12, 40, 0.5); return; }
+    const raider = this.nearestRaider(pl.x, pl.y, 20);
+    if (raider) { pl.tryAttack(raider, 12, 20, 0.5); return; }
 
     const { tx, ty } = pl.faced;
     const t = this.world.get(tx, ty);
     if (!t) return;
 
     if (pl.build !== 'none') {
-      if (t.kind !== 'grass') { this.log('Need open grass to build'); return; }
-      if (this.wood < COST[pl.build]) { this.log(`Need ${COST[pl.build]} wood`); return; }
+      if (t.kind !== 'grass') { this.event('build', 'Need open grass to build'); return; }
+      if (this.wood < COST[pl.build]) { this.event('build', `Need ${COST[pl.build]} wood for a ${pl.build}`); return; }
       this.wood -= COST[pl.build];
       if (pl.build === 'house') this.world.placeHouse(tx, ty); else this.world.placeBarracks(tx, ty);
-      this.log(`Built a ${pl.build}`);
+      this.event('build', `Built a ${pl.build}`, true);
       return;
     }
 
@@ -267,21 +332,22 @@ export class VillageScene extends SimScene {
         break;
       case 'tree':
         if (++t.work >= 3) { this.world.set(tx, ty, 'grass'); this.wood += TREE_YIELD; }
+        else this.world.dirty.add(ty * COLS + tx);
         break;
     }
   }
 
-  private hint(): string {
+  hint(): string {
     const pl = this.player;
-    if (this.nearestRaider(pl.x, pl.y, 40)) return 'E: attack';
-    if (pl.build !== 'none') return `E: build ${pl.build} (${COST[pl.build]} wood) · Q: change`;
+    if (this.nearestRaider(pl.x, pl.y, 20)) return 'E: attack!';
+    if (pl.build !== 'none') return `E: build ${pl.build} (${COST[pl.build]} wood)  ·  Q: cancel`;
     const t = this.world.get(pl.faced.tx, pl.faced.ty);
     switch (t?.kind) {
-      case 'grass': return 'E: till soil · Q: build';
+      case 'grass': return 'E: till soil';
       case 'tilled': return 'E: plant';
       case 'crop': return t.stage >= p.cropDays ? 'E: harvest' : `growing (${t.stage}/${p.cropDays} days)`;
       case 'tree': return `E: chop (${t.work}/3)`;
-      case 'house': return `house (${t.house?.residents ?? 0}/${HOUSE_CAP})`;
+      case 'house': return `house — ${t.house?.residents ?? 0}/${HOUSE_CAP} residents`;
       case 'barracks': return 'barracks — kids raised nearby become soldiers';
       default: return '';
     }
@@ -290,88 +356,10 @@ export class VillageScene extends SimScene {
   // ---- rendering ------------------------------------------------------------
 
   draw(): void {
-    const g = this.gfx;
-    g.clear();
-    const w = this.world;
-    for (let ty = 0; ty < ROWS; ty++) {
-      for (let tx = 0; tx < COLS; tx++) {
-        const t = w.tiles[ty * COLS + tx];
-        const x = tx * TILE, y = ty * TILE;
-        g.fillStyle((tx + ty) % 2 ? COLORS.grass : COLORS.grassAlt, 1);
-        g.fillRect(x, y, TILE, TILE);
-        switch (t.kind) {
-          case 'tilled':
-            g.fillStyle(COLORS.tilled, 1); g.fillRect(x + 2, y + 2, TILE - 4, TILE - 4); break;
-          case 'crop': {
-            g.fillStyle(COLORS.tilled, 1); g.fillRect(x + 2, y + 2, TILE - 4, TILE - 4);
-            const f = Math.min(1, t.stage / p.cropDays);
-            g.fillStyle(f >= 1 ? COLORS.ripe : f > 0.5 ? COLORS.crop : COLORS.sprout, 1);
-            const s = 6 + f * 14;
-            g.fillRect(x + TILE / 2 - s / 2, y + TILE / 2 - s / 2, s, s);
-            break;
-          }
-          case 'tree':
-            g.fillStyle(COLORS.trunk, 1); g.fillRect(x + 13, y + 16, 6, 12);
-            g.fillStyle(COLORS.tree, 1); g.fillCircle(x + TILE / 2, y + 13, 11); break;
-          case 'house':
-            g.fillStyle(COLORS.house, 1); g.fillRect(x + 3, y + 12, TILE - 6, TILE - 14);
-            g.fillStyle(COLORS.roof, 1); g.fillTriangle(x + 1, y + 13, x + TILE - 1, y + 13, x + TILE / 2, y + 2); break;
-          case 'barracks':
-            g.fillStyle(COLORS.barracks, 1); g.fillRect(x + 2, y + 6, TILE - 4, TILE - 8);
-            g.fillStyle(COLORS.barracksTrim, 1); g.fillRect(x + 2, y + 6, TILE - 4, 5); g.fillRect(x + 13, y + 16, 6, 10); break;
-        }
-      }
-    }
-
-    // faced tile highlight
-    const f = this.player.faced;
-    if (w.inBounds(f.tx, f.ty)) {
-      g.lineStyle(2, this.player.build !== 'none' ? 0xffe066 : 0xffffff, 0.6);
-      g.strokeRect(f.tx * TILE + 1, f.ty * TILE + 1, TILE - 2, TILE - 2);
-    }
-
-    // agents
-    for (const a of this.agents) {
-      const m = a as Mover;
-      if (m.hidden) continue;
-      g.fillStyle(m.color, 1);
-      g.fillCircle(m.x, m.y, m.radius);
-      if (a instanceof Villager && a.role === 'soldier') { g.lineStyle(2, 0xffffff, 0.9); g.strokeCircle(m.x, m.y, m.radius + 1); }
-      if (a instanceof Raider) { g.lineStyle(2, 0x300000, 1); g.strokeCircle(m.x, m.y, m.radius + 1); }
-      if (m === this.player) {
-        g.fillStyle(0x000000, 0.6);
-        g.fillCircle(m.x + this.player.facing.x * 5, m.y + this.player.facing.y * 5, 2.5);
-      }
-      if (m.hp < m.maxHp) {
-        const bw = 16;
-        g.fillStyle(0x000000, 0.6); g.fillRect(m.x - bw / 2, m.y - m.radius - 6, bw, 3);
-        g.fillStyle(m.hp / m.maxHp > 0.4 ? 0x5fdc5f : 0xff4040, 1); g.fillRect(m.x - bw / 2, m.y - m.radius - 6, bw * (m.hp / m.maxHp), 3);
-      }
-    }
-
-    // day/night
-    const nightness = Math.max(0, Math.cos((this.dayTime - 0.5) * Math.PI * 2) * -1); // 1 at dayTime 0, 0 at 0.5
-    this.night.setAlpha(nightness * 0.55);
-
-    this.hintText.setText(this.hint()).setVisible(!this.gameOver);
-    this.logText.setText(this.logs.join('\n'));
-    this.bannerText.setText(this.banner?.text ?? '').setAlpha(this.banner ? Math.min(1, this.banner.ttl) : 0);
-  }
-
-  hudLines(): Record<string, string | number> {
-    const vs = this.villagers();
-    const count = (r: Role) => vs.filter((v) => v.role === r).length;
-    const hour = Math.floor(this.dayTime * 24);
-    return {
-      day: `${this.day} ${String(hour).padStart(2, '0')}:00${this.raidActive ? ' ⚔ RAID' : ''}`,
-      food: Math.floor(this.food),
-      wood: Math.floor(this.wood),
-      villagers: `${count('farmer')} farmers · ${count('woodcutter')} cutters · ${count('kid')} kids`,
-      soldiers: count('soldier'),
-      hp: `${Math.max(0, this.player.hp)}/${this.player.maxHp}`,
-      build: this.player.build,
-    };
+    const dt = this.game.loop.delta / 1000;
+    this.view?.sync(dt);
+    this.ui?.render(dt);
   }
 }
 
-launch(VillageScene, { width: COLS * TILE, height: ROWS * TILE, background: '#1a2a1c' });
+launch(VillageScene, { width: COLS * TILE, height: ROWS * TILE, zoom: ZOOM, pixelArt: true, background: '#1a2a1c' });

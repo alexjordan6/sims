@@ -5,6 +5,10 @@ export interface LaunchOptions {
   height?: number;
   background?: string;
   parent?: string;
+  /** Nearest-neighbour texture filtering + rounded positions, for pixel art. */
+  pixelArt?: boolean;
+  /** Integer upscale of the base resolution (e.g. 2 => 16 px tiles show as 32 px). */
+  zoom?: number;
 }
 
 declare global {
@@ -22,7 +26,9 @@ export function launch(scene: typeof Phaser.Scene, opts: LaunchOptions = {}): Ph
     width: opts.width ?? 1280,
     height: opts.height ?? 720,
     backgroundColor: opts.background ?? '#101014',
-    scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH },
+    pixelArt: opts.pixelArt ?? false,
+    roundPixels: opts.pixelArt ?? false,
+    scale: { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH, zoom: opts.zoom ?? 1 },
     scene: [scene],
   });
   window.game = game;

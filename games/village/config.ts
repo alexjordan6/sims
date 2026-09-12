@@ -1,8 +1,9 @@
 import { params } from '@shared/index';
 
-export const TILE = 32;
+export const TILE = 16;
 export const COLS = 40;
 export const ROWS = 22;
+export const ZOOM = 2; // 16 px tiles shown at 32 px
 
 export const p = params({
   dayLength: [60, 2, 180, 1],      // real seconds per day

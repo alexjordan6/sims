@@ -34,3 +34,8 @@ Override `tick(dt)` for global rules, `draw()` for custom rendering.
 2. Repo → Settings → Pages → Source: **GitHub Actions**.
 
 If the repo is named something else, change `base` in `vite.config.ts`.
+
+## Games
+
+- **boids** — flocking reference sim.
+- **village** — Stardew × RTS: farm, raise a family, and the kids you raise beside the barracks grow into your army. Pixel art by [Kenney](https://kenney.nl) (CC0, see `games/village/assets/CREDITS.md`). UI is an HTML overlay (`games/village/ui/`); the world is Phaser tilemap layers + sprites (`render.ts`). Press `` ` `` in-game for the tuning sliders.
