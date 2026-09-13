@@ -137,6 +137,7 @@ export class UI {
   private mountTouch(): void {
     const s = this.scene;
     document.body.classList.add('touch');
+    this.blockBrowserZoom();
 
     // the side panel becomes a bottom drawer with tabs
     const tabs = h(`<div class="tabs"><button class="btn small on" data-tab="inspector">INSPECT</button><button class="btn small" data-tab="roster">VILLAGERS</button><button class="btn small close-drawer">CLOSE</button></div>`);
@@ -187,6 +188,41 @@ export class UI {
     const release = (e: PointerEvent) => { if (e.pointerId !== active) return; active = null; set(0, 0); };
     stick.addEventListener('pointerup', release);
     stick.addEventListener('pointercancel', release);
+  }
+
+  /**
+   * Phones ignore `user-scalable=no` (Safari especially): a stray pinch or double-tap zooms the
+   * whole page and pushes the controls off-screen. Swallow those gestures, and if the page is
+   * somehow zoomed anyway, offer a one-tap reload (there is no API to reset browser zoom).
+   */
+  private blockBrowserZoom(): void {
+    const stop = (e: Event) => e.preventDefault();
+    // Safari pinch
+    document.addEventListener('gesturestart', stop, { passive: false });
+    document.addEventListener('gesturechange', stop, { passive: false });
+    // other browsers: multi-finger pinch reported via touchmove
+    document.addEventListener('touchmove', (e) => { if (e.touches.length > 1 || (e as TouchEvent & { scale?: number }).scale! > 1) e.preventDefault(); }, { passive: false });
+    // double-tap zoom: eat the second tap of a quick double tap outside form fields
+    let lastTap = 0;
+    document.addEventListener('touchend', (e) => {
+      const now = Date.now();
+      if (now - lastTap < 300 && !(e.target as HTMLElement).closest('input')) e.preventDefault();
+      lastTap = now;
+    }, { passive: false });
+
+    const vv = window.visualViewport;
+    if (!vv) return;
+    let banner: HTMLElement | null = null;
+    const check = () => {
+      const zoomed = vv.scale > 1.08;
+      if (zoomed && !banner) {
+        banner = h(`<div class="zoomed-banner"><span>The page got zoomed in.</span><button class="btn ok">RESET VIEW</button></div>`);
+        banner.querySelector('button')!.addEventListener('click', () => location.reload());
+        document.body.append(banner);
+      } else if (!zoomed && banner) { banner.remove(); banner = null; }
+    };
+    vv.addEventListener('resize', check);
+    check();
   }
 
   private showTab(tab: 'inspector' | 'roster'): void {

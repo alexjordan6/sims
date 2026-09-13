@@ -307,3 +307,5 @@ body.touch .tooltip { display: none; }
 }
 .zoombtn { position: absolute; right: 12px; top: 84px; font-size: 20px; }
 @media (max-height: 440px) { .zoombtn { top: 52px; } }
+body.touch, body.touch #side, body.touch #screens { touch-action: manipulation; }
+.zoomed-banner { position: fixed; left: 0; right: 0; top: 0; z-index: 100; display: flex; gap: 10px; align-items: center; justify-content: center; padding: 8px; background: #140f0bee; font-size: 14px; }
