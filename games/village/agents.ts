@@ -1,5 +1,5 @@
 import type { Agent } from '@shared/index';
-import { World, doorstep, type House, type TilePos } from './world';
+import { World, doorstep, buildingCenter, type House, type TilePos } from './world';
 import { p, TREE_YIELD } from './config';
 import type { Mods } from './meta';
 import type { VillageScene } from './main';
@@ -181,8 +181,8 @@ export class Villager extends Mover {
     this.thinkTimer -= dt;
     if (this.thinkTimer <= 0 || this.followPath(dt)) {
       this.thinkTimer = s.rng.range(2, 5);
-      const r = 4;
-      const tx = this.home.tx + s.rng.int(-r, r), ty = this.home.ty + s.rng.int(-r, r);
+      const r = 5, hc = buildingCenter(this.home);
+      const tx = Math.round(hc.tx) + s.rng.int(-r, r), ty = Math.round(hc.ty) + s.rng.int(-r, r);
       if (s.world.inBounds(tx, ty) && !s.world.isBlocked(tx, ty)) this.setGoal(s, tx, ty, true);
     }
 
@@ -197,7 +197,7 @@ export class Villager extends Mover {
     for (let dy = -2; dy <= 2; dy++)
       for (let dx = -2; dx <= 2; dx++) {
         const k = s.world.get(t.tx + dx, t.ty + dy)?.kind;
-        if (k === 'barracks') this.martial += 2 * dt * mm;
+        if (k === 'barracks') this.martial += 0.6 * dt * mm; // 4x4 footprint: several tiles are usually in range
         else if (k === 'crop' || k === 'tilled') this.civil += 0.4 * dt;
       }
   }
@@ -267,8 +267,8 @@ export class Villager extends Mover {
     this.thinkTimer -= dt;
     if (this.followPath(dt) && this.thinkTimer <= 0) {
       this.thinkTimer = s.rng.range(3, 7);
-      const post = s.world.barracks.length ? s.rng.pick(s.world.barracks) : this.home;
-      this.wanderNear(s, post, 2);
+      const post = buildingCenter(s.world.barracks.length ? s.rng.pick(s.world.barracks) : this.home);
+      this.wanderNear(s, { tx: Math.round(post.tx), ty: Math.round(post.ty) }, 3);
     }
   }
 
@@ -288,7 +288,8 @@ export class Villager extends Mover {
     const arrived = this.followPath(dt);
     if (arrived && this.adjacentTo(door)) {
       this.hidden = true;
-      this.x = (this.home.tx + 1) * 16; this.y = (this.home.ty + 1) * 16; // centre of the 2x2
+      const c = buildingCenter(this.home);
+      this.x = c.tx * 16; this.y = c.ty * 16;
       this.clearGoal();
     }
   }

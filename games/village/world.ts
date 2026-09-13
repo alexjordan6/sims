@@ -3,9 +3,10 @@ import { TILE, COLS, ROWS } from './config';
 
 export type TileKind = 'grass' | 'tree' | 'tilled' | 'crop' | 'house' | 'barracks';
 
-/** Buildings are 2x2 tiles; (tx, ty) is the top-left. The door is the bottom-left tile. */
-export const BUILDING_W = 2;
-export const BUILDING_H = 2;
+/** Buildings are 4x4 tiles; (tx, ty) is the top-left. The door is on the bottom row at DOOR_COL. */
+export const BUILDING_W = 4;
+export const BUILDING_H = 4;
+export const DOOR_COL = 1;
 
 export interface House {
   tx: number;
@@ -13,9 +14,13 @@ export interface House {
   residents: number; // count of villagers who call this home
 }
 
-/** The walkable tile just outside a building's door (below the bottom-left tile). */
+/** The walkable tile just outside a building's door. */
 export function doorstep(b: TilePos): TilePos {
-  return { tx: b.tx, ty: b.ty + BUILDING_H };
+  return { tx: b.tx + DOOR_COL, ty: b.ty + BUILDING_H };
+}
+/** Centre of a building, in tiles (fractional). */
+export function buildingCenter(b: TilePos): TilePos {
+  return { tx: b.tx + BUILDING_W / 2, ty: b.ty + BUILDING_H / 2 };
 }
 
 export interface Tile {
@@ -27,7 +32,7 @@ export interface Tile {
   /** visual variant (grass/tree frame choice), picked when the tile is set */
   v: number;
   house?: House;
-  /** for buildings: which 2x2 cell this tile is (col + row * 2), for rendering */
+  /** for buildings: which footprint cell this tile is (col + row * BUILDING_W), for rendering */
   part?: number;
 }
 
@@ -74,7 +79,7 @@ export class World {
     return { tx: Math.floor(x / TILE), ty: Math.floor(y / TILE) };
   }
 
-  /** Can a 2x2 building go here (all footprint tiles open grass, roof row in bounds)? */
+  /** Can a building go here (all footprint tiles open grass, roof ridge row in bounds)? */
   canBuild(tx: number, ty: number): boolean {
     if (ty < 1) return false;
     for (let dy = 0; dy < BUILDING_H; dy++)
@@ -171,10 +176,10 @@ export class World {
     }
     const hx = (this.cols / 2) | 0, hy = (this.rows / 2) | 0;
     // clear the village centre
-    for (let ty = hy - 5; ty <= hy + 4; ty++)
-      for (let tx = hx - 9; tx <= hx + 8; tx++) this.set(tx, ty, 'grass');
-    this.placeHouse(hx - 5, hy - 3);
-    this.placeBarracks(hx + 4, hy - 3);
+    for (let ty = hy - 7; ty <= hy + 4; ty++)
+      for (let tx = hx - 11; tx <= hx + 10; tx++) this.set(tx, ty, 'grass');
+    this.placeHouse(hx - 9, hy - 5);
+    this.placeBarracks(hx + 5, hy - 5);
     const half = Math.floor(fieldW / 2);
     for (let ty = hy + 1; ty <= hy + 3; ty++)
       for (let tx = hx - half; tx <= hx + half; tx++) {

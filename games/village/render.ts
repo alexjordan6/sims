@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { World, type Tile } from './world';
+import { World, BUILDING_W, BUILDING_H, type Tile } from './world';
 import { Mover, Villager, Raider, Player } from './agents';
 import { TOWN, FARM, CHAR } from './atlas';
 import { TILE, COLS, ROWS } from './config';
@@ -14,10 +14,26 @@ import dungeonUrl from './assets/dungeon.png';
 const GID = { town: 1, farm: 1 + 132, dungeon: 1 + 264 } as const;
 const EMPTY = -1;
 
-/** 2x2 building art: parts are the footprint (row-major), ridge is the overhanging roof row above. */
+/** 4x4 building art: parts are the footprint (row-major: two roof rows, two wall rows), ridge is the overhanging roof row above. */
 const BUILDING = {
-  house: { parts: [64, 66, TOWN.wallWoodDoor, 74], ridge: [52, 54] },
-  barracks: { parts: [60, 62, TOWN.wallStoneDoor, 78], ridge: [48, 50] },
+  house: {
+    ridge: [52, 53, 53, 54],
+    parts: [
+      64, 65, 65, 66,
+      64, 65, 65, 66,
+      72, 86, 86, 74,
+      72, TOWN.wallWoodDoor, 73, 74,
+    ],
+  },
+  barracks: {
+    ridge: [48, 49, 49, 50],
+    parts: [
+      60, 61, 61, 62,
+      60, 61, 61, 62,
+      76, 90, 90, 78,
+      76, TOWN.wallStoneDoor, 77, 78,
+    ],
+  },
 } as const;
 
 export const DEPTH = { ground: 0, objects: 1, under: 5, agents: 10, roofs: 20, bars: 30, night: 40 } as const;
@@ -96,7 +112,7 @@ export class Renderer {
     this.ground.putTileAt(ground, tx, ty);
     this.objects.putTileAt(object, tx, ty);
     // the roof ridge overhangs the row above the footprint (drawn over agents)
-    if ((t.kind === 'house' || t.kind === 'barracks') && (t.part ?? 0) < 2) {
+    if ((t.kind === 'house' || t.kind === 'barracks') && (t.part ?? 0) < BUILDING_W) {
       const b = BUILDING[t.kind];
       this.roofs.putTileAt(GID.town + b.ridge[t.part ?? 0], tx, ty - 1);
     }
@@ -166,9 +182,9 @@ export class Renderer {
       if (build) {
         const ok = s.world.canBuild(f.tx, f.ty);
         u.fillStyle(ok ? 0xffe066 : 0xff4040, 0.18);
-        u.fillRect(f.tx * TILE, f.ty * TILE, TILE * 2, TILE * 2);
+        u.fillRect(f.tx * TILE, f.ty * TILE, TILE * BUILDING_W, TILE * BUILDING_H);
         u.lineStyle(1, ok ? 0xffe066 : 0xff4040, 0.9);
-        u.strokeRect(f.tx * TILE + 0.5, f.ty * TILE + 0.5, TILE * 2 - 1, TILE * 2 - 1);
+        u.strokeRect(f.tx * TILE + 0.5, f.ty * TILE + 0.5, TILE * BUILDING_W - 1, TILE * BUILDING_H - 1);
       } else {
         u.lineStyle(1, 0xffffff, 0.5);
         u.strokeRect(f.tx * TILE + 0.5, f.ty * TILE + 0.5, TILE - 1, TILE - 1);

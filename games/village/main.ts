@@ -104,7 +104,7 @@ export class VillageScene extends SimScene {
     for (let i = 0; i < this.mods.startSoldiers; i++) this.addVillager(home, 'soldier', 25);
     if (this.mods.extraAdults > 0) {
       // a second family, in the nearest open 2x2 to the left of the first house
-      const spot = [[-3, 0], [-4, 0], [3, 0], [-3, 3], [3, 3]].map(([dx, dy]) => ({ tx: home.tx + dx, ty: home.ty + dy })).find((q) => this.world.canBuild(q.tx, q.ty)) ?? { tx: home.tx - 3, ty: home.ty };
+      const spot = [[-5, 0], [-6, 0], [5, 0], [0, 5], [-5, 5], [5, 5]].map(([dx, dy]) => ({ tx: home.tx + dx, ty: home.ty + dy })).find((q) => this.world.canBuild(q.tx, q.ty)) ?? { tx: home.tx - 3, ty: home.ty };
       const h2 = this.world.placeHouse(spot.tx, spot.ty);
       for (let i = 0; i < this.mods.extraAdults; i++) this.addVillager(h2, i % 2 ? 'woodcutter' : 'farmer', 22);
     }
@@ -404,7 +404,7 @@ export class VillageScene extends SimScene {
     if (!t) return;
 
     if (pl.build !== 'none') {
-      if (!this.world.canBuild(tx, ty)) { this.event('build', 'Need a clear 2x2 of grass to build'); return; }
+      if (!this.world.canBuild(tx, ty)) { this.event('build', 'Need a clear 4x4 of grass to build'); return; }
       if (this.wood < COST[pl.build]) { this.event('build', `Need ${COST[pl.build]} wood for a ${pl.build}`); return; }
       this.wood -= COST[pl.build];
       if (pl.build === 'house') this.world.placeHouse(tx, ty); else this.world.placeBarracks(tx, ty);
