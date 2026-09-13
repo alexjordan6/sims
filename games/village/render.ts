@@ -21,8 +21,8 @@ const BUILDING = {
     parts: [
       64, 65, 65, 66,
       64, 65, 65, 66,
-      72, 86, 86, 74,
-      72, TOWN.wallWoodDoor, 73, 74,
+      72, 84, 84, 75, // wall edges with two windows
+      72, TOWN.wallWoodDoor, 73, 75, // door, plain wall
     ],
   },
   barracks: {
@@ -30,8 +30,8 @@ const BUILDING = {
     parts: [
       60, 61, 61, 62,
       60, 61, 61, 62,
-      76, 90, 90, 78,
-      76, TOWN.wallStoneDoor, 77, 78,
+      76, 88, 88, 79,
+      76, TOWN.wallStoneDoor, 77, 79,
     ],
   },
 } as const;
