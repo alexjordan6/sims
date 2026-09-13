@@ -3,10 +3,19 @@ import { TILE, COLS, ROWS } from './config';
 
 export type TileKind = 'grass' | 'tree' | 'tilled' | 'crop' | 'house' | 'barracks';
 
+/** Buildings are 2x2 tiles; (tx, ty) is the top-left. The door is the bottom-left tile. */
+export const BUILDING_W = 2;
+export const BUILDING_H = 2;
+
 export interface House {
   tx: number;
   ty: number;
   residents: number; // count of villagers who call this home
+}
+
+/** The walkable tile just outside a building's door (below the bottom-left tile). */
+export function doorstep(b: TilePos): TilePos {
+  return { tx: b.tx, ty: b.ty + BUILDING_H };
 }
 
 export interface Tile {
@@ -18,6 +27,8 @@ export interface Tile {
   /** visual variant (grass/tree frame choice), picked when the tile is set */
   v: number;
   house?: House;
+  /** for buildings: which 2x2 cell this tile is (col + row * 2), for rendering */
+  part?: number;
 }
 
 export interface TilePos { tx: number; ty: number }
@@ -46,7 +57,7 @@ export class World {
   set(tx: number, ty: number, kind: TileKind): Tile {
     const i = ty * this.cols + tx;
     const t = this.tiles[i];
-    t.kind = kind; t.stage = 0; t.work = 0; t.house = undefined; t.v = (t.v + 31) % 97;
+    t.kind = kind; t.stage = 0; t.work = 0; t.house = undefined; t.part = undefined; t.v = (t.v + 31) % 97;
     this.dirty.add(i);
     return t;
   }
@@ -63,15 +74,32 @@ export class World {
     return { tx: Math.floor(x / TILE), ty: Math.floor(y / TILE) };
   }
 
+  /** Can a 2x2 building go here (all footprint tiles open grass, roof row in bounds)? */
+  canBuild(tx: number, ty: number): boolean {
+    if (ty < 1) return false;
+    for (let dy = 0; dy < BUILDING_H; dy++)
+      for (let dx = 0; dx < BUILDING_W; dx++)
+        if (this.get(tx + dx, ty + dy)?.kind !== 'grass') return false;
+    return true;
+  }
+
+  private stamp(tx: number, ty: number, kind: 'house' | 'barracks', house?: House): void {
+    for (let dy = 0; dy < BUILDING_H; dy++)
+      for (let dx = 0; dx < BUILDING_W; dx++) {
+        const t = this.set(tx + dx, ty + dy, kind);
+        t.part = dx + dy * BUILDING_W;
+        t.house = house;
+      }
+  }
+
   placeHouse(tx: number, ty: number): House {
-    const t = this.set(tx, ty, 'house');
     const h: House = { tx, ty, residents: 0 };
-    t.house = h;
+    this.stamp(tx, ty, 'house', h);
     this.houses.push(h);
     return h;
   }
   placeBarracks(tx: number, ty: number): void {
-    this.set(tx, ty, 'barracks');
+    this.stamp(tx, ty, 'barracks');
     this.barracks.push({ tx, ty });
   }
 
@@ -143,12 +171,12 @@ export class World {
     }
     const hx = (this.cols / 2) | 0, hy = (this.rows / 2) | 0;
     // clear the village centre
-    for (let ty = hy - 3; ty <= hy + 3; ty++)
-      for (let tx = hx - 5; tx <= hx + 5; tx++) this.set(tx, ty, 'grass');
-    this.placeHouse(hx - 3, hy - 2);
-    this.placeBarracks(hx + 4, hy - 2);
+    for (let ty = hy - 5; ty <= hy + 4; ty++)
+      for (let tx = hx - 9; tx <= hx + 8; tx++) this.set(tx, ty, 'grass');
+    this.placeHouse(hx - 5, hy - 3);
+    this.placeBarracks(hx + 4, hy - 3);
     const half = Math.floor(fieldW / 2);
-    for (let ty = hy; ty <= hy + 2; ty++)
+    for (let ty = hy + 1; ty <= hy + 3; ty++)
       for (let tx = hx - half; tx <= hx + half; tx++) {
         const t = this.set(tx, ty, 'crop');
         t.stage = rng.int(0, 2);

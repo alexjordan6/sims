@@ -1,5 +1,5 @@
 import type { Agent } from '@shared/index';
-import { World, type House, type TilePos } from './world';
+import { World, doorstep, type House, type TilePos } from './world';
 import { p, TREE_YIELD } from './config';
 import type { Mods } from './meta';
 import type { VillageScene } from './main';
@@ -281,24 +281,22 @@ export class Villager extends Mover {
     }
   }
 
-  /** Run to the home house; once adjacent, duck inside. */
+  /** Run to the home's doorstep; once there, duck inside. */
   private goHome(s: VillageScene, dt: number): void {
-    this.setGoal(s, this.home.tx, this.home.ty);
+    const door = doorstep(this.home);
+    this.setGoal(s, door.tx, door.ty);
     const arrived = this.followPath(dt);
-    if (arrived && this.adjacentTo(this.home)) {
+    if (arrived && this.adjacentTo(door)) {
       this.hidden = true;
-      const c = World.center(this.home.tx, this.home.ty);
-      this.x = c.x; this.y = c.y;
+      this.x = (this.home.tx + 1) * 16; this.y = (this.home.ty + 1) * 16; // centre of the 2x2
       this.clearGoal();
     }
   }
 
   private unhide(s: VillageScene): void {
     this.hidden = false;
-    const spots: TilePos[] = [
-      { tx: this.home.tx, ty: this.home.ty + 1 }, { tx: this.home.tx, ty: this.home.ty - 1 },
-      { tx: this.home.tx + 1, ty: this.home.ty }, { tx: this.home.tx - 1, ty: this.home.ty },
-    ];
+    const door = doorstep(this.home);
+    const spots: TilePos[] = [door, { tx: door.tx + 1, ty: door.ty }, { tx: door.tx, ty: door.ty + 1 }, { tx: door.tx - 1, ty: door.ty }];
     const spot = spots.find((q) => !s.world.isBlocked(q.tx, q.ty)) ?? spots[0];
     const c = World.center(spot.tx, spot.ty);
     this.x = c.x; this.y = c.y;

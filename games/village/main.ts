@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { SimScene, launch } from '@shared/index';
-import { World } from './world';
+import { World, doorstep } from './world';
 import { Villager, Raider, Player, Mover, type Role, type BuildItem } from './agents';
 import { p, TILE, COLS, ROWS, ZOOM, COST, TREE_YIELD, RUN } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
@@ -91,8 +91,9 @@ export class VillageScene extends SimScene {
     this.nameIdx = this.rng.int(0, NAMES.length - 1);
 
     const home = this.world.houses[0];
-    const c = World.center(home.tx, home.ty + 1);
-    this.player = this.spawn(new Player(c.x + TILE * 2, c.y + TILE));
+    const door = doorstep(home);
+    const c = World.center(door.tx, door.ty);
+    this.player = this.spawn(new Player(c.x + TILE * 3, c.y + TILE));
     this.player.keys = this.wasd;
     this.player.maxHp += this.mods.playerHpBonus;
     this.player.hp = this.player.maxHp;
@@ -102,15 +103,17 @@ export class VillageScene extends SimScene {
     this.addVillager(home, 'kid', 4);
     for (let i = 0; i < this.mods.startSoldiers; i++) this.addVillager(home, 'soldier', 25);
     if (this.mods.extraAdults > 0) {
-      // a second family, two tiles left of the first house
-      const h2 = this.world.placeHouse(home.tx - 3, home.ty);
+      // a second family, in the nearest open 2x2 to the left of the first house
+      const spot = [[-3, 0], [-4, 0], [3, 0], [-3, 3], [3, 3]].map(([dx, dy]) => ({ tx: home.tx + dx, ty: home.ty + dy })).find((q) => this.world.canBuild(q.tx, q.ty)) ?? { tx: home.tx - 3, ty: home.ty };
+      const h2 = this.world.placeHouse(spot.tx, spot.ty);
       for (let i = 0; i < this.mods.extraAdults; i++) this.addVillager(h2, i % 2 ? 'woodcutter' : 'farmer', 22);
     }
     this.event('info', 'A new village. Till soil, plant, and keep everyone fed.');
   }
 
   private addVillager(home: (typeof this.world.houses)[number], role: Role, age: number): Villager {
-    const c = World.center(home.tx, home.ty + 1);
+    const d = doorstep(home);
+    const c = World.center(d.tx, d.ty);
     const v = new Villager(c.x + this.rng.range(-4, 4), c.y + this.rng.range(-4, 4), home, role, age, NAMES[this.nameIdx++ % NAMES.length], this.mods);
     home.residents++;
     return this.spawn(v);
@@ -401,7 +404,7 @@ export class VillageScene extends SimScene {
     if (!t) return;
 
     if (pl.build !== 'none') {
-      if (t.kind !== 'grass') { this.event('build', 'Need open grass to build'); return; }
+      if (!this.world.canBuild(tx, ty)) { this.event('build', 'Need a clear 2x2 of grass to build'); return; }
       if (this.wood < COST[pl.build]) { this.event('build', `Need ${COST[pl.build]} wood for a ${pl.build}`); return; }
       this.wood -= COST[pl.build];
       if (pl.build === 'house') this.world.placeHouse(tx, ty); else this.world.placeBarracks(tx, ty);

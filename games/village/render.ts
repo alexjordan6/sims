@@ -14,6 +14,12 @@ import dungeonUrl from './assets/dungeon.png';
 const GID = { town: 1, farm: 1 + 132, dungeon: 1 + 264 } as const;
 const EMPTY = -1;
 
+/** 2x2 building art: parts are the footprint (row-major), ridge is the overhanging roof row above. */
+const BUILDING = {
+  house: { parts: [64, 66, TOWN.wallWoodDoor, 74], ridge: [52, 54] },
+  barracks: { parts: [60, 62, TOWN.wallStoneDoor, 78], ridge: [48, 50] },
+} as const;
+
 export const DEPTH = { ground: 0, objects: 1, under: 5, agents: 10, roofs: 20, bars: 30, night: 40 } as const;
 
 /** Load the three spritesheets. Call from the scene's preload(). */
@@ -89,8 +95,11 @@ export class Renderer {
     const { ground, object } = tileFrames(t, this.scene.cropDays);
     this.ground.putTileAt(ground, tx, ty);
     this.objects.putTileAt(object, tx, ty);
-    if (t.kind === 'house') this.roofs.putTileAt(GID.town + TOWN.roofRed, tx, ty - 1);
-    else if (t.kind === 'barracks') this.roofs.putTileAt(GID.town + TOWN.roofGrey, tx, ty - 1);
+    // the roof ridge overhangs the row above the footprint (drawn over agents)
+    if ((t.kind === 'house' || t.kind === 'barracks') && (t.part ?? 0) < 2) {
+      const b = BUILDING[t.kind];
+      this.roofs.putTileAt(GID.town + b.ridge[t.part ?? 0], tx, ty - 1);
+    }
   }
 
   // ---- sprites -------------------------------------------------------------
@@ -150,12 +159,20 @@ export class Renderer {
     const s = this.scene;
     const u = this.under;
     u.clear();
-    // faced-tile cursor
+    // faced-tile cursor; in build mode a 2x2 footprint preview, red when blocked
     const f = s.player.faced;
     if (s.world.inBounds(f.tx, f.ty)) {
       const build = s.player.build !== 'none';
-      u.lineStyle(1, build ? 0xffe066 : 0xffffff, build ? 0.9 : 0.5);
-      u.strokeRect(f.tx * TILE + 0.5, f.ty * TILE + 0.5, TILE - 1, TILE - 1);
+      if (build) {
+        const ok = s.world.canBuild(f.tx, f.ty);
+        u.fillStyle(ok ? 0xffe066 : 0xff4040, 0.18);
+        u.fillRect(f.tx * TILE, f.ty * TILE, TILE * 2, TILE * 2);
+        u.lineStyle(1, ok ? 0xffe066 : 0xff4040, 0.9);
+        u.strokeRect(f.tx * TILE + 0.5, f.ty * TILE + 0.5, TILE * 2 - 1, TILE * 2 - 1);
+      } else {
+        u.lineStyle(1, 0xffffff, 0.5);
+        u.strokeRect(f.tx * TILE + 0.5, f.ty * TILE + 0.5, TILE - 1, TILE - 1);
+      }
     }
     // selection ring
     if (s.selected && !s.selected.dead) {
@@ -192,8 +209,8 @@ function tileFrames(t: Tile, cropDays: number): { ground: number; object: number
       const f = t.stage >= cropDays ? 3 : Math.min(2, Math.floor((t.stage / cropDays) * 3));
       return { ground: GID.farm + FARM.tilled, object: GID.farm + FARM.crop[f] };
     }
-    case 'house': return { ground: grass, object: GID.town + TOWN.wallWoodDoor };
-    case 'barracks': return { ground: grass, object: GID.town + TOWN.wallStoneDoor };
+    case 'house':
+    case 'barracks': return { ground: grass, object: GID.town + BUILDING[t.kind].parts[t.part ?? 0] };
   }
 }
 
