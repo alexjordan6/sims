@@ -137,7 +137,7 @@ export class Villager extends Mover {
       case 'kid': this.radius = 2; this.color = 0xf5d8a8; this.maxHp = 10; this.speed = 30; break;
       case 'farmer': this.radius = 3; this.color = 0x7fd37f; this.maxHp = 20; this.speed = 35; break;
       case 'woodcutter': this.radius = 3; this.color = 0xc9a26b; this.maxHp = 20; this.speed = 35; break;
-      case 'soldier': this.radius = 3; this.color = 0x6f9bff; this.maxHp = p.soldierHp; this.speed = 45; break;
+      case 'soldier': this.radius = 3; this.color = 0x6f9bff; this.maxHp = p.soldierHp + mods.soldierHpBonus; this.speed = 45; break;
     }
     this.maxHp = Math.round(this.maxHp * mods.hpMul);
     this.hp = Math.min(this.hp, this.maxHp);
@@ -174,7 +174,7 @@ export class Villager extends Mover {
   private kidUpdate(dt: number, s: VillageScene): void {
     const danger = s.nearestRaider(this.x, this.y, 80);
     const mm = s.mods.martialMul;
-    if (danger) { this.martial += 4 * dt * mm; this.task = 'running home'; this.goHome(s, dt); return; }
+    if (danger) { this.martial += 4 * dt * mm * s.mods.fightMartialMul; this.task = 'running home'; this.goHome(s, dt); return; }
 
     this.task = 'playing';
     this.thinkTimer -= dt;
@@ -218,7 +218,7 @@ export class Villager extends Mover {
       this.thinkTimer = 1;
       const w = s.world;
       const job = farmer
-        ? w.nearest(this.x, this.y, (t) => t.kind === 'crop' && t.stage >= p.cropDays) ??
+        ? w.nearest(this.x, this.y, (t) => t.kind === 'crop' && t.stage >= s.cropDays) ??
           w.nearest(this.x, this.y, (t) => t.kind === 'tilled')
         : w.nearest(this.x, this.y, (t) => t.kind === 'tree');
       if (job) { this.setGoal(s, job.tx, job.ty); this.task = farmer ? 'heading to the field' : 'looking for a tree'; }
@@ -230,7 +230,7 @@ export class Villager extends Mover {
       const t = s.world.get(this.goal.tx, this.goal.ty);
       const isJob = farmer ? t?.kind === 'crop' || t?.kind === 'tilled' : t?.kind === 'tree';
       if (isJob && this.adjacentTo(this.goal)) {
-        this.workTimer = farmer ? 1.2 : 2.5;
+        this.workTimer = (farmer ? 1.2 : 2.5) / (farmer ? s.mods.farmerSpeedMul : 1);
         this.task = farmer ? (t!.kind === 'crop' ? 'harvesting' : 'planting') : 'chopping';
       } else this.clearGoal();
     }
@@ -239,7 +239,7 @@ export class Villager extends Mover {
   private finishWork(s: VillageScene, farmer: boolean): void {
     const g = this.goal!;
     const t = s.world.get(g.tx, g.ty)!;
-    if (farmer && t.kind === 'crop' && t.stage >= p.cropDays) { s.world.set(g.tx, g.ty, 'tilled'); s.food += s.mods.cropYield; }
+    if (farmer && t.kind === 'crop' && t.stage >= s.cropDays) { s.world.set(g.tx, g.ty, 'tilled'); s.food += s.mods.cropYield; }
     else if (farmer && t.kind === 'tilled') { s.world.set(g.tx, g.ty, 'crop'); }
     else if (!farmer && t.kind === 'tree') { s.world.set(g.tx, g.ty, 'grass'); s.wood += TREE_YIELD; }
     this.clearGoal();
@@ -255,13 +255,14 @@ export class Villager extends Mover {
     }
     if (this.target && !this.target.dead) {
       this.task = 'fighting';
-      if (this.tryAttack(this.target, p.soldierDmg, 13, 0.6)) return;
+      if (this.tryAttack(this.target, Math.round(p.soldierDmg * s.mods.soldierDmgMul), 13, 0.6)) return;
       this.setGoal(s, this.target.tile.tx, this.target.tile.ty);
       this.followPath(dt);
       return;
     }
     this.target = null;
     this.task = 'on patrol';
+    if (s.mods.soldierRegen && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + s.mods.soldierRegen * dt);
     this.thinkTimer -= dt;
     if (this.followPath(dt) && this.thinkTimer <= 0) {
       this.thinkTimer = s.rng.range(3, 7);
@@ -393,6 +394,7 @@ export class Player extends Mover {
     if (mx) this.dir = mx < 0 ? -1 : 1;
     this.vx = mx * this.speed; this.vy = my * this.speed;
     this.moveWithCollision(dt, s.world);
+    if (s.mods.playerRegen && this.hp < this.maxHp && !s.nearestRaider(this.x, this.y, 40)) this.hp = Math.min(this.maxHp, this.hp + s.mods.playerRegen * dt);
   }
 
   private moveWithCollision(dt: number, w: World): void {

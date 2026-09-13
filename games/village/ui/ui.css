@@ -159,7 +159,7 @@ h3 { font-size: 9px; color: var(--ink-dim); margin-bottom: 6px; }
 /* ---- roguelike loop: legacy panel, boons, boss ------------------------------ */
 .title-wrap { display: flex; gap: 12px; align-items: flex-start; justify-content: center; flex-wrap: wrap; max-width: 96vw; }
 .title-wrap .card { width: min(480px, 92vw); }
-.legacy { width: min(440px, 92vw); text-align: left; max-height: 90vh; overflow-y: auto; scrollbar-width: thin; }
+.legacy { width: min(760px, 94vw); text-align: left; max-height: 92vh; overflow-y: auto; scrollbar-width: thin; }
 .legacy-stats { display: flex; gap: 12px; flex-wrap: wrap; font-size: 14px; color: var(--ink-dim); margin: 4px 0 10px; }
 .legacy-stats b { color: var(--accent); font-family: var(--font-head); font-size: 12px; }
 .boons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
@@ -191,3 +191,34 @@ h3 { font-size: 9px; color: var(--ink-dim); margin-bottom: 6px; }
 .panel.tan .sub, .panel.tan .renown .parts, .panel.tan .legacy-stats { color: #6a5040; }
 .topbar .raid .bar.boss { display: inline-block; width: 90px; height: 8px; vertical-align: middle; margin-left: 6px; }
 .topbar .raid .bar.boss i { background: var(--danger); }
+
+/* ---- legacy trees ---------------------------------------------------------- */
+.trees { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 10px; }
+.branch { padding: 6px; background: #0004; border: 2px solid #0006; }
+.branch.active { border-color: var(--accent); }
+.branch .bh { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; margin-bottom: 4px; }
+.branch .bname { font-family: var(--font-head); font-size: 10px; color: var(--accent); }
+.branch .bblurb { font-size: 12px; color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.branch .tier { display: flex; justify-content: center; }
+.branch .tier .node { width: 60%; }
+.branch .fork { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 4px; position: relative; }
+.branch .fork::before { content: ''; position: absolute; left: 25%; right: 25%; top: -3px; height: 4px; border: 2px solid #5a4636; border-bottom: none; }
+.branch .path { display: flex; flex-direction: column; gap: 4px; padding-top: 4px; }
+.branch .path .node + .node { position: relative; }
+.branch .path .node + .node::before { content: ''; position: absolute; left: 50%; top: -6px; height: 4px; border-left: 2px solid #5a4636; }
+.node { display: grid; grid-template-columns: 24px 1fr; grid-template-rows: auto auto auto; gap: 0 6px; align-items: center; padding: 4px 5px; background: #0006; border: 2px solid #0008; cursor: pointer; min-height: 56px; }
+.node .spr { grid-row: 1 / 4; }
+.node .nn { font-weight: 600; font-size: 13px; line-height: 1.1; }
+.node .nb { color: var(--ink-dim); font-size: 11px; line-height: 1.15; }
+.node .na { font-family: var(--font-head); font-size: 6px; margin-top: 3px; color: var(--ink-dim); }
+.node.locked { opacity: .45; cursor: not-allowed; }
+.node.locked .spr { filter: grayscale(1) brightness(.6); }
+.node.buyable .na { color: var(--accent); }
+.node.buyable:hover { border-color: var(--accent); }
+.node.owned .na { color: var(--ok); }
+.node.owned:hover { border-color: var(--ok); }
+.node.onpath { border-color: #ffcf5a88; background: #ffcf5a14; }
+.node.onpath .na { color: var(--ok); }
+.node.equipped { border-color: var(--accent); background: #ffcf5a2a; }
+.node.equipped .na { color: var(--accent); }
+.node.shake { animation: shake .35s; }

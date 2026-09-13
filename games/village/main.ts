@@ -42,6 +42,11 @@ export class VillageScene extends SimScene {
   private ui?: UI;
   private wasd!: Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>;
 
+  /** Days from seed to harvest for this run (boons can shorten it). */
+  get cropDays(): number {
+    return Math.max(1, p.cropDays + this.mods.cropDaysDelta);
+  }
+
   /** Next raid day; the warlord's day caps the schedule. */
   get nextRaidDay(): number {
     const next = (Math.floor(this.day / p.raidEvery) + 1) * p.raidEvery;
@@ -55,9 +60,9 @@ export class VillageScene extends SimScene {
   }
 
   setup(): void {
-    this.world = new World();
-    this.world.generate(this.rng);
     this.mods = this.meta.mods();
+    this.world = new World();
+    this.world.generate(this.rng, this.mods.fieldWide ? 5 : 3);
     this.food = this.mods.startFood;
     this.wood = this.mods.startWood;
     this.day = 1;
@@ -80,7 +85,7 @@ export class VillageScene extends SimScene {
     this.addVillager(home, 'farmer', 22);
     this.addVillager(home, 'woodcutter', 22);
     this.addVillager(home, 'kid', 4);
-    if (this.mods.startSoldier) this.addVillager(home, 'soldier', 25);
+    for (let i = 0; i < this.mods.startSoldiers; i++) this.addVillager(home, 'soldier', 25);
     if (this.mods.extraAdults > 0) {
       // a second family, two tiles left of the first house
       const h2 = this.world.placeHouse(home.tx - 3, home.ty);
@@ -189,7 +194,7 @@ export class VillageScene extends SimScene {
     const t = this.world.get(Math.floor(ptr.worldX / TILE), Math.floor(ptr.worldY / TILE));
     let html: string | null = null;
     switch (t?.kind) {
-      case 'crop': html = `<div class="t">${t.stage >= p.cropDays ? 'Ripe crop' : 'Growing crop'}</div><div class="d">${Math.min(t.stage, p.cropDays)}/${p.cropDays} days · yields ${this.mods.cropYield} food</div>`; break;
+      case 'crop': html = `<div class="t">${t.stage >= this.cropDays ? 'Ripe crop' : 'Growing crop'}</div><div class="d">${Math.min(t.stage, this.cropDays)}/${this.cropDays} days · yields ${this.mods.cropYield} food</div>`; break;
       case 'tilled': html = `<div class="t">Tilled soil</div><div class="d">plant with E, or a farmer will</div>`; break;
       case 'tree': html = `<div class="t">Tree</div><div class="d">${t.work}/3 chopped · yields ${TREE_YIELD} wood</div>`; break;
       case 'house': html = `<div class="t">House</div><div class="d">${t.house?.residents ?? 0}/${this.mods.houseCap} residents · couples here have children</div>`; break;
@@ -241,21 +246,25 @@ export class VillageScene extends SimScene {
     // villagers: eat, age, grow up, grow old
     const villagers = this.villagers();
     for (const v of villagers) {
-      if (this.food >= p.foodPerDay) { this.food -= p.foodPerDay; v.hungerDays = 0; }
+      const ration = p.foodPerDay * this.mods.foodPerDayMul;
+      if (this.food >= ration) { this.food -= ration; v.hungerDays = 0; }
       else if (++v.hungerDays >= 3) { v.dead = true; v.hp = 0; this.event('death', `${v.name} starved`, true); continue; }
       else this.event('food', `${v.name} went hungry`);
       v.age++;
       v.hp = v.maxHp; // a night's rest
-      if (v.role === 'kid' && v.age >= p.adultAge) v.comeOfAge(this);
+      if (v.role === 'kid' && v.age >= Math.max(1, p.adultAge + this.mods.adultAgeDelta)) v.comeOfAge(this);
       else if (v.age >= p.oldAge && this.rng.chance(0.25)) { v.dead = true; this.event('death', `${v.name} died of old age`); }
     }
 
     // births: a couple sharing a house with room and food to spare
     for (const h of this.world.houses) {
       const adults = villagers.filter((v) => v.home === h && v.isAdult && !v.dead);
-      if (adults.length >= 2 && h.residents < this.mods.houseCap && this.food > 10 && this.rng.chance(p.birthChance)) {
+      if (adults.length >= 2 && h.residents < this.mods.houseCap && this.food > 10 && this.rng.chance(p.birthChance + this.mods.birthBonus)) {
         const kid = this.addVillager(h, 'kid', 0);
-        this.event('birth', `${kid.name} was born`, true);
+        if (h.residents < this.mods.houseCap && this.rng.chance(this.mods.twinChance)) {
+          const twin = this.addVillager(h, 'kid', 0);
+          this.event('birth', `Twins! ${kid.name} and ${twin.name} were born`, true);
+        } else this.event('birth', `${kid.name} was born`, true);
       }
     }
 
@@ -275,7 +284,7 @@ export class VillageScene extends SimScene {
   spawnRaid(boss = false): void {
     const wave = Math.max(1, Math.floor(this.day / p.raidEvery));
     const n = boss ? 5 : 1 + Math.ceil(wave * 0.8); // 2,3,3,4,5,6 then 5 + the warlord
-    const opts = { hpMul: 1 + 0.08 * wave, speedMul: this.mods.raiderSpeedMul };
+    const opts = { hpMul: (1 + 0.08 * wave) * this.mods.raiderHpMul, speedMul: this.mods.raiderSpeedMul };
     const side = this.rng.int(0, 3);
     for (let i = 0; i < n + (boss ? 1 : 0); i++) {
       let tx = side === 0 ? 0 : side === 1 ? COLS - 1 : this.rng.int(0, COLS - 1);
@@ -363,7 +372,7 @@ export class VillageScene extends SimScene {
       case 'grass': this.world.set(tx, ty, 'tilled'); break;
       case 'tilled': this.world.set(tx, ty, 'crop'); break;
       case 'crop':
-        if (t.stage >= p.cropDays) { this.world.set(tx, ty, 'tilled'); this.food += this.mods.cropYield; }
+        if (t.stage >= this.cropDays) { this.world.set(tx, ty, 'tilled'); this.food += this.mods.cropYield; }
         break;
       case 'tree':
         if (++t.work >= 3) { this.world.set(tx, ty, 'grass'); this.wood += TREE_YIELD; }
@@ -380,7 +389,7 @@ export class VillageScene extends SimScene {
     switch (t?.kind) {
       case 'grass': return 'E: till soil';
       case 'tilled': return 'E: plant';
-      case 'crop': return t.stage >= p.cropDays ? 'E: harvest' : `growing (${t.stage}/${p.cropDays} days)`;
+      case 'crop': return t.stage >= this.cropDays ? 'E: harvest' : `growing (${t.stage}/${this.cropDays} days)`;
       case 'tree': return `E: chop (${t.work}/3)`;
       case 'house': return `house — ${t.house?.residents ?? 0}/${this.mods.houseCap} residents`;
       case 'barracks': return 'barracks — kids raised nearby become soldiers';

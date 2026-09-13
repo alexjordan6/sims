@@ -133,7 +133,7 @@ export class World {
   }
 
   /** Starting map: scattered tree clusters, one house, a tilled patch, a barracks. */
-  generate(rng: Rng): void {
+  generate(rng: Rng, fieldW = 3): void {
     for (let k = 0; k < 14; k++) {
       const cx = rng.int(1, this.cols - 2), cy = rng.int(1, this.rows - 2);
       for (let i = 0; i < 6; i++) {
@@ -147,8 +147,9 @@ export class World {
       for (let tx = hx - 5; tx <= hx + 5; tx++) this.set(tx, ty, 'grass');
     this.placeHouse(hx - 3, hy - 2);
     this.placeBarracks(hx + 4, hy - 2);
+    const half = Math.floor(fieldW / 2);
     for (let ty = hy; ty <= hy + 2; ty++)
-      for (let tx = hx - 1; tx <= hx + 1; tx++) {
+      for (let tx = hx - half; tx <= hx + half; tx++) {
         const t = this.set(tx, ty, 'crop');
         t.stage = rng.int(0, 2);
       }

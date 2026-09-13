@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { World, type Tile } from './world';
 import { Mover, Villager, Raider, Player } from './agents';
 import { TOWN, FARM, CHAR } from './atlas';
-import { TILE, COLS, ROWS, p } from './config';
+import { TILE, COLS, ROWS } from './config';
 import type { VillageScene } from './main';
 
 import townUrl from './assets/town.png';
@@ -79,7 +79,7 @@ export class Renderer {
 
   private paintTile(w: World, tx: number, ty: number): void {
     const t = w.get(tx, ty)!;
-    const { ground, object } = tileFrames(t);
+    const { ground, object } = tileFrames(t, this.scene.cropDays);
     this.ground.putTileAt(ground, tx, ty);
     this.objects.putTileAt(object, tx, ty);
     if (t.kind === 'house') this.roofs.putTileAt(GID.town + TOWN.roofRed, tx, ty - 1);
@@ -165,7 +165,7 @@ export class Renderer {
 }
 
 /** Ground + object gids for a tile. */
-function tileFrames(t: Tile): { ground: number; object: number } {
+function tileFrames(t: Tile, cropDays: number): { ground: number; object: number } {
   const grass = GID.town + TOWN.grass[t.v % TOWN.grass.length];
   switch (t.kind) {
     case 'grass': return { ground: grass, object: EMPTY };
@@ -174,7 +174,7 @@ function tileFrames(t: Tile): { ground: number; object: number } {
       return { ground: grass, object: t.work >= 2 ? GID.farm + FARM.bareTree : GID.town + TOWN.trees[t.v % TOWN.trees.length] };
     case 'tilled': return { ground: GID.farm + FARM.tilled, object: EMPTY };
     case 'crop': {
-      const f = t.stage >= p.cropDays ? 3 : Math.min(2, Math.floor((t.stage / p.cropDays) * 3));
+      const f = t.stage >= cropDays ? 3 : Math.min(2, Math.floor((t.stage / cropDays) * 3));
       return { ground: GID.farm + FARM.tilled, object: GID.farm + FARM.crop[f] };
     }
     case 'house': return { ground: grass, object: GID.town + TOWN.wallWoodDoor };

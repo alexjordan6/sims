@@ -2,7 +2,7 @@ import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type BuildItem } from '../agents';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
 import { COST, p, RUN } from '../config';
-import { BOONS } from '../meta';
+import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 
 // ---------------------------------------------------------------------------
@@ -357,32 +357,54 @@ export class UI {
     this.screens.append(screen);
   }
 
-  /** Equipped boons as a one-liner (pause screen). */
+  /** Equipped paths as a one-liner (pause screen). */
   private loadoutLine(): string {
     const ids = this.scene.meta.state.loadout;
     if (!ids.length) return '<p class="sub">no boons equipped</p>';
-    return `<p class="sub">boons: ${ids.map((id) => BOONS.find((b) => b.id === id)?.name ?? id).join(' · ')}</p>`;
+    const names = ids.map((id) => {
+      const n = nodeById(id);
+      return n ? `${BRANCHES.find((b) => b.id === n.branch)!.name} › ${n.name}` : id;
+    });
+    return `<p class="sub">${names.join(' · ')}</p>`;
   }
 
-  /** The Legacy panel: renown, record, and the boon shop / loadout. Re-renders itself on click. */
+  /** The Legacy panel: renown, record, and the four boon trees. Re-renders itself on click. */
   private renderLegacy(el: HTMLElement): void {
     const meta = this.scene.meta;
     const st = meta.state;
-    const cards = BOONS.map((b) => {
-      const unlocked = meta.isUnlocked(b.id), equipped = meta.isEquipped(b.id);
-      const state = equipped ? 'equipped' : unlocked ? 'unlocked' : st.renown >= b.cost ? 'buyable' : 'locked';
-      const action = equipped ? 'unequip' : unlocked ? 'equip' : `${b.cost} renown`;
-      return `<div class="boon ${state}" data-id="${b.id}" title="${esc(b.blurb)}">${spr(b.icon.key, b.icon.frame, 32)}<div class="bn">${b.name}</div><div class="bb">${esc(b.blurb)}</div><div class="ba">${action}</div></div>`;
-    }).join('');
+
+    const card = (n: Node): string => {
+      const owned = meta.isUnlocked(n.id);
+      const equipped = meta.isEquipped(n.id);
+      const onPath = meta.isOnEquippedPath(n.id);
+      const state = equipped ? 'equipped' : onPath ? 'onpath' : owned ? 'owned' : meta.isBuyable(n.id) ? 'buyable' : 'locked';
+      const req = n.requires ? nodeById(n.requires)! : null;
+      const action = equipped ? 'unequip' : owned ? (onPath ? 'equip here' : 'equip') : req && !meta.isUnlocked(req.id) ? `needs ${req.name}` : `${n.cost} renown`;
+      const tip = `${n.name} — ${n.blurb}${req ? ` (requires ${req.name})` : ''}`;
+      return `<div class="node ${state} t${n.tier}" data-id="${n.id}" title="${esc(tip)}">${spr(n.icon.key, n.icon.frame, 24)}<div class="nn">${esc(n.name)}</div><div class="nb">${esc(n.blurb)}</div><div class="na">${esc(action)}</div></div>`;
+    };
+    const tree = (branch: Branch): string => {
+      const ns = nodesOf(branch);
+      const at = (tier: number, side?: string) => ns.find((n) => n.tier === tier && (tier === 1 || n.side === side))!;
+      const eq = meta.equippedIn(branch);
+      const b = BRANCHES.find((x) => x.id === branch)!;
+      return `<div class="branch ${eq ? 'active' : ''}">
+        <div class="bh"><span class="bname">${b.name}</span><span class="bblurb">${eq ? `› ${esc(eq.name)}` : b.blurb}</span></div>
+        <div class="tier">${card(at(1))}</div>
+        <div class="fork"><div class="path">${card(at(2, 'a'))}${card(at(3, 'a'))}</div><div class="path">${card(at(2, 'b'))}${card(at(3, 'b'))}</div></div>
+      </div>`;
+    };
+
     el.innerHTML = `<h2>Legacy</h2>
       <div class="legacy-stats"><span><b>${st.renown}</b> renown</span><span><b>${st.runs}</b> runs</span><span><b>${st.wins}</b> wins</span><span>best day <b>${st.bestDay}</b></span></div>
-      <h3>boons · ${st.loadout.length}/${meta.slots} equipped</h3>
-      <div class="boons">${cards}</div>
-      <p class="sub small">Renown is earned every run, win or lose. Buy boons, equip up to ${meta.slots}, then start.</p>`;
-    el.querySelectorAll<HTMLElement>('.boon').forEach((c) => c.addEventListener('click', () => {
+      <h3>paths equipped · ${st.loadout.length}/${meta.slots}</h3>
+      <div class="trees">${BRANCHES.map((b) => tree(b.id)).join('')}</div>
+      <p class="sub small">Each branch forks. Buy down a path, then equip its deepest node — a whole path takes one slot (${meta.slots} slots${st.wins ? '' : ', a third after your first win'}).</p>`;
+
+    el.querySelectorAll<HTMLElement>('.node').forEach((c) => c.addEventListener('click', () => {
       const id = c.dataset.id!;
-      if (!meta.isUnlocked(id)) { if (!meta.unlock(id)) { c.classList.add('shake'); setTimeout(() => c.classList.remove('shake'), 400); return; } }
-      else if (!meta.toggleLoadout(id)) { c.classList.add('shake'); setTimeout(() => c.classList.remove('shake'), 400); return; }
+      const ok = meta.isUnlocked(id) ? meta.toggleLoadout(id) : meta.unlock(id);
+      if (!ok) { c.classList.add('shake'); setTimeout(() => c.classList.remove('shake'), 400); return; }
       this.renderLegacy(el);
     }));
   }
