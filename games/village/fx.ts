@@ -29,7 +29,7 @@ export class Fx {
   readonly anims = new Map<number, AnimState>();
   private weapons = new Map<number, Phaser.GameObjects.Sprite>();
   /** weapon follows its owner while a swing is running */
-  private swings = new Map<number, { sprite: Phaser.GameObjects.Sprite; side: number; t: number; ttl: number; dy: number }>();
+  private swings = new Map<number, { sprite: Phaser.GameObjects.Sprite; ux: number; uy: number; t: number; ttl: number }>();
   private numberPool: Phaser.GameObjects.Text[] = [];
   private sparks: Phaser.GameObjects.Particles.ParticleEmitter;
   private blood: Phaser.GameObjects.Particles.ParticleEmitter;
@@ -70,7 +70,8 @@ export class Fx {
       const owner = sprites.get(id);
       sw.t += dt;
       if (!owner || sw.t >= sw.ttl) { sw.sprite.setVisible(false); this.swings.delete(id); continue; }
-      sw.sprite.setPosition(owner.x + sw.side * 5, owner.y - 6 + sw.dy).setDepth(owner.depth + 0.5).setFlipX(sw.side < 0);
+      // the weapon rides the hand on the swing side of the body
+      sw.sprite.setPosition(owner.x + sw.ux * 9, owner.y - 5 + sw.uy * 9).setDepth(owner.depth + (sw.uy < 0 ? -0.5 : 0.5));
     }
   }
 
@@ -103,9 +104,12 @@ export class Fx {
 
   /** Lunge + weapon arc from `who` toward `target` (or a point). */
   private swing(who: Mover, target: { x: number; y: number }, sprites: Map<number, Phaser.GameObjects.Sprite>, kind = this.weaponFor(who), ms = 140): void {
-    const side = target.x < who.x ? -1 : 1;
     const dx = target.x - who.x, dy = target.y - who.y;
     const d = Math.hypot(dx, dy) || 1;
+    const ux = dx / d, uy = dy / d;
+    // sprite art points up, so "pointing along the facing" is facing angle + 90°; sweep across it
+    const base = Math.atan2(uy, ux) + Math.PI / 2;
+    const sweep = ux < 0 ? -1.2 : 1.2;
     const a = this.anim(who.id);
     this.scene.tweens.killTweensOf(a);
     this.scene.tweens.chain({
@@ -117,11 +121,12 @@ export class Fx {
     });
     const w = this.weaponSprite(who.id, kind);
     const owner = sprites.get(who.id);
-    if (owner) w.setPosition(owner.x + side * 5, owner.y - 6);
+    if (owner) w.setPosition(owner.x + ux * 9, owner.y - 5 + uy * 9);
     this.scene.tweens.killTweensOf(w);
-    w.setRotation(side * -1.2);
-    this.scene.tweens.add({ targets: w, rotation: side * 1.2, duration: ms, ease: 'Cubic.Out' });
-    this.swings.set(who.id, { sprite: w, side, t: 0, ttl: ms / 1000 + 0.05, dy: 0 });
+    w.setFlipX(ux < 0);
+    w.setRotation(base - sweep);
+    this.scene.tweens.add({ targets: w, rotation: base + sweep, duration: ms, ease: 'Cubic.Out' });
+    this.swings.set(who.id, { sprite: w, ux, uy, t: 0, ttl: ms / 1000 + 0.05 });
     if (who instanceof Raider && who.boss) this.shake(120, 0.006);
   }
 
