@@ -25,8 +25,18 @@ declare global {
 }
 
 /** Boot a Phaser game with one scene, scaled to fit the window. */
-export function launch(scene: typeof Phaser.Scene, opts: LaunchOptions = {}): Phaser.Game {
+export function launch(scene: typeof Phaser.Scene, opts: LaunchOptions = {}): Phaser.Game | null {
   const resize = opts.scale === 'resize';
+  const parentEl = document.getElementById(opts.parent ?? 'game');
+  // In resize mode a 0x0 parent (hidden tab, pane not laid out yet) makes WebGL framebuffers fail; wait for a size.
+  if (resize && parentEl && (parentEl.clientWidth === 0 || parentEl.clientHeight === 0)) {
+    const retry = () => {
+      if (parentEl.clientWidth > 0 && parentEl.clientHeight > 0) launch(scene, opts);
+      else requestAnimationFrame(retry);
+    };
+    requestAnimationFrame(retry);
+    return null; // window.game is set once it actually boots
+  }
   const game = new Phaser.Game({
     type: Phaser.AUTO,
     parent: opts.parent ?? 'game',
@@ -36,7 +46,7 @@ export function launch(scene: typeof Phaser.Scene, opts: LaunchOptions = {}): Ph
     pixelArt: opts.pixelArt ?? false,
     roundPixels: opts.pixelArt ?? false,
     scale: resize
-      ? { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.NO_CENTER }
+      ? { mode: Phaser.Scale.RESIZE, autoCenter: Phaser.Scale.NO_CENTER, min: { width: 64, height: 64 } }
       : { mode: Phaser.Scale.FIT, autoCenter: Phaser.Scale.CENTER_BOTH, zoom: opts.zoom ?? 1 },
     scene: [scene],
   });

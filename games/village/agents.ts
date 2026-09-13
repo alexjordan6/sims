@@ -86,12 +86,13 @@ export abstract class Mover implements Agent {
     if (this.hp <= 0) this.dead = true;
   }
 
-  /** Melee: swing at `target` if in reach and cooldown is up. */
-  tryAttack(target: Mover, dmg: number, reach = 13, cooldown = 0.8): boolean {
+  /** Melee: swing at `target` if in reach and cooldown is up. Reports the hit to the scene for effects. */
+  tryAttack(s: VillageScene, target: Mover, dmg: number, reach = 13, cooldown = 0.8): boolean {
     if (this.attackCd > 0 || this.dist(target) > reach) return false;
     this.dir = target.x < this.x ? -1 : 1;
     target.hit(dmg);
     this.attackCd = cooldown;
+    s.fx.push({ kind: 'hit', attacker: this, target, dmg });
     return true;
   }
 
@@ -255,7 +256,7 @@ export class Villager extends Mover {
     }
     if (this.target && !this.target.dead) {
       this.task = 'fighting';
-      if (this.tryAttack(this.target, Math.round(p.soldierDmg * s.mods.soldierDmgMul), 13, 0.6)) return;
+      if (this.tryAttack(s, this.target, Math.round(p.soldierDmg * s.mods.soldierDmgMul), 13, 0.6)) return;
       this.setGoal(s, this.target.tile.tx, this.target.tile.ty);
       this.followPath(dt);
       return;
@@ -350,7 +351,7 @@ export class Raider extends Mover {
       return;
     }
     this.bored = 0;
-    if (this.tryAttack(this.target, this.dmg, this.boss ? 16 : 13)) return;
+    if (this.tryAttack(s, this.target, this.dmg, this.boss ? 16 : 13)) return;
     this.setGoal(s, this.target.tile.tx, this.target.tile.ty);
     this.followPath(dt);
     // trample crops

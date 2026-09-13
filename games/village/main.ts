@@ -11,6 +11,13 @@ const NAMES = ['Ada', 'Bram', 'Cass', 'Dov', 'Eli', 'Fen', 'Gil', 'Hana', 'Ivo',
 
 export type EventKind = 'birth' | 'grow' | 'soldier' | 'raid' | 'death' | 'build' | 'info' | 'food' | 'wood';
 export interface GameEvent { kind: EventKind; text: string; toast: boolean; day: number }
+/** Things the sim reports for the renderer to animate; drained every frame. */
+export type FxEvent =
+  | { kind: 'hit'; attacker: Mover; target: Mover; dmg: number }
+  | { kind: 'tool'; tool: 'hoe' | 'axe' | 'seed' | 'hammer'; tx: number; ty: number }
+  | { kind: 'death'; who: Mover; x: number; y: number }
+  | { kind: 'boss'; who: Mover };
+
 export type Screen = 'title' | 'playing' | 'paused' | 'over' | 'won';
 
 export class VillageScene extends SimScene {
@@ -27,6 +34,7 @@ export class VillageScene extends SimScene {
   screen: Screen = 'title';
   selected: Mover | null = null;
   journal: GameEvent[] = [];
+  fx: FxEvent[] = [];
   stats = { peakPop: 0, soldiersRaised: 0, raidsRepelled: 0, raidersKilled: 0 };
   /** persists across runs (localStorage) */
   meta = new Meta();
@@ -42,7 +50,7 @@ export class VillageScene extends SimScene {
   private ui?: UI;
   private wasd!: Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>;
   /** camera follows the player when the world is bigger than the viewport (phones) */
-  private following = false;
+  following = false;
 
   // the kernel sizes its grid from W/H; in resize mode the viewport varies, the world does not
   get W(): number { return COLS * TILE; }
@@ -76,6 +84,7 @@ export class VillageScene extends SimScene {
     this.raidActive = false;
     this.selected = null;
     this.journal = [];
+    this.fx = [];
     this.stats = { peakPop: 0, soldiersRaised: 0, raidsRepelled: 0, raidersKilled: 0 };
     this.boss = null;
     this.result = null;
@@ -325,7 +334,7 @@ export class VillageScene extends SimScene {
       const c = World.center(tx, ty);
       const isBoss = boss && i === n; // the last one spawned leads
       const r = this.spawn(new Raider(c.x, c.y, { ...opts, boss: isBoss }));
-      if (isBoss) this.boss = r;
+      if (isBoss) { this.boss = r; this.fx.push({ kind: 'boss', who: r }); }
     }
     this.raidActive = true;
     const from = ['west', 'east', 'north', 'south'][side];
@@ -334,6 +343,7 @@ export class VillageScene extends SimScene {
   }
 
   private onDeath(a: Mover): void {
+    this.fx.push({ kind: 'death', who: a, x: a.x, y: a.y });
     if (a === this.selected) this.selected = null;
     if (a === this.hovered) this.hovered = null;
     if (a instanceof Villager) {
@@ -384,7 +394,7 @@ export class VillageScene extends SimScene {
     if (this.screen !== 'playing') return;
     const pl = this.player;
     const raider = this.nearestRaider(pl.x, pl.y, 20);
-    if (raider) { pl.tryAttack(raider, Math.round(12 * this.mods.playerDmgMul), 20, 0.5); return; }
+    if (raider) { pl.tryAttack(this, raider, Math.round(12 * this.mods.playerDmgMul), 20, 0.5); return; }
 
     const { tx, ty } = pl.faced;
     const t = this.world.get(tx, ty);
@@ -395,19 +405,21 @@ export class VillageScene extends SimScene {
       if (this.wood < COST[pl.build]) { this.event('build', `Need ${COST[pl.build]} wood for a ${pl.build}`); return; }
       this.wood -= COST[pl.build];
       if (pl.build === 'house') this.world.placeHouse(tx, ty); else this.world.placeBarracks(tx, ty);
+      this.fx.push({ kind: 'tool', tool: 'hammer', tx, ty });
       this.event('build', `Built a ${pl.build}`, true);
       return;
     }
 
     switch (t.kind) {
-      case 'grass': this.world.set(tx, ty, 'tilled'); break;
-      case 'tilled': this.world.set(tx, ty, 'crop'); break;
+      case 'grass': this.world.set(tx, ty, 'tilled'); this.fx.push({ kind: 'tool', tool: 'hoe', tx, ty }); break;
+      case 'tilled': this.world.set(tx, ty, 'crop'); this.fx.push({ kind: 'tool', tool: 'seed', tx, ty }); break;
       case 'crop':
-        if (t.stage >= this.cropDays) { this.world.set(tx, ty, 'tilled'); this.food += this.mods.cropYield; }
+        if (t.stage >= this.cropDays) { this.world.set(tx, ty, 'tilled'); this.food += this.mods.cropYield; this.fx.push({ kind: 'tool', tool: 'seed', tx, ty }); }
         break;
       case 'tree':
         if (++t.work >= 3) { this.world.set(tx, ty, 'grass'); this.wood += TREE_YIELD; }
         else this.world.dirty.add(ty * COLS + tx);
+        this.fx.push({ kind: 'tool', tool: 'axe', tx, ty });
         break;
     }
   }

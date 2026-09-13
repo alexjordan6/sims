@@ -4,6 +4,7 @@ import { Mover, Villager, Raider, Player } from './agents';
 import { TOWN, FARM, CHAR } from './atlas';
 import { TILE, COLS, ROWS } from './config';
 import type { VillageScene } from './main';
+import { Fx } from './fx';
 
 import townUrl from './assets/town.png';
 import farmUrl from './assets/farm.png';
@@ -35,6 +36,7 @@ export class Renderer {
   private bars: Phaser.GameObjects.Graphics;
   private night: Phaser.GameObjects.Rectangle;
   private t = 0;
+  readonly fx: Fx;
 
   constructor(private scene: VillageScene) {
     const map = scene.make.tilemap({ tileWidth: TILE, tileHeight: TILE, width: COLS, height: ROWS });
@@ -48,12 +50,14 @@ export class Renderer {
     this.under = scene.add.graphics().setDepth(DEPTH.under);
     this.bars = scene.add.graphics().setDepth(DEPTH.bars);
     this.night = scene.add.rectangle(0, 0, COLS * TILE, ROWS * TILE, 0x060612, 0).setOrigin(0).setDepth(DEPTH.night);
+    this.fx = new Fx(scene);
   }
 
   /** Redraw every tile and drop all sprites (after a reset). */
   rebuild(): void {
     for (const s of this.sprites.values()) s.destroy();
     this.sprites.clear();
+    this.fx.clear();
     this.roofs.fill(EMPTY);
     const w = this.scene.world;
     for (let i = 0; i < w.tiles.length; i++) w.dirty.add(i);
@@ -65,6 +69,9 @@ export class Renderer {
     this.t += dt;
     this.drainDirty();
     this.syncSprites();
+    for (const ev of this.scene.fx) this.fx.handle(ev, this.sprites);
+    this.scene.fx.length = 0;
+    this.fx.update(dt, this.sprites);
     this.drawOverlays();
   }
 
@@ -90,13 +97,14 @@ export class Renderer {
 
   private syncSprites(): void {
     const seen = new Set<number>();
-    for (const a of this.scene.agents) {
-      const m = a as Mover;
+    for (const ag of this.scene.agents) {
+      const m = ag as Mover;
       seen.add(m.id);
       let sp = this.sprites.get(m.id);
       if (!sp) {
         const c = charFor(m);
         sp = this.scene.add.sprite(m.x, m.y, c.key, c.frame).setOrigin(0.5, 0.75).setDepth(DEPTH.agents);
+        sp.setData('agent', m);
         sp.setInteractive({ useHandCursor: true });
         sp.on('pointerdown', () => this.scene.select(m));
         sp.on('pointerover', () => this.scene.hoverAgent(m));
@@ -107,15 +115,22 @@ export class Renderer {
       const c = charFor(m);
       if (sp.texture.key !== c.key || sp.frame.name !== String(c.frame)) sp.setTexture(c.key, c.frame);
       const moving = Math.abs(m.vx) + Math.abs(m.vy) > 1;
-      const bob = moving ? Math.abs(Math.sin(this.t * 14 + m.id)) * 1.5 : 0;
-      sp.setPosition(Math.round(m.x), Math.round(m.y - bob));
+      const hurt = m.hp < m.maxHp * 0.4;
+      const bob = moving ? Math.abs(Math.sin(this.t * (hurt ? 9 : 14) + m.id)) * 1.5 : 0;
+      const a = this.fx.anims.get(m.id);
+      const base = m instanceof Villager && m.role === 'kid' ? 0.7 : m instanceof Raider && m.boss ? 1.5 : 1;
+      sp.setPosition(Math.round(m.x + (a?.ox ?? 0)), Math.round(m.y - bob + (a?.oy ?? 0)));
       sp.setFlipX(m.dir < 0);
       sp.setVisible(!m.hidden);
-      sp.setScale(m instanceof Villager && m.role === 'kid' ? 0.7 : m instanceof Raider && m.boss ? 1.5 : 1);
+      sp.setScale(base * (a?.sx ?? 1), base * (a?.sy ?? 1));
+      sp.setRotation(a?.rot ?? 0);
       sp.setDepth(DEPTH.agents + m.y / 1000);
-      if (m.hurtT < 0.15) sp.setTintFill(0xffffff); else if (m instanceof Raider) sp.setTint(m.boss ? 0xff6a6a : 0xffd0d0); else sp.clearTint();
+      if (m.hurtT < 0.15) sp.setTintFill(0xffffff);
+      else if (m instanceof Raider) sp.setTint(m.boss ? 0xff6a6a : 0xffd0d0);
+      else if (hurt) sp.setTint(0xffb0a0);
+      else sp.clearTint();
     }
-    for (const [id, sp] of this.sprites) if (!seen.has(id)) { sp.destroy(); this.sprites.delete(id); }
+    for (const [id, sp] of this.sprites) if (!seen.has(id)) { this.sprites.delete(id); this.fx.die(sp, sp.getData('agent') as Mover); }
   }
 
   /** Screen-space centre of an agent's sprite (for DOM tooltips). */
