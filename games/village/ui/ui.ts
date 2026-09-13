@@ -1,7 +1,8 @@
 import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type BuildItem } from '../agents';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
-import { COST, HOUSE_CAP, p } from '../config';
+import { COST, p, RUN } from '../config';
+import { BOONS } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 
 // ---------------------------------------------------------------------------
@@ -144,13 +145,13 @@ export class UI {
     const hour = Math.floor(s.dayTime * 24);
     const night = s.dayTime < 0.22 || s.dayTime > 0.8;
     const raidIn = s.nextRaidDay - s.day;
-    const key = `${s.day}|${hour}|${s.food | 0}|${s.wood | 0}|${count('farmer')}|${count('woodcutter')}|${count('kid')}|${count('soldier')}|${s.player.hp}|${s.raidActive}|${raidIn}|${s.speed}|${s.paused}|${night}`;
+    const key = `${s.day}|${hour}|${s.food | 0}|${s.wood | 0}|${count('farmer')}|${count('woodcutter')}|${count('kid')}|${count('soldier')}|${s.player.hp}|${s.raidActive}|${s.boss?.hp ?? ''}|${raidIn}|${s.speed}|${s.paused}|${night}`;
     if (key === this.lastTop) return;
     this.lastTop = key;
 
     const q = (sel: string) => this.top.querySelector<HTMLElement>(sel)!;
     q('.sun').classList.toggle('moon', night);
-    q('.day').textContent = `DAY ${s.day}`;
+    q('.day').textContent = `DAY ${s.day}/${RUN.days}`;
     q('.hour').textContent = `${String(hour).padStart(2, '0')}:00`;
     q('.wood').textContent = String(s.wood | 0);
     q('.food').textContent = String(s.food | 0);
@@ -158,9 +159,14 @@ export class UI {
       ['farmer', CHAR.farmer], ['woodcutter', CHAR.woodcutter], ['kid', CHAR.kid], ['soldier', CHAR.soldier],
     ].map(([r, c]) => `<span class="chip" title="${ROLE_LABEL[r as string]}s">${spr((c as { key: string }).key, (c as { frame: number }).frame, 24)}${count(r as string)}</span>`).join('');
     const raid = q('.raid');
-    if (s.raidActive) { raid.textContent = 'RAID!'; raid.className = 'group raid now'; }
-    else if (raidIn <= 1) { raid.textContent = 'RAID TOMORROW'; raid.className = 'group raid soon'; }
-    else { raid.textContent = `raid in ${raidIn} days`; raid.className = 'group raid'; }
+    const bossNext = s.nextRaidDay === RUN.bossDay;
+    if (s.raidActive && s.boss && !s.boss.dead) {
+      const pct = Math.max(0, (s.boss.hp / s.boss.maxHp) * 100);
+      raid.innerHTML = `<span>WARLORD</span><div class="bar boss"><i style="width:${pct}%"></i></div>`;
+      raid.className = 'group raid now';
+    } else if (s.raidActive) { raid.textContent = 'RAID!'; raid.className = 'group raid now'; }
+    else if (raidIn <= 1) { raid.textContent = bossNext ? 'THE WARLORD COMES TOMORROW' : 'RAID TOMORROW'; raid.className = 'group raid soon'; }
+    else { raid.textContent = bossNext ? `warlord in ${raidIn} days` : `raid in ${raidIn} days`; raid.className = bossNext ? 'group raid soon' : 'group raid'; }
     const hearts = q('.hearts');
     const full = s.player.hp / s.player.maxHp * 6;
     hearts.innerHTML = Array.from({ length: 6 }, (_, i) => `<span class="heart ${i + 1 <= full ? '' : i < full ? 'half' : 'off'}"></span>`).join('');
@@ -189,13 +195,13 @@ export class UI {
       return;
     }
     const c = charOf(m);
-    let html = `<div class="head">${spr(c.key, c.frame, 48)}<div><div class="name">${m instanceof Villager ? esc(m.name) : m instanceof Player ? 'You' : 'Raider'}</div><div class="role">${m instanceof Villager ? ROLE_LABEL[m.role] : m instanceof Player ? 'Village head' : 'Raider'}</div></div><button class="btn small close">x</button></div>`;
+    let html = `<div class="head">${spr(c.key, c.frame, 48)}<div><div class="name">${m instanceof Villager ? esc(m.name) : m instanceof Player ? 'You' : (m as Raider).name}</div><div class="role">${m instanceof Villager ? ROLE_LABEL[m.role] : m instanceof Player ? 'Village head' : (m as Raider).boss ? 'Boss' : 'Raider'}</div></div><button class="btn small close">x</button></div>`;
     const hpPct = Math.max(0, m.hp / m.maxHp * 100);
     html += `<div class="rows">`;
     html += `<b>HP</b><div class="bar hp ${hpPct < 40 ? 'low' : ''}"><i style="width:${hpPct}%"></i></div>`;
     if (m instanceof Villager) {
       html += `<b>Age</b><span>${m.age} days${m.role === 'kid' ? ` — adult in ${Math.max(0, p.adultAge - m.age)}` : ''}</span>`;
-      html += `<b>Home</b><span>house at ${m.home.tx},${m.home.ty} (${m.home.residents}/${HOUSE_CAP})</span>`;
+      html += `<b>Home</b><span>house at ${m.home.tx},${m.home.ty} (${m.home.residents}/${s.mods.houseCap})</span>`;
       html += `<b>Fed</b><span>${m.hungerDays === 0 ? 'yes' : `hungry ${m.hungerDays}d`}</span>`;
     }
     html += `<b>Doing</b><span>${esc(m.task || '—')}</span></div>`;
@@ -285,49 +291,63 @@ export class UI {
 
   // ---- screens ---------------------------------------------------------------
 
-  showScreen(kind: 'title' | 'pause' | 'over' | null): void {
+  showScreen(kind: 'title' | 'pause' | 'over' | 'won' | null): void {
     const s = this.scene;
     this.screens.innerHTML = '';
     if (!kind) return;
     let card: HTMLElement;
     const cast = `<div class="cast">${spr('dungeon', DUNGEON.hero, 48)}${spr('farm', FARM.farmerHat, 48)}${spr('dungeon', DUNGEON.villager, 48)}${spr('dungeon', DUNGEON.knight, 48)}${spr('dungeon', DUNGEON.orc, 48, 'flip')}</div>`;
     if (kind === 'title') {
-      card = h(`<div class="card panel">
-        <h1>VILLAGE</h1>
-        ${cast}
-        <p class="sub">Farm. Raise a family. The children you raise beside the barracks become your army.</p>
-        <div class="controls">
-          <kbd>WASD</kbd><span>move</span><kbd>E</kbd><span>till · plant · harvest · chop · fight · build</span>
-          <kbd>Q</kbd><span>choose what to build</span><kbd>Esc</kbd><span>pause</span>
-          <kbd>1 2 3</kbd><span>game speed</span><kbd>click</kbd><span>inspect a villager</span>
+      card = h(`<div class="title-wrap">
+        <div class="card panel">
+          <h1>VILLAGE</h1>
+          ${cast}
+          <p class="sub">Farm. Raise a family. The children you raise beside the barracks become your army.<br>
+          Survive ${RUN.days} days of raids and <b>beat the Warlord</b>.</p>
+          <div class="controls">
+            <kbd>WASD</kbd><span>move</span><kbd>E</kbd><span>till · plant · harvest · chop · fight · build</span>
+            <kbd>Q</kbd><span>choose what to build</span><kbd>Esc</kbd><span>pause</span>
+            <kbd>1 2 3</kbd><span>game speed</span><kbd>click</kbd><span>inspect a villager</span>
+          </div>
+          <div class="row"><label class="sub">seed <input class="seed" value="${s.seed}"></label></div>
+          <div class="row"><button class="btn ok start">NEW VILLAGE</button></div>
+          <p class="credit">art: <a href="https://kenney.nl" target="_blank" rel="noopener">Kenney</a> (CC0)</p>
         </div>
-        <div class="row"><label class="sub">seed <input class="seed" value="${s.seed}"></label></div>
-        <div class="row"><button class="btn ok start">NEW VILLAGE</button></div>
-        <p class="credit">art: <a href="https://kenney.nl" target="_blank" rel="noopener">Kenney</a> (CC0)</p>
+        <div class="card panel legacy"></div>
       </div>`);
       const input = card.querySelector<HTMLInputElement>('.seed')!;
       const start = () => s.startGame(Number(input.value) || undefined);
       card.querySelector('.start')!.addEventListener('click', start);
       input.addEventListener('keydown', (e) => { if (e.key === 'Enter') start(); e.stopPropagation(); });
+      this.renderLegacy(card.querySelector('.legacy')!);
     } else if (kind === 'pause') {
       card = h(`<div class="card panel">
         <h1>PAUSED</h1>
-        <p class="sub">Day ${s.day} · ${s.villagers().length} villagers · ${s.villagers().filter((v) => v.role === 'soldier').length} soldiers</p>
+        <p class="sub">Day ${s.day} of ${RUN.days} · ${s.villagers().length} villagers · ${s.villagers().filter((v) => v.role === 'soldier').length} soldiers</p>
+        ${this.loadoutLine()}
         <div class="row"><button class="btn ok resume">RESUME</button><button class="btn restart">RESTART</button><button class="btn title">TITLE</button></div>
       </div>`);
       card.querySelector('.resume')!.addEventListener('click', () => s.togglePause());
       card.querySelector('.restart')!.addEventListener('click', () => s.startGame(s.seed));
       card.querySelector('.title')!.addEventListener('click', () => s.goTitle());
     } else {
+      const won = kind === 'won';
       const st = s.stats;
-      card = h(`<div class="card panel red">
-        <h1>THE VILLAGE FELL</h1>
-        <p>You died on day ${s.day}.</p>
+      const r = s.result?.renown;
+      const meta = s.meta.state;
+      card = h(`<div class="card panel ${won ? 'tan' : 'grey'}">
+        <h1 class="${won ? 'gold' : 'blood'}">${won ? 'THE WARLORD FALLS' : 'THE VILLAGE FELL'}</h1>
+        <p>${won ? `Your village stands. Day ${s.day}, and the raiders are broken.` : `You died on day ${s.day}.`}</p>
         <div class="stats">
-          <div><b>${s.day}</b>days survived</div><div><b>${st.peakPop}</b>peak population</div>
-          <div><b>${st.soldiersRaised}</b>soldiers raised</div><div><b>${st.raidsRepelled}</b>raids repelled</div>
+          <div><b>${s.day}</b>days</div><div><b>${st.peakPop}</b>peak population</div>
+          <div><b>${st.soldiersRaised}</b>soldiers raised</div><div><b>${st.raidersKilled}</b>raiders slain</div>
         </div>
-        <div class="row"><button class="btn ok restart">TRY AGAIN</button><button class="btn title">TITLE</button></div>
+        ${r ? `<div class="renown"><div class="lbl">RENOWN EARNED</div>
+          <div class="parts"><span>days ${r.days}</span><span>kills ${r.kills}</span><span>soldiers ${r.soldiers}</span>${r.victory ? `<span>victory ${r.victory}</span>` : ''}</div>
+          <div class="total">+${r.total} <small>· ${meta.renown} banked</small></div>
+          ${won && meta.wins === 1 ? '<div class="unlock">First victory: a third boon slot is yours.</div>' : ''}
+        </div>` : ''}
+        <div class="row"><button class="btn ok restart">NEW RUN</button><button class="btn title">LEGACY</button></div>
       </div>`);
       card.querySelector('.restart')!.addEventListener('click', () => s.startGame());
       card.querySelector('.title')!.addEventListener('click', () => s.goTitle());
@@ -335,6 +355,36 @@ export class UI {
     const screen = h(`<div class="screen ${kind}"></div>`);
     screen.append(card);
     this.screens.append(screen);
+  }
+
+  /** Equipped boons as a one-liner (pause screen). */
+  private loadoutLine(): string {
+    const ids = this.scene.meta.state.loadout;
+    if (!ids.length) return '<p class="sub">no boons equipped</p>';
+    return `<p class="sub">boons: ${ids.map((id) => BOONS.find((b) => b.id === id)?.name ?? id).join(' · ')}</p>`;
+  }
+
+  /** The Legacy panel: renown, record, and the boon shop / loadout. Re-renders itself on click. */
+  private renderLegacy(el: HTMLElement): void {
+    const meta = this.scene.meta;
+    const st = meta.state;
+    const cards = BOONS.map((b) => {
+      const unlocked = meta.isUnlocked(b.id), equipped = meta.isEquipped(b.id);
+      const state = equipped ? 'equipped' : unlocked ? 'unlocked' : st.renown >= b.cost ? 'buyable' : 'locked';
+      const action = equipped ? 'unequip' : unlocked ? 'equip' : `${b.cost} renown`;
+      return `<div class="boon ${state}" data-id="${b.id}" title="${esc(b.blurb)}">${spr(b.icon.key, b.icon.frame, 32)}<div class="bn">${b.name}</div><div class="bb">${esc(b.blurb)}</div><div class="ba">${action}</div></div>`;
+    }).join('');
+    el.innerHTML = `<h2>Legacy</h2>
+      <div class="legacy-stats"><span><b>${st.renown}</b> renown</span><span><b>${st.runs}</b> runs</span><span><b>${st.wins}</b> wins</span><span>best day <b>${st.bestDay}</b></span></div>
+      <h3>boons · ${st.loadout.length}/${meta.slots} equipped</h3>
+      <div class="boons">${cards}</div>
+      <p class="sub small">Renown is earned every run, win or lose. Buy boons, equip up to ${meta.slots}, then start.</p>`;
+    el.querySelectorAll<HTMLElement>('.boon').forEach((c) => c.addEventListener('click', () => {
+      const id = c.dataset.id!;
+      if (!meta.isUnlocked(id)) { if (!meta.unlock(id)) { c.classList.add('shake'); setTimeout(() => c.classList.remove('shake'), 400); return; } }
+      else if (!meta.toggleLoadout(id)) { c.classList.add('shake'); setTimeout(() => c.classList.remove('shake'), 400); return; }
+      this.renderLegacy(el);
+    }));
   }
 }
 

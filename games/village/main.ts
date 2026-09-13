@@ -2,7 +2,8 @@ import Phaser from 'phaser';
 import { SimScene, launch } from '@shared/index';
 import { World } from './world';
 import { Villager, Raider, Player, Mover, type Role, type BuildItem } from './agents';
-import { p, TILE, COLS, ROWS, ZOOM, COST, HOUSE_CAP, CROP_YIELD, TREE_YIELD } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, TREE_YIELD, RUN } from './config';
+import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
 
@@ -10,7 +11,7 @@ const NAMES = ['Ada', 'Bram', 'Cass', 'Dov', 'Eli', 'Fen', 'Gil', 'Hana', 'Ivo',
 
 export type EventKind = 'birth' | 'grow' | 'soldier' | 'raid' | 'death' | 'build' | 'info' | 'food' | 'wood';
 export interface GameEvent { kind: EventKind; text: string; toast: boolean; day: number }
-export type Screen = 'title' | 'playing' | 'paused' | 'over';
+export type Screen = 'title' | 'playing' | 'paused' | 'over' | 'won';
 
 export class VillageScene extends SimScene {
   neighborRadius = 130; // soldier aggro radius = largest grid query
@@ -26,7 +27,14 @@ export class VillageScene extends SimScene {
   screen: Screen = 'title';
   selected: Mover | null = null;
   journal: GameEvent[] = [];
-  stats = { peakPop: 0, soldiersRaised: 0, raidsRepelled: 0 };
+  stats = { peakPop: 0, soldiersRaised: 0, raidsRepelled: 0, raidersKilled: 0 };
+  /** persists across runs (localStorage) */
+  meta = new Meta();
+  /** this run's modifiers, compiled from the equipped boons */
+  mods: Mods = this.meta.mods();
+  boss: Raider | null = null;
+  /** set when the run ends */
+  result: { won: boolean; renown: RenownBreakdown } | null = null;
 
   private nameIdx = 0;
   private hovered: Mover | null = null;
@@ -34,8 +42,10 @@ export class VillageScene extends SimScene {
   private ui?: UI;
   private wasd!: Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>;
 
+  /** Next raid day; the warlord's day caps the schedule. */
   get nextRaidDay(): number {
-    return (Math.floor(this.day / p.raidEvery) + 1) * p.raidEvery;
+    const next = (Math.floor(this.day / p.raidEvery) + 1) * p.raidEvery;
+    return Math.min(next, RUN.bossDay);
   }
 
   // ---- setup ----------------------------------------------------------------
@@ -47,30 +57,41 @@ export class VillageScene extends SimScene {
   setup(): void {
     this.world = new World();
     this.world.generate(this.rng);
-    this.food = 40;
-    this.wood = 25;
+    this.mods = this.meta.mods();
+    this.food = this.mods.startFood;
+    this.wood = this.mods.startWood;
     this.day = 1;
     this.dayTime = 0.3;
     this.raidActive = false;
     this.selected = null;
     this.journal = [];
-    this.stats = { peakPop: 0, soldiersRaised: 0, raidsRepelled: 0 };
+    this.stats = { peakPop: 0, soldiersRaised: 0, raidsRepelled: 0, raidersKilled: 0 };
+    this.boss = null;
+    this.result = null;
     this.nameIdx = this.rng.int(0, NAMES.length - 1);
 
     const home = this.world.houses[0];
     const c = World.center(home.tx, home.ty + 1);
     this.player = this.spawn(new Player(c.x + TILE * 2, c.y + TILE));
     this.player.keys = this.wasd;
+    this.player.maxHp += this.mods.playerHpBonus;
+    this.player.hp = this.player.maxHp;
 
     this.addVillager(home, 'farmer', 22);
     this.addVillager(home, 'woodcutter', 22);
     this.addVillager(home, 'kid', 4);
+    if (this.mods.startSoldier) this.addVillager(home, 'soldier', 25);
+    if (this.mods.extraAdults > 0) {
+      // a second family, two tiles left of the first house
+      const h2 = this.world.placeHouse(home.tx - 3, home.ty);
+      for (let i = 0; i < this.mods.extraAdults; i++) this.addVillager(h2, i % 2 ? 'woodcutter' : 'farmer', 22);
+    }
     this.event('info', 'A new village. Till soil, plant, and keep everyone fed.');
   }
 
   private addVillager(home: (typeof this.world.houses)[number], role: Role, age: number): Villager {
     const c = World.center(home.tx, home.ty + 1);
-    const v = new Villager(c.x + this.rng.range(-4, 4), c.y + this.rng.range(-4, 4), home, role, age, NAMES[this.nameIdx++ % NAMES.length]);
+    const v = new Villager(c.x + this.rng.range(-4, 4), c.y + this.rng.range(-4, 4), home, role, age, NAMES[this.nameIdx++ % NAMES.length], this.mods);
     home.residents++;
     return this.spawn(v);
   }
@@ -133,10 +154,14 @@ export class VillageScene extends SimScene {
     else if (this.screen === 'paused') { this.screen = 'playing'; this.paused = false; this.ui?.showScreen(null); }
   }
 
-  private endGame(): void {
-    this.screen = 'over';
+  /** The run is over: bank renown and show the result. */
+  private endRun(won: boolean): void {
+    if (this.result) return;
+    const renown = this.meta.bankRun({ won, day: this.day, raidersKilled: this.stats.raidersKilled, soldiersRaised: this.stats.soldiersRaised });
+    this.result = { won, renown };
+    this.screen = won ? 'won' : 'over';
     this.paused = true;
-    this.ui?.showScreen('over');
+    this.ui?.showScreen(this.screen);
   }
 
   setBuild(item: BuildItem): void {
@@ -156,7 +181,7 @@ export class VillageScene extends SimScene {
     const ev = ptr.event as MouseEvent;
     const m = this.hovered;
     if (m && !m.dead && !m.hidden) {
-      const name = m instanceof Villager ? m.name : m instanceof Player ? 'You' : 'Raider';
+      const name = m instanceof Villager ? m.name : m instanceof Player ? 'You' : (m as Raider).name;
       const sub = m instanceof Villager ? m.role : m.task;
       this.ui.tooltip(`<div class="t">${name}</div><div class="d">${sub} · ${Math.max(0, m.hp)}/${m.maxHp} hp</div>`, ev.clientX, ev.clientY);
       return;
@@ -164,10 +189,10 @@ export class VillageScene extends SimScene {
     const t = this.world.get(Math.floor(ptr.worldX / TILE), Math.floor(ptr.worldY / TILE));
     let html: string | null = null;
     switch (t?.kind) {
-      case 'crop': html = `<div class="t">${t.stage >= p.cropDays ? 'Ripe crop' : 'Growing crop'}</div><div class="d">${Math.min(t.stage, p.cropDays)}/${p.cropDays} days · yields ${CROP_YIELD} food</div>`; break;
+      case 'crop': html = `<div class="t">${t.stage >= p.cropDays ? 'Ripe crop' : 'Growing crop'}</div><div class="d">${Math.min(t.stage, p.cropDays)}/${p.cropDays} days · yields ${this.mods.cropYield} food</div>`; break;
       case 'tilled': html = `<div class="t">Tilled soil</div><div class="d">plant with E, or a farmer will</div>`; break;
       case 'tree': html = `<div class="t">Tree</div><div class="d">${t.work}/3 chopped · yields ${TREE_YIELD} wood</div>`; break;
-      case 'house': html = `<div class="t">House</div><div class="d">${t.house?.residents ?? 0}/${HOUSE_CAP} residents · couples here have children</div>`; break;
+      case 'house': html = `<div class="t">House</div><div class="d">${t.house?.residents ?? 0}/${this.mods.houseCap} residents · couples here have children</div>`; break;
       case 'barracks': html = `<div class="t">Barracks</div><div class="d">children raised nearby grow into soldiers</div>`; break;
     }
     this.ui.tooltip(html, ev.clientX, ev.clientY);
@@ -185,7 +210,6 @@ export class VillageScene extends SimScene {
       this.newDay();
     }
 
-    this.raidActive = this.agents.some((a) => a instanceof Raider && !a.dead);
 
     for (const a of this.agents) a.update(dt, this);
     for (const a of this.agents) if (a.dead) this.onDeath(a as Mover);
@@ -194,10 +218,11 @@ export class VillageScene extends SimScene {
     if (this.raidActive && !this.agents.some((a) => a instanceof Raider)) {
       this.raidActive = false;
       this.stats.raidsRepelled++;
+      if (this.boss?.dead) { this.endRun(true); return; }
       this.event('raid', 'Raid repelled!', true);
     }
     this.stats.peakPop = Math.max(this.stats.peakPop, this.villagers().length);
-    if (this.player.dead) this.endGame();
+    if (this.player.dead) this.endRun(false);
   }
 
   private newDay(): void {
@@ -220,6 +245,7 @@ export class VillageScene extends SimScene {
       else if (++v.hungerDays >= 3) { v.dead = true; v.hp = 0; this.event('death', `${v.name} starved`, true); continue; }
       else this.event('food', `${v.name} went hungry`);
       v.age++;
+      v.hp = v.maxHp; // a night's rest
       if (v.role === 'kid' && v.age >= p.adultAge) v.comeOfAge(this);
       else if (v.age >= p.oldAge && this.rng.chance(0.25)) { v.dead = true; this.event('death', `${v.name} died of old age`); }
     }
@@ -227,7 +253,7 @@ export class VillageScene extends SimScene {
     // births: a couple sharing a house with room and food to spare
     for (const h of this.world.houses) {
       const adults = villagers.filter((v) => v.home === h && v.isAdult && !v.dead);
-      if (adults.length >= 2 && h.residents < HOUSE_CAP && this.food > 10 && this.rng.chance(p.birthChance)) {
+      if (adults.length >= 2 && h.residents < this.mods.houseCap && this.food > 10 && this.rng.chance(p.birthChance)) {
         const kid = this.addVillager(h, 'kid', 0);
         this.event('birth', `${kid.name} was born`, true);
       }
@@ -235,28 +261,36 @@ export class VillageScene extends SimScene {
 
     // move-ins: adults from crowded houses take a spare room elsewhere
     for (const h of this.world.houses) {
-      if (h.residents >= HOUSE_CAP) continue;
+      if (h.residents >= this.mods.houseCap) continue;
       const mover = villagers.find((v) => v.isAdult && !v.dead && v.home !== h && villagers.filter((o) => o.home === v.home && o.isAdult).length > 2);
       if (mover) { mover.home.residents--; mover.home = h; h.residents++; this.event('info', `${mover.name} moved into a new house`); }
     }
 
-    if (this.day % p.raidEvery === 0) this.spawnRaid();
-    else if ((this.day + 1) % p.raidEvery === 0) this.event('raid', 'Raiders sighted — they arrive tomorrow', true);
+    if (this.day === RUN.bossDay) this.spawnRaid(true);
+    else if (this.day % p.raidEvery === 0 && this.day < RUN.bossDay) this.spawnRaid();
+    else if (this.day === RUN.bossDay - RUN.warnDays) this.event('raid', `The Warlord marches — he arrives in ${RUN.warnDays} days`, true);
+    else if ((this.day + 1) % p.raidEvery === 0 || this.day + 1 === RUN.bossDay) this.event('raid', 'Raiders sighted — they arrive tomorrow', true);
   }
 
-  spawnRaid(): void {
-    const n = 1 + Math.floor(this.day / 5);
+  spawnRaid(boss = false): void {
+    const wave = Math.max(1, Math.floor(this.day / p.raidEvery));
+    const n = boss ? 5 : 1 + Math.ceil(wave * 0.8); // 2,3,3,4,5,6 then 5 + the warlord
+    const opts = { hpMul: 1 + 0.08 * wave, speedMul: this.mods.raiderSpeedMul };
     const side = this.rng.int(0, 3);
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < n + (boss ? 1 : 0); i++) {
       let tx = side === 0 ? 0 : side === 1 ? COLS - 1 : this.rng.int(0, COLS - 1);
       let ty = side === 2 ? 0 : side === 3 ? ROWS - 1 : this.rng.int(0, ROWS - 1);
       const dx = side === 0 ? 1 : side === 1 ? -1 : 0, dy = side === 2 ? 1 : side === 3 ? -1 : 0;
       while (this.world.isBlocked(tx, ty) && this.world.inBounds(tx + dx, ty + dy)) { tx += dx; ty += dy; }
       const c = World.center(tx, ty);
-      this.spawn(new Raider(c.x, c.y));
+      const isBoss = boss && i === n; // the last one spawned leads
+      const r = this.spawn(new Raider(c.x, c.y, { ...opts, boss: isBoss }));
+      if (isBoss) this.boss = r;
     }
     this.raidActive = true;
-    this.event('raid', `RAID! ${n} raider${n > 1 ? 's' : ''} from the ${['west', 'east', 'north', 'south'][side]}`, true);
+    const from = ['west', 'east', 'north', 'south'][side];
+    if (boss) this.event('raid', `THE WARLORD ATTACKS from the ${from} with ${n} raiders!`, true);
+    else this.event('raid', `RAID! ${n} raider${n > 1 ? 's' : ''} from the ${from}`, true);
   }
 
   private onDeath(a: Mover): void {
@@ -266,7 +300,8 @@ export class VillageScene extends SimScene {
       a.home.residents--;
       if (a.hp <= 0 && a.hungerDays < 3) this.event('death', `${a.name} the ${a.role} was killed`, true);
     } else if (a instanceof Raider && a.hp <= 0) {
-      this.event('raid', 'Raider slain');
+      this.stats.raidersKilled++;
+      this.event('raid', a.boss ? 'The Warlord has fallen!' : 'Raider slain', a.boss);
     }
   }
 
@@ -309,7 +344,7 @@ export class VillageScene extends SimScene {
     if (this.screen !== 'playing') return;
     const pl = this.player;
     const raider = this.nearestRaider(pl.x, pl.y, 20);
-    if (raider) { pl.tryAttack(raider, 12, 20, 0.5); return; }
+    if (raider) { pl.tryAttack(raider, Math.round(12 * this.mods.playerDmgMul), 20, 0.5); return; }
 
     const { tx, ty } = pl.faced;
     const t = this.world.get(tx, ty);
@@ -328,7 +363,7 @@ export class VillageScene extends SimScene {
       case 'grass': this.world.set(tx, ty, 'tilled'); break;
       case 'tilled': this.world.set(tx, ty, 'crop'); break;
       case 'crop':
-        if (t.stage >= p.cropDays) { this.world.set(tx, ty, 'tilled'); this.food += CROP_YIELD; }
+        if (t.stage >= p.cropDays) { this.world.set(tx, ty, 'tilled'); this.food += this.mods.cropYield; }
         break;
       case 'tree':
         if (++t.work >= 3) { this.world.set(tx, ty, 'grass'); this.wood += TREE_YIELD; }
@@ -347,7 +382,7 @@ export class VillageScene extends SimScene {
       case 'tilled': return 'E: plant';
       case 'crop': return t.stage >= p.cropDays ? 'E: harvest' : `growing (${t.stage}/${p.cropDays} days)`;
       case 'tree': return `E: chop (${t.work}/3)`;
-      case 'house': return `house — ${t.house?.residents ?? 0}/${HOUSE_CAP} residents`;
+      case 'house': return `house — ${t.house?.residents ?? 0}/${this.mods.houseCap} residents`;
       case 'barracks': return 'barracks — kids raised nearby become soldiers';
       default: return '';
     }

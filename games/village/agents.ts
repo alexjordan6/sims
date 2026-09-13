@@ -1,6 +1,7 @@
 import type { Agent } from '@shared/index';
 import { World, type House, type TilePos } from './world';
-import { p, CROP_YIELD, TREE_YIELD } from './config';
+import { p, TREE_YIELD } from './config';
+import type { Mods } from './meta';
 import type { VillageScene } from './main';
 
 // All distances are in world pixels: 16 px per tile.
@@ -118,12 +119,12 @@ export class Villager extends Mover {
   private retarget = 0;
   private target: Mover | null = null;
 
-  constructor(x: number, y: number, public home: House, role: Role, age: number, name: string) {
+  constructor(x: number, y: number, public home: House, role: Role, age: number, name: string, mods: Mods) {
     super(x, y);
     this.role = role;
     this.age = age;
     this.name = name;
-    this.applyRole();
+    this.applyRole(mods);
     this.hp = this.maxHp;
   }
 
@@ -131,13 +132,14 @@ export class Villager extends Mover {
     return this.role !== 'kid';
   }
 
-  applyRole(): void {
+  applyRole(mods: Mods): void {
     switch (this.role) {
       case 'kid': this.radius = 2; this.color = 0xf5d8a8; this.maxHp = 10; this.speed = 30; break;
       case 'farmer': this.radius = 3; this.color = 0x7fd37f; this.maxHp = 20; this.speed = 35; break;
       case 'woodcutter': this.radius = 3; this.color = 0xc9a26b; this.maxHp = 20; this.speed = 35; break;
       case 'soldier': this.radius = 3; this.color = 0x6f9bff; this.maxHp = p.soldierHp; this.speed = 45; break;
     }
+    this.maxHp = Math.round(this.maxHp * mods.hpMul);
     this.hp = Math.min(this.hp, this.maxHp);
     this.clearGoal();
   }
@@ -146,7 +148,7 @@ export class Villager extends Mover {
   comeOfAge(s: VillageScene): void {
     const noise = s.rng.range(-0.15, 0.15) * (this.martial + this.civil + 1);
     this.role = this.martial + noise > this.civil ? 'soldier' : s.pickCivilRole();
-    this.applyRole();
+    this.applyRole(s.mods);
     this.hp = this.maxHp;
     s.event(this.role === 'soldier' ? 'soldier' : 'grow', `${this.name} came of age — ${this.role}`, true);
     if (this.role === 'soldier') s.stats.soldiersRaised++;
@@ -171,7 +173,8 @@ export class Villager extends Mover {
 
   private kidUpdate(dt: number, s: VillageScene): void {
     const danger = s.nearestRaider(this.x, this.y, 80);
-    if (danger) { this.martial += 4 * dt; this.task = 'running home'; this.goHome(s, dt); return; }
+    const mm = s.mods.martialMul;
+    if (danger) { this.martial += 4 * dt * mm; this.task = 'running home'; this.goHome(s, dt); return; }
 
     this.task = 'playing';
     this.thinkTimer -= dt;
@@ -185,7 +188,7 @@ export class Villager extends Mover {
     // exposure: who is nearby
     s.grid.forEachInRadius(this.x, this.y, 48, (o) => {
       if (!(o instanceof Villager) || o === this) return;
-      if (o.role === 'soldier') this.martial += dt;
+      if (o.role === 'soldier') this.martial += dt * mm;
       else if (o.role === 'farmer' || o.role === 'woodcutter') this.civil += dt;
     });
     // exposure: what is nearby (5x5 tiles)
@@ -193,7 +196,7 @@ export class Villager extends Mover {
     for (let dy = -2; dy <= 2; dy++)
       for (let dx = -2; dx <= 2; dx++) {
         const k = s.world.get(t.tx + dx, t.ty + dy)?.kind;
-        if (k === 'barracks') this.martial += 2 * dt;
+        if (k === 'barracks') this.martial += 2 * dt * mm;
         else if (k === 'crop' || k === 'tilled') this.civil += 0.4 * dt;
       }
   }
@@ -236,7 +239,7 @@ export class Villager extends Mover {
   private finishWork(s: VillageScene, farmer: boolean): void {
     const g = this.goal!;
     const t = s.world.get(g.tx, g.ty)!;
-    if (farmer && t.kind === 'crop' && t.stage >= p.cropDays) { s.world.set(g.tx, g.ty, 'tilled'); s.food += CROP_YIELD; }
+    if (farmer && t.kind === 'crop' && t.stage >= p.cropDays) { s.world.set(g.tx, g.ty, 'tilled'); s.food += s.mods.cropYield; }
     else if (farmer && t.kind === 'tilled') { s.world.set(g.tx, g.ty, 'crop'); }
     else if (!farmer && t.kind === 'tree') { s.world.set(g.tx, g.ty, 'grass'); s.wood += TREE_YIELD; }
     this.clearGoal();
@@ -252,7 +255,7 @@ export class Villager extends Mover {
     }
     if (this.target && !this.target.dead) {
       this.task = 'fighting';
-      if (this.tryAttack(this.target, p.soldierDmg)) return;
+      if (this.tryAttack(this.target, p.soldierDmg, 13, 0.6)) return;
       this.setGoal(s, this.target.tile.tx, this.target.tile.ty);
       this.followPath(dt);
       return;
@@ -304,18 +307,32 @@ export class Villager extends Mover {
 // ---------------------------------------------------------------------------
 // raiders
 
+export interface RaiderOpts {
+  /** the warlord: big, tough, and the run ends when he falls */
+  boss?: boolean;
+  /** wave scaling on HP */
+  hpMul?: number;
+  speedMul?: number;
+}
+
 export class Raider extends Mover {
   private target: Mover | null = null;
   private retarget = 0;
   private bored = 0;
+  readonly boss: boolean;
+  readonly dmg: number;
+  readonly name: string;
 
-  constructor(x: number, y: number) {
+  constructor(x: number, y: number, opts: RaiderOpts = {}) {
     super(x, y);
-    this.hp = this.maxHp = p.raiderHp;
-    this.speed = 38;
-    this.radius = 3;
+    this.boss = opts.boss ?? false;
+    this.hp = this.maxHp = this.boss ? 150 : Math.round(p.raiderHp * (opts.hpMul ?? 1));
+    this.dmg = this.boss ? 10 : p.raiderDmg;
+    this.speed = (this.boss ? 44 : 38) * (opts.speedMul ?? 1);
+    this.radius = this.boss ? 5 : 3;
     this.color = 0xd94a4a;
-    this.task = 'raiding';
+    this.name = this.boss ? 'The Warlord' : 'Raider';
+    this.task = this.boss ? 'leading the raid' : 'raiding';
   }
 
   update(dt: number, s: VillageScene): void {
@@ -332,7 +349,7 @@ export class Raider extends Mover {
       return;
     }
     this.bored = 0;
-    if (this.tryAttack(this.target, p.raiderDmg)) return;
+    if (this.tryAttack(this.target, this.dmg, this.boss ? 16 : 13)) return;
     this.setGoal(s, this.target.tile.tx, this.target.tile.ty);
     this.followPath(dt);
     // trample crops

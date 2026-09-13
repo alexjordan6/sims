@@ -155,3 +155,39 @@ h3 { font-size: 9px; color: var(--ink-dim); margin-bottom: 6px; }
 
 /* the kernel's lil-gui debug panel lives in the corner, hidden until backtick */
 .lil-gui.root { top: 64px !important; right: calc(var(--side-w) + 8px) !important; }
+
+/* ---- roguelike loop: legacy panel, boons, boss ------------------------------ */
+.title-wrap { display: flex; gap: 12px; align-items: flex-start; justify-content: center; flex-wrap: wrap; max-width: 96vw; }
+.title-wrap .card { width: min(480px, 92vw); }
+.legacy { width: min(440px, 92vw); text-align: left; max-height: 90vh; overflow-y: auto; scrollbar-width: thin; }
+.legacy-stats { display: flex; gap: 12px; flex-wrap: wrap; font-size: 14px; color: var(--ink-dim); margin: 4px 0 10px; }
+.legacy-stats b { color: var(--accent); font-family: var(--font-head); font-size: 12px; }
+.boons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.boon { display: grid; grid-template-columns: 32px 1fr; grid-template-rows: auto auto auto; gap: 0 8px; align-items: center; padding: 4px 6px; background: #0006; border: 2px solid #0008; cursor: pointer; font-size: 13px; }
+.boon .spr { grid-row: 1 / 4; }
+.boon .bn { font-weight: 600; font-size: 14px; }
+.boon .bb { color: var(--ink-dim); font-size: 12px; line-height: 1.15; }
+.boon .ba { font-family: var(--font-head); font-size: 7px; margin-top: 3px; color: var(--ink-dim); }
+.boon.locked { opacity: .5; cursor: not-allowed; }
+.boon.locked .spr { filter: grayscale(1) brightness(.6); }
+.boon.buyable .ba { color: var(--accent); }
+.boon.buyable:hover { border-color: var(--accent); }
+.boon.unlocked .ba { color: var(--ok); }
+.boon.unlocked:hover { border-color: var(--ok); }
+.boon.equipped { border-color: var(--accent); background: #ffcf5a22; }
+.boon.equipped .ba { color: var(--accent); }
+.boon.shake { animation: shake .35s; }
+@keyframes shake { 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+.sub.small { font-size: 12px; margin-top: 10px; }
+.screen h1.gold { color: var(--accent); }
+.screen h1.blood { color: var(--danger); }
+.renown { margin: 10px auto 4px; max-width: 380px; padding: 8px 12px; background: #0006; border: 2px solid #0008; }
+.renown .lbl { font-family: var(--font-head); font-size: 8px; color: var(--ink-dim); }
+.renown .parts { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; font-size: 13px; color: var(--ink-dim); margin: 4px 0; }
+.renown .total { font-family: var(--font-head); font-size: 16px; color: var(--accent); }
+.renown .total small { font-family: var(--font); font-size: 13px; color: var(--ink-dim); }
+.renown .unlock { margin-top: 6px; color: var(--ok); font-size: 13px; }
+.panel.tan h1.gold { text-shadow: 2px 2px 0 #5a3a1a; }
+.panel.tan .sub, .panel.tan .renown .parts, .panel.tan .legacy-stats { color: #6a5040; }
+.topbar .raid .bar.boss { display: inline-block; width: 90px; height: 8px; vertical-align: middle; margin-left: 6px; }
+.topbar .raid .bar.boss i { background: var(--danger); }

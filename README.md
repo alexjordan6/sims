@@ -38,4 +38,4 @@ If the repo is named something else, change `base` in `vite.config.ts`.
 ## Games
 
 - **boids** — flocking reference sim.
-- **village** — Stardew × RTS: farm, raise a family, and the kids you raise beside the barracks grow into your army. Pixel art by [Kenney](https://kenney.nl) (CC0, see `games/village/assets/CREDITS.md`). UI is an HTML overlay (`games/village/ui/`); the world is Phaser tilemap layers + sprites (`render.ts`). Press `` ` `` in-game for the tuning sliders.
+- **village** — Stardew × RTS roguelike: farm, raise a family, and the kids you raise beside the barracks grow into your army. Survive 21 days of escalating raids and beat the Warlord. Every run banks renown (win or lose) to unlock and equip boons on the title screen (`meta.ts`, localStorage). Pixel art by [Kenney](https://kenney.nl) (CC0, see `games/village/assets/CREDITS.md`). UI is an HTML overlay (`games/village/ui/`); the world is Phaser tilemap layers + sprites (`render.ts`). Press `` ` `` in-game for the tuning sliders.

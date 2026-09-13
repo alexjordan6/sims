@@ -111,9 +111,9 @@ export class Renderer {
       sp.setPosition(Math.round(m.x), Math.round(m.y - bob));
       sp.setFlipX(m.dir < 0);
       sp.setVisible(!m.hidden);
-      sp.setScale(m instanceof Villager && m.role === 'kid' ? 0.7 : 1);
+      sp.setScale(m instanceof Villager && m.role === 'kid' ? 0.7 : m instanceof Raider && m.boss ? 1.5 : 1);
       sp.setDepth(DEPTH.agents + m.y / 1000);
-      if (m.hurtT < 0.15) sp.setTintFill(0xffffff); else if (m instanceof Raider) sp.setTint(0xffd0d0); else sp.clearTint();
+      if (m.hurtT < 0.15) sp.setTintFill(0xffffff); else if (m instanceof Raider) sp.setTint(m.boss ? 0xff6a6a : 0xffd0d0); else sp.clearTint();
     }
     for (const [id, sp] of this.sprites) if (!seen.has(id)) { sp.destroy(); this.sprites.delete(id); }
   }
@@ -153,7 +153,8 @@ export class Renderer {
     for (const a of s.agents) {
       const m = a as Mover;
       if (m.hidden || m.hp >= m.maxHp) continue;
-      const bw = 10, x = Math.round(m.x - bw / 2), y = Math.round(m.y - 14);
+      const big = m instanceof Raider && m.boss;
+      const bw = big ? 20 : 10, x = Math.round(m.x - bw / 2), y = Math.round(m.y - (big ? 20 : 14));
       b.fillStyle(0x000000, 0.7); b.fillRect(x - 1, y - 1, bw + 2, 3);
       b.fillStyle(m.hp / m.maxHp > 0.4 ? 0x5fdc5f : 0xff4040, 1); b.fillRect(x, y, Math.max(1, Math.round(bw * m.hp / m.maxHp)), 1);
     }
