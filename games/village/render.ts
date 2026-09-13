@@ -180,11 +180,12 @@ export class Renderer {
     if (s.world.inBounds(f.tx, f.ty)) {
       const build = s.player.build !== 'none';
       if (build) {
-        const ok = s.world.canBuild(f.tx, f.ty);
+        const a = s.buildAnchor();
+        const ok = !s.buildProblem(a);
         u.fillStyle(ok ? 0xffe066 : 0xff4040, 0.18);
-        u.fillRect(f.tx * TILE, f.ty * TILE, TILE * BUILDING_W, TILE * BUILDING_H);
+        u.fillRect(a.tx * TILE, a.ty * TILE, TILE * BUILDING_W, TILE * BUILDING_H);
         u.lineStyle(1, ok ? 0xffe066 : 0xff4040, 0.9);
-        u.strokeRect(f.tx * TILE + 0.5, f.ty * TILE + 0.5, TILE * BUILDING_W - 1, TILE * BUILDING_H - 1);
+        u.strokeRect(a.tx * TILE + 0.5, a.ty * TILE + 0.5, TILE * BUILDING_W - 1, TILE * BUILDING_H - 1);
       } else {
         u.lineStyle(1, 0xffffff, 0.5);
         u.strokeRect(f.tx * TILE + 0.5, f.ty * TILE + 0.5, TILE - 1, TILE - 1);

@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { SimScene, launch } from '@shared/index';
-import { World, doorstep } from './world';
+import { World, doorstep, BUILDING_W, BUILDING_H } from './world';
 import { Villager, Raider, Player, Mover, type Role, type BuildItem } from './agents';
 import { p, TILE, COLS, ROWS, ZOOM, COST, TREE_YIELD, RUN } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
@@ -410,25 +410,48 @@ export class VillageScene extends SimScene {
 
   // ---- player actions -------------------------------------------------------
 
+  /**
+   * Top-left of the footprint a new building would take: always the full building in front of
+   * the player (never overlapping them), roughly centred on the faced tile.
+   */
+  buildAnchor(): { tx: number; ty: number } {
+    const f = this.player.faced, d = this.player.facing;
+    const half = Math.floor(BUILDING_W / 2) - 1;
+    if (d.y > 0) return { tx: f.tx - half, ty: f.ty };
+    if (d.y < 0) return { tx: f.tx - half, ty: f.ty - BUILDING_H + 1 };
+    if (d.x > 0) return { tx: f.tx, ty: f.ty - half };
+    return { tx: f.tx - BUILDING_W + 1, ty: f.ty - half };
+  }
+
+  /** Why a building can't go at `a`, or null if it can. */
+  buildProblem(a: { tx: number; ty: number }): string | null {
+    if (!this.world.canBuild(a.tx, a.ty)) return 'Need a clear 4x4 of grass to build';
+    const inside = (m: Mover) => !m.hidden && m.x >= a.tx * TILE - 2 && m.x < (a.tx + BUILDING_W) * TILE + 2 && m.y >= a.ty * TILE - 2 && m.y < (a.ty + BUILDING_H) * TILE + 2;
+    if (this.agents.some((m) => inside(m as Mover))) return "Someone's standing in the way";
+    return null;
+  }
+
   interact(): void {
     if (this.screen !== 'playing') return;
     const pl = this.player;
     const raider = this.nearestRaider(pl.x, pl.y, 20);
     if (raider) { pl.tryAttack(this, raider, Math.round(12 * this.mods.playerDmgMul), 20, 0.5); return; }
 
-    const { tx, ty } = pl.faced;
-    const t = this.world.get(tx, ty);
-    if (!t) return;
-
     if (pl.build !== 'none') {
-      if (!this.world.canBuild(tx, ty)) { this.event('build', 'Need a clear 4x4 of grass to build'); return; }
+      const a = this.buildAnchor();
+      const why = this.buildProblem(a);
+      if (why) { this.event('build', why); return; }
       if (this.wood < COST[pl.build]) { this.event('build', `Need ${COST[pl.build]} wood for a ${pl.build}`); return; }
       this.wood -= COST[pl.build];
-      if (pl.build === 'house') this.world.placeHouse(tx, ty); else this.world.placeBarracks(tx, ty);
-      this.fx.push({ kind: 'tool', tool: 'hammer', tx, ty });
+      if (pl.build === 'house') this.world.placeHouse(a.tx, a.ty); else this.world.placeBarracks(a.tx, a.ty);
+      this.fx.push({ kind: 'tool', tool: 'hammer', tx: a.tx + 1, ty: a.ty + BUILDING_H - 1 });
       this.event('build', `Built a ${pl.build}`, true);
       return;
     }
+
+    const { tx, ty } = pl.faced;
+    const t = this.world.get(tx, ty);
+    if (!t) return;
 
     switch (t.kind) {
       case 'grass': this.world.set(tx, ty, 'tilled'); this.fx.push({ kind: 'tool', tool: 'hoe', tx, ty }); break;
@@ -447,7 +470,7 @@ export class VillageScene extends SimScene {
   hint(): string {
     const pl = this.player;
     if (this.nearestRaider(pl.x, pl.y, 20)) return 'E: attack!';
-    if (pl.build !== 'none') return `E: build ${pl.build} (${COST[pl.build]} wood)  ·  Q: cancel`;
+    if (pl.build !== 'none') return `E: build ${pl.build} (${COST[pl.build]} wood)${this.buildProblem(this.buildAnchor()) ? ' — ' + this.buildProblem(this.buildAnchor()) : ''}  ·  Q: cancel`;
     const t = this.world.get(pl.faced.tx, pl.faced.ty);
     switch (t?.kind) {
       case 'grass': return 'E: till soil';

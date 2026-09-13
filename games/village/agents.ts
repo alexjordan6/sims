@@ -413,10 +413,12 @@ export class Player extends Mover {
       }
       return true;
     };
+    // if we are somehow inside something solid, let any movement through so we can never be trapped
+    const stuck = !free(this.x, this.y);
     const nx = this.x + this.vx * dt;
-    if (free(nx, this.y)) this.x = nx;
+    if (stuck || free(nx, this.y)) this.x = nx;
     const ny = this.y + this.vy * dt;
-    if (free(this.x, ny)) this.y = ny;
+    if (stuck || free(this.x, ny)) this.y = ny;
   }
 
   cycleBuild(): void {
