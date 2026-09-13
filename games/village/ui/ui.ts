@@ -74,32 +74,37 @@ export class UI {
   mount(): void {
     const s = this.scene;
 
-    // --- top bar
+    // --- top bar: labelled stat tiles
+    const tile = (cls: string, cap: string, inner: string, title = '') => `<div class="stat ${cls}" title="${esc(title)}"><span class="cap">${cap}</span><span class="val">${inner}</span></div>`;
     this.top = h(`<div class="topbar panel">
-      <div class="group"><span class="sun"></span><span class="day"></span><span class="hour"></span></div>
-      <div class="group">${spr('town', TOWN.iconWood, 24)}<span class="num wood"></span>${spr('farm', FARM.iconTomato, 24)}<span class="num food"></span></div>
-      <div class="group pop"></div>
+      ${tile('t-day', 'DAY', `<span class="sun"></span><span class="day"></span><span class="hour"></span>`, 'Survive to day 21 and beat the Warlord')}
+      ${tile('t-wood', 'WOOD', `${spr('town', TOWN.iconWood, 24)}<span class="num wood"></span>`, 'Chop trees. Houses cost 20, barracks 30')}
+      ${tile('t-food', 'FOOD', `${spr('farm', FARM.iconTomato, 24)}<span class="num food"></span>`, 'Each villager eats 1 a day. Harvest ripe crops')}
+      <div class="stat t-pop" title="Your villagers by role"><span class="cap">VILLAGERS</span><span class="val pop"></span></div>
       <div class="spacer"></div>
-      <div class="group raid"></div>
-      <div class="group hearts"></div>
-      <div class="group speed">
+      <div class="stat t-raid" title="Raiders attack every few days; the Warlord comes on day 21"><span class="cap">NEXT RAID</span><span class="val raid"></span></div>
+      ${tile('t-hp', 'YOUR HP', `<span class="hearts"></span>`, 'You heal overnight. If you die the run ends')}
+      <div class="stat t-speed" title="Game speed"><span class="cap">SPEED</span><span class="val speed">
         <button class="btn small" data-speed="1">1x</button><button class="btn small" data-speed="4">4x</button><button class="btn small" data-speed="16">16x</button>
         <button class="btn small pause" title="Pause (Esc)">II</button>
-      </div>
+      </span></div>
+      <button class="btn small help" title="How to play">?</button>
     </div>`);
     this.top.querySelectorAll<HTMLButtonElement>('[data-speed]').forEach((b) => b.addEventListener('click', () => (s.speed = Number(b.dataset.speed))));
     this.top.querySelector('.pause')!.addEventListener('click', () => s.togglePause());
+    this.top.querySelector('.help')!.addEventListener('click', () => this.showHelp());
 
-    // --- hotbar
-    const slot = (item: BuildItem, key: string, frame: number, label: string, cost?: number) =>
-      `<div class="slot" data-build="${item}" title="${label}">${spr(key, frame, 32)}<span class="key">Q</span>${cost ? `<span class="cost">${cost}${spr('town', TOWN.iconWood, 16)}</span>` : ''}</div>`;
+    // --- hotbar: what E will do, and what to build
+    const slot = (item: BuildItem, key: string, frame: number, label: string, title: string, cost?: number) =>
+      `<div class="slot" data-build="${item}" title="${esc(title)}">${spr(key, frame, 32)}<span class="lbl">${label}</span>${cost ? `<span class="cost">${cost}${spr('town', TOWN.iconWood, 16)}</span>` : ''}</div>`;
     this.hotbar = h(`<div class="hotbar">
       <div class="slots panel">
-        ${slot('none', 'farm', FARM.iconHand, 'Hand — till, plant, harvest, chop, fight')}
-        ${slot('house', 'town', TOWN.wallWoodDoor, 'House — a family of 4 lives here', COST.house)}
-        ${slot('barracks', 'town', TOWN.wallStoneDoor, 'Barracks — kids raised nearby become soldiers', COST.barracks)}
+        <span class="cap slots-cap">BUILD <kbd>Q</kbd></span>
+        ${slot('none', 'farm', FARM.iconHand, 'HANDS', 'Use your hands: till, plant, harvest, chop, fight')}
+        ${slot('house', 'town', TOWN.wallWoodDoor, 'HOUSE', 'A family of 4 lives here and has children', COST.house)}
+        ${slot('barracks', 'town', TOWN.wallStoneDoor, 'BARRACKS', 'Kids raised near it grow into soldiers', COST.barracks)}
       </div>
-      <div class="hint"></div>
+      <div class="hint"><kbd>E</kbd><span class="hint-text"></span></div>
     </div>`);
     this.hotbar.querySelectorAll<HTMLElement>('.slot').forEach((el) => el.addEventListener('click', () => s.setBuild(el.dataset.build as BuildItem)));
 
@@ -109,7 +114,9 @@ export class UI {
 
     // --- side
     this.inspector = h('<div class="inspector panel"></div>');
-    this.roster = h('<div class="roster panel"><h2>Villagers</h2><div class="list"></div></div>');
+    this.roster = h(`<div class="roster panel"><div class="ph">${spr('dungeon', DUNGEON.villager, 24)}<h2>Villagers</h2><span class="cap">tap one to inspect</span></div><div class="legend-row">
+      <span class="rl farmer">${spr('farm', FARM.farmerHat, 16)} farmer</span><span class="rl woodcutter">${spr('dungeon', DUNGEON.man, 16)} cutter</span><span class="rl kid">${spr('dungeon', DUNGEON.villager, 16)} child</span><span class="rl soldier">${spr('dungeon', DUNGEON.knight, 16)} soldier</span>
+    </div><div class="list"></div></div>`);
     this.side.append(this.inspector, this.roster);
     this.roster.addEventListener('click', (e) => {
       const row = (e.target as HTMLElement).closest<HTMLElement>('.row');
@@ -148,14 +155,17 @@ export class UI {
 
     // joystick + buttons
     const ctl = h(`<div class="mobile">
-      <div class="stick"><div class="knob"></div></div>
+      <div class="stick"><div class="knob"></div><span class="mlbl">MOVE</span></div>
       <div class="cluster">
-        <button class="mbtn small drawerbtn" title="Villagers">${spr('dungeon', DUNGEON.villager, 24)}</button>
-        <button class="mbtn small pausebtn" title="Pause">II</button>
-        <button class="mbtn small buildbtn" title="Build (Q)">${spr('town', TOWN.iconHammer, 24)}</button>
-        <button class="mbtn act" title="Use (E)">E</button>
+        <button class="mbtn small drawerbtn">${spr('dungeon', DUNGEON.villager, 24)}<span class="mlbl">FOLK</span></button>
+        <button class="mbtn small pausebtn">II<span class="mlbl">PAUSE</span></button>
+        <button class="mbtn small buildbtn">${spr('town', TOWN.iconHammer, 24)}<span class="mlbl">BUILD</span></button>
+        <button class="mbtn act"><span class="verb">USE</span></button>
       </div>
-      <button class="mbtn small zoombtn" title="Zoom">⌕</button>
+      <div class="corner">
+        <button class="mbtn small zoombtn">⌕<span class="mlbl">ZOOM</span></button>
+        <button class="mbtn small helpbtn">?<span class="mlbl">HELP</span></button>
+      </div>
     </div>`);
     this.overlay.append(ctl);
     const press = (sel: string, fn: () => void) => {
@@ -166,6 +176,7 @@ export class UI {
     press('.pausebtn', () => s.togglePause());
     press('.drawerbtn', () => { this.showTab('roster'); this.side.classList.toggle('open'); });
     press('.zoombtn', () => s.cycleZoom());
+    press('.helpbtn', () => this.showHelp());
 
     const stick = ctl.querySelector<HTMLElement>('.stick')!;
     const knob = ctl.querySelector<HTMLElement>('.knob')!;
@@ -240,7 +251,11 @@ export class UI {
       if (s.selected) { this.showTab('inspector'); this.side.classList.add('open'); }
     }
     this.topT += dt; this.rosterT += dt;
-    if (this.topT > 0.1) { this.topT = 0; this.renderTop(); this.renderHotbar(); this.renderInspector(); }
+    if (this.topT > 0.1) {
+      this.topT = 0; this.renderTop(); this.renderHotbar(); this.renderInspector();
+      // keep the feed just under the (wrapping) top bar
+      if (this.touch) { const top = `${this.top.offsetHeight + 10}px`; if (this.feed.style.top !== top) this.feed.style.top = top; }
+    }
     if (this.rosterT > 0.5) { this.rosterT = 0; this.renderRoster(); }
     this.renderFeed();
   }
@@ -262,18 +277,19 @@ export class UI {
     q('.hour').textContent = `${String(hour).padStart(2, '0')}:00`;
     q('.wood').textContent = String(s.wood | 0);
     q('.food').textContent = String(s.food | 0);
-    q('.pop').innerHTML = [
-      ['farmer', CHAR.farmer], ['woodcutter', CHAR.woodcutter], ['kid', CHAR.kid], ['soldier', CHAR.soldier],
-    ].map(([r, c]) => `<span class="chip" title="${ROLE_LABEL[r as string]}s">${spr((c as { key: string }).key, (c as { frame: number }).frame, 24)}${count(r as string)}</span>`).join('');
+    q('.pop').innerHTML = ([
+      ['farmer', CHAR.farmer, 'FARM'], ['woodcutter', CHAR.woodcutter, 'WOOD'], ['kid', CHAR.kid, 'KIDS'], ['soldier', CHAR.soldier, 'ARMY'],
+    ] as [string, { key: string; frame: number }, string][]).map(([r, c, lbl]) => `<span class="chip ${r}" title="${ROLE_LABEL[r]}s">${spr(c.key, c.frame, 24)}<b>${count(r)}</b><i>${lbl}</i></span>`).join('');
     const raid = q('.raid');
     const bossNext = s.nextRaidDay === RUN.bossDay;
+    const orc = spr('dungeon', DUNGEON.orc, 24, 'flip');
     if (s.raidActive && s.boss && !s.boss.dead) {
       const pct = Math.max(0, (s.boss.hp / s.boss.maxHp) * 100);
-      raid.innerHTML = `<span>WARLORD</span><div class="bar boss"><i style="width:${pct}%"></i></div>`;
-      raid.className = 'group raid now';
-    } else if (s.raidActive) { raid.textContent = 'RAID!'; raid.className = 'group raid now'; }
-    else if (raidIn <= 1) { raid.textContent = bossNext ? 'THE WARLORD COMES TOMORROW' : 'RAID TOMORROW'; raid.className = 'group raid soon'; }
-    else { raid.textContent = bossNext ? `warlord in ${raidIn} days` : `raid in ${raidIn} days`; raid.className = bossNext ? 'group raid soon' : 'group raid'; }
+      raid.innerHTML = `${orc}<span>WARLORD</span><div class="bar boss"><i style="width:${pct}%"></i></div>`;
+      raid.className = 'val raid now';
+    } else if (s.raidActive) { raid.innerHTML = `${orc}<span>UNDER ATTACK!</span>`; raid.className = 'val raid now'; }
+    else if (raidIn <= 1) { raid.innerHTML = `${orc}<span>${bossNext ? 'WARLORD TOMORROW' : 'TOMORROW'}</span>`; raid.className = 'val raid soon'; }
+    else { raid.innerHTML = `${orc}<span>${bossNext ? 'Warlord' : 'in'} ${raidIn} days</span>`; raid.className = bossNext ? 'val raid soon' : 'val raid'; }
     const hearts = q('.hearts');
     const full = s.player.hp / s.player.maxHp * 6;
     hearts.innerHTML = Array.from({ length: 6 }, (_, i) => `<span class="heart ${i + 1 <= full ? '' : i < full ? 'half' : 'off'}"></span>`).join('');
@@ -288,39 +304,56 @@ export class UI {
       el.classList.toggle('on', s.player.build === item);
       el.classList.toggle('off', item !== 'none' && s.wood < COST[item]);
     });
-    const hint = this.hotbar.querySelector('.hint')!;
-    const text = s.hint();
+    const hint = this.hotbar.querySelector('.hint-text')!;
+    const text = s.hint().replace(/^E: /, '');
     if (hint.textContent !== text) hint.textContent = text;
+    // the touch action button shows the verb it would perform
+    const verb = this.overlay.querySelector('.act .verb');
+    if (verb) {
+      const v = this.verbFor(s.hint());
+      if (verb.textContent !== v) verb.textContent = v;
+      verb.parentElement!.classList.toggle('idle', v === '…');
+    }
+  }
+
+  /** "E: harvest" → "HARVEST"; things E can't do right now → "…" */
+  private verbFor(hint: string): string {
+    if (!hint.startsWith('E:')) return '…';
+    const w = hint.slice(2).trim().split(/[ !(]/)[0].toUpperCase();
+    return { TILL: 'TILL', PLANT: 'PLANT', HARVEST: 'HARVEST', CHOP: 'CHOP', ATTACK: 'FIGHT', BUILD: 'BUILD' }[w] ?? 'USE';
   }
 
   private renderInspector(force = false): void {
     const s = this.scene;
     const m = s.selected;
+    const head = `<div class="ph">${spr('town', TOWN.sign, 24)}<h2>Inspector</h2></div>`;
     if (!m || m.dead) {
-      const html = `<h2>Inspector</h2><p class="empty">Click a villager to inspect them.<br>Kids become <span style="color:var(--martial)">soldiers</span> or <span style="color:var(--civil)">workers</span> depending on what they grow up around.</p>`;
+      const html = `${head}<p class="empty">Click or tap a villager to see who they are.<br>Children become <span class="rl soldier">soldiers</span> if they grow up near the barracks and soldiers, or <span class="rl farmer">workers</span> if they grow up near the fields.</p>`;
       if (force || this.lastInspector !== html) { this.inspector.innerHTML = html; this.lastInspector = html; }
       return;
     }
     const c = charOf(m);
-    let html = `<div class="head">${spr(c.key, c.frame, 48)}<div><div class="name">${m instanceof Villager ? esc(m.name) : m instanceof Player ? 'You' : (m as Raider).name}</div><div class="role">${m instanceof Villager ? ROLE_LABEL[m.role] : m instanceof Player ? 'Village head' : (m as Raider).boss ? 'Boss' : 'Raider'}</div></div><button class="btn small close">x</button></div>`;
+    const roleKey = m instanceof Villager ? m.role : m instanceof Player ? 'player' : 'raider';
+    const roleText = m instanceof Villager ? ROLE_LABEL[m.role] : m instanceof Player ? 'Village head (you)' : (m as Raider).boss ? 'Warlord' : 'Raider';
+    let html = `${head}<div class="head">${spr(c.key, c.frame, 48)}<div><div class="name">${m instanceof Villager ? esc(m.name) : m instanceof Player ? 'You' : (m as Raider).name}</div><span class="badge ${roleKey}">${roleText}</span></div><button class="btn small close">x</button></div>`;
     const hpPct = Math.max(0, m.hp / m.maxHp * 100);
     html += `<div class="rows">`;
-    html += `<b>HP</b><div class="bar hp ${hpPct < 40 ? 'low' : ''}"><i style="width:${hpPct}%"></i></div>`;
+    html += `<b>Health</b><div class="bar hp ${hpPct < 40 ? 'low' : ''}"><i style="width:${hpPct}%"></i><span class="bar-txt">${Math.max(0, m.hp | 0)} / ${m.maxHp}</span></div>`;
     if (m instanceof Villager) {
-      html += `<b>Age</b><span>${m.age} days${m.role === 'kid' ? ` — adult in ${Math.max(0, p.adultAge - m.age)}` : ''}</span>`;
-      html += `<b>Home</b><span>house at ${m.home.tx},${m.home.ty} (${m.home.residents}/${s.mods.houseCap})</span>`;
-      html += `<b>Fed</b><span>${m.hungerDays === 0 ? 'yes' : `hungry ${m.hungerDays}d`}</span>`;
+      html += `<b>Age</b><span>${m.age} days${m.role === 'kid' ? ` <em>· grows up in ${Math.max(0, p.adultAge + s.mods.adultAgeDelta - m.age)}</em>` : ''}</span>`;
+      html += `<b>Home</b><span>${m.home.residents} of ${s.mods.houseCap} beds used</span>`;
+      html += `<b>Fed</b><span>${m.hungerDays === 0 ? 'yes' : `<em class="warn">hungry for ${m.hungerDays} days</em>`}</span>`;
     }
     html += `<b>Doing</b><span>${esc(m.task || '—')}</span></div>`;
     if (m instanceof Villager && m.role === 'kid') {
       const tot = m.martial + m.civil || 1;
       const mp = (m.martial / tot) * 100;
       const lean = m.martial > m.civil ? 'm' : 'c';
-      html += `<div class="upbring"><div class="lbl"><span>martial ${m.martial | 0}</span><span>civil ${m.civil | 0}</span></div>
+      html += `<div class="upbring"><div class="cap">UPBRINGING · decides their job</div><div class="lbl"><span class="rl soldier">soldier ${m.martial | 0}</span><span class="rl farmer">worker ${m.civil | 0}</span></div>
         <div class="bar up"><i class="m" style="width:${mp}%"></i><i class="c" style="width:${100 - mp}%"></i></div>
-        <div class="lean ${lean}">leaning ${lean === 'm' ? 'soldier' : 'worker'}</div></div>`;
+        <div class="lean ${lean}">will become a ${lean === 'm' ? 'SOLDIER' : 'WORKER'}</div></div>`;
     } else if (m instanceof Villager) {
-      html += `<div class="upbring"><div class="lbl"><span>raised martial ${m.martial | 0}</span><span>civil ${m.civil | 0}</span></div></div>`;
+      html += `<div class="upbring"><div class="cap">RAISED</div><div class="lbl"><span class="rl soldier">soldier ${m.martial | 0}</span><span class="rl farmer">worker ${m.civil | 0}</span></div></div>`;
     }
     if (html !== this.lastInspector) {
       this.inspector.innerHTML = html;
@@ -332,15 +365,15 @@ export class UI {
   private renderRoster(): void {
     const s = this.scene;
     const vs = s.villagers();
-    const groups: [string, Villager[]][] = [
-      ['Children', vs.filter((v) => v.role === 'kid').sort((a, b) => b.age - a.age)],
-      ['Soldiers', vs.filter((v) => v.role === 'soldier')],
-      ['Workers', vs.filter((v) => v.role === 'farmer' || v.role === 'woodcutter')],
+    const groups: [string, string, Villager[]][] = [
+      ['Children', 'kid', vs.filter((v) => v.role === 'kid').sort((a, b) => b.age - a.age)],
+      ['Soldiers', 'soldier', vs.filter((v) => v.role === 'soldier')],
+      ['Workers', 'farmer', vs.filter((v) => v.role === 'farmer' || v.role === 'woodcutter')],
     ];
     let html = '';
-    for (const [label, list] of groups) {
+    for (const [label, cls, list] of groups) {
       if (!list.length) continue;
-      html += `<div class="grp">${label} (${list.length})</div>`;
+      html += `<div class="grp ${cls}">${label} <b>${list.length}</b>${cls === 'kid' ? '<span class="grp-note">bar = soldier vs worker</span>' : ''}</div>`;
       for (const v of list) {
         const c = CHAR[v.role];
         let bar = '';
@@ -354,7 +387,7 @@ export class UI {
         html += `<div class="row ${s.selected === v ? 'sel' : ''}" data-id="${v.id}">${spr(c.key, c.frame, 24)}<span class="n">${esc(v.name)}</span><span class="a">${v.age}d</span>${bar}</div>`;
       }
     }
-    if (!vs.length) html = '<p class="empty">Nobody lives here.</p>';
+    if (!vs.length) html = '<p class="empty">Nobody lives here yet.</p>';
     if (html !== this.lastRoster) { this.roster.querySelector('.list')!.innerHTML = html; this.lastRoster = html; }
   }
 
@@ -417,7 +450,7 @@ export class UI {
             <kbd>1 2 3</kbd><span>game speed</span><kbd>click</kbd><span>inspect a villager</span>
           </div>
           <div class="row"><label class="sub">seed <input class="seed" value="${s.seed}"></label></div>
-          <div class="row"><button class="btn ok start">NEW VILLAGE</button></div>
+          <div class="row"><button class="btn ok start">NEW VILLAGE</button><button class="btn howto">HOW TO PLAY</button></div>
           <p class="credit">art: <a href="https://kenney.nl" target="_blank" rel="noopener">Kenney</a> (CC0)</p>
         </div>
         <div class="card panel legacy"></div>
@@ -425,6 +458,7 @@ export class UI {
       const input = card.querySelector<HTMLInputElement>('.seed')!;
       const start = () => s.startGame(Number(input.value) || undefined);
       card.querySelector('.start')!.addEventListener('click', start);
+      card.querySelector('.howto')!.addEventListener('click', () => this.showHelp());
       input.addEventListener('keydown', (e) => { if (e.key === 'Enter') start(); e.stopPropagation(); });
       this.renderLegacy(card.querySelector('.legacy')!);
     } else if (kind === 'pause') {
@@ -432,9 +466,10 @@ export class UI {
         <h1>PAUSED</h1>
         <p class="sub">Day ${s.day} of ${RUN.days} · ${s.villagers().length} villagers · ${s.villagers().filter((v) => v.role === 'soldier').length} soldiers</p>
         ${this.loadoutLine()}
-        <div class="row"><button class="btn ok resume">RESUME</button><button class="btn restart">RESTART</button><button class="btn title">TITLE</button></div>
+        <div class="row"><button class="btn ok resume">RESUME</button><button class="btn howto">HOW TO PLAY</button><button class="btn restart">RESTART</button><button class="btn title">TITLE</button></div>
       </div>`);
       card.querySelector('.resume')!.addEventListener('click', () => s.togglePause());
+      card.querySelector('.howto')!.addEventListener('click', () => this.showHelp());
       card.querySelector('.restart')!.addEventListener('click', () => s.startGame(s.seed));
       card.querySelector('.title')!.addEventListener('click', () => s.goTitle());
     } else {
@@ -460,6 +495,61 @@ export class UI {
       card.querySelector('.title')!.addEventListener('click', () => s.goTitle());
     }
     const screen = h(`<div class="screen ${kind}"></div>`);
+    screen.append(card);
+    this.screens.append(screen);
+  }
+
+  /** The legend / how-to-play overlay. Pauses the game while open. */
+  showHelp(): void {
+    const s = this.scene;
+    if (this.screens.querySelector('.help-screen')) return;
+    const wasPlaying = s.screen === 'playing';
+    if (wasPlaying) s.togglePause();
+    const who = (key: string, frame: number, cls: string, name: string, does: string) =>
+      `<div class="who">${spr(key, frame, 32)}<div><span class="badge ${cls}">${name}</span><div class="d">${does}</div></div></div>`;
+    const card = h(`<div class="card panel help-card">
+      <div class="ph">${spr('town', TOWN.sign, 24)}<h2>How to play</h2><button class="btn small close">CLOSE</button></div>
+      <div class="help-cols">
+        <section>
+          <h3>THE GOAL</h3>
+          <p>Survive <b>${RUN.days} days</b>. Raiders attack every ${p.raidEvery} days and get stronger. On day ${RUN.bossDay} the <b>Warlord</b> comes — beat him to win. If <b>you</b> die, the run ends (you keep the renown).</p>
+          <h3>THE TRICK</h3>
+          <p>You can't recruit soldiers. <b>Children become soldiers if they grow up near the barracks</b> (and near soldiers), or workers if they grow up near the fields. Build houses next to the barracks to raise an army; next to the farm to raise farmers.</p>
+          <h3>EACH DAY</h3>
+          <p>Every villager eats 1 food. Crops ripen in ${s.cropDays} day${s.cropDays > 1 ? 's' : ''}. Couples with a spare bed have children. Everyone heals overnight.</p>
+        </section>
+        <section>
+          <h3>WHO'S WHO</h3>
+          ${who('dungeon', DUNGEON.hero, 'player', 'You', 'Till, plant, harvest, chop, build and fight with E.')}
+          ${who('farm', FARM.farmerHat, 'farmer', 'Farmer', 'Plants and harvests the fields on their own.')}
+          ${who('dungeon', DUNGEON.man, 'woodcutter', 'Woodcutter', 'Chops trees for wood.')}
+          ${who('dungeon', DUNGEON.villager, 'kid', 'Child', 'Plays near home and soaks up what is around them.')}
+          ${who('dungeon', DUNGEON.knight, 'soldier', 'Soldier', 'Guards the barracks and fights raiders.')}
+          ${who('dungeon', DUNGEON.orc, 'raider', 'Raider', 'Comes from the map edge, tramples crops, kills.')}
+          <h3>BUILDINGS</h3>
+          ${who('town', TOWN.wallWoodDoor, 'farmer', 'House · ' + COST.house + ' wood', 'Beds for ' + s.mods.houseCap + '. A couple here has children.')}
+          ${who('town', TOWN.wallStoneDoor, 'soldier', 'Barracks · ' + COST.barracks + ' wood', 'Children raised nearby become soldiers.')}
+        </section>
+        <section>
+          <h3>CONTROLS</h3>
+          <div class="controls">
+            <kbd>WASD</kbd><span>move (joystick on phone)</span>
+            <kbd>E</kbd><span>use what's in front of you — the bottom bar says what</span>
+            <kbd>Q</kbd><span>choose house / barracks / hands</span>
+            <kbd>Esc</kbd><span>pause</span>
+            <kbd>1 2 3</kbd><span>game speed 1x / 4x / 16x</span>
+            <kbd>click</kbd><span>inspect a villager</span>
+            <kbd>\`</kbd><span>tuning sliders (debug)</span>
+          </div>
+          <h3>TOP BAR</h3>
+          <p><b>DAY</b> of ${RUN.days} and the hour · <b>WOOD</b> / <b>FOOD</b> stockpiles · <b>VILLAGERS</b> by role · <b>NEXT RAID</b> countdown · <b>YOUR HP</b>.</p>
+        </section>
+      </div>
+    </div>`);
+    const close = () => { screen.remove(); if (wasPlaying && s.screen === 'paused') s.togglePause(); };
+    card.querySelector('.close')!.addEventListener('click', close);
+    const screen = h('<div class="screen help-screen"></div>');
+    screen.addEventListener('click', (e) => { if (e.target === screen) close(); });
     screen.append(card);
     this.screens.append(screen);
   }

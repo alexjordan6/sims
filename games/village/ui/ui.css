@@ -261,7 +261,7 @@ body.touch .toast { font-size: 9px; padding: 8px 10px; }
 
 /* hotbar sits above the controls, smaller */
 body.touch .hotbar { bottom: 150px; gap: 2px; }
-body.touch .slot { width: 46px; height: 46px; border-width: 8px; }
+body.touch .slot { width: 60px; height: 56px; border-width: 8px; }
 body.touch .slot .spr { width: 24px; height: 24px; background-size: 288px 264px; }
 body.touch .slot .key { display: none; }
 body.touch .slot .cost { font-size: 10px; }
@@ -308,7 +308,107 @@ body.touch .tooltip { display: none; }
   body.touch .cluster .drawerbtn { left: 12px; top: 12px; }
   body.touch .hotbar { bottom: 10px; }
 }
-.zoombtn { position: absolute; right: 12px; top: 84px; font-size: 20px; }
-@media (max-height: 440px) { .zoombtn { top: 52px; } }
+.zoombtn { font-size: 18px; }
+
 body.touch, body.touch #side, body.touch #screens { touch-action: manipulation; }
 .zoomed-banner { position: fixed; left: 0; right: 0; top: 0; z-index: 100; display: flex; gap: 10px; align-items: center; justify-content: center; padding: 8px; background: #140f0bee; font-size: 14px; }
+
+/* =====================================================================================
+   UI v2: labels on everything, colour by meaning, richer panels
+   ===================================================================================== */
+:root {
+  --farmer: #7fd37f; --woodcutter: #d9a86b; --kid: #f5b8d8; --soldier: #7fa6ff; --raider: #ff6b6b; --player: #ffe066;
+  --gold: #ffcf5a; --gold-dim: #c9a44a;
+}
+.cap { font-family: var(--font-head); font-size: 7px; letter-spacing: .5px; color: var(--gold-dim); text-shadow: 1px 1px 0 #000; text-transform: uppercase; }
+kbd { font-family: var(--font-head); font-size: 8px; background: #0009; padding: 3px 5px; border: 1px solid #ffffff22; border-bottom-width: 3px; color: var(--ink); }
+
+/* panel headers with an icon and gold rule */
+.ph { display: flex; align-items: center; gap: 8px; padding-bottom: 6px; margin-bottom: 6px; border-bottom: 2px solid #ffcf5a55; }
+.ph h2 { flex: 1; }
+.ph .cap { color: var(--ink-dim); }
+
+/* role colours, used everywhere a role is named */
+.rl { font-weight: 600; white-space: nowrap; }
+.rl.farmer, .badge.farmer, .grp.farmer { color: var(--farmer); }
+.rl.woodcutter, .badge.woodcutter { color: var(--woodcutter); }
+.rl.kid, .badge.kid, .grp.kid { color: var(--kid); }
+.rl.soldier, .badge.soldier, .grp.soldier { color: var(--soldier); }
+.rl.raider, .badge.raider { color: var(--raider); }
+.rl.player, .badge.player { color: var(--player); }
+.badge { display: inline-block; font-family: var(--font-head); font-size: 8px; padding: 4px 6px; background: #0008; border: 2px solid currentColor; margin-top: 3px; }
+
+/* ---- top bar as stat tiles ---- */
+.topbar { gap: 4px 8px; padding: 2px 6px; min-height: 56px; }
+.topbar .stat { display: flex; flex-direction: column; gap: 2px; padding: 2px 8px; border-left: 2px solid #ffffff14; }
+.topbar .stat:first-child { border-left: none; }
+.topbar .stat .val { display: flex; align-items: center; gap: 4px; min-height: 26px; font-size: 16px; }
+.topbar .t-day .day { font-size: 12px; }
+.topbar .t-day .hour { font-size: 13px; }
+.topbar .t-wood .num { color: var(--woodcutter); }
+.topbar .t-food .num { color: var(--farmer); }
+.topbar .chip { display: inline-flex; align-items: center; gap: 2px; padding: 0 6px 0 2px; background: #0007; border: 2px solid #0008; font-size: 14px; }
+.topbar .chip b { font-size: 15px; }
+.topbar .chip i { font-family: var(--font-head); font-style: normal; font-size: 6px; color: var(--ink-dim); margin-left: 2px; }
+.topbar .chip.farmer b { color: var(--farmer); } .topbar .chip.woodcutter b { color: var(--woodcutter); } .topbar .chip.kid b { color: var(--kid); } .topbar .chip.soldier b { color: var(--soldier); }
+.topbar .raid { font-family: var(--font-head); font-size: 8px; color: var(--ink-dim); gap: 6px; }
+.topbar .raid.soon { color: var(--gold); }
+.topbar .raid.now { color: var(--danger); animation: pulse .6s infinite alternate; }
+.topbar .t-raid.soon { border-left-color: var(--gold); } .topbar .raid.now { }
+.topbar .help { margin-left: 4px; align-self: center; }
+.topbar .speed .btn { margin-left: 1px; }
+
+/* ---- hotbar ---- */
+.hotbar .slots { align-items: center; padding: 6px 8px 4px; gap: 8px; }
+.slots-cap { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 7px; display: inline-flex; align-items: center; gap: 4px; }
+.slots-cap kbd { writing-mode: horizontal-tb; transform: rotate(90deg); }
+.slot { width: 66px; height: 66px; gap: 0; }
+.slot .lbl { font-family: var(--font-head); font-size: 6px; color: var(--ink-dim); margin-top: 3px; }
+.slot.on { border-image-source: url(../assets/ui/tan_inlay.png); box-shadow: 0 0 0 2px var(--gold), 0 0 10px #ffcf5a66; }
+.slot.on .lbl { color: #3a2a1a; }
+.slot .cost { top: -9px; bottom: auto; right: -6px; padding: 0 3px; background: #000c; }
+.hint { display: flex; align-items: center; gap: 8px; font-size: 15px; padding: 3px 10px; background: #000b; border: 2px solid #ffffff14; min-height: 28px; }
+.hint .hint-text::first-letter { text-transform: uppercase; }
+body.touch .hint kbd { display: none; }
+
+/* ---- side panels ---- */
+.legend-row { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 11px; margin: 0 0 6px; }
+.legend-row .rl { display: inline-flex; align-items: center; gap: 3px; }
+.roster .grp { display: flex; align-items: baseline; gap: 6px; font-size: 8px; margin: 8px 0 3px; padding-bottom: 2px; border-bottom: 1px solid #ffffff14; }
+.roster .grp b { font-family: var(--font); font-size: 13px; color: var(--ink); }
+.roster .grp-note { margin-left: auto; font-family: var(--font); font-size: 10px; color: var(--ink-dim); font-weight: normal; }
+.inspector .rows b { font-family: var(--font-head); font-size: 7px; color: var(--gold-dim); align-self: center; }
+.inspector .rows em { font-style: normal; color: var(--ink-dim); font-size: 12px; }
+.inspector .rows em.warn { color: var(--danger); }
+.bar { height: 12px; }
+.bar .bar-txt { position: absolute; inset: 0; font-size: 9px; line-height: 9px; text-align: center; color: #fff; text-shadow: 1px 1px 0 #000; font-family: var(--font-head); }
+.upbring .cap { margin-bottom: 3px; }
+.upbring .lean { font-family: var(--font-head); font-size: 8px; }
+
+/* ---- touch buttons with captions ---- */
+.mbtn { flex-direction: column; gap: 1px; }
+.mlbl { font-family: var(--font-head); font-size: 5px; color: var(--ink-dim); letter-spacing: 0; }
+.mbtn.act .verb { font-size: 13px; }
+.mbtn.act.idle { background: #ffcf5a88; }
+.stick .mlbl { position: absolute; left: 0; right: 0; bottom: -14px; text-align: center; font-size: 6px; }
+.mobile .corner { position: absolute; right: 12px; top: 84px; display: flex; flex-direction: column; gap: 8px; }
+@media (max-height: 440px) { .mobile .corner { top: 52px; flex-direction: row; } }
+
+/* ---- help overlay ---- */
+.screen .help-card { width: min(920px, 96vw); text-align: left; max-height: 92vh; overflow-y: auto; }
+.help-card .ph .close { margin-left: auto; }
+.help-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 6px 18px; }
+.help-card h3 { margin: 10px 0 4px; color: var(--gold); font-size: 8px; }
+.help-card p { font-size: 14px; margin: 0 0 6px; line-height: 1.35; }
+.help-card .controls { margin: 4px 0; grid-template-columns: auto 1fr; }
+.who { display: flex; gap: 8px; align-items: flex-start; margin: 4px 0; }
+.who .d { font-size: 12px; color: var(--ink-dim); margin-top: 2px; }
+body.touch .help-card { padding: 8px; }
+body.touch .topbar .t-speed, body.touch .topbar .help { display: none; }
+body.touch .topbar { gap: 2px 4px; padding: 2px 4px; }
+body.touch .topbar .stat { padding: 0 5px; gap: 0; }
+body.touch .topbar .stat .val { min-height: 20px; font-size: 13px; }
+body.touch .topbar .chip { font-size: 12px; }
+body.touch .topbar .chip i { display: none; }
+body.touch .topbar .t-raid .raid { font-size: 7px; }
+body.touch .slot .lbl { font-size: 5px; }
