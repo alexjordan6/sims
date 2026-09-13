@@ -41,6 +41,12 @@ export class VillageScene extends SimScene {
   private view?: Renderer;
   private ui?: UI;
   private wasd!: Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>;
+  /** camera follows the player when the world is bigger than the viewport (phones) */
+  private following = false;
+
+  // the kernel sizes its grid from W/H; in resize mode the viewport varies, the world does not
+  get W(): number { return COLS * TILE; }
+  get H(): number { return ROWS * TILE; }
 
   /** Days from seed to harvest for this run (boons can shorten it). */
   get cropDays(): number {
@@ -126,6 +132,10 @@ export class VillageScene extends SimScene {
     this.input.on('pointerdown', (_ptr: Phaser.Input.Pointer, objs: unknown[]) => { if (objs.length === 0) this.select(null); });
     this.input.on('gameout', () => { this.hovered = null; this.ui?.tooltip(null); });
 
+    this.scale.on('resize', () => this.fitCamera());
+    // Phaser only watches the window; the stage can change on its own (drawer, orientation, layout)
+    new ResizeObserver(() => this.scale.refresh()).observe(this.game.canvas.parentElement!);
+    this.fitCamera();
     this.goTitle();
   }
 
@@ -133,7 +143,28 @@ export class VillageScene extends SimScene {
     super.reset(newSeed);
     this.view?.rebuild();
     this.ui?.clear();
+    if (this.following) this.cameras.main.centerOn(this.player.x, this.player.y);
     if (this.screen !== 'title') { this.screen = 'playing'; this.paused = false; this.ui?.showScreen(null); }
+  }
+
+  /**
+   * Desktop: the whole world fits, so show it all at the largest crisp zoom.
+   * Phone: zoom 2 (32 px tiles, good for thumbs) and follow the player.
+   */
+  private fitCamera(): void {
+    const cam = this.cameras.main;
+    const fit = Math.min(this.scale.width / this.W, this.scale.height / this.H);
+    if (fit >= 2) {
+      this.following = false;
+      cam.removeBounds();
+      cam.setZoom(Math.min(4, Math.floor(fit * 2) / 2));
+      cam.centerOn(this.W / 2, this.H / 2);
+    } else {
+      this.following = true;
+      cam.setZoom(2);
+      cam.setBounds(0, 0, this.W, this.H, true);
+      if (this.player) cam.centerOn(this.player.x, this.player.y);
+    }
   }
 
   // ---- screens / flow -------------------------------------------------------
@@ -349,7 +380,7 @@ export class VillageScene extends SimScene {
 
   // ---- player actions -------------------------------------------------------
 
-  private interact(): void {
+  interact(): void {
     if (this.screen !== 'playing') return;
     const pl = this.player;
     const raider = this.nearestRaider(pl.x, pl.y, 20);
@@ -401,9 +432,17 @@ export class VillageScene extends SimScene {
 
   draw(): void {
     const dt = this.game.loop.delta / 1000;
+    if (this.following) {
+      const cam = this.cameras.main;
+      const k = Math.min(1, dt * 8);
+      cam.centerOn(cam.midPoint.x + (this.player.x - cam.midPoint.x) * k, cam.midPoint.y + (this.player.y - cam.midPoint.y) * k);
+    }
     this.view?.sync(dt);
     this.ui?.render(dt);
   }
 }
 
-launch(VillageScene, { width: COLS * TILE, height: ROWS * TILE, zoom: ZOOM, pixelArt: true, background: '#1a2a1c' });
+// Decide the touch layout before Phaser measures its parent (the side panel becomes a drawer).
+if (matchMedia('(pointer: coarse)').matches || new URLSearchParams(location.search).has('touch')) document.body.classList.add('touch');
+
+launch(VillageScene, { width: COLS * TILE, height: ROWS * TILE, zoom: ZOOM, scale: 'resize', pixelArt: true, background: '#1a2a1c' });

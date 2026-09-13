@@ -222,3 +222,86 @@ h3 { font-size: 9px; color: var(--ink-dim); margin-bottom: 6px; }
 .node.equipped { border-color: var(--accent); background: #ffcf5a2a; }
 .node.equipped .na { color: var(--accent); }
 .node.shake { animation: shake .35s; }
+
+/* ---- mobile / touch ---------------------------------------------------------- */
+#stage { touch-action: none; }
+body.touch { height: 100dvh; }
+body.touch #stage { height: 100dvh; }
+body.touch #side {
+  position: fixed; left: 0; right: 0; bottom: 0; width: auto; height: min(60dvh, 420px); z-index: 15;
+  border-left: none; border-top: 4px solid #0d0a08; transform: translateY(100%); transition: transform .22s ease-out;
+  padding: 6px 8px 8px; gap: 6px;
+}
+body.touch #side.open { transform: none; }
+body.touch #side .tabs { display: flex; gap: 6px; }
+body.touch #side .tabs .close-drawer { margin-left: auto; }
+body.touch #side .inspector, body.touch #side .roster { display: none; }
+body.touch #side[data-tab="inspector"] .inspector { display: block; flex: 1; min-height: 0; overflow-y: auto; }
+body.touch #side[data-tab="roster"] .roster { display: flex; }
+body.touch .btn { font-size: 10px; border-width: 10px; padding: 4px 8px; }
+
+/* compact top bar */
+body.touch .topbar { top: 4px; left: 4px; right: 4px; min-height: 36px; gap: 2px 8px; padding: 0 2px; font-size: 13px; }
+body.touch .topbar .day { font-size: 9px; }
+body.touch .topbar .hour { font-size: 12px; }
+body.touch .topbar .num { font-size: 15px; }
+body.touch .topbar .chip { font-size: 12px; padding: 0 4px 0 0; }
+body.touch .topbar .chip .spr { width: 20px; height: 20px; background-size: 240px 220px; }
+body.touch .topbar .speed { display: none; }
+body.touch .topbar .raid { font-size: 8px; }
+body.touch .heart { width: 11px; height: 11px; }
+
+/* feed under the bar, shorter */
+body.touch .feed { top: 76px; bottom: auto; left: 6px; flex-direction: column; max-width: 56vw; }
+body.touch .feed .ev { font-size: 12px; padding: 0 6px 0 2px; }
+body.touch .feed .ev .spr { width: 16px; height: 16px; background-size: 192px 176px; }
+body.touch .feed .ev:nth-child(n+4) { display: none; }
+body.touch .toasts { top: 50px; }
+body.touch .toast { font-size: 9px; padding: 8px 10px; }
+
+/* hotbar sits above the controls, smaller */
+body.touch .hotbar { bottom: 150px; gap: 2px; }
+body.touch .slot { width: 46px; height: 46px; border-width: 8px; }
+body.touch .slot .spr { width: 24px; height: 24px; background-size: 288px 264px; }
+body.touch .slot .key { display: none; }
+body.touch .slot .cost { font-size: 10px; }
+body.touch .hint { font-size: 13px; padding: 1px 8px; min-height: 20px; }
+
+/* joystick + action cluster */
+.mobile { position: absolute; inset: 0; pointer-events: none; }
+.mobile > * { pointer-events: auto; }
+.stick { position: absolute; left: 18px; bottom: 22px; width: 120px; height: 120px; border-radius: 50%; background: #0007; border: 3px solid #f4e9d455; touch-action: none; }
+.stick .knob { position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; margin: -26px 0 0 -26px; border-radius: 50%; background: #f4e9d4cc; border: 3px solid #5a4636; box-shadow: 2px 2px 0 #0008; }
+.cluster { position: absolute; right: 16px; bottom: 22px; display: grid; grid-template-columns: 48px 48px; grid-template-rows: 48px 48px; gap: 8px; align-items: end; justify-items: end; }
+.mbtn { display: flex; align-items: center; justify-content: center; border: 3px solid #5a4636; border-radius: 50%; background: #241c16dd; color: var(--ink); font-family: var(--font-head); font-size: 11px; box-shadow: 2px 2px 0 #0008; touch-action: none; user-select: none; }
+.mbtn.small { width: 48px; height: 48px; }
+.mbtn.act { width: 88px; height: 88px; font-size: 22px; background: #ffcf5aee; color: #3a2a1a; border-color: #8a5a1a; grid-column: 2; grid-row: 2; }
+.cluster .drawerbtn { grid-column: 1; grid-row: 1; }
+.cluster .pausebtn { grid-column: 2; grid-row: 1; }
+.cluster .buildbtn { grid-column: 1; grid-row: 2; }
+.mbtn:active { transform: translate(1px, 1px); box-shadow: none; }
+
+/* full screens scroll on small viewports */
+body.touch .screen { align-items: flex-start; overflow-y: auto; padding: 8px; }
+body.touch .screen .card { width: 100%; padding: 8px 10px 12px; }
+body.touch .title-wrap { width: 100%; gap: 8px; }
+body.touch .title-wrap .card, body.touch .legacy { width: 100%; max-height: none; }
+body.touch .screen h1 { font-size: 18px; }
+body.touch .screen .controls { display: none; }
+body.touch .trees { grid-template-columns: 1fr; }
+body.touch .node .na { font-size: 7px; }
+body.touch .node .nn { font-size: 14px; }
+body.touch .node .nb { font-size: 12px; }
+body.touch .screen .row .btn { font-size: 11px; padding: 6px 10px; }
+body.touch .tooltip { display: none; }
+
+/* very short landscape phones: shrink the drawer so the map stays visible */
+@media (max-height: 440px) {
+  body.touch #side { height: 78dvh; }
+  body.touch .stick { width: 100px; height: 100px; bottom: 14px; left: 14px; }
+  body.touch .stick .knob { width: 44px; height: 44px; margin: -22px 0 0 -22px; }
+  body.touch .mbtn.act { width: 72px; height: 72px; }
+  body.touch .mbtn.small { width: 42px; height: 42px; }
+  body.touch .cluster { grid-template-columns: 42px 42px; grid-template-rows: 42px 42px; bottom: 14px; right: 12px; }
+  body.touch .hotbar { bottom: 10px; }
+}

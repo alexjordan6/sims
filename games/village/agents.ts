@@ -370,6 +370,8 @@ export class Player extends Mover {
   build: BuildItem = 'none';
   /** set by the scene: W/A/S/D key objects */
   keys!: Record<'W' | 'A' | 'S' | 'D', { isDown: boolean }>;
+  /** virtual joystick axis (-1..1), set by the touch UI */
+  touch = { x: 0, y: 0 };
 
   constructor(x: number, y: number) {
     super(x, y);
@@ -390,7 +392,12 @@ export class Player extends Mover {
     let mx = (this.keys.D.isDown ? 1 : 0) - (this.keys.A.isDown ? 1 : 0);
     let my = (this.keys.S.isDown ? 1 : 0) - (this.keys.W.isDown ? 1 : 0);
     if (mx && my) { mx *= Math.SQRT1_2; my *= Math.SQRT1_2; }
-    if (mx || my) this.facing = { x: Math.sign(mx), y: mx ? 0 : Math.sign(my) };
+    if (!mx && !my && (this.touch.x || this.touch.y)) {
+      const len = Math.hypot(this.touch.x, this.touch.y);
+      const k = Math.min(1, len) / (len || 1);
+      mx = this.touch.x * k; my = this.touch.y * k;
+    }
+    if (mx || my) this.facing = Math.abs(mx) >= Math.abs(my) ? { x: Math.sign(mx), y: 0 } : { x: 0, y: Math.sign(my) };
     if (mx) this.dir = mx < 0 ? -1 : 1;
     this.vx = mx * this.speed; this.vy = my * this.speed;
     this.moveWithCollision(dt, s.world);

@@ -65,6 +65,9 @@ export class UI {
   private rosterT = 0;
   private topT = 0;
   private feedSeen = 0;
+  /** coarse pointer (phone/tablet) or ?touch=1 for testing */
+  readonly touch = document.body.classList.contains('touch');
+  private lastSelected: Mover | null = null;
 
   constructor(private scene: VillageScene) {}
 
@@ -118,6 +121,8 @@ export class UI {
     this.tooltipEl = h('<div class="tooltip" hidden></div>');
     document.body.append(this.tooltipEl);
 
+    if (this.touch) this.mountTouch();
+
     // debug sliders hidden until backtick
     getGui().hide();
     window.addEventListener('keydown', (e) => {
@@ -127,11 +132,75 @@ export class UI {
     this.renderInspector(true);
   }
 
+  // ---- touch controls ----------------------------------------------------------
+
+  private mountTouch(): void {
+    const s = this.scene;
+    document.body.classList.add('touch');
+
+    // the side panel becomes a bottom drawer with tabs
+    const tabs = h(`<div class="tabs"><button class="btn small on" data-tab="inspector">INSPECT</button><button class="btn small" data-tab="roster">VILLAGERS</button><button class="btn small close-drawer">CLOSE</button></div>`);
+    this.side.prepend(tabs);
+    tabs.querySelectorAll<HTMLElement>('[data-tab]').forEach((b) => b.addEventListener('click', () => this.showTab(b.dataset.tab as 'inspector' | 'roster')));
+    tabs.querySelector('.close-drawer')!.addEventListener('click', () => this.side.classList.remove('open'));
+    this.showTab('inspector');
+
+    // joystick + buttons
+    const ctl = h(`<div class="mobile">
+      <div class="stick"><div class="knob"></div></div>
+      <div class="cluster">
+        <button class="mbtn small drawerbtn" title="Villagers">${spr('dungeon', DUNGEON.villager, 24)}</button>
+        <button class="mbtn small pausebtn" title="Pause">II</button>
+        <button class="mbtn small buildbtn" title="Build (Q)">${spr('town', TOWN.iconHammer, 24)}</button>
+        <button class="mbtn act" title="Use (E)">E</button>
+      </div>
+    </div>`);
+    this.overlay.append(ctl);
+    const press = (sel: string, fn: () => void) => {
+      ctl.querySelector<HTMLElement>(sel)!.addEventListener('pointerdown', (e) => { e.preventDefault(); fn(); });
+    };
+    press('.act', () => s.interact());
+    press('.buildbtn', () => s.player.cycleBuild());
+    press('.pausebtn', () => s.togglePause());
+    press('.drawerbtn', () => { this.showTab('roster'); this.side.classList.toggle('open'); });
+
+    const stick = ctl.querySelector<HTMLElement>('.stick')!;
+    const knob = ctl.querySelector<HTMLElement>('.knob')!;
+    const R = 40, dead = 0.18;
+    let active: number | null = null;
+    const set = (dx: number, dy: number) => {
+      const d = Math.hypot(dx, dy);
+      const k = d > R ? R / d : 1;
+      dx *= k; dy *= k;
+      knob.style.transform = `translate(${dx}px, ${dy}px)`;
+      const ax = dx / R, ay = dy / R;
+      s.player.touch = Math.hypot(ax, ay) < dead ? { x: 0, y: 0 } : { x: ax, y: ay };
+    };
+    const fromEvent = (e: PointerEvent) => {
+      const r = stick.getBoundingClientRect();
+      set(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2));
+    };
+    stick.addEventListener('pointerdown', (e) => { active = e.pointerId; stick.setPointerCapture(e.pointerId); fromEvent(e); e.preventDefault(); });
+    stick.addEventListener('pointermove', (e) => { if (e.pointerId === active) fromEvent(e); });
+    const release = (e: PointerEvent) => { if (e.pointerId !== active) return; active = null; set(0, 0); };
+    stick.addEventListener('pointerup', release);
+    stick.addEventListener('pointercancel', release);
+  }
+
+  private showTab(tab: 'inspector' | 'roster'): void {
+    this.side.dataset.tab = tab;
+    this.side.querySelectorAll<HTMLElement>('[data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+  }
+
   // ---- per-frame -------------------------------------------------------------
 
   render(dt: number): void {
     const s = this.scene;
     this.stage.classList.toggle('raid', s.raidActive);
+    if (this.touch && s.selected !== this.lastSelected) {
+      this.lastSelected = s.selected;
+      if (s.selected) { this.showTab('inspector'); this.side.classList.add('open'); }
+    }
     this.topT += dt; this.rosterT += dt;
     if (this.topT > 0.1) { this.topT = 0; this.renderTop(); this.renderHotbar(); this.renderInspector(); }
     if (this.rosterT > 0.5) { this.rosterT = 0; this.renderRoster(); }
