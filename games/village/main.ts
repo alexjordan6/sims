@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { SimScene, launch } from '@shared/index';
 import { World, doorstep, BUILDING_W, BUILDING_H } from './world';
-import { Villager, Raider, Player, Mover, type Role, type BuildItem } from './agents';
+import { Villager, Raider, Player, Mover, type Role, type Tool } from './agents';
 import { p, TILE, COLS, ROWS, ZOOM, COST, TREE_YIELD, RUN } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
@@ -16,7 +16,8 @@ export type FxEvent =
   | { kind: 'hit'; attacker: Mover; target: Mover; dmg: number }
   | { kind: 'tool'; tool: 'hoe' | 'axe' | 'seed' | 'hammer'; tx: number; ty: number }
   | { kind: 'death'; who: Mover; x: number; y: number }
-  | { kind: 'boss'; who: Mover };
+  | { kind: 'boss'; who: Mover }
+  | { kind: 'swing'; who: Mover; dx: number; dy: number };
 
 export type Screen = 'title' | 'playing' | 'paused' | 'over' | 'won';
 
@@ -127,7 +128,8 @@ export class VillageScene extends SimScene {
     const kb = this.input.keyboard!;
     this.wasd = kb.addKeys('W,A,S,D') as typeof this.wasd;
     kb.on('keydown-E', () => this.interact());
-    kb.on('keydown-Q', () => this.player.cycleBuild());
+    kb.on('keydown-Q', () => this.player.cycleTool());
+    kb.on('keydown-TAB', (e: KeyboardEvent) => { e.preventDefault?.(); this.player.cycleTool(-1); });
     kb.on('keydown-ESC', () => this.togglePause());
 
     super.create(); // creates gfx + hud, then calls reset() -> setup()
@@ -229,8 +231,8 @@ export class VillageScene extends SimScene {
     this.ui?.showScreen(this.screen);
   }
 
-  setBuild(item: BuildItem): void {
-    this.player.build = item;
+  setTool(tool: Tool): void {
+    this.player.tool = tool;
   }
 
   select(m: Mover | null): void {
@@ -431,55 +433,87 @@ export class VillageScene extends SimScene {
     return null;
   }
 
+  /** E: do what the equipped tool does to the faced tile (or swing the sword). */
   interact(): void {
     if (this.screen !== 'playing') return;
     const pl = this.player;
-    const raider = this.nearestRaider(pl.x, pl.y, 20);
-    if (raider) { pl.tryAttack(this, raider, Math.round(12 * this.mods.playerDmgMul), 20, 0.5); return; }
-
-    if (pl.build !== 'none') {
-      const a = this.buildAnchor();
-      const why = this.buildProblem(a);
-      if (why) { this.event('build', why); return; }
-      if (this.wood < COST[pl.build]) { this.event('build', `Need ${COST[pl.build]} wood for a ${pl.build}`); return; }
-      this.wood -= COST[pl.build];
-      if (pl.build === 'house') this.world.placeHouse(a.tx, a.ty); else this.world.placeBarracks(a.tx, a.ty);
-      this.fx.push({ kind: 'tool', tool: 'hammer', tx: a.tx + 1, ty: a.ty + BUILDING_H - 1 });
-      this.event('build', `Built a ${pl.build}`, true);
-      return;
-    }
-
     const { tx, ty } = pl.faced;
     const t = this.world.get(tx, ty);
-    if (!t) return;
 
-    switch (t.kind) {
-      case 'grass': this.world.set(tx, ty, 'tilled'); this.fx.push({ kind: 'tool', tool: 'hoe', tx, ty }); break;
-      case 'tilled': this.world.set(tx, ty, 'crop'); this.fx.push({ kind: 'tool', tool: 'seed', tx, ty }); break;
-      case 'crop':
-        if (t.stage >= this.cropDays) { this.world.set(tx, ty, 'tilled'); this.food += this.mods.cropYield; this.fx.push({ kind: 'tool', tool: 'seed', tx, ty }); }
-        break;
-      case 'tree':
-        if (++t.work >= 3) { this.world.set(tx, ty, 'grass'); this.wood += TREE_YIELD; }
-        else this.world.dirty.add(ty * COLS + tx);
+    switch (pl.tool) {
+      case 'sword':
+        if (pl.startSwing()) this.fx.push({ kind: 'swing', who: pl, dx: pl.facing.x, dy: pl.facing.y });
+        return;
+      case 'house':
+      case 'barracks': {
+        const a = this.buildAnchor();
+        const why = this.buildProblem(a);
+        if (why) { this.event('build', why); return; }
+        if (this.wood < COST[pl.tool]) { this.event('build', `Need ${COST[pl.tool]} wood for a ${pl.tool}`); return; }
+        this.wood -= COST[pl.tool];
+        if (pl.tool === 'house') this.world.placeHouse(a.tx, a.ty); else this.world.placeBarracks(a.tx, a.ty);
+        this.fx.push({ kind: 'tool', tool: 'hammer', tx: a.tx + 1, ty: a.ty + BUILDING_H - 1 });
+        this.event('build', `Built a ${pl.tool}`, true);
+        return;
+      }
+      case 'hoe':
+        if (t?.kind === 'grass') { this.world.set(tx, ty, 'tilled'); this.fx.push({ kind: 'tool', tool: 'hoe', tx, ty }); }
+        else this.fx.push({ kind: 'tool', tool: 'hoe', tx, ty }); // swing anyway, feels responsive
+        return;
+      case 'seeds':
+        if (t?.kind === 'tilled') { this.world.set(tx, ty, 'crop'); this.fx.push({ kind: 'tool', tool: 'seed', tx, ty }); }
+        return;
+      case 'axe':
+        if (t?.kind === 'tree') {
+          if (++t.work >= 3) { this.world.set(tx, ty, 'grass'); this.wood += TREE_YIELD; }
+          else this.world.dirty.add(ty * COLS + tx);
+        }
         this.fx.push({ kind: 'tool', tool: 'axe', tx, ty });
-        break;
+        return;
+      case 'hands':
+        if (t?.kind === 'crop' && t.stage >= this.cropDays) { this.world.set(tx, ty, 'tilled'); this.food += this.mods.cropYield; this.fx.push({ kind: 'tool', tool: 'seed', tx, ty }); }
+        return;
     }
   }
 
+  /** What E would do right now, as "E: verb" (or a reason it won't). */
   hint(): string {
     const pl = this.player;
-    if (this.nearestRaider(pl.x, pl.y, 20)) return 'E: attack!';
-    if (pl.build !== 'none') return `E: build ${pl.build} (${COST[pl.build]} wood)${this.buildProblem(this.buildAnchor()) ? ' — ' + this.buildProblem(this.buildAnchor()) : ''}  ·  Q: cancel`;
     const t = this.world.get(pl.faced.tx, pl.faced.ty);
-    switch (t?.kind) {
-      case 'grass': return 'E: till soil';
-      case 'tilled': return 'E: plant';
-      case 'crop': return t.stage >= this.cropDays ? 'E: harvest' : `growing (${t.stage}/${this.cropDays} days)`;
-      case 'tree': return `E: chop (${t.work}/3)`;
-      case 'house': return `house — ${t.house?.residents ?? 0}/${this.mods.houseCap} residents`;
-      case 'barracks': return 'barracks — kids raised nearby become soldiers';
-      default: return '';
+    const kind = t?.kind;
+    const need = (tool: string) => `need the ${tool}`;
+    switch (pl.tool) {
+      case 'sword': {
+        const near = this.nearestRaider(pl.x, pl.y, 40);
+        return near ? 'E: attack!' : 'E: swing sword';
+      }
+      case 'house':
+      case 'barracks': {
+        const why = this.buildProblem(this.buildAnchor());
+        return `E: build ${pl.tool} (${COST[pl.tool]} wood)${why ? ' — ' + why : ''}`;
+      }
+      case 'hoe':
+        if (kind === 'grass') return 'E: till soil';
+        if (kind === 'tilled') return `tilled — ${need('seeds')}`;
+        if (kind === 'crop') return t!.stage >= this.cropDays ? `ripe — ${need('hands')}` : `growing (${t!.stage}/${this.cropDays} days)`;
+        if (kind === 'tree') return `tree — ${need('axe')}`;
+        return 'hoe: face open grass';
+      case 'seeds':
+        if (kind === 'tilled') return 'E: plant';
+        if (kind === 'grass') return `grass — ${need('hoe')} first`;
+        if (kind === 'crop') return t!.stage >= this.cropDays ? `ripe — ${need('hands')}` : `growing (${t!.stage}/${this.cropDays} days)`;
+        return 'seeds: face tilled soil';
+      case 'axe':
+        if (kind === 'tree') return `E: chop (${t!.work}/3)`;
+        return 'axe: face a tree';
+      case 'hands':
+        if (kind === 'crop') return t!.stage >= this.cropDays ? 'E: harvest' : `growing (${t!.stage}/${this.cropDays} days)`;
+        if (kind === 'grass') return `grass — ${need('hoe')} to till`;
+        if (kind === 'tilled') return `tilled — ${need('seeds')}`;
+        if (kind === 'tree') return `tree — ${need('axe')}`;
+        if (kind === 'house') return `house — ${t!.house?.residents ?? 0}/${this.mods.houseCap} beds used`;
+        if (kind === 'barracks') return 'barracks — kids raised nearby become soldiers';
+        return 'hands: harvest ripe crops';
     }
   }
 

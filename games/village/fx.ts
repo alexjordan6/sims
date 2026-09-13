@@ -76,7 +76,9 @@ export class Fx {
 
   handle(ev: FxEvent, sprites: Map<number, Phaser.GameObjects.Sprite>): void {
     switch (ev.kind) {
-      case 'hit': this.swing(ev.attacker, ev.target, sprites); this.hit(ev.attacker, ev.target, ev.dmg); break;
+      // the player's sword swing is its own event; NPC hits swing-and-hit together
+      case 'hit': if (!(ev.attacker instanceof Player)) this.swing(ev.attacker, ev.target, sprites); this.hit(ev.attacker, ev.target, ev.dmg); break;
+      case 'swing': this.swing(ev.who, { x: ev.who.x + ev.dx * 20, y: ev.who.y + ev.dy * 20 }, sprites, 'sword', 360); break;
       case 'tool': this.tool(ev.tool, ev.tx, ev.ty, sprites); break;
       case 'boss': this.bossArrive(ev.who, sprites); break;
       case 'death': break; // handled by die() when the renderer hands over the sprite

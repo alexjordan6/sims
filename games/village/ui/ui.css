@@ -246,7 +246,6 @@ body.touch .topbar .day { font-size: 9px; }
 body.touch .topbar .hour { font-size: 12px; }
 body.touch .topbar .num { font-size: 15px; }
 body.touch .topbar .chip { font-size: 12px; padding: 0 4px 0 0; }
-body.touch .topbar .chip .spr { width: 20px; height: 20px; background-size: 240px 220px; }
 body.touch .topbar .speed { display: none; }
 body.touch .topbar .raid { font-size: 8px; }
 body.touch .heart { width: 11px; height: 11px; }
@@ -254,7 +253,6 @@ body.touch .heart { width: 11px; height: 11px; }
 /* feed under the bar, shorter */
 body.touch .feed { top: 76px; bottom: auto; left: 6px; flex-direction: column; max-width: 56vw; }
 body.touch .feed .ev { font-size: 12px; padding: 0 6px 0 2px; }
-body.touch .feed .ev .spr { width: 16px; height: 16px; background-size: 192px 176px; }
 body.touch .feed .ev:nth-child(n+4) { display: none; }
 body.touch .toasts { top: 50px; }
 body.touch .toast { font-size: 9px; padding: 8px 10px; }
@@ -262,7 +260,6 @@ body.touch .toast { font-size: 9px; padding: 8px 10px; }
 /* hotbar sits above the controls, smaller */
 body.touch .hotbar { bottom: 150px; gap: 2px; }
 body.touch .slot { width: 60px; height: 56px; border-width: 8px; }
-body.touch .slot .spr { width: 24px; height: 24px; background-size: 288px 264px; }
 body.touch .slot .key { display: none; }
 body.touch .slot .cost { font-size: 10px; }
 body.touch .hint { font-size: 13px; padding: 1px 8px; min-height: 20px; }
@@ -412,3 +409,46 @@ body.touch .topbar .chip { font-size: 12px; }
 body.touch .topbar .chip i { display: none; }
 body.touch .topbar .t-raid .raid { font-size: 7px; }
 body.touch .slot .lbl { font-size: 5px; }
+
+/* =====================================================================================
+   Touch layout v2: the world is never covered. Top bar above it, control deck below it.
+   ===================================================================================== */
+body.touch #stage { display: flex; flex-direction: column; }
+body.touch #game { position: relative; flex: 1; min-height: 120px; order: 1; }
+body.touch .topbar { position: static; order: 0; margin: 4px 4px 0; }
+body.touch #overlay { order: 2; } /* toasts only; absolute over the stage */
+body.touch .deck { order: 3; display: flex; flex-direction: column; gap: 4px; padding: 4px 6px 8px; background: #241c16; border-top: 4px solid #0d0a08; }
+
+/* feed: one or two lines in the deck instead of floating over the map */
+body.touch .feed { position: static; flex-direction: column-reverse; max-width: none; width: auto; }
+body.touch .feed .ev:nth-child(n+3) { display: none; }
+body.touch .feed .ev:nth-child(n+2) { opacity: .55; }
+
+/* tool belt: scrolls sideways if it doesn't fit */
+body.touch .hotbar { position: static; transform: none; align-items: stretch; }
+body.touch .hotbar .slots { overflow-x: auto; scrollbar-width: none; justify-content: flex-start; padding: 6px 6px 4px; }
+body.touch .hotbar .slots::-webkit-scrollbar { display: none; }
+body.touch .slots-cap { display: none; }
+body.touch .slot { flex: 0 0 auto; width: 54px; height: 54px; }
+body.touch .hint { justify-content: center; }
+
+/* controls row: stick | zoom+help | buttons */
+body.touch .mobile { position: static; display: grid; grid-template-columns: 124px 1fr 168px; align-items: end; gap: 6px; min-height: 150px; }
+body.touch .stick { position: relative; left: auto; bottom: auto; margin: 0 0 16px 2px; }
+body.touch .mid { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; height: 100%; }
+body.touch .cluster { position: relative; right: auto; bottom: auto; justify-self: end; }
+body.touch .mobile .corner { display: none; }
+
+/* landscape phones: keep the deck short (feed + belt); stick and buttons overlay the world's edges */
+@media (max-height: 440px) {
+  body.touch .mobile { position: absolute; inset: 0; display: block; min-height: 0; pointer-events: none; }
+  body.touch .mobile > * { pointer-events: auto; }
+  body.touch .stick { position: absolute; left: 12px; top: 50%; transform: translateY(-40%); margin: 0; }
+  body.touch .cluster { position: absolute; right: 8px; top: 50%; transform: translateY(-45%); }
+  body.touch .mid { position: absolute; right: 8px; top: 4px; flex-direction: row; height: auto; }
+  body.touch .topbar { padding-right: 110px; }
+  body.touch .deck { padding: 2px 6px 4px; gap: 2px; }
+  body.touch .feed .ev:nth-child(n+2) { display: none; }
+  body.touch .slot { width: 46px; height: 46px; }
+  body.touch .hint { min-height: 18px; font-size: 12px; }
+}

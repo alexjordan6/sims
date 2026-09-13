@@ -362,12 +362,27 @@ export class Raider extends Mover {
 // ---------------------------------------------------------------------------
 // player
 
-export type BuildItem = 'none' | 'house' | 'barracks';
-export const BUILD_ORDER: BuildItem[] = ['none', 'house', 'barracks'];
+/** What the player holds. The equipped tool decides what E does. */
+export type Tool = 'hands' | 'hoe' | 'seeds' | 'axe' | 'sword' | 'house' | 'barracks';
+export const TOOLS: Tool[] = ['hands', 'hoe', 'seeds', 'axe', 'sword', 'house', 'barracks'];
+
+/** A sword swing in progress: an arc in front of the player that connects during its active window. */
+export interface Swing {
+  t: number;
+  dur: number;
+  /** direction the swing faces (unit) */
+  dx: number;
+  dy: number;
+  /** targets already hit by this swing */
+  hit: Set<number>;
+}
+
+export const SWING = { dur: 0.36, activeFrom: 0.08, activeTo: 0.22, reach: 24, halfAngleCos: 0.35 } as const;
 
 export class Player extends Mover {
   facing = { x: 0, y: 1 };
-  build: BuildItem = 'none';
+  tool: Tool = 'hands';
+  swing: Swing | null = null;
   /** set by the scene: W/A/S/D key objects */
   keys!: Record<'W' | 'A' | 'S' | 'D', { isDown: boolean }>;
   /** virtual joystick axis (-1..1), set by the touch UI */
@@ -380,6 +395,11 @@ export class Player extends Mover {
     this.radius = 3.5;
     this.color = 0xffe066;
     this.task = 'you';
+  }
+
+  /** The building the tool would place, if it's a building tool. */
+  get build(): 'house' | 'barracks' | 'none' {
+    return this.tool === 'house' || this.tool === 'barracks' ? this.tool : 'none';
   }
 
   /** The tile just in front of the player. */
@@ -399,9 +419,39 @@ export class Player extends Mover {
     }
     if (mx || my) this.facing = Math.abs(mx) >= Math.abs(my) ? { x: Math.sign(mx), y: 0 } : { x: 0, y: Math.sign(my) };
     if (mx) this.dir = mx < 0 ? -1 : 1;
-    this.vx = mx * this.speed; this.vy = my * this.speed;
+    // swinging slows you down a little
+    const slow = this.swing ? 0.5 : 1;
+    this.vx = mx * this.speed * slow; this.vy = my * this.speed * slow;
     this.moveWithCollision(dt, s.world);
+    this.updateSwing(dt, s);
     if (s.mods.playerRegen && this.hp < this.maxHp && !s.nearestRaider(this.x, this.y, 40)) this.hp = Math.min(this.maxHp, this.hp + s.mods.playerRegen * dt);
+  }
+
+  /** Start a sword swing in the facing direction. Returns false while one is still going. */
+  startSwing(): boolean {
+    if (this.swing) return false;
+    this.swing = { t: 0, dur: SWING.dur, dx: this.facing.x, dy: this.facing.y, hit: new Set() };
+    return true;
+  }
+
+  /** Advance the swing; during the active window, anything in the arc gets hit once. */
+  private updateSwing(dt: number, s: VillageScene): void {
+    const sw = this.swing;
+    if (!sw) return;
+    sw.t += dt;
+    if (sw.t >= SWING.activeFrom && sw.t <= SWING.activeTo) {
+      const dmg = Math.round(12 * s.mods.playerDmgMul);
+      s.grid.forEachInRadius(this.x, this.y, SWING.reach, (o, d2) => {
+        if (!(o instanceof Raider) || o.dead || sw.hit.has(o.id)) return;
+        const d = Math.sqrt(d2) || 1;
+        const dot = ((o.x - this.x) / d) * sw.dx + ((o.y - this.y) / d) * sw.dy;
+        if (d > 6 && dot < SWING.halfAngleCos) return; // outside the arc (very close targets always count)
+        sw.hit.add(o.id);
+        o.hit(dmg);
+        s.fx.push({ kind: 'hit', attacker: this, target: o, dmg });
+      });
+    }
+    if (sw.t >= sw.dur) this.swing = null;
   }
 
   private moveWithCollision(dt: number, w: World): void {
@@ -421,7 +471,7 @@ export class Player extends Mover {
     if (stuck || free(this.x, ny)) this.y = ny;
   }
 
-  cycleBuild(): void {
-    this.build = BUILD_ORDER[(BUILD_ORDER.indexOf(this.build) + 1) % BUILD_ORDER.length];
+  cycleTool(dir = 1): void {
+    this.tool = TOOLS[(TOOLS.indexOf(this.tool) + dir + TOOLS.length) % TOOLS.length];
   }
 }

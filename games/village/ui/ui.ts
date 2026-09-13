@@ -1,5 +1,5 @@
 import { getGui } from '@shared/index';
-import { Villager, Raider, Player, Mover, type BuildItem } from '../agents';
+import { Villager, Raider, Player, Mover, type Tool } from '../agents';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
 import { COST, p, RUN } from '../config';
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
@@ -94,19 +94,23 @@ export class UI {
     this.top.querySelector('.pause')!.addEventListener('click', () => s.togglePause());
     this.top.querySelector('.help')!.addEventListener('click', () => this.showHelp());
 
-    // --- hotbar: what E will do, and what to build
-    const slot = (item: BuildItem, key: string, frame: number, label: string, title: string, cost?: number) =>
-      `<div class="slot" data-build="${item}" title="${esc(title)}">${spr(key, frame, 32)}<span class="lbl">${label}</span>${cost ? `<span class="cost">${cost}${spr('town', TOWN.iconWood, 16)}</span>` : ''}</div>`;
+    // --- tool belt: the equipped tool decides what E does
+    const slot = (tool: Tool, key: string, frame: number, label: string, title: string, cost?: number) =>
+      `<div class="slot" data-tool="${tool}" title="${esc(title)}">${spr(key, frame, 32)}<span class="lbl">${label}</span>${cost ? `<span class="cost">${cost}${spr('town', TOWN.iconWood, 16)}</span>` : ''}</div>`;
     this.hotbar = h(`<div class="hotbar">
       <div class="slots panel">
-        <span class="cap slots-cap">BUILD <kbd>Q</kbd></span>
-        ${slot('none', 'farm', FARM.iconHand, 'HANDS', 'Use your hands: till, plant, harvest, chop, fight')}
+        <span class="cap slots-cap">TOOLS <kbd>Q</kbd></span>
+        ${slot('hands', 'farm', FARM.iconHand, 'HANDS', 'Harvest ripe crops')}
+        ${slot('hoe', 'town', TOWN.iconHoe, 'HOE', 'Till grass into soil')}
+        ${slot('seeds', 'farm', FARM.grassTuft, 'SEEDS', 'Plant on tilled soil')}
+        ${slot('axe', 'town', TOWN.iconAxe, 'AXE', 'Chop trees for wood (3 hits)')}
+        ${slot('sword', 'dungeon', DUNGEON.sword, 'SWORD', 'Swing at raiders in front of you')}
         ${slot('house', 'town', TOWN.wallWoodDoor, 'HOUSE', 'A family of 4 lives here and has children', COST.house)}
         ${slot('barracks', 'town', TOWN.wallStoneDoor, 'BARRACKS', 'Kids raised near it grow into soldiers', COST.barracks)}
       </div>
       <div class="hint"><kbd>E</kbd><span class="hint-text"></span></div>
     </div>`);
-    this.hotbar.querySelectorAll<HTMLElement>('.slot').forEach((el) => el.addEventListener('click', () => s.setBuild(el.dataset.build as BuildItem)));
+    this.hotbar.querySelectorAll<HTMLElement>('.slot').forEach((el) => el.addEventListener('click', () => s.setTool(el.dataset.tool as Tool)));
 
     this.feed = h('<div class="feed"></div>');
     this.toasts = h('<div class="toasts"></div>');
@@ -156,23 +160,30 @@ export class UI {
     // joystick + buttons
     const ctl = h(`<div class="mobile">
       <div class="stick"><div class="knob"></div><span class="mlbl">MOVE</span></div>
-      <div class="cluster">
-        <button class="mbtn small drawerbtn">${spr('dungeon', DUNGEON.villager, 24)}<span class="mlbl">FOLK</span></button>
-        <button class="mbtn small pausebtn">II<span class="mlbl">PAUSE</span></button>
-        <button class="mbtn small buildbtn">${spr('town', TOWN.iconHammer, 24)}<span class="mlbl">BUILD</span></button>
-        <button class="mbtn act"><span class="verb">USE</span></button>
-      </div>
-      <div class="corner">
+      <div class="mid">
         <button class="mbtn small zoombtn">⌕<span class="mlbl">ZOOM</span></button>
         <button class="mbtn small helpbtn">?<span class="mlbl">HELP</span></button>
       </div>
+      <div class="cluster">
+        <button class="mbtn small drawerbtn">${spr('dungeon', DUNGEON.villager, 24)}<span class="mlbl">FOLK</span></button>
+        <button class="mbtn small pausebtn">II<span class="mlbl">PAUSE</span></button>
+        <button class="mbtn small buildbtn">${spr('town', TOWN.iconHammer, 24)}<span class="mlbl">TOOL</span></button>
+        <button class="mbtn act"><span class="verb">USE</span></button>
+      </div>
     </div>`);
-    this.overlay.append(ctl);
+    // The world gets its own uncovered area: top bar above it, a control deck below it.
+    const deck = h('<div class="deck"></div>');
+    this.stage.prepend(this.top);
+    deck.append(this.feed, this.hotbar, ctl);
+    this.stage.append(deck);
+    // the world area just shrank; make sure Phaser sees the final size
+    setTimeout(() => s.scale.refresh(), 60);
+    window.addEventListener('orientationchange', () => setTimeout(() => s.scale.refresh(), 300));
     const press = (sel: string, fn: () => void) => {
       ctl.querySelector<HTMLElement>(sel)!.addEventListener('pointerdown', (e) => { e.preventDefault(); fn(); });
     };
     press('.act', () => s.interact());
-    press('.buildbtn', () => s.player.cycleBuild());
+    press('.buildbtn', () => s.player.cycleTool());
     press('.pausebtn', () => s.togglePause());
     press('.drawerbtn', () => { this.showTab('roster'); this.side.classList.toggle('open'); });
     press('.zoombtn', () => s.cycleZoom());
@@ -253,8 +264,6 @@ export class UI {
     this.topT += dt; this.rosterT += dt;
     if (this.topT > 0.1) {
       this.topT = 0; this.renderTop(); this.renderHotbar(); this.renderInspector();
-      // keep the feed just under the (wrapping) top bar
-      if (this.touch) { const top = `${this.top.offsetHeight + 10}px`; if (this.feed.style.top !== top) this.feed.style.top = top; }
     }
     if (this.rosterT > 0.5) { this.rosterT = 0; this.renderRoster(); }
     this.renderFeed();
@@ -300,15 +309,15 @@ export class UI {
   private renderHotbar(): void {
     const s = this.scene;
     this.hotbar.querySelectorAll<HTMLElement>('.slot').forEach((el) => {
-      const item = el.dataset.build as BuildItem;
-      el.classList.toggle('on', s.player.build === item);
-      el.classList.toggle('off', item !== 'none' && s.wood < COST[item]);
+      const tool = el.dataset.tool as Tool;
+      el.classList.toggle('on', s.player.tool === tool);
+      el.classList.toggle('off', (tool === 'house' || tool === 'barracks') && s.wood < COST[tool]);
     });
     const hint = this.hotbar.querySelector('.hint-text')!;
     const text = s.hint().replace(/^E: /, '');
     if (hint.textContent !== text) hint.textContent = text;
     // the touch action button shows the verb it would perform
-    const verb = this.overlay.querySelector('.act .verb');
+    const verb = this.stage.querySelector('.act .verb');
     if (verb) {
       const v = this.verbFor(s.hint());
       if (verb.textContent !== v) verb.textContent = v;
@@ -320,7 +329,7 @@ export class UI {
   private verbFor(hint: string): string {
     if (!hint.startsWith('E:')) return '…';
     const w = hint.slice(2).trim().split(/[ !(]/)[0].toUpperCase();
-    return { TILL: 'TILL', PLANT: 'PLANT', HARVEST: 'HARVEST', CHOP: 'CHOP', ATTACK: 'FIGHT', BUILD: 'BUILD' }[w] ?? 'USE';
+    return { TILL: 'TILL', PLANT: 'PLANT', HARVEST: 'HARVEST', CHOP: 'CHOP', ATTACK: 'FIGHT', SWING: 'SWING', BUILD: 'BUILD' }[w] ?? 'USE';
   }
 
   private renderInspector(force = false): void {
@@ -520,7 +529,7 @@ export class UI {
         </section>
         <section>
           <h3>WHO'S WHO</h3>
-          ${who('dungeon', DUNGEON.hero, 'player', 'You', 'Till, plant, harvest, chop, build and fight with E.')}
+          ${who('dungeon', DUNGEON.hero, 'player', 'You', 'Equip a tool, then E: hoe tills, seeds plant, hands harvest, axe chops, sword fights, hammer builds.')}
           ${who('farm', FARM.farmerHat, 'farmer', 'Farmer', 'Plants and harvests the fields on their own.')}
           ${who('dungeon', DUNGEON.man, 'woodcutter', 'Woodcutter', 'Chops trees for wood.')}
           ${who('dungeon', DUNGEON.villager, 'kid', 'Child', 'Plays near home and soaks up what is around them.')}
@@ -534,8 +543,8 @@ export class UI {
           <h3>CONTROLS</h3>
           <div class="controls">
             <kbd>WASD</kbd><span>move (joystick on phone)</span>
-            <kbd>E</kbd><span>use what's in front of you — the bottom bar says what</span>
-            <kbd>Q</kbd><span>choose house / barracks / hands</span>
+            <kbd>E</kbd><span>use the equipped tool on what's in front of you — the bottom bar says what. The sword swings an arc; it only hits what it reaches.</span>
+            <kbd>Q</kbd><span>next tool (Tab: previous) — hands, hoe, seeds, axe, sword, house, barracks</span>
             <kbd>Esc</kbd><span>pause</span>
             <kbd>1 2 3</kbd><span>game speed 1x / 4x / 16x</span>
             <kbd>click</kbd><span>inspect a villager</span>
