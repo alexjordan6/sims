@@ -159,24 +159,41 @@ export class VillageScene extends SimScene {
     if (this.screen !== 'title') { this.screen = 'playing'; this.paused = false; this.ui?.showScreen(null); }
   }
 
+  /** Follow-camera zoom levels the player can cycle through on small screens. */
+  static readonly ZOOMS = [1, 1.5, 2] as const;
+  /** index into ZOOMS; null = automatic */
+  zoomChoice: number | null = null;
+
   /**
    * Desktop: the whole world fits, so show it all at the largest crisp zoom.
-   * Phone: zoom 2 (32 px tiles, good for thumbs) and follow the player.
+   * Small screens: follow the player. The default zoom keeps about 16-18 tiles across the
+   * narrow side, so a phone in portrait isn't filled by a single building.
    */
-  private fitCamera(): void {
+  fitCamera(): void {
     const cam = this.cameras.main;
-    const fit = Math.min(this.scale.width / this.W, this.scale.height / this.H);
-    if (fit >= 2) {
+    const vw = this.scale.width, vh = this.scale.height;
+    const fit = Math.min(vw / this.W, vh / this.H);
+    if (fit >= 2 && this.zoomChoice === null) {
       this.following = false;
       cam.removeBounds();
       cam.setZoom(Math.min(4, Math.floor(fit * 2) / 2));
       cam.centerOn(this.W / 2, this.H / 2);
-    } else {
-      this.following = true;
-      cam.setZoom(2);
-      cam.setBounds(0, 0, this.W, this.H, true);
-      if (this.player) cam.centerOn(this.player.x, this.player.y);
+      return;
     }
+    const auto = Math.min(vw, vh) < 500 ? 1.5 : 2;
+    const zoom = this.zoomChoice === null ? auto : VillageScene.ZOOMS[this.zoomChoice];
+    this.following = true;
+    cam.setZoom(zoom);
+    cam.setBounds(0, 0, this.W, this.H, true);
+    if (this.player) cam.centerOn(this.player.x, this.player.y);
+  }
+
+  /** Cycle 1x → 1.5x → 2x (touch zoom button). */
+  cycleZoom(): void {
+    const zooms: readonly number[] = VillageScene.ZOOMS;
+    const cur = this.zoomChoice ?? Math.max(0, zooms.indexOf(this.cameras.main.zoom));
+    this.zoomChoice = (cur + 1) % zooms.length;
+    this.fitCamera();
   }
 
   // ---- screens / flow -------------------------------------------------------

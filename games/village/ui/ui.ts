@@ -154,6 +154,7 @@ export class UI {
         <button class="mbtn small buildbtn" title="Build (Q)">${spr('town', TOWN.iconHammer, 24)}</button>
         <button class="mbtn act" title="Use (E)">E</button>
       </div>
+      <button class="mbtn small zoombtn" title="Zoom">⌕</button>
     </div>`);
     this.overlay.append(ctl);
     const press = (sel: string, fn: () => void) => {
@@ -163,6 +164,7 @@ export class UI {
     press('.buildbtn', () => s.player.cycleBuild());
     press('.pausebtn', () => s.togglePause());
     press('.drawerbtn', () => { this.showTab('roster'); this.side.classList.toggle('open'); });
+    press('.zoombtn', () => s.cycleZoom());
 
     const stick = ctl.querySelector<HTMLElement>('.stick')!;
     const knob = ctl.querySelector<HTMLElement>('.knob')!;

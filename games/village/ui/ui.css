@@ -305,3 +305,5 @@ body.touch .tooltip { display: none; }
   body.touch .cluster { grid-template-columns: 42px 42px; grid-template-rows: 42px 42px; bottom: 14px; right: 12px; }
   body.touch .hotbar { bottom: 10px; }
 }
+.zoombtn { position: absolute; right: 12px; top: 84px; font-size: 20px; }
+@media (max-height: 440px) { .zoombtn { top: 52px; } }
