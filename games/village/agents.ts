@@ -115,6 +115,8 @@ export class Villager extends Mover {
   martial = 0;
   civil = 0;
   name: string;
+  /** a snatcher has this child */
+  carriedBy: Raider | null = null;
   private workTimer = 0;
   private thinkTimer = 0;
   private retarget = 0;
@@ -157,6 +159,10 @@ export class Villager extends Mover {
 
   update(dt: number, s: VillageScene): void {
     this.tickTimers(dt);
+    if (this.carriedBy) {
+      if (this.carriedBy.dead) { this.carriedBy = null; this.clearGoal(); }
+      else { this.x = this.carriedBy.x; this.y = this.carriedBy.y - 8; this.vx = this.vy = 0; this.task = 'being carried off!'; return; }
+    }
     if (this.hidden) {
       this.task = 'hiding indoors';
       if (!s.raidActive || this.role === 'soldier') this.unhide(s);
@@ -252,7 +258,7 @@ export class Villager extends Mover {
     this.retarget -= dt;
     if (this.retarget <= 0) {
       this.retarget = 0.4;
-      this.target = s.nearestRaider(this.x, this.y, 130);
+      this.target = s.bestTarget(this.x, this.y, 130);
     }
     if (this.target && !this.target.dead) {
       this.task = 'fighting';
@@ -308,6 +314,8 @@ export class Villager extends Mover {
 // ---------------------------------------------------------------------------
 // raiders
 
+export type EnemyKind = 'raider' | 'warlord' | 'rat' | 'snatcher' | 'brute' | 'shaman';
+
 export interface RaiderOpts {
   /** the warlord: big, tough, and the run ends when he falls */
   boss?: boolean;
@@ -316,17 +324,29 @@ export interface RaiderOpts {
   speedMul?: number;
 }
 
+/**
+ * Base enemy: walks at the nearest person and hits them. Other kinds (enemies.ts) extend this so
+ * every `instanceof Raider` check — soldier targeting, the sword arc, villagers fleeing — covers them.
+ */
 export class Raider extends Mover {
-  private target: Mover | null = null;
-  private retarget = 0;
-  private bored = 0;
+  protected target: Mover | null = null;
+  protected retarget = 0;
+  protected bored = 0;
   readonly boss: boolean;
-  readonly dmg: number;
-  readonly name: string;
+  dmg: number;
+  name: string;
+  kind: EnemyKind;
+  /** shrugs off knockback */
+  heavy = false;
+  /** villagers don't flee from it (rats) */
+  harmless = false;
+  /** a child being carried off (snatchers) */
+  carrying: Villager | null = null;
 
   constructor(x: number, y: number, opts: RaiderOpts = {}) {
     super(x, y);
     this.boss = opts.boss ?? false;
+    this.kind = this.boss ? 'warlord' : 'raider';
     this.hp = this.maxHp = this.boss ? 150 : Math.round(p.raiderHp * (opts.hpMul ?? 1));
     this.dmg = this.boss ? 10 : p.raiderDmg;
     this.speed = (this.boss ? 44 : 38) * (opts.speedMul ?? 1);

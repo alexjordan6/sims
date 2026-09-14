@@ -23,6 +23,7 @@ export function spr(key: string, frame: number, size = 32, extra = ''): string {
 }
 
 const ROLE_LABEL: Record<string, string> = { kid: 'Child', farmer: 'Farmer', woodcutter: 'Woodcutter', soldier: 'Soldier' };
+const ENEMY_LABEL: Record<string, string> = { raider: 'Raider', warlord: 'Warlord', rat: 'Rat — eats crops', snatcher: 'Snatcher — steals children', brute: 'Brute — heavy', shaman: 'Shaman — ranged' };
 
 const EVENT_ICON: Record<EventKind, { key: string; frame: number }> = {
   birth: { key: 'dungeon', frame: DUNGEON.villager },
@@ -38,7 +39,7 @@ const EVENT_ICON: Record<EventKind, { key: string; frame: number }> = {
 
 function charOf(m: Mover): { key: string; frame: number } {
   if (m instanceof Player) return CHAR.player;
-  if (m instanceof Raider) return CHAR.raider;
+  if (m instanceof Raider) return CHAR[m.kind];
   if (m instanceof Villager) return CHAR[m.role];
   return CHAR.kid;
 }
@@ -343,7 +344,7 @@ export class UI {
     }
     const c = charOf(m);
     const roleKey = m instanceof Villager ? m.role : m instanceof Player ? 'player' : 'raider';
-    const roleText = m instanceof Villager ? ROLE_LABEL[m.role] : m instanceof Player ? 'Village head (you)' : (m as Raider).boss ? 'Warlord' : 'Raider';
+    const roleText = m instanceof Villager ? ROLE_LABEL[m.role] : m instanceof Player ? 'Village head (you)' : ENEMY_LABEL[(m as Raider).kind] ?? 'Raider';
     let html = `${head}<div class="head">${spr(c.key, c.frame, 48)}<div><div class="name">${m instanceof Villager ? esc(m.name) : m instanceof Player ? 'You' : (m as Raider).name}</div><span class="badge ${roleKey}">${roleText}</span></div><button class="btn small close">x</button></div>`;
     const hpPct = Math.max(0, m.hp / m.maxHp * 100);
     html += `<div class="rows">`;
@@ -353,7 +354,7 @@ export class UI {
       html += `<b>Home</b><span>${m.home.residents} of ${s.mods.houseCap} beds used</span>`;
       html += `<b>Fed</b><span>${m.hungerDays === 0 ? 'yes' : `<em class="warn">hungry for ${m.hungerDays} days</em>`}</span>`;
     }
-    html += `<b>Doing</b><span>${esc(m.task || '—')}</span></div>`;
+    html += `<b>Doing</b><span>${esc(m.task || '—')}${m instanceof Villager && m.carriedBy ? ` <em class="warn">— kill the ${esc(m.carriedBy.name.toLowerCase())} to free them</em>` : ''}</span></div>`;
     if (m instanceof Villager && m.role === 'kid') {
       const tot = m.martial + m.civil || 1;
       const mp = (m.martial / tot) * 100;
@@ -534,7 +535,11 @@ export class UI {
           ${who('dungeon', DUNGEON.man, 'woodcutter', 'Woodcutter', 'Chops trees for wood.')}
           ${who('dungeon', DUNGEON.villager, 'kid', 'Child', 'Plays near home and soaks up what is around them.')}
           ${who('dungeon', DUNGEON.knight, 'soldier', 'Soldier', 'Guards the barracks and fights raiders.')}
-          ${who('dungeon', DUNGEON.orc, 'raider', 'Raider', 'Comes from the map edge, tramples crops, kills.')}
+          ${who('dungeon', DUNGEON.orc, 'raider', 'Raider', 'Walks at the nearest person and hits them. Tramples crops.')}
+          ${who('dungeon', 123, 'raider', 'Rat', 'Harmless to people; eats your crops. Scatters from soldiers and you.')}
+          ${who('dungeon', DUNGEON.imp, 'raider', 'Snatcher', 'Grabs a child and runs for the map edge. Kill it to free them; kids indoors are safe.')}
+          ${who('dungeon', DUNGEON.orc, 'raider', 'Brute', 'Slow, huge, ignores knockback, hunts soldiers. Gang up.')}
+          ${who('dungeon', DUNGEON.wizard, 'raider', 'Shaman', 'Keeps its distance and casts bolts. Close in on it.')}
           <h3>BUILDINGS</h3>
           ${who('town', TOWN.wallWoodDoor, 'farmer', 'House · ' + COST.house + ' wood', 'Beds for ' + s.mods.houseCap + '. A couple here has children.')}
           ${who('town', TOWN.wallStoneDoor, 'soldier', 'Barracks · ' + COST.barracks + ' wood', 'Children raised nearby become soldiers.')}

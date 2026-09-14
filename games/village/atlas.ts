@@ -91,6 +91,11 @@ export const CHAR = {
   kid: { key: 'dungeon', frame: DUNGEON.villager },
   soldier: { key: 'dungeon', frame: DUNGEON.knight },
   raider: { key: 'dungeon', frame: DUNGEON.orc },
+  warlord: { key: 'dungeon', frame: DUNGEON.orc },
+  rat: { key: 'dungeon', frame: 123 },
+  snatcher: { key: 'dungeon', frame: DUNGEON.imp },
+  brute: { key: 'dungeon', frame: DUNGEON.orc },
+  shaman: { key: 'dungeon', frame: DUNGEON.wizard },
 } as const;
 
 /** CSS background-position for a frame in a 12-col sheet, at a given scale. */

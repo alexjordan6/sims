@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { SimScene, launch } from '@shared/index';
 import { World, doorstep, BUILDING_W, BUILDING_H } from './world';
 import { Villager, Raider, Player, Mover, type Role, type Tool } from './agents';
+import { Rat, Snatcher, Brute, Shaman, waveComposition } from './enemies';
 import { p, TILE, COLS, ROWS, ZOOM, COST, TREE_YIELD, RUN } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
@@ -17,7 +18,9 @@ export type FxEvent =
   | { kind: 'tool'; tool: 'hoe' | 'axe' | 'seed' | 'hammer'; tx: number; ty: number }
   | { kind: 'death'; who: Mover; x: number; y: number }
   | { kind: 'boss'; who: Mover }
-  | { kind: 'swing'; who: Mover; dx: number; dy: number };
+  | { kind: 'swing'; who: Mover; dx: number; dy: number }
+  | { kind: 'cast'; who: Mover }
+  | { kind: 'impact'; x: number; y: number };
 
 export type Screen = 'title' | 'playing' | 'paused' | 'over' | 'won';
 
@@ -345,24 +348,62 @@ export class VillageScene extends SimScene {
 
   spawnRaid(boss = false): void {
     const wave = Math.max(1, Math.floor(this.day / p.raidEvery));
-    const n = boss ? 5 : 1 + Math.ceil(wave * 0.8); // 2,3,3,4,5,6 then 5 + the warlord
+    const mix = waveComposition(wave, boss);
     const opts = { hpMul: (1 + 0.08 * wave) * this.mods.raiderHpMul, speedMul: this.mods.raiderSpeedMul };
     const side = this.rng.int(0, 3);
-    for (let i = 0; i < n + (boss ? 1 : 0); i++) {
+    const spawnAt = (): { x: number; y: number } => {
       let tx = side === 0 ? 0 : side === 1 ? COLS - 1 : this.rng.int(0, COLS - 1);
       let ty = side === 2 ? 0 : side === 3 ? ROWS - 1 : this.rng.int(0, ROWS - 1);
       const dx = side === 0 ? 1 : side === 1 ? -1 : 0, dy = side === 2 ? 1 : side === 3 ? -1 : 0;
       while (this.world.isBlocked(tx, ty) && this.world.inBounds(tx + dx, ty + dy)) { tx += dx; ty += dy; }
-      const c = World.center(tx, ty);
-      const isBoss = boss && i === n; // the last one spawned leads
-      const r = this.spawn(new Raider(c.x, c.y, { ...opts, boss: isBoss }));
-      if (isBoss) { this.boss = r; this.fx.push({ kind: 'boss', who: r }); }
+      return World.center(tx, ty);
+    };
+    const make: Record<keyof typeof mix, (x: number, y: number) => Raider> = {
+      raider: (x, y) => new Raider(x, y, opts),
+      rat: (x, y) => new Rat(x, y, opts),
+      snatcher: (x, y) => new Snatcher(x, y, opts),
+      brute: (x, y) => new Brute(x, y, opts),
+      shaman: (x, y) => new Shaman(x, y, opts),
+    };
+    const parts: string[] = [];
+    for (const kind of Object.keys(mix) as (keyof typeof mix)[]) {
+      const n = mix[kind];
+      if (!n) continue;
+      parts.push(`${n} ${kind}${n > 1 ? 's' : ''}`);
+      for (let i = 0; i < n; i++) { const c = spawnAt(); this.spawn(make[kind](c.x, c.y)); }
+    }
+    if (boss) {
+      const c = spawnAt();
+      const w = this.spawn(new Raider(c.x, c.y, { ...opts, boss: true }));
+      this.boss = w;
+      this.fx.push({ kind: 'boss', who: w });
     }
     this.raidActive = true;
+    this.cropsEatenThisRaid = false;
     const from = ['west', 'east', 'north', 'south'][side];
-    if (boss) this.event('raid', `THE WARLORD ATTACKS from the ${from} with ${n} raiders!`, true);
-    else this.event('raid', `RAID! ${n} raider${n > 1 ? 's' : ''} from the ${from}`, true);
+    if (boss) this.event('raid', `THE WARLORD ATTACKS from the ${from} with ${parts.join(', ')}!`, true);
+    else this.event('raid', `RAID! ${parts.join(', ')} from the ${from}`, true);
   }
+
+  // ---- hooks called by enemies ----------------------------------------------
+
+  private cropsEatenThisRaid = false;
+  cropEaten(): void {
+    if (this.cropsEatenThisRaid) return;
+    this.cropsEatenThisRaid = true;
+    this.event('food', 'Rats are gnawing the crops!', true);
+  }
+  childGrabbed(kid: Villager, by: Raider): void {
+    this.event('raid', `A ${by.name.toLowerCase()} grabbed ${kid.name}!`, true);
+  }
+  childCarriedOff(kid: Villager, _by: Raider): void {
+    kid.carriedBy = null;
+    kid.dead = true;
+    kid.hp = 0;
+    kid.hungerDays = 99; // keeps onDeath from logging "was killed"
+    this.event('death', `${kid.name} was carried off`, true);
+  }
+
 
   private onDeath(a: Mover): void {
     this.fx.push({ kind: 'death', who: a, x: a.x, y: a.y });
@@ -371,9 +412,12 @@ export class VillageScene extends SimScene {
     if (a instanceof Villager) {
       a.home.residents--;
       if (a.hp <= 0 && a.hungerDays < 3) this.event('death', `${a.name} the ${a.role} was killed`, true);
-    } else if (a instanceof Raider && a.hp <= 0) {
-      this.stats.raidersKilled++;
-      this.event('raid', a.boss ? 'The Warlord has fallen!' : 'Raider slain', a.boss);
+    } else if (a instanceof Raider) {
+      if (a.carrying && !a.carrying.dead) { const kid = a.carrying; kid.carriedBy = null; a.carrying = null; this.event('grow', `${kid.name} was rescued!`, true); }
+      if (a.hp <= 0) {
+        this.stats.raidersKilled++;
+        this.event('raid', a.boss ? 'The Warlord has fallen!' : `${a.name} slain`, a.boss);
+      }
     }
   }
 
@@ -383,11 +427,45 @@ export class VillageScene extends SimScene {
     return this.agents.filter((a): a is Villager => a instanceof Villager);
   }
 
-  nearestRaider(x: number, y: number, r: number): Raider | null {
+  /** Nearest enemy; rats are skipped unless `includeHarmless` (they're no threat to people). */
+  nearestRaider(x: number, y: number, r: number, includeHarmless = false): Raider | null {
     let best: Raider | null = null, bd = Infinity;
     this.grid.forEachInRadius(x, y, r, (o, d2) => {
-      if (o instanceof Raider && !o.dead && d2 < bd) { bd = d2; best = o; }
+      if (o instanceof Raider && !o.dead && (includeHarmless || !o.harmless) && d2 < bd) { bd = d2; best = o; }
     });
+    return best;
+  }
+
+  /** What a soldier should go for: a snatcher carrying a child first (seen from further away), then real threats, rats last. */
+  bestTarget(x: number, y: number, r: number): Raider | null {
+    let best: Raider | null = null, bs = Infinity;
+    this.grid.forEachInRadius(x, y, r * 2.5, (o, d2) => {
+      if (o instanceof Raider && !o.dead && o.carrying && d2 < bs) { bs = d2; best = o; }
+    });
+    if (best) return best;
+    this.grid.forEachInRadius(x, y, r, (o, d2) => {
+      if (!(o instanceof Raider) || o.dead) return;
+      const score = Math.sqrt(d2) - (o.carrying ? 120 : o.harmless ? -60 : 0);
+      if (score < bs) { bs = score; best = o; }
+    });
+    return best;
+  }
+
+  nearestSoldier(x: number, y: number, r: number): Villager | null {
+    let best: Villager | null = null, bd = Infinity;
+    this.grid.forEachInRadius(x, y, r, (o, d2) => {
+      if (o instanceof Villager && o.role === 'soldier' && !o.dead && !o.hidden && d2 < bd) { bd = d2; best = o; }
+    });
+    return best;
+  }
+
+  nearestChild(x: number, y: number): Villager | null {
+    let best: Villager | null = null, bd = Infinity;
+    for (const a of this.agents) {
+      if (!(a instanceof Villager) || a.role !== 'kid' || a.dead || a.hidden || a.carriedBy) continue;
+      const d = (a.x - x) ** 2 + (a.y - y) ** 2;
+      if (d < bd) { bd = d; best = a; }
+    }
     return best;
   }
 
@@ -396,7 +474,7 @@ export class VillageScene extends SimScene {
     for (const a of this.agents) {
       if (!(a instanceof Villager) && a !== this.player) continue;
       const m = a as Mover;
-      if (m.dead || m.hidden) continue;
+      if (m.dead || m.hidden || (a instanceof Villager && a.carriedBy)) continue;
       const d = (m.x - x) ** 2 + (m.y - y) ** 2;
       if (d < bd) { bd = d; best = m; }
     }

@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { World, BUILDING_W, BUILDING_H, type Tile } from './world';
 import { Mover, Villager, Raider, Player } from './agents';
+import { Bolt } from './enemies';
 import { TOWN, FARM, CHAR } from './atlas';
 import { TILE, COLS, ROWS } from './config';
 import type { VillageScene } from './main';
@@ -130,7 +131,7 @@ export class Renderer {
         const c = charFor(m);
         sp = this.scene.add.sprite(m.x, m.y, c.key, c.frame).setOrigin(0.5, 0.75).setDepth(DEPTH.agents);
         sp.setData('agent', m);
-        sp.setInteractive({ useHandCursor: true });
+        if (!(m instanceof Bolt)) sp.setInteractive({ useHandCursor: true });
         sp.on('pointerdown', () => this.scene.select(m));
         sp.on('pointerover', () => this.scene.hoverAgent(m));
         sp.on('pointerout', () => this.scene.hoverAgent(null));
@@ -138,12 +139,12 @@ export class Renderer {
       }
       // role can change (kid -> adult), so re-check the frame cheaply
       const c = charFor(m);
-      if (sp.texture.key !== c.key || sp.frame.name !== String(c.frame)) sp.setTexture(c.key, c.frame);
+      if (sp.texture.key !== c.key || (c.key !== 'px' && sp.frame.name !== String(c.frame))) sp.setTexture(c.key, c.frame);
       const moving = Math.abs(m.vx) + Math.abs(m.vy) > 1;
       const hurt = m.hp < m.maxHp * 0.4;
       const bob = moving ? Math.abs(Math.sin(this.t * (hurt ? 9 : 14) + m.id)) * 1.5 : 0;
       const a = this.fx.anims.get(m.id);
-      const base = m instanceof Villager && m.role === 'kid' ? 0.7 : m instanceof Raider && m.boss ? 1.5 : 1;
+      const base = m instanceof Villager && m.role === 'kid' ? 0.7 : m instanceof Raider ? ENEMY_SCALE[m.kind] : m instanceof Bolt ? 3 : 1;
       sp.setPosition(Math.round(m.x + (a?.ox ?? 0)), Math.round(m.y - bob + (a?.oy ?? 0)));
       sp.setFlipX(m.dir < 0);
       sp.setVisible(!m.hidden);
@@ -151,7 +152,8 @@ export class Renderer {
       sp.setRotation(a?.rot ?? 0);
       sp.setDepth(DEPTH.agents + m.y / 1000);
       if (m.hurtT < 0.15) sp.setTintFill(0xffffff);
-      else if (m instanceof Raider) sp.setTint(m.boss ? 0xff6a6a : 0xffd0d0);
+      else if (m instanceof Raider) sp.setTint(m.boss ? 0xff6a6a : m.kind === 'brute' ? 0xb07070 : 0xffd0d0);
+      else if (m instanceof Bolt) sp.setTint(0xb46bff);
       else if (hurt) sp.setTint(0xffb0a0);
       else sp.clearTint();
     }
@@ -231,9 +233,12 @@ function tileFrames(t: Tile, cropDays: number): { ground: number; object: number
   }
 }
 
+const ENEMY_SCALE: Record<string, number> = { raider: 1, warlord: 1.5, rat: 0.8, snatcher: 0.9, brute: 1.3, shaman: 1 };
+
 function charFor(m: Mover): { key: string; frame: number } {
   if (m instanceof Player) return CHAR.player;
-  if (m instanceof Raider) return CHAR.raider;
+  if (m instanceof Bolt) return { key: 'px', frame: 0 };
+  if (m instanceof Raider) return CHAR[m.kind];
   if (m instanceof Villager) return CHAR[m.role];
   return CHAR.kid;
 }

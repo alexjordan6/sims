@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { Mover, Villager, Raider, Player } from './agents';
+import { Bolt } from './enemies';
 import { DUNGEON, TOWN } from './atlas';
 import { TILE } from './config';
 import type { VillageScene, FxEvent } from './main';
@@ -13,6 +14,7 @@ const WEAPON = {
   sword: { key: 'dungeon', frame: DUNGEON.sword, scale: 1 },
   axe: { key: 'dungeon', frame: DUNGEON.axe, scale: 1 },
   bigAxe: { key: 'dungeon', frame: 119, scale: 1.5 },
+  dagger: { key: 'dungeon', frame: 106, scale: 0.8 },
   hoe: { key: 'town', frame: TOWN.iconHoe, scale: 1 },
   woodAxe: { key: 'town', frame: TOWN.iconAxe, scale: 1 },
   hammer: { key: 'town', frame: TOWN.iconHammer, scale: 1 },
@@ -36,6 +38,7 @@ export class Fx {
   private dust: Phaser.GameObjects.Particles.ParticleEmitter;
   private seeds: Phaser.GameObjects.Particles.ParticleEmitter;
   private gold: Phaser.GameObjects.Particles.ParticleEmitter;
+  private magic: Phaser.GameObjects.Particles.ParticleEmitter;
   private reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   private wasPaused = false;
   /** sprites of the dead, kept alive until their tween ends */
@@ -50,6 +53,7 @@ export class Fx {
     this.dust = mk([0xb8a88e, 0x8a6a4a], { speed: { min: 8, max: 25 }, gravityY: 20, lifespan: 380 });
     this.seeds = mk([0x8fd35a, 0x3a6b2a], { speed: { min: 10, max: 30 }, gravityY: 90 });
     this.gold = mk([0xffcf5a, 0xfff2b0], { speed: { min: 30, max: 90 }, gravityY: -20, lifespan: 700 });
+    this.magic = mk([0xb46bff, 0xe0b0ff, 0x7a3fd6], { speed: { min: 10, max: 40 }, gravityY: -30, lifespan: 380 });
   }
 
   anim(id: number): AnimState {
@@ -78,7 +82,13 @@ export class Fx {
   handle(ev: FxEvent, sprites: Map<number, Phaser.GameObjects.Sprite>): void {
     switch (ev.kind) {
       // the player's sword swing is its own event; NPC hits swing-and-hit together
-      case 'hit': if (!(ev.attacker instanceof Player)) this.swing(ev.attacker, ev.target, sprites); this.hit(ev.attacker, ev.target, ev.dmg); break;
+      case 'hit':
+        if (ev.attacker instanceof Raider && ev.attacker.kind !== 'rat' && ev.attacker.kind !== 'shaman') this.swing(ev.attacker, ev.target, sprites);
+        if (ev.attacker instanceof Bolt) this.magic.explode(8, ev.target.x, ev.target.y - 4);
+        this.hit(ev.attacker, ev.target, ev.dmg);
+        break;
+      case 'cast': this.magic.explode(10, ev.who.x, ev.who.y - 8); this.scene.tweens.add({ targets: this.anim(ev.who.id), sy: 1.15, sx: 0.9, duration: 120, yoyo: true }); break;
+      case 'impact': this.magic.explode(6, ev.x, ev.y); break;
       case 'swing': this.swing(ev.who, { x: ev.who.x + ev.dx * 20, y: ev.who.y + ev.dy * 20 }, sprites, 'sword', 360); break;
       case 'tool': this.tool(ev.tool, ev.tx, ev.ty, sprites); break;
       case 'boss': this.bossArrive(ev.who, sprites); break;
@@ -89,7 +99,7 @@ export class Fx {
   // ---- attacks ---------------------------------------------------------------
 
   private weaponFor(m: Mover): WeaponKind {
-    if (m instanceof Raider) return m.boss ? 'bigAxe' : 'axe';
+    if (m instanceof Raider) return m.boss || m.kind === 'brute' ? 'bigAxe' : m.kind === 'snatcher' ? 'dagger' : 'axe';
     return 'sword';
   }
 
@@ -127,7 +137,7 @@ export class Fx {
     w.setRotation(base - sweep);
     this.scene.tweens.add({ targets: w, rotation: base + sweep, duration: ms, ease: 'Cubic.Out' });
     this.swings.set(who.id, { sprite: w, ux, uy, t: 0, ttl: ms / 1000 + 0.05 });
-    if (who instanceof Raider && who.boss) this.shake(120, 0.006);
+    if (who instanceof Raider && (who.boss || who.kind === 'brute')) this.shake(who.boss ? 120 : 80, who.boss ? 0.006 : 0.004);
   }
 
   private hit(attacker: Mover, target: Mover, dmg: number): void {
@@ -135,10 +145,12 @@ export class Fx {
     const d = Math.hypot(dx, dy) || 1;
     const a = this.anim(target.id);
     this.scene.tweens.killTweensOf(a);
+    const heavy = target instanceof Raider && target.heavy;
+    const kb = heavy ? 0 : 4; // brutes don't budge
     this.scene.tweens.chain({
       targets: a,
       tweens: [
-        { ox: (dx / d) * 4, oy: (dy / d) * 4, sy: 0.8, sx: 1.1, duration: 60, ease: 'Quad.Out' },
+        { ox: (dx / d) * kb, oy: (dy / d) * kb, sy: heavy ? 0.94 : 0.8, sx: heavy ? 1.04 : 1.1, duration: 60, ease: 'Quad.Out' },
         { ox: 0, oy: 0, sy: 1, sx: 1, duration: 110, ease: 'Sine.Out' },
       ],
     });
@@ -165,9 +177,10 @@ export class Fx {
     sprite.disableInteractive();
     const done = () => { this.dying.delete(sprite); sprite.destroy(); };
     if (who) { this.anims.delete(who.id); this.weapons.get(who.id)?.setVisible(false); this.swings.delete(who.id); }
+    if (who instanceof Bolt) { sprite.destroy(); this.dying.delete(sprite); return; }
     if (who instanceof Raider) {
       const boss = who.boss;
-      this.blood.explode(boss ? 24 : 8, sprite.x, sprite.y - 4);
+      this.blood.explode(boss ? 24 : who.kind === 'rat' || who.kind === 'snatcher' ? 4 : 8, sprite.x, sprite.y - 4);
       if (boss) { this.gold.explode(30, sprite.x, sprite.y - 8); this.shake(400, 0.012); }
       this.scene.tweens.add({ targets: sprite, scaleY: 0.15, scaleX: sprite.scaleX * 1.3, alpha: 0, y: sprite.y + 4, duration: boss ? 1000 : 350, ease: 'Quad.In', onComplete: done });
       return;
