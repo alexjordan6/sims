@@ -137,6 +137,11 @@ export class VillageScene extends SimScene {
 
     super.create(); // creates gfx + hud, then calls reset() -> setup()
     kb.removeAllListeners('keydown-SPACE'); // Esc handles pause; Space is free for later
+    // the kernel's R (restart) / N (new seed) are far too easy to hit mid-run: restart lives in the pause menu,
+    // and R only works on the end screens where it means "new run"
+    kb.removeAllListeners('keydown-R');
+    kb.removeAllListeners('keydown-N');
+    kb.on('keydown-R', () => { if (this.screen === 'over' || this.screen === 'won') this.startGame(); });
     this.hud.setVisible(false);
 
     this.view = new Renderer(this);
