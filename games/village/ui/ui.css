@@ -307,7 +307,8 @@ body.touch .tooltip { display: none; }
 }
 .zoombtn { font-size: 18px; }
 
-body.touch, body.touch #side, body.touch #screens { touch-action: manipulation; }
+/* pan-x pan-y (not 'manipulation') keeps fast taps and scrolling but, unlike manipulation, does NOT re-permit pinch-zoom on every element that does not opt out with touch-action:none */
+body.touch, body.touch #side, body.touch #screens { touch-action: pan-x pan-y; }
 .zoomed-banner { position: fixed; left: 0; right: 0; top: 0; z-index: 100; display: flex; gap: 10px; align-items: center; justify-content: center; padding: 8px; background: #140f0bee; font-size: 14px; }
 
 /* =====================================================================================

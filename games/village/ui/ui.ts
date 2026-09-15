@@ -289,17 +289,29 @@ export class UI {
   }
 
   /**
-   * Phones ignore `user-scalable=no` (Safari especially): a stray pinch or double-tap zooms the
-   * whole page and pushes the controls off-screen. Swallow those gestures, and if the page is
-   * somehow zoomed anyway, offer a one-tap reload (there is no API to reset browser zoom).
+   * Phones ignore `user-scalable=no` (Safari especially), and `touch-action` alone doesn't cover
+   * every element: a stray pinch that starts over a bit of UI can still trigger the browser's own
+   * page zoom, which pans the fixed-layout controls off screen. Block what we can — but never
+   * block a *shrinking* pinch, so a stuck player can always pinch back out themselves — and if the
+   * page still ends up zoomed, try to force it back to 1x in place (no reload, run kept), falling
+   * back to a banner (positioned to the visible slice of the page, wherever that's panned to) and
+   * finally a reload only if nothing else worked.
    */
   private blockBrowserZoom(): void {
     const stop = (e: Event) => e.preventDefault();
     // Safari pinch
     document.addEventListener('gesturestart', stop, { passive: false });
     document.addEventListener('gesturechange', stop, { passive: false });
-    // other browsers: multi-finger pinch reported via touchmove
-    document.addEventListener('touchmove', (e) => { if (e.touches.length > 1 || (e as TouchEvent & { scale?: number }).scale! > 1) e.preventDefault(); }, { passive: false });
+    // other browsers: multi-finger pinch reported via touchmove. Block it from growing (zooming
+    // in) but always let it shrink (zooming back out) — that's the one native gesture a stuck
+    // player can fall back on, so it must never be the thing we're blocking.
+    let pinchStart = 0;
+    const pinchDist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    document.addEventListener('touchstart', (e) => { if (e.touches.length === 2) pinchStart = pinchDist(e.touches); }, { passive: true });
+    document.addEventListener('touchmove', (e) => {
+      if (e.touches.length < 2) return;
+      if (pinchDist(e.touches) > pinchStart + 4) e.preventDefault();
+    }, { passive: false });
     // double-tap zoom: eat the second tap of a quick double tap outside form fields
     let lastTap = 0;
     document.addEventListener('touchend', (e) => {
@@ -310,16 +322,46 @@ export class UI {
 
     const vv = window.visualViewport;
     if (!vv) return;
+
+    // re-applying the viewport meta tag forces most mobile browsers to drop a manual pinch-zoom,
+    // without a reload — this is the trick, there's no direct API for it
+    const meta = document.querySelector('meta[name="viewport"]');
+    const metaContent = meta?.getAttribute('content') ?? '';
+    const forceReset = (): void => {
+      if (!meta) return;
+      meta.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no');
+      meta.remove();
+      document.head.appendChild(meta);
+      requestAnimationFrame(() => meta.setAttribute('content', metaContent));
+    };
+
     let banner: HTMLElement | null = null;
-    const check = () => {
+    let attempted = false;
+    const positionBanner = (): void => {
+      // pin it to the visible slice of the page — while zoomed, that may not be the layout
+      // viewport's top edge, which is where a plain `position: fixed; top: 0` would sit
+      if (banner) { banner.style.left = `${vv.offsetLeft}px`; banner.style.top = `${vv.offsetTop}px`; banner.style.width = `${vv.width}px`; }
+    };
+    const check = (): void => {
       const zoomed = vv.scale > 1.08;
-      if (zoomed && !banner) {
+      if (!zoomed) {
+        attempted = false;
+        if (banner) { banner.remove(); banner = null; }
+        return;
+      }
+      if (!attempted) { attempted = true; forceReset(); setTimeout(check, 260); return; }
+      if (!banner) {
         banner = h(`<div class="zoomed-banner"><span>The page got zoomed in.</span><button class="btn ok">RESET VIEW</button></div>`);
-        banner.querySelector('button')!.addEventListener('click', () => location.reload());
+        banner.querySelector('button')!.addEventListener('click', () => {
+          forceReset();
+          setTimeout(() => { if ((vv.scale ?? 1) > 1.08) location.reload(); }, 260);
+        });
         document.body.append(banner);
-      } else if (!zoomed && banner) { banner.remove(); banner = null; }
+      }
+      positionBanner();
     };
     vv.addEventListener('resize', check);
+    vv.addEventListener('scroll', positionBanner);
     check();
   }
 
