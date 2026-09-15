@@ -478,3 +478,11 @@ body.touch .ctrl-tab { font-size: 7px; }
 /* minimap */
 .minimap { display: block; image-rendering: pixelated; border: 2px solid #0d0a08; background: #0d0a08; }
 .minimap-panel { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+
+/* buildings in the help screen: their own art at each level */
+.bld { margin: 6px 0 10px; }
+.bld-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 4px; }
+.lvls { display: flex; gap: 8px; flex-wrap: wrap; }
+.lv { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 118px; font-size: 12px; text-align: center; }
+.lv .art { image-rendering: pixelated; height: 60px; width: auto; }
+.lv i { color: var(--ink-dim); font-style: normal; font-size: 11px; }

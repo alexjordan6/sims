@@ -326,6 +326,13 @@ export class Fx {
     });
   }
 
+  /** Something good happened here (an upgrade): a big puff and a ring of sparks. */
+  celebrate(x: number, y: number): void {
+    this.poof(x, y - 6, 1.6);
+    this.sparks.explode(14, x, y - 8);
+    this.zoomBump(0.04, 80, 260);
+  }
+
   /** A white cartoon cloud that puffs out and dissolves. */
   private poof(x: number, y: number, size: number): void {
     this.puff.explode(Math.round(8 * size), x, y);

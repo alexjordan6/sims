@@ -1,10 +1,12 @@
 import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type Tool } from '../agents';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
-import { COST, p, RUN, CAPS, HOUSE_BEDS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS, TREE_YIELD, OLD_YIELD } from '../config';
+import { COST, p, RUN, LEVEL_PERKS, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS, TREE_YIELD, OLD_YIELD } from '../config';
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
+import { frameDataUrl, BUILDING_TEXTURE } from '../pixelart';
+import type { BuildingKind } from '../world';
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -590,6 +592,11 @@ export class UI {
     if (wasPlaying) s.togglePause();
     const who = (key: string, frame: number, cls: string, name: string, does: string) =>
       `<div class="who">${spr(key, frame, 32)}<div><span class="badge ${cls}">${name}</span><div class="d">${does}</div></div></div>`;
+    // a building drawn from its own art at each level, with what the level gives and how it looks
+    const building = (kind: BuildingKind, name: string, does: string) => {
+      const levels = [1, 2, 3].map((lv) => `<div class="lv"><img class="art" src="${frameDataUrl(s, BUILDING_TEXTURE[kind], lv - 1)}" alt=""><b>Lv${lv}</b><span>${LEVEL_PERKS[kind][lv]}</span><i>${LEVEL_LOOKS[kind][lv]}</i></div>`).join('');
+      return `<div class="bld"><div class="bld-head"><span class="badge farmer">${name}</span><span class="d">${does}</span></div><div class="lvls">${levels}</div></div>`;
+    };
     const card = h(`<div class="card panel help-card">
       <div class="ph">${spr('town', TOWN.sign, 24)}<h2>How to play</h2><button class="btn small close">CLOSE</button></div>
       <div class="help-cols">
@@ -614,11 +621,11 @@ export class UI {
           ${who('dungeon', DUNGEON.orc, 'raider', 'Brute', 'Slow, huge, ignores knockback, hunts soldiers. Gang up.')}
           ${who('dungeon', DUNGEON.wizard, 'raider', 'Shaman', 'Keeps its distance and casts bolts. Close in on it.')}
           <h3>BUILDINGS</h3>
-          ${who('town', TOWN.wallWoodDoor, 'farmer', 'House · ' + COST.house + ' wood', 'Beds for ' + HOUSE_BEDS[1] + ' (Lv2: 6, Lv3: 8 and more births). A couple here has children.')}
-          ${who('town', TOWN.wallStoneDoor, 'soldier', 'Barracks · ' + COST.barracks + ' wood', 'Children raised nearby become soldiers. Lv2: tougher soldiers, wider reach. Lv3: stronger, regenerating soldiers.')}
-          ${who('farm', 103, 'farmer', 'Granary', 'Holds your food: ' + CAPS[1] + ' / ' + CAPS[2] + ' / ' + CAPS[3] + ' by level. Its yard fills as the store does.')}
-          ${who('town', 92, 'woodcutter', 'Woodyard', 'Holds your wood: ' + CAPS[1] + ' / ' + CAPS[2] + ' / ' + CAPS[3] + ' by level. The log stack beside the cabin climbs as it fills.')}
-          <p>Buildings can't be damaged. Use the <b>HAMMER</b> on one (3 hits) to upgrade it for wood — every building has three levels, shown by a chimney (Lv2) and a gable (Lv3) on the roof.</p>
+          <p>Buildings can't be damaged. Use the <b>HAMMER</b> on one (3 hits) to upgrade it for wood. Every building has three levels — the brass studs on the sign by the door count them, and each level changes the building itself:</p>
+          ${building('house', 'House · ' + COST.house + ' wood', 'A couple here has children.')}
+          ${building('barracks', 'Barracks · ' + COST.barracks + ' wood', 'Children raised nearby become soldiers.')}
+          ${building('granary', 'Granary', 'Holds your food; the crate stack beside it climbs as the store fills.')}
+          ${building('woodyard', 'Woodyard', 'Holds your wood; the log stack beside the cabin climbs as it fills.')}
           <h3>GROVES</h3>
           <p>Trees spread onto neighbouring grass — but a lone tree barely does (about 1% a day) while a tree inside a grove seeds fast (up to 11%). A sapling with two or more trees beside it grows in ${SHELTERED_SAPLING_DAYS} days instead of ${SAPLING_DAYS}. So plant trees <b>together</b>, near the woodyard, and let the grove do the work.</p>
           <p>Trees age: after ${OLD_GROWTH_DAYS} days they become <b>old growth</b> — taller, and worth ${OLD_YIELD} wood instead of ${TREE_YIELD}. Woodcutters take old growth first and thin a grove from its edge.</p>

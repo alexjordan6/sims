@@ -45,5 +45,19 @@ export const CAPS = [0, 150, 300, 600] as const;
 export const UPGRADE_COST: Record<'house' | 'barracks' | 'granary' | 'woodyard', readonly number[]> = {
   house: [0, 30, 60], barracks: [0, 40, 80], granary: [0, 30, 60], woodyard: [0, 30, 60],
 };
+/** what each level of a building gives, in a few words (index = level); shown in tooltips, hints and help */
+export const LEVEL_PERKS: Record<'house' | 'barracks' | 'granary' | 'woodyard', readonly [string, string, string, string]> = {
+  house: ['', '4 beds', '6 beds', '8 beds · births +15%'],
+  barracks: ['', 'raises soldiers', 'soldiers +15 HP · reach 7×7', 'soldiers +30 HP · +20% dmg · regen'],
+  granary: ['', 'holds 150 food', 'holds 300 food', 'holds 600 food'],
+  woodyard: ['', 'holds 150 wood', 'holds 300 wood', 'holds 600 wood'],
+};
+/** what changes on the building itself at each level, for the help screen */
+export const LEVEL_LOOKS: Record<'house' | 'barracks' | 'granary' | 'woodyard', readonly [string, string, string, string]> = {
+  house: ['', 'cottage', 'chimney, flower boxes, porch', 'second storey'],
+  barracks: ['', 'banner', 'shields and stakes', 'watchtower and torches'],
+  granary: ['', 'barn', 'open hay loft', 'silo'],
+  woodyard: ['', 'cabin', 'chimney', 'lantern and loft window'],
+};
 /** beds per house level (index = level); overridden upward by the Big Families boon */
 export const HOUSE_BEDS = [0, 4, 6, 8] as const;

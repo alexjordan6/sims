@@ -1,170 +1,319 @@
 import Phaser from 'phaser';
 
-// Hand-drawn (procedurally, pixel by pixel) art that the Kenney sheets don't have.
+// Hand-drawn (procedurally, pixel by pixel) art that the Kenney sheets don't have: the village's
+// buildings and their stockpiles. One visual language throughout — steep plank gable roofs with
+// courses and a centre beam, plank (or stone) walls, framed windows, arched doors, ink outlines.
 
-const BARK_DARK = '#3b2314';
-const BARK = '#7a4a24';
-const BARK_LIGHT = '#a56a36';
-const FACE = '#e2b07a';
-const FACE_LIGHT = '#f4d3a6';
-const RING = '#c38a4e';
-const SHADOW = 'rgba(20, 12, 6, 0.35)';
+type Ctx = CanvasRenderingContext2D;
 
-/** One log seen end-on: a 6x6 bark ring around a pale face with growth rings. (x, y) is its top-left. */
-function logEnd(ctx: CanvasRenderingContext2D, x: number, y: number): void {
-  const px = (dx: number, dy: number, c: string) => { ctx.fillStyle = c; ctx.fillRect(x + dx, y + dy, 1, 1); };
-  // bark outline (rounded square)
-  for (let i = 1; i <= 4; i++) { px(i, 0, BARK_DARK); px(i, 5, BARK_DARK); px(0, i, BARK_DARK); px(5, i, BARK_DARK); }
-  // face
-  for (let dy = 1; dy <= 4; dy++) for (let dx = 1; dx <= 4; dx++) px(dx, dy, FACE);
-  // bark inner shading in the corners: light on the upper-left, dark on the lower-right
-  px(1, 1, BARK_LIGHT); px(4, 1, BARK); px(1, 4, BARK); px(4, 4, BARK_DARK);
-  px(2, 1, FACE_LIGHT); px(1, 2, FACE_LIGHT);
-  // growth ring + heart
-  px(2, 2, RING); px(3, 2, RING); px(2, 3, RING); px(3, 3, BARK);
-}
-
-/** A log lying along the ground, seen from the side: bark with a couple of grain lines and a cut end. */
-function logSide(ctx: CanvasRenderingContext2D, x: number, y: number, len: number): void {
-  ctx.fillStyle = BARK_DARK; ctx.fillRect(x, y, len, 5);
-  ctx.fillStyle = BARK; ctx.fillRect(x + 1, y + 1, len - 2, 3);
-  ctx.fillStyle = BARK_LIGHT; ctx.fillRect(x + 1, y + 1, len - 2, 1);
-  ctx.fillStyle = BARK_DARK; for (let i = x + 3; i < x + len - 2; i += 4) ctx.fillRect(i, y + 2, 2, 1);
-  ctx.fillStyle = FACE; ctx.fillRect(x + len - 2, y + 1, 1, 3);
-}
-
-/** Frame size of the `logs` texture; sprites use origin (0.5, 1) so piles sit on the ground. */
-export const LOGS_W = 18, LOGS_H = 20;
-
-/**
- * `logs` texture, 4 frames of growing wood piles: a couple of logs on the ground, then end-on
- * stacks of 3 / 3+2 / 3+2+1 logs. Safe to call more than once.
- */
-export function ensureLogPiles(scene: Phaser.Scene): void {
-  if (scene.textures.exists('logs')) return;
-  const tex = scene.textures.createCanvas('logs', LOGS_W * 4, LOGS_H)!;
-  const ctx = tex.getContext();
-  ctx.imageSmoothingEnabled = false;
-  const base = LOGS_H - 1; // ground line
-  const frame = (i: number) => i * LOGS_W;
-  const shadow = (x0: number, w: number) => { ctx.fillStyle = SHADOW; ctx.fillRect(x0, base - 1, w, 2); };
-
-  // 0: two logs lying on the ground
-  shadow(frame(0) + 2, 14);
-  logSide(ctx, frame(0) + 1, base - 5, 10);
-  logSide(ctx, frame(0) + 6, base - 9, 11);
-
-  // 1: a row of three
-  shadow(frame(1) + 1, 16);
-  for (let k = 0; k < 3; k++) logEnd(ctx, frame(1) + 1 + k * 5, base - 6);
-
-  // 2: three plus two
-  shadow(frame(2) + 1, 16);
-  for (let k = 0; k < 3; k++) logEnd(ctx, frame(2) + 1 + k * 5, base - 6);
-  for (let k = 0; k < 2; k++) logEnd(ctx, frame(2) + 4 + k * 5, base - 11);
-
-  // 3: a full pyramid, three-two-one
-  shadow(frame(3) + 1, 16);
-  for (let k = 0; k < 3; k++) logEnd(ctx, frame(3) + 1 + k * 5, base - 6);
-  for (let k = 0; k < 2; k++) logEnd(ctx, frame(3) + 4 + k * 5, base - 11);
-  logEnd(ctx, frame(3) + 6, base - 16);
-
-  tex.refresh();
-  for (let i = 0; i < 4; i++) tex.add(i, 0, frame(i), 0, LOGS_W, LOGS_H);
-}
-
-// ---- the woodyard: a plank cabin and a log stack that grows beside it -------------------------
-
-const PLANK = '#c48a4c', PLANK_DARK = '#a06c38', PLANK_LIGHT = '#dba566';
-const WALL = '#6e3d2c', WALL_DARK = '#4e2a1f', WALL_LIGHT = '#8a4d36';
-const FRAME = '#d19a5a';
 const INK = '#2a1a16';
-const STONE = '#8d8f95', STONE_DARK = '#5e6067';
+const SHADOW = 'rgba(20, 12, 6, 0.35)';
+const GLASS = '#3d2a30';
+const GLOW = '#ffd75a';
+const BRASS = '#e0b04a';
+const STONE = '#8d8f95', STONE_DARK = '#5e6067', STONE_LIGHT = '#b0b3b9';
+const IRON = '#4a4e57';
+const RED = '#c23b3b', RED_DARK = '#7d2424';
+const BLUE = '#3f6fd1';
+const HAY = '#e0b954', HAY_DARK = '#b8912f';
+const LEAF = '#4f9a3c';
 
-/** Cabin frame size; drawn with origin (0, 0) at the tile above the footprint's top-left. */
-export const CABIN_W = 32, CABIN_H = 48;
+// log ends
+const BARK_DARK = '#3b2314', BARK = '#7a4a24', BARK_LIGHT = '#a56a36';
+const FACE = '#e2b07a', FACE_LIGHT = '#f4d3a6', RING = '#c38a4e';
 
-/**
- * `cabin` texture, 3 frames by level: a steep plank roof over dark plank walls with a window and
- * an arched door. Lv2 adds a stone chimney, Lv3 a second window and a lantern by the door.
- */
-export function ensureCabin(scene: Phaser.Scene): void {
-  if (scene.textures.exists('cabin')) return;
-  const tex = scene.textures.createCanvas('cabin', CABIN_W * 3, CABIN_H)!;
-  const ctx = tex.getContext();
-  ctx.imageSmoothingEnabled = false;
-  for (let level = 1; level <= 3; level++) {
-    const ox = (level - 1) * CABIN_W;
-    const px = (x: number, y: number, c: string, w = 1, h = 1) => { ctx.fillStyle = c; ctx.fillRect(ox + x, y, w, h); };
+/** Roof / wall / trim colours for one building kind. */
+export interface Palette {
+  roof: string; roofDark: string; roofLight: string;
+  wall: string; wallDark: string; wallLight: string;
+  frame: string;
+  stone?: boolean; // walls laid as stone blocks instead of planks
+}
 
-    // walls: 26 wide, y 24..47, plank rows with dark seams
-    px(3, 24, INK, 26, 24);
-    px(4, 25, WALL, 24, 22);
-    for (let y = 29; y < 47; y += 5) px(4, y, WALL_DARK, 24, 1);
-    for (let y = 25; y < 47; y += 5) px(4, y, WALL_LIGHT, 24, 1);
-    // staggered plank ends
-    for (let y = 26, k = 0; y < 46; y += 5, k++) px(k % 2 ? 16 : 9, y, WALL_DARK, 1, 3);
-    // window (left)
-    px(7, 30, FRAME, 8, 8); px(8, 31, INK, 6, 6); px(9, 32, '#3d2a30', 4, 4);
-    // door (right): arched, dark inside, tan frame
-    px(18, 33, FRAME, 9, 14); px(19, 35, INK, 7, 12); px(20, 34, INK, 5, 1); px(21, 33, INK, 3, 1);
-    px(19, 34, FRAME, 1, 1); px(25, 34, FRAME, 1, 1);
-    px(24, 41, PLANK_LIGHT, 1, 1); // handle
-    // roof: a gable from the peak at (16, 0) down to the eaves at y 24, overhanging the walls
-    for (let y = 0; y < 26; y++) {
-      const half = Math.min(16, 3 + y * 0.62); // slope
-      const x0 = Math.round(16 - half), x1 = Math.round(16 + half);
-      px(x0, y, INK, x1 - x0, 1);
-      if (y > 0 && x1 - x0 > 2) px(x0 + 1, y, PLANK, x1 - x0 - 2, 1);
-    }
-    // plank courses across the roof, following the slope
-    for (let y = 5; y < 25; y += 5) {
-      const half = Math.min(16, 3 + y * 0.62);
-      const x0 = Math.round(16 - half) + 1, x1 = Math.round(16 + half) - 1;
-      px(x0, y, PLANK_DARK, x1 - x0, 1);
-      px(x0, y - 4, PLANK_LIGHT, x1 - x0, 1);
-      px(x0 + ((y / 5) % 2 ? 4 : 9), y - 3, PLANK_DARK, 1, 3); // plank end seams
-      px(x1 - ((y / 5) % 2 ? 9 : 4), y - 3, PLANK_DARK, 1, 3);
-    }
-    // ridge beam down the middle
-    px(15, 0, INK, 3, 25); px(16, 1, PLANK_DARK, 1, 24);
-    // eaves shadow on the wall
-    px(4, 25, WALL_DARK, 24, 1);
+export const PALETTES = {
+  house: { roof: '#c48a4c', roofDark: '#a06c38', roofLight: '#dba566', wall: '#6e3d2c', wallDark: '#4e2a1f', wallLight: '#8a4d36', frame: '#d19a5a' },
+  barracks: { roof: '#6f7d8c', roofDark: '#4f5b68', roofLight: '#8b99a8', wall: '#7a7e86', wallDark: '#5a5e66', wallLight: '#969aa2', frame: '#b7a27a', stone: true },
+  granary: { roof: '#b8463a', roofDark: '#8f3229', roofLight: '#d3675a', wall: '#8a4632', wallDark: '#61301f', wallLight: '#a85a3e', frame: '#e0b078' },
+  woodyard: { roof: '#c48a4c', roofDark: '#a06c38', roofLight: '#dba566', wall: '#6e3d2c', wallDark: '#4e2a1f', wallLight: '#8a4d36', frame: '#d19a5a' },
+} satisfies Record<string, Palette>;
 
-    if (level >= 2) { // stone chimney on the right slope
-      px(23, 3, INK, 5, 11); px(24, 4, STONE, 3, 9); px(24, 6, STONE_DARK, 3, 1); px(24, 9, STONE_DARK, 3, 1); px(25, 2, INK, 1, 1);
-    }
-    if (level >= 3) { // second window and a lantern by the door
-      px(7, 40, FRAME, 8, 6); px(8, 41, INK, 6, 4); px(9, 42, '#3d2a30', 4, 2);
-      px(28, 34, INK, 3, 5); px(29, 35, '#ffd75a', 1, 3); px(29, 33, INK, 1, 1);
+// ---- primitives -----------------------------------------------------------------------------
+
+function px(ctx: Ctx, x: number, y: number, c: string, w = 1, h = 1): void { ctx.fillStyle = c; ctx.fillRect(x, y, w, h); }
+
+/** A steep gable roof: peak at (x + w/2, y), eaves at y + h across the full width. Plank courses, seams, ridge beam. */
+function gableRoof(ctx: Ctx, x: number, y: number, w: number, h: number, p: Palette): void {
+  const cx = x + w / 2, maxHalf = w / 2;
+  const slope = (maxHalf - 3) / (h - 4);
+  const half = (r: number) => Math.min(maxHalf, 3 + r * slope);
+  for (let r = 0; r < h; r++) {
+    const x0 = Math.round(cx - half(r)), x1 = Math.round(cx + half(r));
+    px(ctx, x0, y + r, INK, x1 - x0, 1);
+    if (r > 0 && x1 - x0 > 2) px(ctx, x0 + 1, y + r, p.roof, x1 - x0 - 2, 1);
+  }
+  for (let r = 5; r < h - 1; r += 5) {
+    const x0 = Math.round(cx - half(r)) + 1, x1 = Math.round(cx + half(r)) - 1;
+    px(ctx, x0, y + r, p.roofDark, x1 - x0, 1);
+    const xl = Math.round(cx - half(r - 4)) + 1, xr = Math.round(cx + half(r - 4)) - 1;
+    px(ctx, xl, y + r - 4, p.roofLight, xr - xl, 1);
+    const off = (r / 5) % 2 ? 4 : 9;
+    if (x0 + off < cx - 2) px(ctx, x0 + off, y + r - 3, p.roofDark, 1, 3);
+    if (x1 - off > cx + 2) px(ctx, x1 - off, y + r - 3, p.roofDark, 1, 3);
+  }
+  px(ctx, Math.round(cx) - 1, y, INK, 3, h - 1);
+  px(ctx, Math.round(cx), y + 1, p.roofDark, 1, h - 2);
+}
+
+/** Plank (or stone-block) wall with an ink border; the top row is the eaves shadow. */
+function wall(ctx: Ctx, x: number, y: number, w: number, h: number, p: Palette): void {
+  px(ctx, x, y, INK, w, h);
+  px(ctx, x + 1, y + 1, p.wall, w - 2, h - 2);
+  if (p.stone) {
+    for (let r = y + 4; r < y + h - 1; r += 4) px(ctx, x + 1, r, p.wallDark, w - 2, 1);
+    for (let r = y + 1, k = 0; r < y + h - 1; r += 4, k++)
+      for (let c = x + 1 + (k % 2 ? 3 : 0); c < x + w - 1; c += 6) { px(ctx, c, r, p.wallDark, 1, 3); px(ctx, c + 1, r, p.wallLight, 2, 1); }
+  } else {
+    for (let r = y + 5; r < y + h - 1; r += 5) px(ctx, x + 1, r, p.wallDark, w - 2, 1);
+    for (let r = y + 1; r < y + h - 1; r += 5) px(ctx, x + 1, r, p.wallLight, w - 2, 1);
+    for (let r = y + 2, k = 0; r < y + h - 2; r += 5, k++) {
+      for (let c = x + (k % 2 ? 7 : 3); c < x + w - 2; c += 13) px(ctx, c, r, p.wallDark, 1, 3);
     }
   }
-  tex.refresh();
-  for (let i = 0; i < 3; i++) tex.add(i, 0, i * CABIN_W, 0, CABIN_W, CABIN_H);
+  px(ctx, x + 1, y + 1, p.wallDark, w - 2, 1);
 }
 
-/** Log stack frame size; origin (0, 1) sits it on the ground. `STACK_ROWS` is the tallest stack. */
+function windowAt(ctx: Ctx, x: number, y: number, w: number, h: number, p: Palette, lit = false): void {
+  px(ctx, x, y, p.frame, w, h);
+  px(ctx, x + 1, y + 1, INK, w - 2, h - 2);
+  px(ctx, x + 2, y + 2, lit ? GLOW : GLASS, w - 4, h - 4);
+  if (w >= 8 && h >= 8) { px(ctx, x + Math.floor(w / 2), y + 2, INK, 1, h - 4); px(ctx, x + 2, y + Math.floor(h / 2), INK, w - 4, 1); }
+}
+
+/** Arched door: frame, dark opening with a rounded top, a handle. */
+function archDoor(ctx: Ctx, x: number, y: number, w: number, h: number, p: Palette): void {
+  px(ctx, x, y, p.frame, w, h);
+  px(ctx, x + 1, y + 2, INK, w - 2, h - 2);
+  px(ctx, x + 2, y + 1, INK, w - 4, 1);
+  px(ctx, x + 1, y + 1, p.frame, 1, 1); px(ctx, x + w - 2, y + 1, p.frame, 1, 1);
+  px(ctx, x + w - 3, y + Math.floor(h / 2), p.roofLight, 1, 1);
+}
+
+/** Iron-banded double door (barracks, barn). */
+function doubleDoor(ctx: Ctx, x: number, y: number, w: number, h: number, p: Palette, banded = true): void {
+  px(ctx, x, y, p.frame, w, h);
+  px(ctx, x + 1, y + 1, p.wallDark, w - 2, h - 1);
+  px(ctx, x + Math.floor(w / 2), y + 1, INK, 1, h - 1);
+  if (banded) { px(ctx, x + 1, y + 3, IRON, w - 2, 1); px(ctx, x + 1, y + h - 5, IRON, w - 2, 1); px(ctx, x + 2, y + 3, STONE_LIGHT, 1, 1); px(ctx, x + w - 3, y + h - 5, STONE_LIGHT, 1, 1); }
+  else { px(ctx, x + 1, y + 1, INK, w - 2, 1); }
+  px(ctx, x + 1, y + h - 1, INK, w - 2, 1);
+}
+
+function chimney(ctx: Ctx, x: number, y: number, h = 11): void {
+  px(ctx, x, y, INK, 5, h); px(ctx, x + 1, y + 1, STONE, 3, h - 2);
+  px(ctx, x + 1, y + 3, STONE_DARK, 3, 1); px(ctx, x + 1, y + 6, STONE_DARK, 3, 1);
+  px(ctx, x + 2, y - 1, INK, 1, 1);
+  px(ctx, x, y, INK, 5, 1); px(ctx, x - 1, y + 1, INK, 7, 1); px(ctx, x, y + 1, STONE_LIGHT, 5, 1);
+}
+
+function lantern(ctx: Ctx, x: number, y: number): void { px(ctx, x, y, INK, 3, 5); px(ctx, x + 1, y + 1, GLOW, 1, 3); px(ctx, x + 1, y - 1, INK, 1, 1); }
+function torch(ctx: Ctx, x: number, y: number): void { px(ctx, x, y + 2, BARK_DARK, 1, 5); px(ctx, x - 1, y, '#ff8a2a', 3, 2); px(ctx, x, y - 1, GLOW, 1, 1); }
+
+function banner(ctx: Ctx, x: number, y: number, colour: string, dark: string): void {
+  px(ctx, x, y, INK, 1, 16);
+  px(ctx, x + 1, y + 1, INK, 7, 11); px(ctx, x + 2, y + 2, colour, 5, 9); px(ctx, x + 2, y + 9, dark, 5, 2);
+  px(ctx, x + 4, y + 10, INK, 1, 2); // notched hem
+  px(ctx, x + 4, y + 4, GLOW, 1, 2);
+}
+
+function shield(ctx: Ctx, x: number, y: number): void {
+  px(ctx, x + 1, y, INK, 5, 7); px(ctx, x, y + 1, INK, 7, 4);
+  px(ctx, x + 2, y + 1, RED, 3, 5); px(ctx, x + 1, y + 2, RED, 5, 2);
+  px(ctx, x + 3, y + 3, BRASS, 1, 1); px(ctx, x + 2, y + 1, '#e46a6a', 1, 1);
+}
+
+/** A row of sharpened stakes along the ground. */
+function stakes(ctx: Ctx, x: number, y: number, w: number, skipFrom: number, skipTo: number): void {
+  for (let c = x; c < x + w - 2; c += 4) {
+    if (c >= skipFrom && c < skipTo) continue;
+    px(ctx, c, y + 1, INK, 3, 3); px(ctx, c + 1, y, INK, 1, 1);
+    px(ctx, c + 1, y + 1, BARK_LIGHT, 1, 1); px(ctx, c + 1, y + 2, BARK, 1, 2);
+  }
+}
+
+/** Level plaque above the door: a little wooden sign with one brass stud per level. */
+function plaque(ctx: Ctx, x: number, y: number, level: number, p: Palette): void {
+  px(ctx, x, y, INK, 11, 6); px(ctx, x + 1, y + 1, p.frame, 9, 4);
+  for (let i = 0; i < level; i++) px(ctx, x + 2 + i * 3, y + 2, BRASS, 2, 2);
+}
+
+function flowerBox(ctx: Ctx, x: number, y: number, w: number): void {
+  px(ctx, x, y, INK, w, 3); px(ctx, x + 1, y + 1, BARK, w - 2, 1);
+  for (let c = x + 1; c < x + w - 1; c += 2) px(ctx, c, y - 1, c % 4 ? '#e85a7a' : GLOW, 1, 1);
+  for (let c = x + 2; c < x + w - 1; c += 2) px(ctx, c, y, LEAF, 1, 1);
+}
+
+/** Grain silo: a banded stone cylinder with a domed cap and a weather vane. */
+function silo(ctx: Ctx, x: number, y: number, w: number, h: number): void {
+  px(ctx, x, y + 2, INK, w, h - 2); px(ctx, x + 1, y + 3, STONE, w - 2, h - 4);
+  px(ctx, x + 1, y + 3, STONE_LIGHT, 1, h - 4); px(ctx, x + w - 2, y + 3, STONE_DARK, 1, h - 4);
+  for (let r = y + 7; r < y + h - 2; r += 5) px(ctx, x + 1, r, IRON, w - 2, 1);
+  px(ctx, x + 1, y, INK, w - 2, 2); px(ctx, x + 2, y + 1, RED_DARK, w - 4, 1); px(ctx, x, y + 2, INK, w, 1); px(ctx, x + 1, y + 2, RED, w - 2, 1);
+  const vx = x + Math.floor(w / 2);
+  px(ctx, vx, y - 4, INK, 1, 4); px(ctx, vx - 2, y - 4, INK, 5, 1); px(ctx, vx + 2, y - 5, INK, 1, 1); px(ctx, vx - 2, y - 3, INK, 1, 1);
+}
+
+/** One log seen end-on: a 6x6 bark ring around a pale face with growth rings. */
+function logEnd(ctx: Ctx, x: number, y: number): void {
+  for (let i = 1; i <= 4; i++) { px(ctx, x + i, y, BARK_DARK); px(ctx, x + i, y + 5, BARK_DARK); px(ctx, x, y + i, BARK_DARK); px(ctx, x + 5, y + i, BARK_DARK); }
+  px(ctx, x + 1, y + 1, FACE, 4, 4);
+  px(ctx, x + 1, y + 1, BARK_LIGHT); px(ctx, x + 4, y + 1, BARK); px(ctx, x + 1, y + 4, BARK); px(ctx, x + 4, y + 4, BARK_DARK);
+  px(ctx, x + 2, y + 1, FACE_LIGHT); px(ctx, x + 1, y + 2, FACE_LIGHT);
+  px(ctx, x + 2, y + 2, RING); px(ctx, x + 3, y + 2, RING); px(ctx, x + 2, y + 3, RING); px(ctx, x + 3, y + 3, BARK);
+}
+
+/** One 6x6 produce crate: plank box with a cross brace and a red tomato peeking out. */
+function crateFace(ctx: Ctx, x: number, y: number): void {
+  px(ctx, x, y, INK, 6, 6); px(ctx, x + 1, y + 1, '#c48a4c', 4, 4);
+  px(ctx, x + 1, y + 1, '#dba566', 4, 1); px(ctx, x + 1, y + 4, '#a06c38', 4, 1);
+  px(ctx, x + 2, y + 2, '#a06c38', 1, 1); px(ctx, x + 3, y + 3, '#a06c38', 1, 1);
+  px(ctx, x + 3, y + 2, RED, 1, 1); px(ctx, x + 2, y + 3, RED, 1, 1);
+}
+
+/** Frame size of the cabin texture; origin (0, 0) sits at the tile above the footprint's top-left. */
+export const CABIN_W = 32, CABIN_H = 48;
+/** Frames of the 4x4 buildings: the footprint plus one roof-overhang row above. */
+export const BIG_W = 64, BIG_H = 80;
+/** Stock column (logs, crates): origin (0, 1) sits it on the ground. */
 export const STACK_W = 16, STACK_H = 48, STACK_ROWS = 9;
 
-/**
- * `logstack` texture, frames 0..STACK_ROWS: a brick-laid stack of end-on logs, one more row per
- * frame, so the pile at the woodyard visibly climbs as wood comes in.
- */
-export function ensureLogStack(scene: Phaser.Scene): void {
-  if (scene.textures.exists('logstack')) return;
-  const tex = scene.textures.createCanvas('logstack', STACK_W * (STACK_ROWS + 1), STACK_H)!;
+// ---- buildings, three frames each (Lv1..Lv3) --------------------------------------------------
+
+function drawHouse(ctx: Ctx, ox: number, level: number): void {
+  const p = PALETTES.house;
+  const roofH = level >= 3 ? 26 : 36; // a second storey pushes the roof up
+  const wallTop = roofH - 2;
+  wall(ctx, ox + 4, wallTop, 56, BIG_H - wallTop, p);
+  archDoor(ctx, ox + 36, 62, 10, 18, p);
+  windowAt(ctx, ox + 9, 46, 9, 8, p); windowAt(ctx, ox + 22, 46, 9, 8, p);
+  if (level >= 2) {
+    windowAt(ctx, ox + 49, 46, 9, 8, p);
+    flowerBox(ctx, ox + 9, 55, 9); flowerBox(ctx, ox + 22, 55, 9); flowerBox(ctx, ox + 49, 55, 9);
+    px(ctx, ox + 34, 78, INK, 14, 2); px(ctx, ox + 35, 78, p.frame, 12, 1); // porch step
+  }
+  if (level >= 3) {
+    for (const x of [9, 22, 35, 48]) windowAt(ctx, ox + x, 30, 9, 8, p, x === 35);
+    lantern(ctx, ox + 48, 64);
+  }
+  gableRoof(ctx, ox, 0, BIG_W, roofH, p);
+  if (level >= 2) chimney(ctx, ox + 46, level >= 3 ? 6 : 10);
+  plaque(ctx, ox + 35, 55, level, p);
+}
+
+function drawBarracks(ctx: Ctx, ox: number, level: number): void {
+  const p = PALETTES.barracks;
+  const roofH = 34, wallTop = roofH - 2;
+  wall(ctx, ox + 4, wallTop, 56, BIG_H - wallTop, p);
+  doubleDoor(ctx, ox + 25, 60, 14, 20, p);
+  windowAt(ctx, ox + 10, 46, 7, 7, p); windowAt(ctx, ox + 47, 46, 7, 7, p);
+  banner(ctx, ox + 44, 40, BLUE, '#274a9c');
+  if (level >= 2) {
+    shield(ctx, ox + 16, 62); shield(ctx, ox + 41, 62);
+    stakes(ctx, ox + 4, 76, 56, ox + 22, ox + 42);
+  }
+  gableRoof(ctx, ox, 0, BIG_W, roofH, p);
+  if (level >= 3) {
+    // watchtower rising through the right slope
+    px(ctx, ox + 47, 4, INK, 13, 32); px(ctx, ox + 48, 5, p.wall, 11, 30);
+    for (let r = 9; r < 34; r += 4) px(ctx, ox + 48, r, p.wallDark, 11, 1);
+    px(ctx, ox + 52, 12, INK, 3, 6); px(ctx, ox + 53, 13, GLASS, 1, 4);
+    px(ctx, ox + 46, 2, INK, 15, 3); px(ctx, ox + 47, 3, p.roofDark, 13, 1);
+    px(ctx, ox + 49, 0, INK, 1, 2); px(ctx, ox + 50, 0, RED, 4, 2); px(ctx, ox + 46, 1, INK, 1, 1);
+    torch(ctx, ox + 21, 56); torch(ctx, ox + 43, 56);
+    banner(ctx, ox + 12, 40, RED, RED_DARK);
+  }
+  plaque(ctx, ox + 26, 53, level, p);
+}
+
+function drawGranary(ctx: Ctx, ox: number, level: number): void {
+  const p = PALETTES.granary;
+  if (level >= 3) silo(ctx, ox + 23, 6, 8, 20);
+  wall(ctx, ox + 3, 20, 26, CABIN_H - 20, p);
+  doubleDoor(ctx, ox + 11, 34, 10, 14, p, false);
+  px(ctx, ox + 12, 36, p.frame, 1, 10); px(ctx, ox + 19, 36, p.frame, 1, 10); // barn door braces
+  if (level >= 2) {
+    // loft door open with hay, a pulley beam poking out of the peak
+    px(ctx, ox + 12, 23, INK, 8, 8); px(ctx, ox + 13, 24, HAY, 6, 6); px(ctx, ox + 13, 27, HAY_DARK, 6, 1); px(ctx, ox + 15, 25, HAY_DARK, 1, 3);
+    px(ctx, ox + 15, 19, INK, 2, 4); px(ctx, ox + 14, 18, INK, 4, 1);
+    windowAt(ctx, ox + 23, 37, 5, 5, p);
+  } else {
+    // closed loft door with an X brace
+    px(ctx, ox + 12, 23, p.frame, 8, 8); px(ctx, ox + 13, 24, p.wallDark, 6, 6);
+    for (let i = 0; i < 6; i++) { px(ctx, ox + 13 + i, 24 + i, p.frame); px(ctx, ox + 18 - i, 24 + i, p.frame); }
+  }
+  gableRoof(ctx, ox, 0, CABIN_W, 22, p);
+  plaque(ctx, ox + 4, 22, level, p);
+}
+
+function drawCabin(ctx: Ctx, ox: number, level: number): void {
+  const p = PALETTES.woodyard;
+  wall(ctx, ox + 3, 24, 26, CABIN_H - 24, p);
+  windowAt(ctx, ox + 7, 30, 8, 8, p);
+  archDoor(ctx, ox + 18, 33, 9, 15, p);
+  if (level >= 3) { windowAt(ctx, ox + 7, 40, 8, 6, p); lantern(ctx, ox + 28, 35); }
+  gableRoof(ctx, ox, 0, CABIN_W, 26, p);
+  if (level >= 2) chimney(ctx, ox + 23, 4);
+  plaque(ctx, ox + 17, 27, level, p);
+}
+
+function stackTexture(scene: Phaser.Scene, key: string, unit: (ctx: Ctx, x: number, y: number) => void): void {
+  if (scene.textures.exists(key)) return;
+  const tex = scene.textures.createCanvas(key, STACK_W * (STACK_ROWS + 1), STACK_H)!;
   const ctx = tex.getContext();
   ctx.imageSmoothingEnabled = false;
   const base = STACK_H - 1;
   for (let rows = 0; rows <= STACK_ROWS; rows++) {
     const ox = rows * STACK_W;
-    if (rows > 0) { ctx.fillStyle = SHADOW; ctx.fillRect(ox, base - 1, STACK_W, 2); }
+    if (rows > 0) px(ctx, ox, base - 1, SHADOW, STACK_W, 2);
     for (let r = 0; r < rows; r++) {
       const y = base - 6 - r * 5;
-      if (r % 2 === 0) for (let k = 0; k < 3; k++) logEnd(ctx, ox + k * 5, y);
-      else for (let k = 0; k < 2; k++) logEnd(ctx, ox + 3 + k * 5, y);
+      if (r % 2 === 0) for (let k = 0; k < 3; k++) unit(ctx, ox + k * 5, y);
+      else for (let k = 0; k < 2; k++) unit(ctx, ox + 3 + k * 5, y);
     }
   }
   tex.refresh();
   for (let i = 0; i <= STACK_ROWS; i++) tex.add(i, 0, i * STACK_W, 0, STACK_W, STACK_H);
+}
+
+function buildingTexture(scene: Phaser.Scene, key: string, w: number, h: number, draw: (ctx: Ctx, ox: number, level: number) => void): void {
+  if (scene.textures.exists(key)) return;
+  const tex = scene.textures.createCanvas(key, w * 3, h)!;
+  const ctx = tex.getContext();
+  ctx.imageSmoothingEnabled = false;
+  for (let level = 1; level <= 3; level++) draw(ctx, (level - 1) * w, level);
+  tex.refresh();
+  for (let i = 0; i < 3; i++) tex.add(i, 0, i * w, 0, w, h);
+}
+
+/** Texture key for a building kind; frame = level - 1. */
+export const BUILDING_TEXTURE = { house: 'bld-house', barracks: 'bld-barracks', granary: 'bld-granary', woodyard: 'cabin' } as const;
+
+/** Create every building and stock texture (safe to call more than once). */
+export function ensureBuildingArt(scene: Phaser.Scene): void {
+  buildingTexture(scene, 'bld-house', BIG_W, BIG_H, drawHouse);
+  buildingTexture(scene, 'bld-barracks', BIG_W, BIG_H, drawBarracks);
+  buildingTexture(scene, 'bld-granary', CABIN_W, CABIN_H, drawGranary);
+  buildingTexture(scene, 'cabin', CABIN_W, CABIN_H, drawCabin);
+  stackTexture(scene, 'logstack', logEnd);
+  stackTexture(scene, 'cratestack', crateFace);
+}
+
+/** PNG data URL of one frame of a generated texture, for the DOM help screen. */
+export function frameDataUrl(scene: Phaser.Scene, key: string, frame: number): string {
+  const tex = scene.textures.get(key);
+  const f = tex.get(frame);
+  const src = tex.getSourceImage() as HTMLCanvasElement;
+  const c = document.createElement('canvas');
+  c.width = f.width; c.height = f.height;
+  c.getContext('2d')!.drawImage(src, f.cutX, f.cutY, f.width, f.height, 0, 0, f.width, f.height);
+  return c.toDataURL();
 }

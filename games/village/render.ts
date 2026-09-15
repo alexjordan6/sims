@@ -1,12 +1,12 @@
 import Phaser from 'phaser';
-import { World, BUILDINGS, yardOf, type Tile, type Building, type BuildingKind } from './world';
+import { World, BUILDINGS, doorstep, type Tile, type Building, type BuildingKind } from './world';
 import { Mover, Villager, Raider, Player } from './agents';
 import { Bolt } from './enemies';
 import { TOWN, FARM, CHAR } from './atlas';
 import { TILE, COLS, ROWS, CAPS, OLD_GROWTH_DAYS } from './config';
 import type { VillageScene } from './main';
 import { Fx } from './fx';
-import { ensureLogPiles, ensureCabin, ensureLogStack, STACK_ROWS } from './pixelart';
+import { ensureBuildingArt, BUILDING_TEXTURE, STACK_ROWS } from './pixelart';
 
 import townUrl from './assets/town.png';
 import farmUrl from './assets/farm.png';
@@ -16,56 +16,7 @@ import dungeonUrl from './assets/dungeon.png';
 const GID = { town: 1, farm: 1 + 132, dungeon: 1 + 264 } as const;
 const EMPTY = -1;
 
-/**
- * Building art per kind: `ridge` is the overhanging roof row drawn above the footprint (over agents),
- * `parts` the footprint row-major. Gids are relative to the town sheet unless wrapped by farm().
- * Level markers replace the ridge's end tiles: Lv2 adds a chimney, Lv3 a gable peak beside it.
- */
-const farm = (f: number) => GID.farm - GID.town + f; // express a farm-sheet frame as a town-relative gid
-const BUILDING: Record<BuildingKind, { ridge: readonly number[]; parts: readonly number[]; chimney: number; peak: number }> = {
-  house: {
-    ridge: [52, 53, 53, 54],
-    parts: [
-      64, 65, 65, 66,
-      64, 65, 65, 66,
-      72, 84, 84, 75, // wall edges with two windows
-      72, TOWN.wallWoodDoor, 73, 75, // door, plain wall
-    ],
-    chimney: 55, peak: 63,
-  },
-  barracks: {
-    ridge: [48, 49, 49, 50],
-    parts: [
-      60, 61, 61, 62,
-      60, 61, 61, 62,
-      76, 88, 88, 79,
-      76, TOWN.wallStoneDoor, 77, 79,
-    ],
-    chimney: 51, peak: 67,
-  },
-  // red barn from the farm sheet: X-braced doors on top, plank walls below
-  granary: {
-    ridge: [farm(90), farm(91), farm(92)],
-    parts: [
-      farm(102), farm(103), farm(104),
-      farm(114), farm(115), farm(116),
-    ],
-    chimney: farm(96), peak: farm(97), // hay bale, then a grain barrel on the roofline
-  },
-  // the woodyard is drawn as sprites (a cabin and a log stack, see paintYards); its tiles stay bare
-  woodyard: {
-    ridge: [EMPTY, EMPTY, EMPTY],
-    parts: [
-      EMPTY, EMPTY, EMPTY,
-      EMPTY, EMPTY, EMPTY,
-    ],
-    chimney: EMPTY, peak: EMPTY,
-  },
-};
-/** Granary yard stock, by tier: crate, hay bale, grain barrel (farm-sheet frames). */
-const GRANARY_STOCK = [FARM.crate, FARM.hayBale, 97] as const;
-
-export const DEPTH = { ground: 0, objects: 1, under: 5, agents: 10, roofs: 20, bars: 30, night: 40, arrows: 50 } as const;
+export const DEPTH = { ground: 0, objects: 1, under: 5, agents: 10, bars: 30, night: 40, arrows: 50 } as const;
 
 /** Load the three spritesheets. Call from the scene's preload(). */
 export function preloadArt(scene: Phaser.Scene): void {
@@ -75,16 +26,15 @@ export function preloadArt(scene: Phaser.Scene): void {
 }
 
 /**
- * Draws the world: three tilemap layers (ground / objects / roofs), one sprite per agent,
+ * Draws the world: two tilemap layers (ground / objects), buildings as hand-drawn sprites, one sprite per agent,
  * HP bars, the faced-tile cursor, selection ring and the day/night tint.
  */
 export class Renderer {
   private ground!: Phaser.Tilemaps.TilemapLayer;
   private objects!: Phaser.Tilemaps.TilemapLayer;
-  private roofs!: Phaser.Tilemaps.TilemapLayer;
   private sprites = new Map<number, Phaser.GameObjects.Sprite>();
-  /** stock shown at a supply building: 3 yard slots (granary) or the cabin + growing log stack (woodyard) */
-  private yards = new Map<Building, Phaser.GameObjects.Image[]>();
+  /** each building's sprite (frame = level - 1) and, for the supply buildings, its climbing stock column */
+  private buildings = new Map<Building, { body: Phaser.GameObjects.Image; stock?: Phaser.GameObjects.Image }>();
   private under: Phaser.GameObjects.Graphics;
   private bars: Phaser.GameObjects.Graphics;
   private night: Phaser.GameObjects.Rectangle;
@@ -103,15 +53,12 @@ export class Renderer {
     const sets = [town, farm, dungeon];
     this.ground = map.createBlankLayer('ground', sets)!.setDepth(DEPTH.ground);
     this.objects = map.createBlankLayer('objects', sets)!.setDepth(DEPTH.objects);
-    this.roofs = map.createBlankLayer('roofs', sets)!.setDepth(DEPTH.roofs);
     this.under = scene.add.graphics().setDepth(DEPTH.under);
     this.bars = scene.add.graphics().setDepth(DEPTH.bars);
     this.night = scene.add.rectangle(0, 0, COLS * TILE, ROWS * TILE, 0x060612, 0).setOrigin(0).setDepth(DEPTH.night);
     this.arrows = scene.add.graphics().setDepth(DEPTH.arrows).setScrollFactor(0);
     this.fx = new Fx(scene);
-    ensureLogPiles(scene);
-    ensureCabin(scene);
-    ensureLogStack(scene);
+    ensureBuildingArt(scene);
   }
 
   /** Redraw every tile and drop all sprites (after a reset). */
@@ -119,9 +66,8 @@ export class Renderer {
     for (const s of this.sprites.values()) s.destroy();
     this.sprites.clear();
     this.fx.clear();
-    for (const imgs of this.yards.values()) imgs.forEach((i) => i.destroy());
-    this.yards.clear();
-    this.roofs.fill(EMPTY);
+    for (const b of this.buildings.values()) { b.body.destroy(); b.stock?.destroy(); }
+    this.buildings.clear();
     const w = this.scene.world;
     for (let i = 0; i < w.tiles.length; i++) w.dirty.add(i);
     this.drainDirty();
@@ -130,10 +76,13 @@ export class Renderer {
   /** Per-frame: patch changed tiles, sync sprites, overlays. */
   sync(dt: number): void {
     this.t += dt;
-    this.paintYards();
+    this.paintBuildings();
     this.drainDirty();
     this.syncSprites();
-    for (const ev of this.scene.fx) this.fx.handle(ev, this.sprites);
+    for (const ev of this.scene.fx) {
+      if (ev.kind === 'upgrade') { this.upgradePop(ev.building); continue; }
+      this.fx.handle(ev, this.sprites);
+    }
     this.scene.fx.length = 0;
     this.fx.update(dt, this.sprites);
     this.drawOverlays();
@@ -143,49 +92,46 @@ export class Renderer {
   // ---- tiles ---------------------------------------------------------------
 
   /**
-   * The stockpile shows in the world. Granary: the yard in front fills slot by slot (each slot
-   * growing through crate → hay → barrel). Woodyard: a plank cabin on the left two tiles and, on
-   * the right, a stack of logs that climbs one row at a time as wood comes in.
+   * Buildings are sprites drawn in one hand-made style; the frame is the level, so upgrades
+   * change the building itself (chimneys, storeys, shields, a silo…). The supply buildings
+   * carry a stock column beside them — logs at the woodyard, produce crates at the granary —
+   * that climbs one row per ninth of the cap stored. Depth sorts with agents by the bottom edge.
    */
-  private paintYards(): void {
+  private paintBuildings(): void {
     const s = this.scene;
     for (const b of s.world.buildings) {
-      if (b.kind === 'granary') this.paintGranaryYard(b);
-      else if (b.kind === 'woodyard') this.paintWoodyard(b);
+      const f = BUILDINGS[b.kind];
+      let e = this.buildings.get(b);
+      if (!e) {
+        const bottom = (b.ty + f.h) * TILE;
+        const depth = DEPTH.agents + bottom / 1000 - 0.0005;
+        e = { body: s.add.image(b.tx * TILE, (b.ty - 1) * TILE, BUILDING_TEXTURE[b.kind], 0).setOrigin(0, 0).setDepth(depth) };
+        if (b.kind === 'granary' || b.kind === 'woodyard') {
+          e.stock = s.add.image((b.tx + 2) * TILE, bottom - 1, b.kind === 'granary' ? 'cratestack' : 'logstack', 0).setOrigin(0, 1).setDepth(depth);
+        }
+        this.buildings.set(b, e);
+      }
+      e.body.setFrame(Math.min(2, b.level - 1));
+      if (e.stock) {
+        const amount = b.kind === 'granary' ? s.food : s.wood;
+        const rows = amount <= 0 ? 0 : Math.min(STACK_ROWS, Math.max(1, Math.ceil((amount / CAPS[b.level]) * STACK_ROWS)));
+        e.stock.setFrame(rows);
+      }
     }
   }
 
-  private paintGranaryYard(b: Building): void {
-    const s = this.scene;
-    let imgs = this.yards.get(b);
-    if (!imgs) {
-      imgs = yardOf(b).map((q) => s.add.image((q.tx + 0.5) * TILE, (q.ty + 1) * TILE - 1, 'farm', GRANARY_STOCK[0]).setOrigin(0.5, 1).setDepth(DEPTH.objects + 1).setVisible(false));
-      this.yards.set(b, imgs);
-    }
-    const units = s.food <= 0 ? 0 : Math.min(9, Math.max(1, Math.ceil((s.food / CAPS[b.level]) * 9)));
-    for (let i = 0; i < 3; i++) {
-      const tier = Math.max(0, Math.min(3, units - i * 3));
-      imgs[i].setVisible(tier > 0);
-      if (tier > 0) imgs[i].setTexture('farm', GRANARY_STOCK[tier - 1]);
-    }
-  }
-
-  private paintWoodyard(b: Building): void {
-    const s = this.scene;
-    const f = BUILDINGS[b.kind];
-    let imgs = this.yards.get(b);
-    if (!imgs) {
-      imgs = [
-        // cabin: 2 tiles wide, 3 tall including the roof, which overhangs the row above the footprint
-        s.add.image(b.tx * TILE, (b.ty - 1) * TILE, 'cabin', 0).setOrigin(0, 0).setDepth(DEPTH.objects + 1),
-        // log stack in the third column, standing on the footprint's bottom edge
-        s.add.image((b.tx + 2) * TILE, (b.ty + f.h) * TILE - 1, 'logstack', 0).setOrigin(0, 1).setDepth(DEPTH.objects + 1),
-      ];
-      this.yards.set(b, imgs);
-    }
-    imgs[0].setFrame(Math.min(2, b.level - 1));
-    const rows = s.wood <= 0 ? 0 : Math.min(STACK_ROWS, Math.max(1, Math.ceil((s.wood / CAPS[b.level]) * STACK_ROWS)));
-    imgs[1].setFrame(rows);
+  /** An upgrade lands: the building pops and a cloud puffs out of its door. */
+  private upgradePop(b: Building): void {
+    const e = this.buildings.get(b);
+    if (!e) return;
+    const body = e.body;
+    body.setOrigin(0.5, 1).setPosition(body.x + body.width / 2, body.y + body.height);
+    this.scene.tweens.add({
+      targets: body, scaleX: 1.12, scaleY: 1.12, duration: 110, yoyo: true, ease: 'Quad.Out',
+      onComplete: () => body.setOrigin(0, 0).setPosition(body.x - body.width / 2, body.y - body.height),
+    });
+    const d = doorstep(b);
+    this.fx.celebrate((d.tx + 0.5) * TILE, d.ty * TILE);
   }
 
   private drainDirty(): void {
@@ -201,16 +147,6 @@ export class Renderer {
     const { ground, object } = tileFrames(t, this.scene.cropDays);
     this.ground.putTileAt(ground, tx, ty);
     this.objects.putTileAt(object, tx, ty);
-    // the roof ridge overhangs the row above the footprint (drawn over agents); level markers sit on it
-    const b = t.building;
-    if (b && (t.part ?? 0) < BUILDINGS[b.kind].w) {
-      const art = BUILDING[b.kind];
-      const col = t.part ?? 0, last = BUILDINGS[b.kind].w - 1;
-      let frame = art.ridge[col];
-      if (b.level >= 2 && col === last) frame = art.chimney;
-      if (b.level >= 3 && col === 0) frame = art.peak;
-      this.roofs.putTileAt(frame === EMPTY ? EMPTY : GID.town + frame, tx, ty - 1);
-    }
   }
 
   // ---- sprites -------------------------------------------------------------
@@ -370,10 +306,7 @@ function tileFrames(t: Tile, cropDays: number): { ground: number; object: number
     case 'house':
     case 'barracks':
     case 'granary':
-    case 'woodyard': {
-      const part = BUILDING[t.kind].parts[t.part ?? 0];
-      return { ground: grass, object: part === EMPTY ? EMPTY : GID.town + part };
-    }
+    case 'woodyard': return { ground: grass, object: EMPTY }; // the building sprite sits on top
   }
 }
 

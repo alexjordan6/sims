@@ -3,7 +3,7 @@ import { SimScene, launch } from '@shared/index';
 import { World, doorstep, BUILDINGS, MAX_LEVEL, type Building, type BuildingKind, type Tile } from './world';
 import { Villager, Raider, Player, Mover, TOOLS, type Role, type Tool } from './agents';
 import { Rat, Snatcher, Brute, Shaman, waveComposition } from './enemies';
-import { p, TILE, COLS, ROWS, ZOOM, COST, TREE_YIELD, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, OLD_YIELD, CAPS, UPGRADE_COST, HOUSE_BEDS } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, TREE_YIELD, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, OLD_YIELD, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
@@ -23,7 +23,8 @@ export type FxEvent =
   | { kind: 'boss'; who: Mover }
   | { kind: 'swing'; who: Mover; dx: number; dy: number; stage: number }
   | { kind: 'cast'; who: Mover }
-  | { kind: 'impact'; x: number; y: number };
+  | { kind: 'impact'; x: number; y: number }
+  | { kind: 'upgrade'; building: Building };
 
 export type Screen = 'title' | 'playing' | 'paused' | 'over' | 'won';
 
@@ -602,14 +603,14 @@ export class VillageScene extends SimScene {
   buildingTitle(b: Building): string {
     return `${BUILDINGS[b.kind].name} Lv${b.level}`;
   }
+  /** What the building does now, and what the next level adds. */
   buildingBlurb(b: Building): string {
-    const up = b.level < MAX_LEVEL ? ` · hammer: upgrade (${UPGRADE_COST[b.kind][b.level]} wood)` : ' · max level';
-    switch (b.kind) {
-      case 'house': return `${b.residents}/${this.beds(b)} beds${b.level >= 3 ? ' · births +15%' : ''}${up}`;
-      case 'barracks': return `children raised nearby become soldiers${b.level >= 2 ? ` · soldiers +${b.level >= 3 ? 30 : 15} HP` : ''}${b.level >= 3 ? ' · +20% damage, regen' : ''}${up}`;
-      case 'granary': return `holds ${CAPS[b.level]} food (${this.food | 0} stored)${up}`;
-      case 'woodyard': return `holds ${CAPS[b.level]} wood (${this.wood | 0} stored)${up}`;
-    }
+    const now = b.kind === 'house' ? `${b.residents}/${this.beds(b)} beds${b.level >= 3 ? ' · births +15%' : ''}`
+      : b.kind === 'granary' ? `${this.food | 0}/${CAPS[b.level]} food`
+      : b.kind === 'woodyard' ? `${this.wood | 0}/${CAPS[b.level]} wood`
+      : LEVEL_PERKS.barracks[b.level];
+    const next = b.level < MAX_LEVEL ? ` · next Lv${b.level + 1}: ${LEVEL_PERKS[b.kind][b.level + 1]} (${UPGRADE_COST[b.kind][b.level]} wood, hammer)` : ' · max level';
+    return now + next;
   }
 
   /** Why the hammer can't upgrade `b` right now, or null. */
@@ -625,7 +626,8 @@ export class VillageScene extends SimScene {
     this.wood -= cost;
     b.level++;
     this.world.refresh(b);
-    this.event('build', `${BUILDINGS[b.kind].name} upgraded to level ${b.level}`, true);
+    this.fx.push({ kind: 'upgrade', building: b });
+    this.event('build', `${BUILDINGS[b.kind].name} is now Lv${b.level} — ${LEVEL_PERKS[b.kind][b.level]}`, true);
   }
 
   // ---- player actions -------------------------------------------------------
@@ -758,7 +760,7 @@ export class VillageScene extends SimScene {
       case 'hammer': {
         if (!b) return 'hammer: face a building to upgrade it';
         const why = this.upgradeProblem(b);
-        return why ? `${this.buildingTitle(b)} — ${why}` : `E: upgrade ${BUILDINGS[b.kind].name} to Lv${b.level + 1} (${UPGRADE_COST[b.kind][b.level]} wood, ${3 - (t?.work ?? 0)} hits)`;
+        return why ? `${this.buildingTitle(b)} — ${why}` : `E: upgrade ${BUILDINGS[b.kind].name} → Lv${b.level + 1}: ${LEVEL_PERKS[b.kind][b.level + 1]} (${UPGRADE_COST[b.kind][b.level]} wood, ${3 - (t?.work ?? 0)} hits)`;
       }
       case 'hoe':
         if (kind === 'grass') return 'E: till soil';
