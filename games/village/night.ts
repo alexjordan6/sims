@@ -9,21 +9,26 @@ import type { VillageScene } from './main';
 // dusk, deep-blue night) drawn as a render texture with warm pools of light erased out of it
 // around windows, lanterns, torches and the player; chimney smoke; fireflies near the trees.
 
-interface Key { t: number; colour: number; alpha: number }
-/** Sky wash keyframes over dayTime (0 = midnight, 0.5 = noon); wraps at 1. */
+interface Key { t: number; colour: number; alpha: number; tint: number }
+/**
+ * Sky keyframes over dayTime (0 = midnight, 0.5 = noon); wraps at 1. `colour`/`alpha` is the
+ * multiply wash; `tint` is multiplied into every sprite and tile so the art itself changes.
+ * Sunset is quick: clear at 0.73, full night by 0.88.
+ */
 const SKY: Key[] = [
-  { t: 0.0, colour: 0x0d1436, alpha: 0.62 },
-  { t: 0.2, colour: 0x141c48, alpha: 0.52 },
-  { t: 0.28, colour: 0xff9a6a, alpha: 0.24 },
-  { t: 0.36, colour: 0xfff0d0, alpha: 0 },
-  { t: 0.7, colour: 0xfff0d0, alpha: 0 },
-  { t: 0.78, colour: 0xff8a3a, alpha: 0.28 },
-  { t: 0.86, colour: 0x4a2a6a, alpha: 0.46 },
-  { t: 0.93, colour: 0x0d1436, alpha: 0.62 },
-  { t: 1.0, colour: 0x0d1436, alpha: 0.62 },
+  { t: 0.0, colour: 0x2a3670, alpha: 0.62, tint: 0x98a4d8 },
+  { t: 0.22, colour: 0x2a3670, alpha: 0.6, tint: 0x98a4d8 },
+  { t: 0.26, colour: 0xffb08a, alpha: 0.5, tint: 0xffc8b0 },
+  { t: 0.31, colour: 0xffffff, alpha: 0, tint: 0xffffff },
+  { t: 0.73, colour: 0xffffff, alpha: 0, tint: 0xffffff },
+  { t: 0.76, colour: 0xffc070, alpha: 0.55, tint: 0xffe0c0 },
+  { t: 0.80, colour: 0xff9a5a, alpha: 0.55, tint: 0xffc0a0 },
+  { t: 0.84, colour: 0x5a3a8a, alpha: 0.6, tint: 0xbcaadc },
+  { t: 0.88, colour: 0x2a3670, alpha: 0.62, tint: 0x98a4d8 },
+  { t: 1.0, colour: 0x2a3670, alpha: 0.62, tint: 0x98a4d8 },
 ];
 
-export interface Sky { r: number; g: number; b: number; alpha: number; /** 0 by day → 1 at deepest night */ night: number }
+export interface Sky { r: number; g: number; b: number; alpha: number; /** 0 by day → 1 at deepest night */ night: number; /** colour to multiply into sprites and tiles */ tint: number }
 
 /** The sky wash for a time of day. */
 export function skyAt(dayTime: number): Sky {
@@ -35,7 +40,12 @@ export function skyAt(dayTime: number): Sky {
   const ca = Phaser.Display.Color.IntegerToColor(a.colour), cb = Phaser.Display.Color.IntegerToColor(b.colour);
   const c = Phaser.Display.Color.Interpolate.ColorWithColor(ca, cb, 1, f);
   const alpha = a.alpha + (b.alpha - a.alpha) * f;
-  return { r: c.r | 0, g: c.g | 0, b: c.b | 0, alpha, night: Math.max(0, Math.min(1, (alpha - 0.2) / 0.42)) };
+  const ta = Phaser.Display.Color.IntegerToColor(a.tint), tb = Phaser.Display.Color.IntegerToColor(b.tint);
+  const tc = Phaser.Display.Color.Interpolate.ColorWithColor(ta, tb, 1, f);
+  const tint = Phaser.Display.Color.GetColor(tc.r | 0, tc.g | 0, tc.b | 0);
+  // "night" is how blue the tint has gone: 0 at white, 1 at the night tint
+  const night = Math.max(0, Math.min(1, (255 - (tc.r | 0)) / (255 - 0x98)));
+  return { r: c.r | 0, g: c.g | 0, b: c.b | 0, alpha, night, tint };
 }
 
 const DEPTH = { wash: 40, warm: 41, fireflies: 42, smoke: 11 } as const;
@@ -54,7 +64,7 @@ export class Night {
 
   constructor(private scene: VillageScene) {
     // sized to the camera view (not the world) and moved with it, so the fill stays cheap
-    this.rt = scene.add.renderTexture(0, 0, 64, 64).setOrigin(0).setDepth(DEPTH.wash);
+    this.rt = scene.add.renderTexture(0, 0, 64, 64).setOrigin(0).setDepth(DEPTH.wash).setBlendMode(Phaser.BlendModes.MULTIPLY);
     this.stamp = scene.make.image({ key: 'glow', add: false });
     this.smoke = scene.add.particles(0, 0, 'px', {
       emitting: false, lifespan: { min: 1400, max: 2200 }, speedY: { min: -14, max: -8 }, speedX: { min: -4, max: 4 },

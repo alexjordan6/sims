@@ -6,7 +6,7 @@ import { TOWN, FARM, CHAR } from './atlas';
 import { TILE, COLS, ROWS, CAPS, OLD_GROWTH_DAYS } from './config';
 import type { VillageScene } from './main';
 import { Fx } from './fx';
-import { ensureBuildingArt, BUILDING_TEXTURE, STACK_ROWS } from './pixelart';
+import { ensureBuildingArt, BUILDING_TEXTURE, LIT_TEXTURE, STACK_ROWS } from './pixelart';
 import { Night } from './night';
 
 import townUrl from './assets/town.png';
@@ -35,7 +35,10 @@ export class Renderer {
   private objects!: Phaser.Tilemaps.TilemapLayer;
   private sprites = new Map<number, Phaser.GameObjects.Sprite>();
   /** each building's sprite (frame = level - 1) and, for the supply buildings, its climbing stock column */
-  private buildings = new Map<Building, { body: Phaser.GameObjects.Image; stock?: Phaser.GameObjects.Image; banner?: Phaser.GameObjects.Image }>();
+  private buildings = new Map<Building, { body: Phaser.GameObjects.Image; lit: Phaser.GameObjects.Image; stock?: Phaser.GameObjects.Image; banner?: Phaser.GameObjects.Image }>();
+  /** the sky's tint, multiplied into tiles and sprites; tiles repaint only when it changes */
+  private tint = 0xffffff;
+  private tileTint = 0xffffff;
   private under: Phaser.GameObjects.Graphics;
   private bars: Phaser.GameObjects.Graphics;
   private night: Night;
@@ -67,7 +70,7 @@ export class Renderer {
     for (const s of this.sprites.values()) s.destroy();
     this.sprites.clear();
     this.fx.clear();
-    for (const b of this.buildings.values()) { b.body.destroy(); b.stock?.destroy(); b.banner?.destroy(); }
+    for (const b of this.buildings.values()) { b.body.destroy(); b.lit.destroy(); b.stock?.destroy(); b.banner?.destroy(); }
     this.buildings.clear();
     const w = this.scene.world;
     for (let i = 0; i < w.tiles.length; i++) w.dirty.add(i);
@@ -77,8 +80,10 @@ export class Renderer {
   /** Per-frame: patch changed tiles, sync sprites, overlays. */
   sync(dt: number): void {
     this.t += dt;
+    this.tint = this.night.sky.tint;
     this.paintBuildings();
     this.drainDirty();
+    this.tintTiles();
     this.syncSprites();
     for (const ev of this.scene.fx) {
       if (ev.kind === 'upgrade') { this.upgradePop(ev.building); continue; }
@@ -107,13 +112,20 @@ export class Renderer {
       if (!e) {
         const bottom = (b.ty + f.h) * TILE;
         const depth = DEPTH.agents + bottom / 1000 - 0.0005;
-        e = { body: s.add.image(b.tx * TILE, (b.ty - 1) * TILE, BUILDING_TEXTURE[b.kind], 0).setOrigin(0, 0).setDepth(depth) };
+        e = {
+          body: s.add.image(b.tx * TILE, (b.ty - 1) * TILE, BUILDING_TEXTURE[b.kind], 0).setOrigin(0, 0).setDepth(depth),
+          lit: s.add.image(b.tx * TILE, (b.ty - 1) * TILE, LIT_TEXTURE[b.kind], 0).setOrigin(0, 0).setDepth(depth + 0.00005).setAlpha(0),
+        };
         if (b.kind === 'granary' || b.kind === 'woodyard') {
           e.stock = s.add.image((b.tx + 2) * TILE, bottom - 1, b.kind === 'granary' ? 'cratestack' : 'logstack', 0).setOrigin(0, 1).setDepth(depth);
         }
         this.buildings.set(b, e);
       }
-      e.body.setFrame(Math.min(2, b.level - 1));
+      e.body.setFrame(Math.min(2, b.level - 1)).setTint(this.tint);
+      // the windows come on as night falls; they are never tinted
+      e.lit.setFrame(Math.min(2, b.level - 1)).setAlpha(this.night.sky.night);
+      e.stock?.setTint(this.tint);
+      e.banner?.setTint(this.tint);
       // a sworn house flies the barracks' banner from its roof
       if (b.kind === 'house') {
         if (b.sworn && !e.banner) e.banner = s.add.image(e.body.x + 54, e.body.y + 6, 'banner').setOrigin(0, 0).setDepth(e.body.depth + 0.0001);
@@ -139,6 +151,17 @@ export class Renderer {
     });
     const d = doorstep(b);
     this.fx.celebrate((d.tx + 0.5) * TILE, d.ty * TILE);
+  }
+
+  /** Tiles carry the sky tint too (foliage goes cool at night); repainted only when it changes. */
+  private tintTiles(): void {
+    // quantise so steady day/night never repaints and transitions repaint a handful of times
+    const q = ((this.tint >> 16) & 0xf0) << 16 | ((this.tint >> 8) & 0xf0) << 8 | (this.tint & 0xf0);
+    if (q === this.tileTint) return;
+    this.tileTint = q;
+    const c = q === 0xf0f0f0 ? 0xffffff : q;
+    this.ground.forEachTile((t) => { t.tint = c; });
+    this.objects.forEachTile((t) => { t.tint = c; });
   }
 
   private drainDirty(): void {
@@ -189,10 +212,10 @@ export class Renderer {
       sp.setRotation(a?.rot ?? 0);
       sp.setDepth(DEPTH.agents + m.y / 1000);
       if (m.hurtT < 0.15) sp.setTintFill(0xffffff);
-      else if (m instanceof Raider) sp.setTint(m.boss ? 0xff6a6a : m.kind === 'brute' ? 0xb07070 : 0xffd0d0);
+      else if (m instanceof Raider) sp.setTint(mulColor(m.boss ? 0xff6a6a : m.kind === 'brute' ? 0xb07070 : 0xffd0d0, this.tint));
       else if (m instanceof Bolt) sp.setTint(0xb46bff);
-      else if (hurt) sp.setTint(0xffb0a0);
-      else sp.clearTint();
+      else if (hurt) sp.setTint(mulColor(0xffb0a0, this.tint));
+      else sp.setTint(this.tint);
     }
     for (const [id, sp] of this.sprites) if (!seen.has(id)) { this.sprites.delete(id); this.fx.die(sp, sp.getData('agent') as Mover); }
   }
@@ -290,6 +313,12 @@ export class Renderer {
       b.fillStyle(m.hp / m.maxHp > 0.4 ? 0x5fdc5f : 0xff4040, 1); b.fillRect(x, y, Math.max(1, Math.round(bw * m.hp / m.maxHp)), 1);
     }
   }
+}
+
+/** Multiply two 0xRRGGBB colours channel by channel. */
+function mulColor(a: number, b: number): number {
+  const r = (((a >> 16) & 255) * ((b >> 16) & 255)) / 255, g = (((a >> 8) & 255) * ((b >> 8) & 255)) / 255, bl = ((a & 255) * (b & 255)) / 255;
+  return (r << 16) | (g << 8) | bl;
 }
 
 /** Ground + object gids for a tile. */

@@ -39,7 +39,12 @@ export const PALETTES = {
 
 // ---- primitives -----------------------------------------------------------------------------
 
-function px(ctx: Ctx, x: number, y: number, c: string, w = 1, h = 1): void { ctx.fillStyle = c; ctx.fillRect(x, y, w, h); }
+/** While true, only the parts that glow at night are painted (see `litPx`) — used to build the lights overlays. */
+let LIT_ONLY = false;
+function px(ctx: Ctx, x: number, y: number, c: string, w = 1, h = 1): void { if (LIT_ONLY) return; ctx.fillStyle = c; ctx.fillRect(x, y, w, h); }
+/** A pixel that glows at night: painted in both modes. */
+function litPx(ctx: Ctx, x: number, y: number, c: string, w = 1, h = 1): void { ctx.fillStyle = c; ctx.fillRect(x, y, w, h); }
+const PANE = '#ffd75a', PANE_HOT = '#fff0b0', FLAME = '#ff8a2a';
 
 /** A steep gable roof: peak at (x + w/2, y), eaves at y + h across the full width. Plank courses, seams, ridge beam. */
 function gableRoof(ctx: Ctx, x: number, y: number, w: number, h: number, p: Palette): void {
@@ -86,6 +91,10 @@ function windowAt(ctx: Ctx, x: number, y: number, w: number, h: number, p: Palet
   px(ctx, x, y, p.frame, w, h);
   px(ctx, x + 1, y + 1, INK, w - 2, h - 2);
   px(ctx, x + 2, y + 2, lit ? GLOW : GLASS, w - 4, h - 4);
+  // the panes light up at night
+  litPx(ctx, x + 2, y + 2, PANE, w - 4, h - 4);
+  if (!LIT_ONLY) px(ctx, x + 2, y + 2, lit ? GLOW : GLASS, w - 4, h - 4);
+  if (LIT_ONLY && w >= 8 && h >= 8) litPx(ctx, x + 2, y + 2, PANE_HOT, 2, 2);
   if (w >= 8 && h >= 8) { px(ctx, x + Math.floor(w / 2), y + 2, INK, 1, h - 4); px(ctx, x + 2, y + Math.floor(h / 2), INK, w - 4, 1); }
 }
 
@@ -96,6 +105,7 @@ function archDoor(ctx: Ctx, x: number, y: number, w: number, h: number, p: Palet
   px(ctx, x + 2, y + 1, INK, w - 4, 1);
   px(ctx, x + 1, y + 1, p.frame, 1, 1); px(ctx, x + w - 2, y + 1, p.frame, 1, 1);
   px(ctx, x + w - 3, y + Math.floor(h / 2), p.roofLight, 1, 1);
+  if (LIT_ONLY) litPx(ctx, x + 2, y + h - 2, PANE, w - 4, 1); // light under the door
 }
 
 /** Iron-banded double door (barracks, barn). */
@@ -115,8 +125,8 @@ function chimney(ctx: Ctx, x: number, y: number, h = 11): void {
   px(ctx, x, y, INK, 5, 1); px(ctx, x - 1, y + 1, INK, 7, 1); px(ctx, x, y + 1, STONE_LIGHT, 5, 1);
 }
 
-function lantern(ctx: Ctx, x: number, y: number): void { px(ctx, x, y, INK, 3, 5); px(ctx, x + 1, y + 1, GLOW, 1, 3); px(ctx, x + 1, y - 1, INK, 1, 1); }
-function torch(ctx: Ctx, x: number, y: number): void { px(ctx, x, y + 2, BARK_DARK, 1, 5); px(ctx, x - 1, y, '#ff8a2a', 3, 2); px(ctx, x, y - 1, GLOW, 1, 1); }
+function lantern(ctx: Ctx, x: number, y: number): void { px(ctx, x, y, INK, 3, 5); litPx(ctx, x + 1, y + 1, GLOW, 1, 3); px(ctx, x + 1, y - 1, INK, 1, 1); }
+function torch(ctx: Ctx, x: number, y: number): void { px(ctx, x, y + 2, BARK_DARK, 1, 5); litPx(ctx, x - 1, y, FLAME, 3, 2); litPx(ctx, x, y - 1, PANE_HOT, 1, 1); }
 
 function banner(ctx: Ctx, x: number, y: number, colour: string, dark: string): void {
   px(ctx, x, y, INK, 1, 16);
@@ -154,7 +164,7 @@ function merlons(ctx: Ctx, x: number, y: number, w: number, p: Palette): void {
   px(ctx, x, y + 6, INK, w, 1);
 }
 /** Arrow slit: a dark 2x6 slot with a stone lip. */
-function slit(ctx: Ctx, x: number, y: number): void { px(ctx, x - 1, y - 1, STONE_DARK, 4, 8); px(ctx, x, y, INK, 2, 6); }
+function slit(ctx: Ctx, x: number, y: number): void { px(ctx, x - 1, y - 1, STONE_DARK, 4, 8); px(ctx, x, y, INK, 2, 6); litPx(ctx, x, y + 1, '#c99a3a', 2, 4); }
 
 function flowerBox(ctx: Ctx, x: number, y: number, w: number): void {
   px(ctx, x, y, INK, w, 3); px(ctx, x + 1, y + 1, BARK, w - 2, 1);
@@ -306,12 +316,14 @@ function stackTexture(scene: Phaser.Scene, key: string, unit: (ctx: Ctx, x: numb
   for (let i = 0; i <= STACK_ROWS; i++) tex.add(i, 0, i * STACK_W, 0, STACK_W, STACK_H);
 }
 
-function buildingTexture(scene: Phaser.Scene, key: string, w: number, h: number, draw: (ctx: Ctx, ox: number, level: number) => void): void {
+function buildingTexture(scene: Phaser.Scene, key: string, w: number, h: number, draw: (ctx: Ctx, ox: number, level: number) => void, litOnly = false): void {
   if (scene.textures.exists(key)) return;
   const tex = scene.textures.createCanvas(key, w * 3, h)!;
   const ctx = tex.getContext();
   ctx.imageSmoothingEnabled = false;
+  LIT_ONLY = litOnly;
   for (let level = 1; level <= 3; level++) draw(ctx, (level - 1) * w, level);
+  LIT_ONLY = false;
   tex.refresh();
   for (let i = 0; i < 3; i++) tex.add(i, 0, i * w, 0, w, h);
 }
@@ -373,6 +385,8 @@ export function ensureGlowTexture(scene: Phaser.Scene): void {
 
 /** Texture key for a building kind; frame = level - 1. */
 export const BUILDING_TEXTURE = { house: 'bld-house', barracks: 'bld-barracks', granary: 'bld-granary', woodyard: 'cabin' } as const;
+/** The same buildings' windows, lanterns and torches alone — laid over the body at night. */
+export const LIT_TEXTURE = { house: 'bld-house-lit', barracks: 'bld-barracks-lit', granary: 'bld-granary-lit', woodyard: 'cabin-lit' } as const;
 
 /** Create every building and stock texture (safe to call more than once). */
 export function ensureBuildingArt(scene: Phaser.Scene): void {
@@ -380,6 +394,10 @@ export function ensureBuildingArt(scene: Phaser.Scene): void {
   buildingTexture(scene, 'bld-barracks', BIG_W, BIG_H, drawBarracks);
   buildingTexture(scene, 'bld-granary', CABIN_W, CABIN_H, drawGranary);
   buildingTexture(scene, 'cabin', CABIN_W, CABIN_H, drawCabin);
+  buildingTexture(scene, 'bld-house-lit', BIG_W, BIG_H, drawHouse, true);
+  buildingTexture(scene, 'bld-barracks-lit', BIG_W, BIG_H, drawBarracks, true);
+  buildingTexture(scene, 'bld-granary-lit', CABIN_W, CABIN_H, drawGranary, true);
+  buildingTexture(scene, 'cabin-lit', CABIN_W, CABIN_H, drawCabin, true);
   stackTexture(scene, 'logstack', logEnd);
   stackTexture(scene, 'cratestack', crateFace);
   ensureGlowTexture(scene);

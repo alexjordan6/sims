@@ -9,7 +9,7 @@ export const ZOOM = 2; // 16 px tiles shown at 32 px
 export const RUN = { days: 21, raidEvery: 3, bossDay: 21, warnDays: 3 } as const;
 
 export const p = params({
-  dayLength: [30, 2, 180, 1],      // real seconds per day
+  dayLength: [120, 10, 300, 1],    // real seconds per day
   raidEvery: [RUN.raidEvery, 1, 20, 1],
   birthChance: [0.5, 0, 1],        // per couple per day, if fed and housed
   adultAge: [8, 1, 40, 1],         // days
