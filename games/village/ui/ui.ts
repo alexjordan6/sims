@@ -1,13 +1,13 @@
 import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type Tool } from '../agents';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
-import { COST, p, RUN, LEVEL_PERKS, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS, TREE_YIELD, OLD_YIELD } from '../config';
+import { COST, p, RUN, LEVEL_PERKS, UPGRADE_COST, CADET_AGE_BEFORE, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS, TREE_YIELD, OLD_YIELD } from '../config';
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
 import { skyAt } from '../night';
 import { frameDataUrl, BUILDING_TEXTURE } from '../pixelart';
-import type { BuildingKind } from '../world';
+import { BUILDINGS, MAX_LEVEL, type BuildingKind } from '../world';
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -74,6 +74,7 @@ export class UI {
   /** coarse pointer (phone/tablet) or ?touch=1 for testing */
   readonly touch = document.body.classList.contains('touch');
   private lastSelected: Mover | null = null;
+  private lastBuilding: import('../world').Building | null = null;
 
   constructor(private scene: VillageScene) {}
 
@@ -112,7 +113,7 @@ export class UI {
         ${slot('axe', 'town', TOWN.iconAxe, 'AXE', 'Chop trees for wood (3 hits); clears stumps and saplings')}
         ${slot('sword', 'dungeon', DUNGEON.sword, 'SWORD', 'Swing at raiders in front of you')}
         ${slot('house', 'town', TOWN.wallWoodDoor, 'HOUSE', 'A family of 4 lives here and has children', COST.house)}
-        ${slot('barracks', 'town', TOWN.wallStoneDoor, 'BARRACKS', 'Kids raised near it grow into soldiers', COST.barracks)}
+        ${slot('barracks', 'town', TOWN.wallStoneDoor, 'BARRACKS', 'Sponsors sworn houses: their children drill here and become soldiers', COST.barracks)}
         ${slot('hammer', 'town', TOWN.iconHammer, 'HAMMER', 'Upgrade the building in front of you (3 hits)')}
       </div>
       <div class="hint"><kbd>click / C</kbd><span class="hint-text"></span></div>
@@ -332,6 +333,7 @@ export class UI {
   render(dt: number): void {
     const s = this.scene;
     this.stage.classList.toggle('raid', s.raidActive);
+    if (s.selectedBuilding !== this.lastBuilding) { this.lastBuilding = s.selectedBuilding; this.renderInspector(true); if (this.touch && s.selectedBuilding) { this.showTab('inspector'); this.side.classList.add('open'); } }
     if (this.touch && s.selected !== this.lastSelected) {
       this.lastSelected = s.selected;
       if (s.selected) { this.showTab('inspector'); this.side.classList.add('open'); }
@@ -415,8 +417,33 @@ export class UI {
     const s = this.scene;
     const m = s.selected;
     const head = `<div class="ph">${spr('town', TOWN.sign, 24)}<h2>Inspector</h2></div>`;
+    const b = s.selectedBuilding;
+    if (!m && b) {
+      // a building: what it does, what the next level adds, and for houses the RAISE toggle
+      const cost = b.level < MAX_LEVEL ? UPGRADE_COST[b.kind][b.level] : 0;
+      let html = `${head}<div class="head"><img class="art" src="${frameDataUrl(s, BUILDING_TEXTURE[b.kind], b.level - 1)}" alt=""><div><div class="name">${BUILDINGS[b.kind].name} <small>Lv${b.level}</small></div><span class="badge ${b.kind === 'barracks' ? 'soldier' : 'farmer'}">${LEVEL_PERKS[b.kind][b.level]}</span></div><button class="btn small close">x</button></div>`;
+      html += `<div class="rows">`;
+      if (b.kind === 'house') html += `<b>Beds</b><span>${b.residents} / ${s.beds(b)}</span>`;
+      if (b.kind === 'barracks') html += `<b>Sponsors</b><span>${s.world.swornHouses.length} / ${s.world.sponsorship(s.mods.sponsorBonus)} houses sworn</span>`;
+      html += `<b>Next</b><span>${b.level < MAX_LEVEL ? `Lv${b.level + 1}: ${LEVEL_PERKS[b.kind][b.level + 1]} <em>· ${cost} wood with the hammer</em>` : 'max level'}</span></div>`;
+      if (b.kind === 'house') {
+        const why = b.sworn ? null : s.swearProblem(b);
+        html += `<div class="raise"><div class="cap">RAISE CHILDREN AS</div><div class="seg"><button class="btn small ${b.sworn ? '' : 'on'}" data-raise="workers">WORKERS</button><button class="btn small ${b.sworn ? 'on' : ''}" data-raise="soldiers" ${why ? 'disabled' : ''}>SOLDIERS</button></div>
+          <div class="d">${b.sworn ? `Sworn to the barracks: children drill from age ${s.adultAge - CADET_AGE_BEFORE} and come of age as soldiers.` : why ? `<em class="warn">${esc(why)}</em>` : 'Swear this house to the barracks and its children will drill to become soldiers.'}</div></div>`;
+      }
+      if (force || html !== this.lastInspector) {
+        this.inspector.innerHTML = html; this.lastInspector = html;
+        this.inspector.querySelector('.close')?.addEventListener('click', () => s.selectBuilding(null));
+        this.inspector.querySelectorAll<HTMLButtonElement>('[data-raise]').forEach((el) => el.addEventListener('click', () => {
+          const wantSoldiers = el.dataset.raise === 'soldiers';
+          if (wantSoldiers !== !!b.sworn) s.swear(b);
+          this.renderInspector(true);
+        }));
+      }
+      return;
+    }
     if (!m || m.dead) {
-      const html = `${head}<p class="empty">Click or tap a villager to see who they are.<br>Children become <span class="rl soldier">soldiers</span> if they grow up near the barracks and soldiers, or <span class="rl farmer">workers</span> if they grow up near the fields.</p>`;
+      const html = `${head}<p class="empty">Click or tap a villager or a building.<br>Children become <span class="rl soldier">soldiers</span> if their house is <b>sworn</b> to the barracks and they finish their drill, otherwise <span class="rl farmer">workers</span>.</p>`;
       if (force || this.lastInspector !== html) { this.inspector.innerHTML = html; this.lastInspector = html; }
       return;
     }
@@ -429,19 +456,16 @@ export class UI {
     html += `<b>Health</b><div class="bar hp ${hpPct < 40 ? 'low' : ''}"><i style="width:${hpPct}%"></i><span class="bar-txt">${Math.max(0, m.hp | 0)} / ${m.maxHp}</span></div>`;
     if (m instanceof Villager) {
       html += `<b>Age</b><span>${m.age} days${m.role === 'kid' ? ` <em>· grows up in ${Math.max(0, p.adultAge + s.mods.adultAgeDelta - m.age)}</em>` : ''}</span>`;
-      html += `<b>Home</b><span>${m.home.residents} of ${s.mods.houseCap} beds used</span>`;
+      html += `<b>Home</b><span>${m.home.residents} of ${s.beds(m.home)} beds${m.home.sworn ? ' · <span class="rl soldier">sworn</span>' : ''}</span>`;
       html += `<b>Fed</b><span>${m.hungerDays === 0 ? 'yes' : `<em class="warn">hungry for ${m.hungerDays} days</em>`}</span>`;
     }
     html += `<b>Doing</b><span>${esc(m.task || '—')}${m instanceof Villager && m.carriedBy ? ` <em class="warn">— kill the ${esc(m.carriedBy.name.toLowerCase())} to free them</em>` : ''}</span></div>`;
     if (m instanceof Villager && m.role === 'kid') {
-      const tot = m.martial + m.civil || 1;
-      const mp = (m.martial / tot) * 100;
-      const lean = m.martial > m.civil ? 'm' : 'c';
-      html += `<div class="upbring"><div class="cap">UPBRINGING · decides their job</div><div class="lbl"><span class="rl soldier">soldier ${m.martial | 0}</span><span class="rl farmer">worker ${m.civil | 0}</span></div>
-        <div class="bar up"><i class="m" style="width:${mp}%"></i><i class="c" style="width:${100 - mp}%"></i></div>
-        <div class="lean ${lean}">will become a ${lean === 'm' ? 'SOLDIER' : 'WORKER'}</div></div>`;
-    } else if (m instanceof Villager) {
-      html += `<div class="upbring"><div class="cap">RAISED</div><div class="lbl"><span class="rl soldier">soldier ${m.martial | 0}</span><span class="rl farmer">worker ${m.civil | 0}</span></div></div>`;
+      const outlook = m.outlook(s), need = Villager.drillNeeded(s), cadetAge = s.adultAge - CADET_AGE_BEFORE;
+      const line = !m.home.sworn ? 'home raises workers — swear the house to change that'
+        : m.age < cadetAge ? `cadet from age ${cadetAge} · needs ${need} days of drill`
+        : `cadet · drilled ${m.drilled}/${need}${outlook === 'worker' ? ' — <em class="warn">too late to finish</em>' : ''}`;
+      html += `<div class="upbring"><div class="cap">UPBRINGING</div><div class="lean ${outlook === 'soldier' ? 'm' : 'c'}">will become a ${outlook === 'soldier' ? 'SOLDIER' : 'WORKER'} at age ${s.adultAge}</div><div class="d">${line}</div></div>`;
     }
     if (html !== this.lastInspector) {
       this.inspector.innerHTML = html;
@@ -461,13 +485,13 @@ export class UI {
     let html = '';
     for (const [label, cls, list] of groups) {
       if (!list.length) continue;
-      html += `<div class="grp ${cls}">${label} <b>${list.length}</b>${cls === 'kid' ? '<span class="grp-note">bar = soldier vs worker</span>' : ''}</div>`;
+      html += `<div class="grp ${cls}">${label} <b>${list.length}</b>${cls === 'kid' ? '<span class="grp-note">sword = will be a soldier</span>' : ''}</div>`;
       for (const v of list) {
         const c = CHAR[v.role];
         let bar = '';
         if (v.role === 'kid') {
-          const tot = v.martial + v.civil || 1;
-          bar = `<div class="bar up"><i class="m" style="width:${(v.martial / tot) * 100}%"></i><i class="c" style="width:${(v.civil / tot) * 100}%"></i></div>`;
+          const soldier = v.outlook(s) === 'soldier';
+          bar = `<span class="outlook ${soldier ? 'm' : 'c'}">${soldier ? spr('dungeon', DUNGEON.sword, 16) : spr('town', TOWN.iconHoe, 16)}${v.cadetAt(s) ? ` ${v.drilled}/${Villager.drillNeeded(s)}` : ''}</span>`;
         } else {
           const pct = Math.max(0, v.hp / v.maxHp * 100);
           bar = `<div class="bar hp ${pct < 40 ? 'low' : ''}"><i style="width:${pct}%"></i></div>`;
@@ -608,7 +632,7 @@ export class UI {
           <h3>THE GOAL</h3>
           <p>Survive <b>${RUN.days} days</b>. Raiders attack every ${p.raidEvery} days and get stronger. On day ${RUN.bossDay} the <b>Warlord</b> comes — beat him to win. If <b>you</b> die, the run ends (you keep the renown).</p>
           <h3>THE TRICK</h3>
-          <p>You can't recruit soldiers. <b>Children become soldiers if they grow up near the barracks</b> (and near soldiers), or workers if they grow up near the fields. Build houses next to the barracks to raise an army; next to the farm to raise farmers.</p>
+          <p>You can't recruit soldiers. <b>Children become soldiers if their house is sworn to the barracks</b> and they finish their drill; everyone else grows up a worker. See RAISING SOLDIERS below.</p>
           <h3>EACH DAY</h3>
           <p>Every villager eats 1 food. Crops ripen in ${s.cropDays} day${s.cropDays > 1 ? 's' : ''}. Couples with a spare bed have children. Everyone heals overnight.</p>
         </section>
@@ -617,7 +641,7 @@ export class UI {
           ${who('dungeon', DUNGEON.hero, 'player', 'You', 'Equip a tool, then click: hoe tills, seeds plant, hands harvest, axe chops, sword fights, hammer upgrades.')}
           ${who('farm', FARM.farmerHat, 'farmer', 'Farmer', 'Plants and harvests the fields on their own.')}
           ${who('dungeon', DUNGEON.man, 'woodcutter', 'Woodcutter', 'Fells trees for wood — old growth first, thinning a grove from its edge so the core keeps spreading. Leaves the last ' + TREE_RESERVE + ' standing. Helps in the field when the woodyard is full.')}
-          ${who('dungeon', DUNGEON.villager, 'kid', 'Child', 'Plays near home and soaks up what is around them.')}
+          ${who('dungeon', DUNGEON.villager, 'kid', 'Child', 'Plays near home. Becomes a worker — or a soldier, if their house is sworn and they finish drill.')}
           ${who('dungeon', DUNGEON.knight, 'soldier', 'Soldier', 'Guards the barracks and fights raiders.')}
           ${who('dungeon', DUNGEON.orc, 'raider', 'Raider', 'Walks at the nearest person and hits them. Tramples crops.')}
           ${who('dungeon', 123, 'raider', 'Rat', 'Harmless to people; eats your crops. Scatters from soldiers and you.')}
@@ -627,9 +651,11 @@ export class UI {
           <h3>BUILDINGS</h3>
           <p>Buildings can't be damaged. Use the <b>HAMMER</b> on one (3 hits) to upgrade it for wood. Every building has three levels — the brass studs on the sign by the door count them, and each level changes the building itself:</p>
           ${building('house', 'House · ' + COST.house + ' wood', 'A couple here has children.')}
-          ${building('barracks', 'Barracks · ' + COST.barracks + ' wood', 'Children raised nearby become soldiers.')}
+          ${building('barracks', 'Barracks · ' + COST.barracks + ' wood', 'Sponsors sworn houses; cadets drill in its yard.')}
           ${building('granary', 'Granary', 'Holds your food; the crate stack beside it climbs as the store fills.')}
           ${building('woodyard', 'Woodyard', 'Holds your wood; the log stack beside the cabin climbs as it fills.')}
+          <h3>RAISING SOLDIERS</h3>
+          <p>Pick a house (right click / X, or tap it) and set <b>RAISE CHILDREN AS: SOLDIERS</b> to <b>swear</b> it to the barracks — it flies a banner. A barracks sponsors <b>one sworn house per level</b> (two barracks Lv2 = 4 houses). Children of a sworn house become <b>cadets</b> ${CADET_AGE_BEFORE} days before coming of age: each day they walk to the barracks yard and drill. ${Villager.drillNeeded(s)} days of drill make a soldier at age ${s.adultAge}; a child sworn too late comes of age a worker. Every child's outlook is shown in the inspector and the villagers list — no surprises.</p>
           <h3>GROVES</h3>
           <p>Trees spread onto neighbouring grass — but a lone tree barely does (about 1% a day) while a tree inside a grove seeds fast (up to 11%). A sapling with two or more trees beside it grows in ${SHELTERED_SAPLING_DAYS} days instead of ${SAPLING_DAYS}. So plant trees <b>together</b>, near the woodyard, and let the grove do the work.</p>
           <p>Trees age: after ${OLD_GROWTH_DAYS} days they become <b>old growth</b> — taller, and worth ${OLD_YIELD} wood instead of ${TREE_YIELD}. Woodcutters take old growth first and thin a grove from its edge.</p>

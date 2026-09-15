@@ -22,6 +22,8 @@ export interface Building {
   level: number;
   /** houses: count of villagers who call this home */
   residents: number;
+  /** houses: sworn to the barracks — its children are raised as soldiers */
+  sworn?: boolean;
 }
 /** Houses are buildings; kept as a named type because half the sim talks about "home". */
 export type House = Building;
@@ -78,6 +80,9 @@ export class World {
   get woodyard(): Building | undefined { return this.buildings.find((b) => b.kind === 'woodyard'); }
   /** The best barracks level in the village (0 if none). */
   get barracksLevel(): number { return this.barracks.reduce((m, b) => Math.max(m, b.level), 0); }
+  /** Houses a barracks can sponsor: one per level, summed over every barracks (+ any bonus). */
+  sponsorship(bonusPerBarracks = 0): number { return this.barracks.reduce((n, b) => n + b.level + bonusPerBarracks, 0); }
+  get swornHouses(): Building[] { return this.houses.filter((h) => h.sworn); }
 
   inBounds(tx: number, ty: number): boolean {
     return tx >= 0 && ty >= 0 && tx < this.cols && ty < this.rows;

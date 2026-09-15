@@ -48,7 +48,7 @@ export const UPGRADE_COST: Record<'house' | 'barracks' | 'granary' | 'woodyard',
 /** what each level of a building gives, in a few words (index = level); shown in tooltips, hints and help */
 export const LEVEL_PERKS: Record<'house' | 'barracks' | 'granary' | 'woodyard', readonly [string, string, string, string]> = {
   house: ['', '4 beds', '6 beds', '8 beds · births +15%'],
-  barracks: ['', 'raises soldiers', 'soldiers +15 HP · reach 7×7', 'soldiers +30 HP · +20% dmg · regen'],
+  barracks: ['', 'sponsors 1 house', 'sponsors 2 houses · soldiers +15 HP', 'sponsors 3 houses · soldiers +30 HP · +20% dmg · regen'],
   granary: ['', 'holds 150 food', 'holds 300 food', 'holds 600 food'],
   woodyard: ['', 'holds 150 wood', 'holds 300 wood', 'holds 600 wood'],
 };
@@ -59,5 +59,8 @@ export const LEVEL_LOOKS: Record<'house' | 'barracks' | 'granary' | 'woodyard', 
   granary: ['', 'barn', 'open hay loft', 'silo'],
   woodyard: ['', 'cabin', 'chimney', 'lantern and loft window'],
 };
+/** a child in a sworn house starts drilling this many days before coming of age, and needs CADET_DAYS of drill to be a soldier */
+export const CADET_AGE_BEFORE = 3;
+export const CADET_DAYS = 3;
 /** beds per house level (index = level); overridden upward by the Big Families boon */
 export const HOUSE_BEDS = [0, 4, 6, 8] as const;

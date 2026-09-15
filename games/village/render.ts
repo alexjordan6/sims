@@ -35,7 +35,7 @@ export class Renderer {
   private objects!: Phaser.Tilemaps.TilemapLayer;
   private sprites = new Map<number, Phaser.GameObjects.Sprite>();
   /** each building's sprite (frame = level - 1) and, for the supply buildings, its climbing stock column */
-  private buildings = new Map<Building, { body: Phaser.GameObjects.Image; stock?: Phaser.GameObjects.Image }>();
+  private buildings = new Map<Building, { body: Phaser.GameObjects.Image; stock?: Phaser.GameObjects.Image; banner?: Phaser.GameObjects.Image }>();
   private under: Phaser.GameObjects.Graphics;
   private bars: Phaser.GameObjects.Graphics;
   private night: Night;
@@ -67,7 +67,7 @@ export class Renderer {
     for (const s of this.sprites.values()) s.destroy();
     this.sprites.clear();
     this.fx.clear();
-    for (const b of this.buildings.values()) { b.body.destroy(); b.stock?.destroy(); }
+    for (const b of this.buildings.values()) { b.body.destroy(); b.stock?.destroy(); b.banner?.destroy(); }
     this.buildings.clear();
     const w = this.scene.world;
     for (let i = 0; i < w.tiles.length; i++) w.dirty.add(i);
@@ -114,6 +114,11 @@ export class Renderer {
         this.buildings.set(b, e);
       }
       e.body.setFrame(Math.min(2, b.level - 1));
+      // a sworn house flies the barracks' banner from its roof
+      if (b.kind === 'house') {
+        if (b.sworn && !e.banner) e.banner = s.add.image(e.body.x + 54, e.body.y + 6, 'banner').setOrigin(0, 0).setDepth(e.body.depth + 0.0001);
+        else if (!b.sworn && e.banner) { e.banner.destroy(); e.banner = undefined; }
+      }
       if (e.stock) {
         const amount = b.kind === 'granary' ? s.food : s.wood;
         const rows = amount <= 0 ? 0 : Math.min(STACK_ROWS, Math.max(1, Math.ceil((amount / CAPS[b.level]) * STACK_ROWS)));

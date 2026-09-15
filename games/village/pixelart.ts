@@ -349,6 +349,15 @@ export const CHIMNEYS: Record<'house' | 'barracks' | 'granary' | 'woodyard', rea
   woodyard: [[], [], [{ x: 25, y: 3 }], [{ x: 25, y: 3 }]],
 };
 
+/** A lone blue banner on a pole (10x18): flown from a house sworn to the barracks. */
+export function ensureBannerTexture(scene: Phaser.Scene): void {
+  if (scene.textures.exists('banner')) return;
+  const tex = scene.textures.createCanvas('banner', 10, 18)!;
+  const ctx = tex.getContext();
+  banner(ctx, 1, 1, BLUE, '#274a9c');
+  tex.refresh();
+}
+
 /** Soft radial light, 64x64, white centre fading to transparent — erased from the night to make pools of light. */
 export function ensureGlowTexture(scene: Phaser.Scene): void {
   if (scene.textures.exists('glow')) return;
@@ -374,6 +383,7 @@ export function ensureBuildingArt(scene: Phaser.Scene): void {
   stackTexture(scene, 'logstack', logEnd);
   stackTexture(scene, 'cratestack', crateFace);
   ensureGlowTexture(scene);
+  ensureBannerTexture(scene);
 }
 
 /** PNG data URL of one frame of a generated texture, for the DOM help screen. */

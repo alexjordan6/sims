@@ -1,6 +1,6 @@
 import type { Agent } from '@shared/index';
-import { World, doorstep, buildingCenter, type House, type TilePos } from './world';
-import { p, TREE_RESERVE } from './config';
+import { World, doorstep, buildingCenter, yardOf, type House, type TilePos } from './world';
+import { p, TREE_RESERVE, CADET_AGE_BEFORE, CADET_DAYS } from './config';
 import type { Mods } from './meta';
 import type { VillageScene } from './main';
 
@@ -182,9 +182,8 @@ export class Villager extends Mover {
   role: Role;
   age: number; // days
   hungerDays = 0;
-  /** upbringing exposure; compared at coming-of-age */
-  martial = 0;
-  civil = 0;
+  /** days of drill done at the barracks (cadets of sworn houses) */
+  drilled = 0;
   name: string;
   /** a snatcher has this child */
   carriedBy: Raider | null = null;
@@ -208,6 +207,19 @@ export class Villager extends Mover {
   get isAdult(): boolean {
     return this.role !== 'kid';
   }
+  /** A child of a sworn house who is old enough to drill. */
+  cadetAt(s: VillageScene): boolean {
+    return this.role === 'kid' && !!this.home.sworn && this.age >= s.adultAge - CADET_AGE_BEFORE;
+  }
+  /** Drill days a cadet needs (War Drums lowers it). */
+  static drillNeeded(s: VillageScene): number { return Math.max(1, CADET_DAYS + s.mods.cadetDaysDelta); }
+  /** What this child will become, as things stand — shown in the UI so nothing is a surprise. */
+  outlook(s: VillageScene): 'soldier' | 'worker' {
+    if (!this.home.sworn) return 'worker';
+    const cadetAge = s.adultAge - CADET_AGE_BEFORE;
+    const daysLeft = s.adultAge - Math.max(this.age, cadetAge); // drill days still to come, today's included
+    return this.drilled + daysLeft >= Villager.drillNeeded(s) ? 'soldier' : 'worker';
+  }
 
   applyRole(mods: Mods): void {
     switch (this.role) {
@@ -223,8 +235,9 @@ export class Villager extends Mover {
 
   /** Called on the day the kid reaches adultAge. */
   comeOfAge(s: VillageScene): void {
-    const noise = s.rng.range(-0.15, 0.15) * (this.martial + this.civil + 1);
-    this.role = this.martial + noise > this.civil ? 'soldier' : s.pickCivilRole();
+    const drilled = this.drilled >= Villager.drillNeeded(s);
+    this.role = this.home.sworn && drilled ? 'soldier' : s.pickCivilRole();
+    if (this.home.sworn && !drilled) s.event('grow', `${this.name} came of age before finishing drill — a ${this.role} instead`, true);
     this.barracksHp = s.world.barracksLevel >= 3 ? 30 : s.world.barracksLevel >= 2 ? 15 : 0;
     this.applyRole(s.mods);
     this.hp = this.maxHp;
@@ -256,10 +269,26 @@ export class Villager extends Mover {
 
   private kidUpdate(dt: number, s: VillageScene): void {
     const danger = s.nearestRaider(this.x, this.y, 80);
-    const mm = s.mods.martialMul;
-    if (danger) { this.martial += 4 * dt * mm * s.mods.fightMartialMul; this.task = 'running home'; this.goHome(s, dt); return; }
+    if (danger) { this.task = 'running home'; this.goHome(s, dt); return; }
 
-    this.task = 'playing';
+    // cadets spend the working day drilling in the barracks yard
+    const drillHours = s.dayTime > 0.3 && s.dayTime < 0.75;
+    const barracks = this.cadetAt(s) && drillHours ? s.nearestBarracks(this.x, this.y) : null;
+    if (barracks) {
+      const yard = yardOf(barracks);
+      const spot = yard[1 + (this.id % (yard.length - 1))];
+      if (!this.goal || this.goal.tx !== spot.tx || this.goal.ty !== spot.ty) this.setGoal(s, spot.tx, spot.ty, true);
+      const there = this.followPath(dt);
+      if (there) {
+        this.task = 'drilling at the barracks';
+        this.vx = this.vy = 0;
+        this.thinkTimer -= dt;
+        if (this.thinkTimer <= 0) { this.thinkTimer = s.rng.range(1.2, 2.2); s.fx.push({ kind: 'swing', who: this, dx: this.dir, dy: 0, stage: 0 }); }
+      } else this.task = 'off to drill';
+      return;
+    }
+
+    this.task = this.home.sworn ? 'playing (cadet)' : 'playing';
     this.thinkTimer -= dt;
     if (this.thinkTimer <= 0 || this.followPath(dt)) {
       this.thinkTimer = s.rng.range(2, 5);
@@ -267,23 +296,6 @@ export class Villager extends Mover {
       const tx = Math.round(hc.tx) + s.rng.int(-r, r), ty = Math.round(hc.ty) + s.rng.int(-r, r);
       if (s.world.inBounds(tx, ty) && !s.world.isBlocked(tx, ty)) this.setGoal(s, tx, ty, true);
     }
-
-    // exposure: who is nearby
-    s.grid.forEachInRadius(this.x, this.y, 48, (o) => {
-      if (!(o instanceof Villager) || o === this) return;
-      if (o.role === 'soldier') this.martial += dt * mm;
-      else if (o.role === 'farmer' || o.role === 'woodcutter') this.civil += dt;
-    });
-    // exposure: what is nearby (5x5 tiles; a level-2+ barracks reaches 7x7)
-    const t = this.tile;
-    for (let dy = -3; dy <= 3; dy++)
-      for (let dx = -3; dx <= 3; dx++) {
-        const tile = s.world.get(t.tx + dx, t.ty + dy);
-        const k = tile?.kind;
-        const near = Math.abs(dx) <= 2 && Math.abs(dy) <= 2;
-        if (k === 'barracks' && (near || (tile!.building?.level ?? 1) >= 2)) this.martial += 0.6 * dt * mm; // 4x4 footprint: several tiles are usually in range
-        else if (near && (k === 'crop' || k === 'tilled')) this.civil += 0.4 * dt;
-      }
   }
 
   // --- farmers / woodcutters ------------------------------------------------

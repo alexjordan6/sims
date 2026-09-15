@@ -1,9 +1,9 @@
 import Phaser from 'phaser';
 import { SimScene, launch } from '@shared/index';
-import { World, doorstep, BUILDINGS, MAX_LEVEL, type Building, type BuildingKind, type Tile } from './world';
+import { World, doorstep, buildingCenter, BUILDINGS, MAX_LEVEL, type Building, type BuildingKind, type Tile } from './world';
 import { Villager, Raider, Player, Mover, TOOLS, type Role, type Tool } from './agents';
 import { Rat, Snatcher, Brute, Shaman, waveComposition } from './enemies';
-import { p, TILE, COLS, ROWS, ZOOM, COST, TREE_YIELD, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, OLD_YIELD, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, TREE_YIELD, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, OLD_YIELD, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, CADET_AGE_BEFORE } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
@@ -41,6 +41,8 @@ export class VillageScene extends SimScene {
   raidActive = false;
   screen: Screen = 'title';
   selected: Mover | null = null;
+  /** a building picked with X / right-click / tap (houses can be sworn from its card) */
+  selectedBuilding: Building | null = null;
   journal: GameEvent[] = [];
   fx: FxEvent[] = [];
   stats = { peakPop: 0, soldiersRaised: 0, raidsRepelled: 0, raidersKilled: 0 };
@@ -157,7 +159,11 @@ export class VillageScene extends SimScene {
     this.wasd = kb.addKeys('W,A,S,D') as typeof this.wasd;
     // Stardew-style: C / left click = use tool, X / right click = check, E / Esc = menu, 1-8 or Tab / wheel = tools
     kb.on('keydown-C', () => this.interact());
-    kb.on('keydown-X', () => this.select(this.hovered));
+    kb.on('keydown-X', () => {
+      if (this.hovered) { this.select(this.hovered); return; }
+      const b = this.facedBuilding() ?? this.world.get(this.player.tile.tx, this.player.tile.ty)?.building ?? null;
+      if (b) this.selectBuilding(b); else this.select(null);
+    });
     kb.on('keydown-E', () => this.togglePause());
     kb.on('keydown-ESC', () => this.togglePause());
     kb.on('keydown-TAB', (e: KeyboardEvent) => { e.preventDefault?.(); this.player.cycleTool(e.shiftKey ? -1 : 1); });
@@ -188,8 +194,8 @@ export class VillageScene extends SimScene {
     this.input.on('pointermove', (ptr: Phaser.Input.Pointer) => this.onPointerMove(ptr));
     this.input.mouse?.disableContextMenu();
     this.input.on('pointerdown', (ptr: Phaser.Input.Pointer, objs: Phaser.GameObjects.GameObject[]) => {
-      if (document.body.classList.contains('touch')) { this.select((objs[0]?.getData('agent') as Mover) ?? null); return; }
-      if (ptr.rightButtonDown()) { this.select((objs[0]?.getData('agent') as Mover) ?? null); return; }
+      if (document.body.classList.contains('touch')) { this.pick(ptr, objs); return; }
+      if (ptr.rightButtonDown()) { this.pick(ptr, objs); return; }
       if (this.screen !== 'playing') return;
       // left click: face the cursor and use the tool there
       const dx = ptr.worldX - this.player.x, dy = ptr.worldY - this.player.y;
@@ -299,6 +305,45 @@ export class VillageScene extends SimScene {
 
   select(m: Mover | null): void {
     this.selected = m;
+    if (m) this.selectedBuilding = null;
+  }
+  selectBuilding(b: Building | null): void {
+    this.selectedBuilding = b;
+    if (b) this.selected = null;
+  }
+  /** Pick whatever is under the pointer: an agent first, else a building tile. */
+  private pick(ptr: Phaser.Input.Pointer, objs: Phaser.GameObjects.GameObject[]): void {
+    const m = (objs[0]?.getData('agent') as Mover) ?? null;
+    if (m) { this.select(m); return; }
+    const b = this.world.get(Math.floor(ptr.worldX / TILE), Math.floor(ptr.worldY / TILE))?.building ?? null;
+    if (b) this.selectBuilding(b); else this.select(null);
+  }
+
+  get adultAge(): number { return Math.max(1, p.adultAge + this.mods.adultAgeDelta); }
+  nearestBarracks(x: number, y: number): Building | null {
+    let best: Building | null = null, bd = Infinity;
+    for (const b of this.world.barracks) { const c = buildingCenter(b); const d = (c.tx * TILE - x) ** 2 + (c.ty * TILE - y) ** 2; if (d < bd) { bd = d; best = b; } }
+    return best;
+  }
+
+  /** Why a house can't be sworn right now, or null. */
+  swearProblem(h: Building): string | null {
+    if (h.kind !== 'house') return 'Only houses can be sworn';
+    if (h.sworn) return null;
+    const cap = this.world.sponsorship(this.mods.sponsorBonus);
+    const used = this.world.swornHouses.length;
+    if (!cap) return 'Build a barracks first';
+    if (used >= cap) return `Your barracks sponsor ${cap} house${cap === 1 ? '' : 's'} — upgrade one or build another`;
+    return null;
+  }
+  /** Swear a house to the barracks (its children drill and become soldiers) or release it. */
+  swear(h: Building): boolean {
+    if (h.sworn) { h.sworn = false; this.event('info', 'House released — it raises workers again', true); return true; }
+    const why = this.swearProblem(h);
+    if (why) { this.event('info', why, true); return false; }
+    h.sworn = true;
+    this.event('soldier', `House sworn to the barracks — its children will drill from age ${this.adultAge - CADET_AGE_BEFORE}`, true);
+    return true;
   }
 
   hoverAgent(m: Mover | null): void {
@@ -405,6 +450,7 @@ export class VillageScene extends SimScene {
       if (this.food >= ration) { this.food -= ration; v.hungerDays = 0; }
       else if (++v.hungerDays >= 3) { v.dead = true; v.hp = 0; this.event('death', `${v.name} starved`, true); continue; }
       else this.event('food', `${v.name} went hungry`);
+      if (v.cadetAt(this) && this.world.barracks.length) v.drilled++; // yesterday's drill
       v.age++;
       v.hp = v.maxHp; // a night's rest
       if (v.role === 'kid' && v.age >= Math.max(1, p.adultAge + this.mods.adultAgeDelta)) v.comeOfAge(this);
@@ -605,7 +651,7 @@ export class VillageScene extends SimScene {
   }
   /** What the building does now, and what the next level adds. */
   buildingBlurb(b: Building): string {
-    const now = b.kind === 'house' ? `${b.residents}/${this.beds(b)} beds${b.level >= 3 ? ' · births +15%' : ''}`
+    const now = b.kind === 'house' ? `${b.residents}/${this.beds(b)} beds${b.level >= 3 ? ' · births +15%' : ''}${b.sworn ? ' · sworn: raises soldiers' : ' · raises workers'}`
       : b.kind === 'granary' ? `${this.food | 0}/${CAPS[b.level]} food`
       : b.kind === 'woodyard' ? `${this.wood | 0}/${CAPS[b.level]} wood`
       : LEVEL_PERKS.barracks[b.level];
