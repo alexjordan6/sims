@@ -143,7 +143,7 @@ export class UI {
     });
 
     this.tooltipEl = h('<div class="tooltip" hidden></div>');
-    document.body.append(this.tooltipEl);
+    this.overlay.append(this.tooltipEl);
 
     if (this.touch) this.mountTouch();
     this.mountControls();
@@ -532,14 +532,12 @@ export class UI {
 
   // ---- tooltip ---------------------------------------------------------------
 
-  tooltip(html: string | null, x = 0, y = 0): void {
+  /** What's under the pointer, in a card docked under the top bar — never beside the cursor, so it can't cover what you're aiming at. */
+  tooltip(html: string | null, _x = 0, _y = 0): void {
     if (!html) { this.tooltipEl.hidden = true; return; }
     this.tooltipEl.hidden = false;
+    this.tooltipEl.style.top = `${this.top.offsetTop + this.top.offsetHeight + 8}px`; // the top bar wraps on narrow screens
     if (this.tooltipEl.innerHTML !== html) this.tooltipEl.innerHTML = html;
-    const r = this.tooltipEl.getBoundingClientRect();
-    const px = Math.min(x, window.innerWidth - r.width - 16), py = Math.min(y, window.innerHeight - r.height - 16);
-    this.tooltipEl.style.left = `${px}px`;
-    this.tooltipEl.style.top = `${py}px`;
   }
 
   // ---- screens ---------------------------------------------------------------

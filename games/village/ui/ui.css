@@ -129,7 +129,7 @@ h3 { font-size: 9px; color: var(--ink-dim); margin-bottom: 6px; }
 .roster .row .spr { width: 24px; height: 24px; background-size: 288px 264px; }
 
 /* ---- tooltip ------------------------------------------------------------ */
-.tooltip { position: fixed; z-index: 30; pointer-events: none; font-size: 14px; padding: 4px 8px; background: #140f0b; border: 2px solid #5a4636; box-shadow: 2px 2px 0 #000; transform: translate(12px, 12px); max-width: 260px; }
+.tooltip { position: absolute; right: 10px; top: 66px; z-index: 30; pointer-events: none !important; font-size: 14px; padding: 4px 8px; background: #140f0bd9; border: 2px solid #5a4636; box-shadow: 2px 2px 0 #000; max-width: 260px; }
 .tooltip .t { color: var(--accent); }
 .tooltip .d { color: var(--ink-dim); font-size: 12px; }
 
