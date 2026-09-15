@@ -6,6 +6,7 @@ import { TOWN, FARM, CHAR } from './atlas';
 import { TILE, COLS, ROWS, CAPS } from './config';
 import type { VillageScene } from './main';
 import { Fx } from './fx';
+import { ensureLogPiles } from './pixelart';
 
 import townUrl from './assets/town.png';
 import farmUrl from './assets/farm.png';
@@ -56,16 +57,13 @@ const BUILDING: Record<BuildingKind, { ridge: readonly number[]; parts: readonly
     ridge: [80, 81, 82],
     parts: [
       44, 45, 46,
-      68, 92, 70,
+      68, 69, 70,
     ],
     chimney: 83, peak: 57, // a sign, then a crate
   },
 };
-/** Yard decorations: how many items to show for a fill fraction, and which frames (town-relative gids). */
-const YARD = {
-  granary: [farm(75), farm(96), farm(75)], // crate, hay bale, crate
-  woodyard: [92, 92, 92], // log piles
-} as const;
+/** Granary yard stock, by tier: crate, hay bale, grain barrel (farm-sheet frames). */
+const GRANARY_STOCK = [FARM.crate, FARM.hayBale, 97] as const;
 
 export const DEPTH = { ground: 0, objects: 1, under: 5, agents: 10, roofs: 20, bars: 30, night: 40 } as const;
 
@@ -85,6 +83,8 @@ export class Renderer {
   private objects!: Phaser.Tilemaps.TilemapLayer;
   private roofs!: Phaser.Tilemaps.TilemapLayer;
   private sprites = new Map<number, Phaser.GameObjects.Sprite>();
+  /** stock shown in a supply building's yard (3 slots) plus, for the woodyard, the pile inside the shed */
+  private yards = new Map<Building, Phaser.GameObjects.Image[]>();
   private under: Phaser.GameObjects.Graphics;
   private bars: Phaser.GameObjects.Graphics;
   private night: Phaser.GameObjects.Rectangle;
@@ -104,6 +104,7 @@ export class Renderer {
     this.bars = scene.add.graphics().setDepth(DEPTH.bars);
     this.night = scene.add.rectangle(0, 0, COLS * TILE, ROWS * TILE, 0x060612, 0).setOrigin(0).setDepth(DEPTH.night);
     this.fx = new Fx(scene);
+    ensureLogPiles(scene);
   }
 
   /** Redraw every tile and drop all sprites (after a reset). */
@@ -111,6 +112,8 @@ export class Renderer {
     for (const s of this.sprites.values()) s.destroy();
     this.sprites.clear();
     this.fx.clear();
+    for (const imgs of this.yards.values()) imgs.forEach((i) => i.destroy());
+    this.yards.clear();
     this.roofs.fill(EMPTY);
     const w = this.scene.world;
     for (let i = 0; i < w.tiles.length; i++) w.dirty.add(i);
@@ -131,23 +134,34 @@ export class Renderer {
 
   // ---- tiles ---------------------------------------------------------------
 
-  private lastYard = new WeakMap<Building, number>();
-  /** The stockpile shows in the world: crates/hay in front of the granary, log piles at the woodyard. */
+  /**
+   * The stockpile shows in the world: the yard in front of a supply building fills slot by
+   * slot (each slot growing through three tiers) as the store fills — crates, hay and barrels
+   * at the granary, stacked logs at the woodyard.
+   */
   private paintYards(): void {
     const s = this.scene;
     for (const b of s.world.buildings) {
       if (b.kind !== 'granary' && b.kind !== 'woodyard') continue;
+      let imgs = this.yards.get(b);
+      if (!imgs) {
+        imgs = yardOf(b).map((q) => s.add.image((q.tx + 0.5) * TILE, (q.ty + 1) * TILE - 1, 'logs', 0).setOrigin(0.5, 1).setDepth(DEPTH.objects + 1).setVisible(false));
+        if (b.kind === 'woodyard') { // the shed always shows a full stack inside its frame
+          const f = BUILDINGS[b.kind];
+          imgs.push(s.add.image((b.tx + f.w / 2) * TILE, (b.ty + f.h) * TILE - 2, 'logs', 3).setOrigin(0.5, 1).setDepth(DEPTH.objects + 1));
+        }
+        this.yards.set(b, imgs);
+      }
       const amount = b.kind === 'granary' ? s.food : s.wood;
-      const cap = CAPS[b.level];
-      const n = amount <= 0 ? 0 : Math.min(3, Math.max(1, Math.ceil((amount / cap) * 3)));
-      if (this.lastYard.get(b) === n) continue;
-      this.lastYard.set(b, n);
-      const frames = YARD[b.kind];
-      yardOf(b).forEach((q, i) => {
-        if (!s.world.inBounds(q.tx, q.ty)) return;
-        s.world.get(q.tx, q.ty)!.yard = i < n ? GID.town + frames[i] : 0;
-        s.world.markDirty(q.tx, q.ty);
-      });
+      const units = amount <= 0 ? 0 : Math.min(9, Math.max(1, Math.ceil((amount / CAPS[b.level]) * 9)));
+      for (let i = 0; i < 3; i++) {
+        const tier = Math.max(0, Math.min(3, units - i * 3));
+        const img = imgs[i];
+        img.setVisible(tier > 0);
+        if (tier === 0) continue;
+        if (b.kind === 'woodyard') img.setTexture('logs', tier);
+        else img.setTexture('farm', GRANARY_STOCK[tier - 1]);
+      }
     }
   }
 
@@ -162,9 +176,7 @@ export class Renderer {
     const t = w.get(tx, ty)!;
     const { ground, object } = tileFrames(t, this.scene.cropDays);
     this.ground.putTileAt(ground, tx, ty);
-    // yard stock (crates, log piles) sits on open ground in front of the supply buildings
-    const yard = t.yard && (t.kind === 'grass' || t.kind === 'tilled') ? t.yard : 0;
-    this.objects.putTileAt(yard || object, tx, ty);
+    this.objects.putTileAt(object, tx, ty);
     // the roof ridge overhangs the row above the footprint (drawn over agents); level markers sit on it
     const b = t.building;
     if (b && (t.part ?? 0) < BUILDINGS[b.kind].w) {

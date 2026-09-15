@@ -52,8 +52,6 @@ export interface Tile {
   building?: Building;
   /** for buildings: which footprint cell this tile is (col + row * w), for rendering */
   part?: number;
-  /** yard stock decoration: tile gid to draw (0 = none), set by the renderer from the stockpile */
-  yard?: number;
 }
 
 export interface TilePos { tx: number; ty: number }
@@ -90,7 +88,7 @@ export class World {
     const i = ty * this.cols + tx;
     const t = this.tiles[i];
     if (t.building && !this.stamping) return t;
-    t.kind = kind; t.stage = 0; t.work = 0; t.building = undefined; t.part = undefined; t.yard = undefined; t.v = (t.v + 31) % 97;
+    t.kind = kind; t.stage = 0; t.work = 0; t.building = undefined; t.part = undefined; t.v = (t.v + 31) % 97;
     this.dirty.add(i);
     return t;
   }
