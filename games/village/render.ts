@@ -3,7 +3,7 @@ import { World, BUILDINGS, yardOf, type Tile, type Building, type BuildingKind }
 import { Mover, Villager, Raider, Player } from './agents';
 import { Bolt } from './enemies';
 import { TOWN, FARM, CHAR } from './atlas';
-import { TILE, COLS, ROWS, CAPS } from './config';
+import { TILE, COLS, ROWS, CAPS, OLD_GROWTH_DAYS } from './config';
 import type { VillageScene } from './main';
 import { Fx } from './fx';
 import { ensureLogPiles, ensureCabin, ensureLogStack, STACK_ROWS } from './pixelart';
@@ -359,13 +359,14 @@ function tileFrames(t: Tile, cropDays: number): { ground: number; object: number
     case 'grass': return { ground: grass, object: EMPTY };
     case 'tree':
       // half-chopped trees show as a bare trunk
-      return { ground: grass, object: t.work >= 2 ? GID.farm + FARM.bareTree : GID.town + TOWN.trees[t.v % TOWN.trees.length] };
+      // young trees are small; old growth stands tall (two tall frames by variant)
+      return { ground: grass, object: t.work >= 2 ? GID.farm + FARM.bareTree : GID.town + (t.stage >= OLD_GROWTH_DAYS ? TOWN.trees[t.v % 2] : TOWN.trees[2]) };
     case 'tilled': return { ground: GID.farm + FARM.tilled, object: EMPTY };
     case 'crop': {
       const f = t.stage >= cropDays ? 3 : Math.min(2, Math.floor((t.stage / cropDays) * 3));
       return { ground: GID.farm + FARM.tilled, object: GID.farm + FARM.crop[f] };
     }
-    case 'sapling': return { ground: grass, object: t.stage < 2 ? GID.farm + FARM.bareTree : GID.town + TOWN.trees[3] };
+    case 'sapling': return { ground: grass, object: t.stage < 2 ? GID.farm + FARM.bareTree : GID.farm + FARM.bush };
     case 'house':
     case 'barracks':
     case 'granary':

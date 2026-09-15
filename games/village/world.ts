@@ -44,7 +44,7 @@ export function yardOf(b: Building): TilePos[] {
 
 export interface Tile {
   kind: TileKind;
-  /** crops: growth 0..cropDays (mature when >=); saplings: days until a tree */
+  /** crops: growth 0..cropDays (mature when >=); saplings: days toward a tree; trees: age in days (old growth at OLD_GROWTH_DAYS) */
   stage: number;
   /** trees: chop progress accumulated by workers; buildings: upgrade hammering */
   work: number;
@@ -145,6 +145,34 @@ export class World {
       for (let dx = 0; dx < f.w; dx++) if (this.inBounds(b.tx + dx, b.ty + dy)) this.markDirty(b.tx + dx, b.ty + dy);
   }
 
+  /** Trees in the 8 tiles around (tx, ty). */
+  treeNeighbours(tx: number, ty: number): number {
+    let n = 0;
+    for (let dy = -1; dy <= 1; dy++)
+      for (let dx = -1; dx <= 1; dx++)
+        if ((dx || dy) && this.get(tx + dx, ty + dy)?.kind === 'tree') n++;
+    return n;
+  }
+
+  /** Size of the connected grove (trees and saplings, 8-connected) containing (tx, ty), counting at most `cap`. */
+  groveSize(tx: number, ty: number, cap = 200): number {
+    const start = this.get(tx, ty);
+    if (!start || (start.kind !== 'tree' && start.kind !== 'sapling')) return 0;
+    const seen = new Set<number>([ty * this.cols + tx]);
+    const queue = [[tx, ty]];
+    for (let qi = 0; qi < queue.length && seen.size < cap; qi++) {
+      const [cx, cy] = queue[qi];
+      for (let dy = -1; dy <= 1; dy++)
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = cx + dx, ny = cy + dy, k = ny * this.cols + nx;
+          if ((!dx && !dy) || seen.has(k)) continue;
+          const t = this.get(nx, ny);
+          if (t && (t.kind === 'tree' || t.kind === 'sapling')) { seen.add(k); queue.push([nx, ny]); }
+        }
+    }
+    return seen.size;
+  }
+
   /** Iterate all tiles matching a predicate. */
   *find(pred: (t: Tile, tx: number, ty: number) => boolean): Generator<TilePos> {
     for (let ty = 0; ty < this.rows; ty++)
@@ -214,7 +242,7 @@ export class World {
       const cx = rng.int(1, this.cols - 2), cy = rng.int(1, this.rows - 2);
       for (let i = 0; i < 6; i++) {
         const tx = cx + rng.int(-2, 2), ty = cy + rng.int(-2, 2);
-        if (this.inBounds(tx, ty) && this.get(tx, ty)!.kind === 'grass') this.set(tx, ty, 'tree');
+        if (this.inBounds(tx, ty) && this.get(tx, ty)!.kind === 'grass') this.set(tx, ty, 'tree').stage = rng.int(0, 10);
       }
     }
     const hx = (this.cols / 2) | 0, hy = (this.rows / 2) | 0;

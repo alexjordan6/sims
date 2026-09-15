@@ -1,7 +1,7 @@
 import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type Tool } from '../agents';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
-import { COST, p, RUN, CAPS, HOUSE_BEDS, SAPLING_DAYS, TREE_RESERVE } from '../config';
+import { COST, p, RUN, CAPS, HOUSE_BEDS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS, TREE_YIELD, OLD_YIELD } from '../config';
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
@@ -605,7 +605,7 @@ export class UI {
           <h3>WHO'S WHO</h3>
           ${who('dungeon', DUNGEON.hero, 'player', 'You', 'Equip a tool, then click: hoe tills, seeds plant, hands harvest, axe chops, sword fights, hammer upgrades.')}
           ${who('farm', FARM.farmerHat, 'farmer', 'Farmer', 'Plants and harvests the fields on their own.')}
-          ${who('dungeon', DUNGEON.man, 'woodcutter', 'Woodcutter', 'Chops trees for wood, but leaves the last ' + TREE_RESERVE + ' standing. Helps in the field when the woodyard is full.')}
+          ${who('dungeon', DUNGEON.man, 'woodcutter', 'Woodcutter', 'Fells trees for wood — old growth first, thinning a grove from its edge so the core keeps spreading. Leaves the last ' + TREE_RESERVE + ' standing. Helps in the field when the woodyard is full.')}
           ${who('dungeon', DUNGEON.villager, 'kid', 'Child', 'Plays near home and soaks up what is around them.')}
           ${who('dungeon', DUNGEON.knight, 'soldier', 'Soldier', 'Guards the barracks and fights raiders.')}
           ${who('dungeon', DUNGEON.orc, 'raider', 'Raider', 'Walks at the nearest person and hits them. Tramples crops.')}
@@ -619,7 +619,10 @@ export class UI {
           ${who('farm', 103, 'farmer', 'Granary', 'Holds your food: ' + CAPS[1] + ' / ' + CAPS[2] + ' / ' + CAPS[3] + ' by level. Its yard fills as the store does.')}
           ${who('town', 92, 'woodcutter', 'Woodyard', 'Holds your wood: ' + CAPS[1] + ' / ' + CAPS[2] + ' / ' + CAPS[3] + ' by level. The log stack beside the cabin climbs as it fills.')}
           <p>Buildings can't be damaged. Use the <b>HAMMER</b> on one (3 hits) to upgrade it for wood — every building has three levels, shown by a chimney (Lv2) and a gable (Lv3) on the roof.</p>
-          <p>Trees grow back: a chopped tree leaves a sapling that regrows in ${SAPLING_DAYS} days, forests spread on their own, and <b>SEEDS</b> on grass plants a new tree. Clear stumps and saplings with the <b>AXE</b> or <b>HOE</b>; the hoe also flattens soil back to grass. Buildings can go on grass, stumps or soil — just not on trees, crops or other buildings.</p>
+          <h3>GROVES</h3>
+          <p>Trees spread onto neighbouring grass — but a lone tree barely does (about 1% a day) while a tree inside a grove seeds fast (up to 11%). A sapling with two or more trees beside it grows in ${SHELTERED_SAPLING_DAYS} days instead of ${SAPLING_DAYS}. So plant trees <b>together</b>, near the woodyard, and let the grove do the work.</p>
+          <p>Trees age: after ${OLD_GROWTH_DAYS} days they become <b>old growth</b> — taller, and worth ${OLD_YIELD} wood instead of ${TREE_YIELD}. Woodcutters take old growth first and thin a grove from its edge.</p>
+          <p>Seeds only land on grass, never next to buildings — a ring of tilled soil is a firebreak that stops a grove spreading. <b>SEEDS</b> on grass plants a tree; clear stumps and saplings with the <b>AXE</b> or <b>HOE</b> (the hoe also flattens soil back to grass). Buildings can go on grass, stumps or soil — not on trees, crops or other buildings.</p>
         </section>
         <section>
           <h3>CONTROLS</h3>

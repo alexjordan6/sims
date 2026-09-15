@@ -1,9 +1,9 @@
 import Phaser from 'phaser';
 import { SimScene, launch } from '@shared/index';
-import { World, doorstep, BUILDINGS, MAX_LEVEL, type Building, type BuildingKind } from './world';
+import { World, doorstep, BUILDINGS, MAX_LEVEL, type Building, type BuildingKind, type Tile } from './world';
 import { Villager, Raider, Player, Mover, TOOLS, type Role, type Tool } from './agents';
 import { Rat, Snatcher, Brute, Shaman, waveComposition } from './enemies';
-import { p, TILE, COLS, ROWS, ZOOM, COST, TREE_YIELD, RUN, SAPLING_DAYS, TREE_SEED_CHANCE, CAPS, UPGRADE_COST, HOUSE_BEDS } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, TREE_YIELD, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, OLD_YIELD, CAPS, UPGRADE_COST, HOUSE_BEDS } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
@@ -314,13 +314,23 @@ export class VillageScene extends SimScene {
       this.ui.tooltip(`<div class="t">${name}</div><div class="d">${sub} · ${Math.max(0, m.hp)}/${m.maxHp} hp</div>`, ev.clientX, ev.clientY);
       return;
     }
-    const t = this.world.get(Math.floor(ptr.worldX / TILE), Math.floor(ptr.worldY / TILE));
+    const tx = Math.floor(ptr.worldX / TILE), ty = Math.floor(ptr.worldY / TILE);
+    const t = this.world.get(tx, ty);
     let html: string | null = null;
     switch (t?.kind) {
       case 'crop': html = `<div class="t">${t.stage >= this.cropDays ? 'Ripe crop' : 'Growing crop'}</div><div class="d">${Math.min(t.stage, this.cropDays)}/${this.cropDays} days · yields ${this.mods.cropYield} food</div>`; break;
       case 'tilled': html = `<div class="t">Tilled soil</div><div class="d">plant with seeds, or a farmer will</div>`; break;
-      case 'tree': html = `<div class="t">Tree</div><div class="d">${t.work}/3 chopped · yields ${TREE_YIELD} wood</div>`; break;
-      case 'sapling': html = `<div class="t">${t.stage < 2 ? 'Stump' : 'Sapling'}</div><div class="d">grows into a tree in ${SAPLING_DAYS - t.stage} day${SAPLING_DAYS - t.stage === 1 ? '' : 's'}</div>`; break;
+      case 'tree': {
+        const old = this.isOldGrowth(t), grove = this.world.groveSize(tx, ty);
+        const age = old ? `old growth · yields ${OLD_YIELD} wood` : `young · old growth in ${OLD_GROWTH_DAYS - t.stage} day${OLD_GROWTH_DAYS - t.stage === 1 ? '' : 's'} · yields ${TREE_YIELD} wood`;
+        html = `<div class="t">${old ? 'Old growth' : 'Tree'}</div><div class="d">${age} · grove of ${grove}${grove >= 200 ? '+' : ''} · spreads ${Math.round(this.seedChance(tx, ty) * 100)}%/day${t.work ? ` · ${t.work}/3 chopped` : ''}</div>`;
+        break;
+      }
+      case 'sapling': {
+        const days = this.saplingDays(tx, ty) - t.stage;
+        html = `<div class="t">${t.stage < 2 ? 'Stump' : 'Sapling'}</div><div class="d">grows into a tree in ${days} day${days === 1 ? '' : 's'}${this.world.treeNeighbours(tx, ty) >= 2 ? ' · sheltered by the grove' : ''}</div>`;
+        break;
+      }
       case 'house': case 'barracks': case 'granary': case 'woodyard': {
         const b = t.building!;
         html = `<div class="t">${this.buildingTitle(b)}</div><div class="d">${this.buildingBlurb(b)}</div>`;
@@ -368,10 +378,13 @@ export class VillageScene extends SimScene {
     this.world.tiles.forEach((t, i) => {
       const tx = i % COLS, ty = (i / COLS) | 0;
       if (t.kind === 'sapling') {
-        if (++t.stage >= SAPLING_DAYS) this.world.set(tx, ty, 'tree'); else this.world.dirty.add(i);
-      } else if (t.kind === 'tree' && this.rng.chance(TREE_SEED_CHANCE)) {
-        const [dx, dy] = this.rng.pick([[1, 0], [-1, 0], [0, 1], [0, -1]]);
-        if (this.world.get(tx + dx, ty + dy)?.kind === 'grass') seeds.push({ tx: tx + dx, ty: ty + dy });
+        if (++t.stage >= this.saplingDays(tx, ty)) this.world.set(tx, ty, 'tree'); else this.world.dirty.add(i);
+      } else if (t.kind === 'tree') {
+        if (++t.stage === OLD_GROWTH_DAYS) this.world.dirty.add(i); // grows tall
+        if (this.rng.chance(this.seedChance(tx, ty))) {
+          const [dx, dy] = this.rng.pick([[1, 0], [-1, 0], [0, 1], [0, -1]]);
+          if (this.world.get(tx + dx, ty + dy)?.kind === 'grass') seeds.push({ tx: tx + dx, ty: ty + dy });
+        }
       }
     });
     // forests spread until the map is about a third trees, but never into the village clearing
@@ -640,6 +653,20 @@ export class VillageScene extends SimScene {
     return null;
   }
 
+  // ---- groves: trees shelter each other and age into old growth ------------------------------
+
+  /** A tree's daily chance to seed a neighbour: lone trees barely spread, a grove spreads fast. */
+  seedChance(tx: number, ty: number): number {
+    return SEED_BASE + SEED_PER_NEIGHBOUR * Math.min(4, this.world.treeNeighbours(tx, ty));
+  }
+  /** Days a sapling at (tx, ty) needs: quicker with two or more trees around it. */
+  saplingDays(tx: number, ty: number): number {
+    return this.world.treeNeighbours(tx, ty) >= 2 ? SHELTERED_SAPLING_DAYS : SAPLING_DAYS;
+  }
+  isOldGrowth(t: Tile): boolean { return t.kind === 'tree' && t.stage >= OLD_GROWTH_DAYS; }
+  /** Wood a tree pays when felled. */
+  treeYield(t: Tile): number { return this.isOldGrowth(t) ? OLD_YIELD : TREE_YIELD; }
+
   /** Is (tx, ty) within `pad` tiles of any building footprint (including its yard)? */
   nearBuilding(tx: number, ty: number, pad: number): boolean {
     return this.world.buildings.some((b) => {
@@ -699,7 +726,7 @@ export class VillageScene extends SimScene {
         return;
       case 'axe':
         if (t?.kind === 'tree') {
-          if (++t.work >= 3) { this.world.set(tx, ty, 'sapling'); this.addWood(TREE_YIELD); }
+          if (++t.work >= 3) { const wood = this.treeYield(t); this.world.set(tx, ty, 'sapling'); this.addWood(wood); }
           else this.world.dirty.add(ty * COLS + tx);
         } else if (t?.kind === 'sapling') this.world.set(tx, ty, 'grass'); // clear the stump
         this.fx.push({ kind: 'tool', tool: 'axe', tx, ty });
@@ -742,12 +769,12 @@ export class VillageScene extends SimScene {
         return 'hoe: face open grass';
       case 'seeds':
         if (kind === 'tilled') return 'E: plant crops';
-        if (kind === 'grass') return `E: plant a tree (grows in ${SAPLING_DAYS} days)`;
-        if (kind === 'sapling') return `sapling — a tree in ${SAPLING_DAYS - t!.stage} days`;
+        if (kind === 'grass') return `E: plant a tree (grows in ${this.saplingDays(pl.faced.tx, pl.faced.ty)} days${this.world.treeNeighbours(pl.faced.tx, pl.faced.ty) >= 2 ? ', sheltered' : ''})`;
+        if (kind === 'sapling') return `sapling — a tree in ${this.saplingDays(pl.faced.tx, pl.faced.ty) - t!.stage} days`;
         if (kind === 'crop') return t!.stage >= this.cropDays ? `ripe — ${need('hands')}` : `growing (${t!.stage}/${this.cropDays} days)`;
         return 'seeds: crops on soil, trees on grass';
       case 'axe':
-        if (kind === 'tree') return `E: chop (${t!.work}/3)`;
+        if (kind === 'tree') return `E: chop ${this.isOldGrowth(t!) ? 'old growth' : 'young tree'} (${t!.work}/3, ${this.treeYield(t!)} wood)`;
         if (kind === 'sapling') return t!.stage < 2 ? 'E: clear the stump' : 'E: cut down the sapling';
         return 'axe: face a tree';
       case 'hands':
@@ -755,7 +782,7 @@ export class VillageScene extends SimScene {
         if (kind === 'grass') return `grass — ${need('hoe')} to till`;
         if (kind === 'tilled') return `tilled — ${need('seeds')}`;
         if (kind === 'tree') return `tree — ${need('axe')}`;
-        if (kind === 'sapling') return `sapling — a tree in ${SAPLING_DAYS - t!.stage} days`;
+        if (kind === 'sapling') return `sapling — a tree in ${this.saplingDays(pl.faced.tx, pl.faced.ty) - t!.stage} days`;
         return 'hands: harvest ripe crops';
     }
   }

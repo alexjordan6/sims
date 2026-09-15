@@ -29,7 +29,14 @@ export const TREE_YIELD = 8;
 /** days for a stump/sapling to become a tree */
 export const SAPLING_DAYS = 4;
 /** daily chance each tree seeds an adjacent grass tile */
-export const TREE_SEED_CHANCE = 0.04;
+/** a tree's daily chance to seed a neighbouring grass tile: base + per tree around it (8-neighbourhood, capped at 4) */
+export const SEED_BASE = 0.01;
+export const SEED_PER_NEIGHBOUR = 0.025;
+/** a sapling with at least two tree neighbours grows this fast instead of SAPLING_DAYS */
+export const SHELTERED_SAPLING_DAYS = 3;
+/** days after which a tree is old growth: taller, and worth OLD_YIELD */
+export const OLD_GROWTH_DAYS = 6;
+export const OLD_YIELD = 12;
 /** woodcutters leave at least this many trees standing */
 export const TREE_RESERVE = 8;
 /** food / wood the granary / woodyard can hold, by level (index = level) */

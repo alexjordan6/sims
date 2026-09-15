@@ -1,6 +1,6 @@
 import type { Agent } from '@shared/index';
 import { World, doorstep, buildingCenter, type House, type TilePos } from './world';
-import { p, TREE_YIELD, TREE_RESERVE } from './config';
+import { p, TREE_RESERVE } from './config';
 import type { Mods } from './meta';
 import type { VillageScene } from './main';
 
@@ -313,7 +313,7 @@ export class Villager extends Mover {
       const job = farmer
         ? w.nearest(this.x, this.y, (t) => t.kind === 'crop' && t.stage >= s.cropDays) ??
           w.nearest(this.x, this.y, (t) => t.kind === 'tilled')
-        : w.count((t) => t.kind === 'tree') > TREE_RESERVE ? w.nearest(this.x, this.y, (t) => t.kind === 'tree') : null;
+        : w.count((t) => t.kind === 'tree') > TREE_RESERVE ? this.pickTree(s) : null;
       if (job) { this.setGoal(s, job.tx, job.ty); this.task = farmer ? (this.role === 'woodcutter' ? 'helping in the field' : 'heading to the field') : 'looking for a tree'; }
       else { this.wanderNear(s, this.home); this.task = farmer ? 'no crops to tend' : 'leaving the last trees to regrow'; }
       return;
@@ -329,12 +329,25 @@ export class Villager extends Mover {
     }
   }
 
+  /**
+   * Which tree to fell: thin the grove from its edge and take old growth first, so the core keeps
+   * spreading — old growth on the edge, then any old growth, then a young edge tree, then anything.
+   */
+  private pickTree(s: VillageScene): TilePos | null {
+    const w = s.world;
+    const edge = (tx: number, ty: number) => w.treeNeighbours(tx, ty) <= 3;
+    return w.nearest(this.x, this.y, (t, tx, ty) => s.isOldGrowth(t) && edge(tx, ty))
+      ?? w.nearest(this.x, this.y, (t) => s.isOldGrowth(t))
+      ?? w.nearest(this.x, this.y, (t, tx, ty) => t.kind === 'tree' && edge(tx, ty))
+      ?? w.nearest(this.x, this.y, (t) => t.kind === 'tree');
+  }
+
   private finishWork(s: VillageScene, farmer: boolean): void {
     const g = this.goal!;
     const t = s.world.get(g.tx, g.ty)!;
     if (farmer && t.kind === 'crop' && t.stage >= s.cropDays) { if (s.food < s.foodCap) { s.world.set(g.tx, g.ty, 'tilled'); s.addFood(s.mods.cropYield); } }
     else if (farmer && t.kind === 'tilled') { s.world.set(g.tx, g.ty, 'crop'); }
-    else if (!farmer && t.kind === 'tree') { s.world.set(g.tx, g.ty, 'sapling'); s.addWood(TREE_YIELD); }
+    else if (!farmer && t.kind === 'tree') { const wood = s.treeYield(t); s.world.set(g.tx, g.ty, 'sapling'); s.addWood(wood); }
     this.clearGoal();
   }
 
