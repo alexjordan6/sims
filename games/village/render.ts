@@ -6,7 +6,7 @@ import { TOWN, FARM, CHAR } from './atlas';
 import { TILE, COLS, ROWS, CAPS } from './config';
 import type { VillageScene } from './main';
 import { Fx } from './fx';
-import { ensureLogPiles } from './pixelart';
+import { ensureLogPiles, ensureCabin, ensureLogStack, STACK_ROWS } from './pixelart';
 
 import townUrl from './assets/town.png';
 import farmUrl from './assets/farm.png';
@@ -52,14 +52,14 @@ const BUILDING: Record<BuildingKind, { ridge: readonly number[]; parts: readonly
     ],
     chimney: farm(96), peak: farm(97), // hay bale, then a grain barrel on the roofline
   },
-  // open lumber shed: a wooden frame with a log stack inside, a beam across the top
+  // the woodyard is drawn as sprites (a cabin and a log stack, see paintYards); its tiles stay bare
   woodyard: {
-    ridge: [80, 81, 82],
+    ridge: [EMPTY, EMPTY, EMPTY],
     parts: [
-      44, 45, 46,
-      68, 69, 70,
+      EMPTY, EMPTY, EMPTY,
+      EMPTY, EMPTY, EMPTY,
     ],
-    chimney: 83, peak: 57, // a sign, then a crate
+    chimney: EMPTY, peak: EMPTY,
   },
 };
 /** Granary yard stock, by tier: crate, hay bale, grain barrel (farm-sheet frames). */
@@ -83,7 +83,7 @@ export class Renderer {
   private objects!: Phaser.Tilemaps.TilemapLayer;
   private roofs!: Phaser.Tilemaps.TilemapLayer;
   private sprites = new Map<number, Phaser.GameObjects.Sprite>();
-  /** stock shown in a supply building's yard (3 slots) plus, for the woodyard, the pile inside the shed */
+  /** stock shown at a supply building: 3 yard slots (granary) or the cabin + growing log stack (woodyard) */
   private yards = new Map<Building, Phaser.GameObjects.Image[]>();
   private under: Phaser.GameObjects.Graphics;
   private bars: Phaser.GameObjects.Graphics;
@@ -110,6 +110,8 @@ export class Renderer {
     this.arrows = scene.add.graphics().setDepth(DEPTH.arrows).setScrollFactor(0);
     this.fx = new Fx(scene);
     ensureLogPiles(scene);
+    ensureCabin(scene);
+    ensureLogStack(scene);
   }
 
   /** Redraw every tile and drop all sprites (after a reset). */
@@ -141,34 +143,49 @@ export class Renderer {
   // ---- tiles ---------------------------------------------------------------
 
   /**
-   * The stockpile shows in the world: the yard in front of a supply building fills slot by
-   * slot (each slot growing through three tiers) as the store fills — crates, hay and barrels
-   * at the granary, stacked logs at the woodyard.
+   * The stockpile shows in the world. Granary: the yard in front fills slot by slot (each slot
+   * growing through crate → hay → barrel). Woodyard: a plank cabin on the left two tiles and, on
+   * the right, a stack of logs that climbs one row at a time as wood comes in.
    */
   private paintYards(): void {
     const s = this.scene;
     for (const b of s.world.buildings) {
-      if (b.kind !== 'granary' && b.kind !== 'woodyard') continue;
-      let imgs = this.yards.get(b);
-      if (!imgs) {
-        imgs = yardOf(b).map((q) => s.add.image((q.tx + 0.5) * TILE, (q.ty + 1) * TILE - 1, 'logs', 0).setOrigin(0.5, 1).setDepth(DEPTH.objects + 1).setVisible(false));
-        if (b.kind === 'woodyard') { // the shed always shows a full stack inside its frame
-          const f = BUILDINGS[b.kind];
-          imgs.push(s.add.image((b.tx + f.w / 2) * TILE, (b.ty + f.h) * TILE - 2, 'logs', 3).setOrigin(0.5, 1).setDepth(DEPTH.objects + 1));
-        }
-        this.yards.set(b, imgs);
-      }
-      const amount = b.kind === 'granary' ? s.food : s.wood;
-      const units = amount <= 0 ? 0 : Math.min(9, Math.max(1, Math.ceil((amount / CAPS[b.level]) * 9)));
-      for (let i = 0; i < 3; i++) {
-        const tier = Math.max(0, Math.min(3, units - i * 3));
-        const img = imgs[i];
-        img.setVisible(tier > 0);
-        if (tier === 0) continue;
-        if (b.kind === 'woodyard') img.setTexture('logs', tier);
-        else img.setTexture('farm', GRANARY_STOCK[tier - 1]);
-      }
+      if (b.kind === 'granary') this.paintGranaryYard(b);
+      else if (b.kind === 'woodyard') this.paintWoodyard(b);
     }
+  }
+
+  private paintGranaryYard(b: Building): void {
+    const s = this.scene;
+    let imgs = this.yards.get(b);
+    if (!imgs) {
+      imgs = yardOf(b).map((q) => s.add.image((q.tx + 0.5) * TILE, (q.ty + 1) * TILE - 1, 'farm', GRANARY_STOCK[0]).setOrigin(0.5, 1).setDepth(DEPTH.objects + 1).setVisible(false));
+      this.yards.set(b, imgs);
+    }
+    const units = s.food <= 0 ? 0 : Math.min(9, Math.max(1, Math.ceil((s.food / CAPS[b.level]) * 9)));
+    for (let i = 0; i < 3; i++) {
+      const tier = Math.max(0, Math.min(3, units - i * 3));
+      imgs[i].setVisible(tier > 0);
+      if (tier > 0) imgs[i].setTexture('farm', GRANARY_STOCK[tier - 1]);
+    }
+  }
+
+  private paintWoodyard(b: Building): void {
+    const s = this.scene;
+    const f = BUILDINGS[b.kind];
+    let imgs = this.yards.get(b);
+    if (!imgs) {
+      imgs = [
+        // cabin: 2 tiles wide, 3 tall including the roof, which overhangs the row above the footprint
+        s.add.image(b.tx * TILE, (b.ty - 1) * TILE, 'cabin', 0).setOrigin(0, 0).setDepth(DEPTH.objects + 1),
+        // log stack in the third column, standing on the footprint's bottom edge
+        s.add.image((b.tx + 2) * TILE, (b.ty + f.h) * TILE - 1, 'logstack', 0).setOrigin(0, 1).setDepth(DEPTH.objects + 1),
+      ];
+      this.yards.set(b, imgs);
+    }
+    imgs[0].setFrame(Math.min(2, b.level - 1));
+    const rows = s.wood <= 0 ? 0 : Math.min(STACK_ROWS, Math.max(1, Math.ceil((s.wood / CAPS[b.level]) * STACK_ROWS)));
+    imgs[1].setFrame(rows);
   }
 
   private drainDirty(): void {
@@ -192,7 +209,7 @@ export class Renderer {
       let frame = art.ridge[col];
       if (b.level >= 2 && col === last) frame = art.chimney;
       if (b.level >= 3 && col === 0) frame = art.peak;
-      this.roofs.putTileAt(GID.town + frame, tx, ty - 1);
+      this.roofs.putTileAt(frame === EMPTY ? EMPTY : GID.town + frame, tx, ty - 1);
     }
   }
 
@@ -352,7 +369,10 @@ function tileFrames(t: Tile, cropDays: number): { ground: number; object: number
     case 'house':
     case 'barracks':
     case 'granary':
-    case 'woodyard': return { ground: grass, object: GID.town + BUILDING[t.kind].parts[t.part ?? 0] };
+    case 'woodyard': {
+      const part = BUILDING[t.kind].parts[t.part ?? 0];
+      return { ground: grass, object: part === EMPTY ? EMPTY : GID.town + part };
+    }
   }
 }
 

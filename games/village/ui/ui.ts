@@ -617,7 +617,7 @@ export class UI {
           ${who('town', TOWN.wallWoodDoor, 'farmer', 'House · ' + COST.house + ' wood', 'Beds for ' + HOUSE_BEDS[1] + ' (Lv2: 6, Lv3: 8 and more births). A couple here has children.')}
           ${who('town', TOWN.wallStoneDoor, 'soldier', 'Barracks · ' + COST.barracks + ' wood', 'Children raised nearby become soldiers. Lv2: tougher soldiers, wider reach. Lv3: stronger, regenerating soldiers.')}
           ${who('farm', 103, 'farmer', 'Granary', 'Holds your food: ' + CAPS[1] + ' / ' + CAPS[2] + ' / ' + CAPS[3] + ' by level. Its yard fills as the store does.')}
-          ${who('town', 92, 'woodcutter', 'Woodyard', 'Holds your wood: ' + CAPS[1] + ' / ' + CAPS[2] + ' / ' + CAPS[3] + ' by level. Log piles show how full it is.')}
+          ${who('town', 92, 'woodcutter', 'Woodyard', 'Holds your wood: ' + CAPS[1] + ' / ' + CAPS[2] + ' / ' + CAPS[3] + ' by level. The log stack beside the cabin climbs as it fills.')}
           <p>Buildings can't be damaged. Use the <b>HAMMER</b> on one (3 hits) to upgrade it for wood — every building has three levels, shown by a chimney (Lv2) and a gable (Lv3) on the roof.</p>
           <p>Trees grow back: a chopped tree leaves a sapling that regrows in ${SAPLING_DAYS} days, forests spread on their own, and <b>SEEDS</b> on grass plants a new tree. Clear stumps and saplings with the <b>AXE</b> or <b>HOE</b>; the hoe also flattens soil back to grass. Buildings can go on grass, stumps or soil — just not on trees, crops or other buildings.</p>
         </section>
