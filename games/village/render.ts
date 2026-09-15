@@ -2,11 +2,11 @@ import Phaser from 'phaser';
 import { World, BUILDINGS, doorstep, type Tile, type Building, type BuildingKind } from './world';
 import { Mover, Villager, Raider, Player } from './agents';
 import { Bolt } from './enemies';
-import { TOWN, FARM, CHAR } from './atlas';
+import { TOWN, CHAR } from './atlas';
 import { TILE, COLS, ROWS, CAPS, OLD_GROWTH_DAYS } from './config';
 import type { VillageScene } from './main';
 import { Fx } from './fx';
-import { ensureBuildingArt, BUILDING_TEXTURE, LIT_TEXTURE, STACK_ROWS } from './pixelart';
+import { ensureBuildingArt, ensureFlora, FLORA, BUILDING_TEXTURE, LIT_TEXTURE, STACK_ROWS } from './pixelart';
 import { Night } from './night';
 
 import townUrl from './assets/town.png';
@@ -14,7 +14,7 @@ import farmUrl from './assets/farm.png';
 import dungeonUrl from './assets/dungeon.png';
 
 // Tileset first-gids inside the one tilemap (0 is reserved for "no tile" by using 1-based gids).
-const GID = { town: 1, farm: 1 + 132, dungeon: 1 + 264 } as const;
+const GID = { town: 1, farm: 1 + 132, dungeon: 1 + 264, flora: 1 + 396 } as const;
 const EMPTY = -1;
 
 export const DEPTH = { ground: 0, objects: 1, under: 5, agents: 10, bars: 30, arrows: 50 } as const; // night wash lives at 40-42 (night.ts)
@@ -33,6 +33,9 @@ export function preloadArt(scene: Phaser.Scene): void {
 export class Renderer {
   private ground!: Phaser.Tilemaps.TilemapLayer;
   private objects!: Phaser.Tilemaps.TilemapLayer;
+  /** crown-tops of tall trees, painted into the tile above the trunk */
+  private canopy!: Phaser.Tilemaps.TilemapLayer;
+  private cropT = 0;
   private sprites = new Map<number, Phaser.GameObjects.Sprite>();
   /** each building's sprite (frame = level - 1) and, for the supply buildings, its climbing stock column */
   private buildings = new Map<Building, { body: Phaser.GameObjects.Image; lit: Phaser.GameObjects.Image; stock?: Phaser.GameObjects.Image; banner?: Phaser.GameObjects.Image }>();
@@ -50,13 +53,16 @@ export class Renderer {
   readonly fx: Fx;
 
   constructor(private scene: VillageScene) {
+    ensureFlora(scene); // the drawn tileset has to exist before the map references it
     const map = scene.make.tilemap({ tileWidth: TILE, tileHeight: TILE, width: COLS, height: ROWS });
     const town = map.addTilesetImage('town', 'town', TILE, TILE, 0, 0, GID.town)!;
     const farm = map.addTilesetImage('farm', 'farm', TILE, TILE, 0, 0, GID.farm)!;
     const dungeon = map.addTilesetImage('dungeon', 'dungeon', TILE, TILE, 0, 0, GID.dungeon)!;
-    const sets = [town, farm, dungeon];
+    const flora = map.addTilesetImage('flora', 'flora', TILE, TILE, 0, 0, GID.flora)!;
+    const sets = [town, farm, dungeon, flora];
     this.ground = map.createBlankLayer('ground', sets)!.setDepth(DEPTH.ground);
     this.objects = map.createBlankLayer('objects', sets)!.setDepth(DEPTH.objects);
+    this.canopy = map.createBlankLayer('canopy', sets)!.setDepth(DEPTH.objects + 0.5);
     this.under = scene.add.graphics().setDepth(DEPTH.under);
     this.bars = scene.add.graphics().setDepth(DEPTH.bars);
     this.arrows = scene.add.graphics().setDepth(DEPTH.arrows).setScrollFactor(0);
@@ -82,6 +88,7 @@ export class Renderer {
     this.t += dt;
     this.tint = this.night.sky.tint;
     this.paintBuildings();
+    this.growCrops(dt);
     this.drainDirty();
     this.tintTiles();
     this.syncSprites();
@@ -162,6 +169,7 @@ export class Renderer {
     const c = q === 0xf0f0f0 ? 0xffffff : q;
     this.ground.forEachTile((t) => { t.tint = c; });
     this.objects.forEachTile((t) => { t.tint = c; });
+    this.canopy.forEachTile((t) => { t.tint = c; });
   }
 
   private drainDirty(): void {
@@ -174,9 +182,26 @@ export class Renderer {
 
   private paintTile(w: World, tx: number, ty: number): void {
     const t = w.get(tx, ty)!;
-    const { ground, object } = tileFrames(t, this.scene.cropDays);
+    const { ground, object, canopy } = tileFrames(t, this.scene.cropDays, this.scene.dayTime);
     this.ground.putTileAt(ground, tx, ty);
     this.objects.putTileAt(object, tx, ty);
+    // a tall tree's crown-top lives in the tile above; anything else clears it
+    if (ty > 0) this.canopy.putTileAt(canopy ?? EMPTY, tx, ty - 1);
+  }
+
+  /** Crops grow through the day, not just at midnight: repaint the ones whose phase moved. */
+  private growCrops(dt: number): void {
+    this.cropT += dt;
+    if (this.cropT < 0.5) return;
+    this.cropT = 0;
+    const w = this.scene.world;
+    for (const q of w.find((t) => t.kind === 'crop')) {
+      const t = w.get(q.tx, q.ty)!;
+      const phase = cropPhase(t, this.scene.cropDays, this.scene.dayTime);
+      const shown = this.objects.getTileAt(q.tx, q.ty)?.index ?? EMPTY;
+      const want = GID.flora + (t.v % 2 ? FLORA.crop2 : FLORA.crop)[phase];
+      if (shown !== want) w.markDirty(q.tx, q.ty);
+    }
   }
 
   // ---- sprites -------------------------------------------------------------
@@ -336,21 +361,29 @@ function mulColor(a: number, b: number): number {
   return (r << 16) | (g << 8) | bl;
 }
 
-/** Ground + object gids for a tile. */
-function tileFrames(t: Tile, cropDays: number): { ground: number; object: number } {
+/** Which of the five crop frames to show: growth runs continuously through the day. */
+function cropPhase(t: Tile, cropDays: number, dayTime: number): number {
+  if (t.stage >= cropDays) return 4;
+  const g = (t.stage + Math.max(0, Math.min(1, (dayTime - 0.25) / 0.75))) / cropDays; // the day's growth happens from dawn on
+  return Math.min(3, Math.floor(g * 4));
+}
+
+/** Ground + object gids for a tile (and the crown-top for the tile above, for tall trees). */
+function tileFrames(t: Tile, cropDays: number, dayTime: number): { ground: number; object: number; canopy?: number } {
   const grass = GID.town + TOWN.grass[t.v % TOWN.grass.length];
+  const F = GID.flora;
   switch (t.kind) {
     case 'grass': return { ground: grass, object: EMPTY };
-    case 'tree':
-      // half-chopped trees show as a bare trunk
-      // young trees are small; old growth stands tall (two tall frames by variant)
-      return { ground: grass, object: t.work >= 2 ? GID.farm + FARM.bareTree : GID.town + (t.stage >= OLD_GROWTH_DAYS ? TOWN.trees[t.v % 2] : TOWN.trees[2]) };
-    case 'tilled': return { ground: GID.farm + FARM.tilled, object: EMPTY };
-    case 'crop': {
-      const f = t.stage >= cropDays ? 3 : Math.min(2, Math.floor((t.stage / cropDays) * 3));
-      return { ground: GID.farm + FARM.tilled, object: GID.farm + FARM.crop[f] };
+    case 'tree': {
+      if (t.work >= 2) return { ground: grass, object: F + FLORA.bare };
+      const old = t.stage >= OLD_GROWTH_DAYS;
+      if (!old) return { ground: grass, object: F + (t.work === 1 ? FLORA.youngChopped : FLORA.young[t.v % 3]) };
+      const pine = t.v % 3 === 1;
+      return { ground: grass, object: F + (t.work === 1 ? FLORA.oakChopped : pine ? FLORA.pineTrunk : FLORA.oakTrunk), canopy: F + (pine ? FLORA.pineTop : FLORA.oakTop) };
     }
-    case 'sapling': return { ground: grass, object: t.stage < 2 ? GID.farm + FARM.bareTree : GID.farm + FARM.bush };
+    case 'tilled': return { ground: F + FLORA.tilled, object: EMPTY };
+    case 'crop': return { ground: F + FLORA.tilled, object: F + (t.v % 2 ? FLORA.crop2 : FLORA.crop)[cropPhase(t, cropDays, dayTime)] };
+    case 'sapling': return { ground: grass, object: F + (t.stage < 2 ? FLORA.stump : t.stage === 2 ? FLORA.sprout : FLORA.sapling) };
     case 'house':
     case 'barracks':
     case 'granary':
