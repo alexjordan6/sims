@@ -16,6 +16,7 @@ export class Rat extends Raider {
     this.kind = 'rat';
     this.name = 'Rat';
     this.harmless = true;
+    this.pushScale = 1.8; // rats fly
     this.hp = this.maxHp = Math.round(8 * (opts.hpMul ?? 1));
     this.dmg = 0;
     this.speed = 55 * (opts.speedMul ?? 1);
@@ -25,6 +26,7 @@ export class Rat extends Raider {
 
   update(dt: number, s: VillageScene): void {
     this.tickTimers(dt);
+    if (this.frozen(dt)) return;
     // anyone armed nearby: scatter
     const threat = this.nearestArmed(s, 40);
     if (threat) this.flee = 1;
@@ -101,6 +103,8 @@ export class Snatcher extends Raider {
 
   update(dt: number, s: VillageScene): void {
     this.tickTimers(dt);
+    if (this.frozen(dt)) return;
+    if (this.attackTick(dt, s)) return;
     if (this.carrying) {
       if (this.carrying.dead) { this.carrying = null; this.edge = null; }
       else {
@@ -135,7 +139,7 @@ export class Snatcher extends Raider {
       s.childGrabbed(kid, this);
       return;
     }
-    if (!kid && this.tryAttack(s, this.target, this.dmg, 12, 1)) return;
+    if (!kid && this.startAttack(s, this.target, this.dmg, 12, 0.12, 0.9)) return;
     this.task = kid ? 'chasing a child' : 'looking for prey';
     this.setGoal(s, this.target.tile.tx, this.target.tile.ty);
     this.followPath(dt);
@@ -154,6 +158,7 @@ export class Brute extends Raider {
     this.kind = 'brute';
     this.name = 'Brute';
     this.heavy = true;
+    this.pushScale = 0.3;
     this.hp = this.maxHp = Math.round(90 * (opts.hpMul ?? 1));
     this.dmg = 12;
     this.speed = 28 * (opts.speedMul ?? 1);
@@ -163,6 +168,8 @@ export class Brute extends Raider {
 
   update(dt: number, s: VillageScene): void {
     this.tickTimers(dt);
+    if (this.frozen(dt)) return;
+    if (this.attackTick(dt, s)) return;
     this.retarget -= dt;
     if (this.retarget <= 0 || !this.target || this.target.dead || this.target.hidden) {
       this.retarget = 0.6;
@@ -176,7 +183,7 @@ export class Brute extends Raider {
     }
     this.bored = 0;
     this.task = this.target instanceof Villager && this.target.role === 'soldier' ? 'smashing soldiers' : 'smashing';
-    if (this.tryAttack(s, this.target, this.dmg, 15, 1.2)) return;
+    if (this.startAttack(s, this.target, this.dmg, 15, 0.4, 0.8)) return;
     this.setGoal(s, this.target.tile.tx, this.target.tile.ty);
     this.followPath(dt);
     const t = this.tile;
@@ -201,6 +208,7 @@ export class Shaman extends Raider {
 
   update(dt: number, s: VillageScene): void {
     this.tickTimers(dt);
+    if (this.frozen(dt)) return;
     this.retarget -= dt;
     if (this.retarget <= 0 || !this.target || this.target.dead || this.target.hidden) {
       this.retarget = 0.5;
@@ -273,7 +281,7 @@ export class Bolt extends Mover {
     });
     if (hit) {
       (hit as Mover).hit(this.dmg);
-      s.fx.push({ kind: 'hit', attacker: this, target: hit, dmg: this.dmg });
+      s.fx.push({ kind: 'hit', attacker: this, target: hit, dmg: this.dmg, crit: false, killed: !!(hit as Mover).dead });
       this.dead = true;
     }
   }

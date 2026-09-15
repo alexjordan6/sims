@@ -14,11 +14,14 @@ export type EventKind = 'birth' | 'grow' | 'soldier' | 'raid' | 'death' | 'build
 export interface GameEvent { kind: EventKind; text: string; toast: boolean; day: number }
 /** Things the sim reports for the renderer to animate; drained every frame. */
 export type FxEvent =
-  | { kind: 'hit'; attacker: Mover; target: Mover; dmg: number }
+  | { kind: 'hit'; attacker: Mover; target: Mover; dmg: number; crit: boolean; killed: boolean; streak?: number; ux?: number; uy?: number; push?: number }
+  | { kind: 'telegraph'; who: Mover; ms: number }
+  | { kind: 'miss'; who: Mover }
+  | { kind: 'slowmo' }
   | { kind: 'tool'; tool: 'hoe' | 'axe' | 'seed' | 'hammer'; tx: number; ty: number }
   | { kind: 'death'; who: Mover; x: number; y: number }
   | { kind: 'boss'; who: Mover }
-  | { kind: 'swing'; who: Mover; dx: number; dy: number }
+  | { kind: 'swing'; who: Mover; dx: number; dy: number; stage: number }
   | { kind: 'cast'; who: Mover }
   | { kind: 'impact'; x: number; y: number };
 
@@ -60,6 +63,22 @@ export class VillageScene extends SimScene {
   get W(): number { return COLS * TILE; }
   get H(): number { return ROWS * TILE; }
 
+  /** Agents need the world for pushes to respect walls. */
+  spawn<T extends { id: number }>(agent: T): T {
+    (agent as unknown as Mover).world = this.world;
+    return super.spawn(agent as unknown as Parameters<SimScene['spawn']>[0]) as unknown as T;
+  }
+
+  /** Brief slow motion for a big moment (real-time 0.5 s), then back to the speed the player had. */
+  slowMo(): void {
+    if (this.slowUntil) return;
+    const prev = this.speed;
+    this.speed = 0.2;
+    this.fx.push({ kind: 'slowmo' });
+    this.slowUntil = window.setTimeout(() => { if (this.speed === 0.2) this.speed = prev; this.slowUntil = 0; }, 500);
+  }
+  private slowUntil = 0;
+
   /** Days from seed to harvest for this run (boons can shorten it). */
   get cropDays(): number {
     return Math.max(1, p.cropDays + this.mods.cropDaysDelta);
@@ -89,6 +108,8 @@ export class VillageScene extends SimScene {
     this.selected = null;
     this.journal = [];
     this.fx = [];
+    if (this.slowUntil) { clearTimeout(this.slowUntil); this.slowUntil = 0; }
+    if (this.speed < 1) this.speed = 1;
     this.stats = { peakPop: 0, soldiersRaised: 0, raidsRepelled: 0, raidersKilled: 0 };
     this.boss = null;
     this.result = null;
@@ -137,6 +158,7 @@ export class VillageScene extends SimScene {
     kb.on('keydown-ESC', () => this.togglePause());
     kb.on('keydown-TAB', (e: KeyboardEvent) => { e.preventDefault?.(); this.player.cycleTool(e.shiftKey ? -1 : 1); });
     kb.on('keydown-Q', () => this.player.cycleTool());
+    kb.on('keydown-M', () => this.toggleMute());
 
     super.create(); // creates gfx + hud, then calls reset() -> setup()
     kb.removeAllListeners('keydown-SPACE'); // Esc handles pause; Space is free for later
@@ -258,6 +280,14 @@ export class VillageScene extends SimScene {
     this.ui?.showScreen(this.screen);
   }
 
+  /** Sound on/off (M). Returns the new muted state. */
+  toggleMute(): boolean {
+    return this.view?.fx.sfx.toggleMute() ?? true;
+  }
+  get muted(): boolean {
+    return this.view?.fx.sfx.muted ?? true;
+  }
+
   setTool(tool: Tool): void {
     this.player.tool = tool;
   }
@@ -312,6 +342,7 @@ export class VillageScene extends SimScene {
     if (this.raidActive && !this.agents.some((a) => a instanceof Raider)) {
       this.raidActive = false;
       this.stats.raidsRepelled++;
+      this.slowMo();
       if (this.boss?.dead) { this.endRun(true); return; }
       this.event('raid', 'Raid repelled!', true);
     }
@@ -543,9 +574,11 @@ export class VillageScene extends SimScene {
     const t = this.world.get(tx, ty);
 
     switch (pl.tool) {
-      case 'sword':
-        if (pl.startSwing()) this.fx.push({ kind: 'swing', who: pl, dx: pl.facing.x, dy: pl.facing.y });
+      case 'sword': {
+        const stage = pl.pressAttack();
+        if (stage >= 0) this.fx.push({ kind: 'swing', who: pl, dx: pl.facing.x, dy: pl.facing.y, stage });
         return;
+      }
       case 'house':
       case 'barracks': {
         const a = this.buildAnchor();

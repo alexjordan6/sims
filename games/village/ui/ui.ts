@@ -173,6 +173,7 @@ export class UI {
           ['E · Esc', 'menu'],
           ['- · =', 'game speed'],
           ['H', 'this panel'],
+          ['M', 'sound on / off'],
           ['?', 'how to play'],
         ];
     const panel = h(`<div class="ctrl-panel">
@@ -181,6 +182,7 @@ export class UI {
         <div class="ph">${spr('town', TOWN.iconKey, 24)}<h2>Controls</h2><button class="btn small ctrl-close">×</button></div>
         <div class="ctrl-rows">${rows.map(([k, d]) => `<kbd>${esc(k)}</kbd><span>${esc(d)}</span>`).join('')}</div>
         ${this.touch ? '' : '<div class="ctrl-foot">Hold a tool, face something, click. The bar above the belt tells you what will happen.</div>'}
+        <div class="ctrl-foot"><button class="btn small mute">SOUND</button></div>
       </div>
     </div>`);
     let open = true;
@@ -192,6 +194,11 @@ export class UI {
     };
     panel.querySelector('.ctrl-tab')!.addEventListener('click', () => set(!open));
     panel.querySelector('.ctrl-close')!.addEventListener('click', () => set(false));
+    const muteBtn = panel.querySelector<HTMLElement>('.mute')!;
+    const paintMute = () => { muteBtn.textContent = this.scene.muted ? 'SOUND: OFF' : 'SOUND: ON'; muteBtn.classList.toggle('on', !this.scene.muted); };
+    muteBtn.addEventListener('click', () => { this.scene.toggleMute(); paintMute(); });
+    window.addEventListener('keydown', (e) => { if (e.key === 'm' || e.key === 'M') setTimeout(paintMute, 0); });
+    setTimeout(paintMute, 0);
     window.addEventListener('keydown', (e) => {
       if ((e.key === 'h' || e.key === 'H') && !(e.target as HTMLElement).closest('input')) set(!open);
     });

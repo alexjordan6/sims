@@ -80,25 +80,96 @@ export abstract class Mover implements Agent {
     return Math.abs(t.tx - pos.tx) + Math.abs(t.ty - pos.ty) <= 1;
   }
 
+  /** knockback impulse (px/s), decays over ~200 ms */
+  pushX = 0;
+  pushY = 0;
+  /** how much of a push this body takes (brutes 0.3, the warlord 0.15) */
+  pushScale = 1;
+  /** hitstop: seconds this body stays frozen after a big hit lands */
+  freeze = 0;
+  /** telegraphed melee attack in progress (raiders, soldiers) */
+  attack: { target: Mover; t: number; windup: number; recover: number; dmg: number; reach: number; struck: boolean } | null = null;
+
   hit(dmg: number): void {
     this.hp -= dmg;
     this.hurtT = 0;
     if (this.hp <= 0) this.dead = true;
   }
 
-  /** Melee: swing at `target` if in reach and cooldown is up. Reports the hit to the scene for effects. */
+  /** Shove this body: the impulse plays out over the next few ticks (see tickTimers). */
+  shove(ux: number, uy: number, px: number): void {
+    this.pushX += ux * px * this.pushScale * 6;
+    this.pushY += uy * px * this.pushScale * 6;
+  }
+
+  /**
+   * Start a telegraphed melee attack: wind up, then strike (re-checking reach, so the target can
+   * step away), then recover. Returns true while an attack is running so callers hold position.
+   */
+  startAttack(s: VillageScene, target: Mover, dmg: number, reach: number, windup: number, recover: number): boolean {
+    if (this.attack || this.attackCd > 0 || this.dist(target) > reach + 4) return false;
+    this.dir = target.x < this.x ? -1 : 1;
+    this.attack = { target, t: 0, windup, recover, dmg, reach, struck: false };
+    this.vx = this.vy = 0;
+    s.fx.push({ kind: 'telegraph', who: this, ms: windup * 1000 });
+    return true;
+  }
+
+  /** Advance a running attack. Returns true while it still occupies this body. */
+  attackTick(dt: number, s: VillageScene): boolean {
+    const a = this.attack;
+    if (!a) return false;
+    a.t += dt;
+    if (!a.struck && a.t >= a.windup) {
+      a.struck = true;
+      const t = a.target;
+      if (!t.dead && !t.hidden && this.dist(t) <= a.reach) {
+        this.dir = t.x < this.x ? -1 : 1;
+        t.hit(a.dmg);
+        const d = this.dist(t) || 1;
+        t.shove((t.x - this.x) / d, (t.y - this.y) / d, 3);
+        s.fx.push({ kind: 'hit', attacker: this, target: t, dmg: a.dmg, crit: false, killed: !!t.dead });
+      } else {
+        s.fx.push({ kind: 'miss', who: this });
+      }
+    }
+    if (a.t >= a.windup + a.recover) { this.attack = null; this.attackCd = 0.05; return false; }
+    this.vx = this.vy = 0;
+    return true;
+  }
+
+  /** Legacy instant melee (kept for the odd caller); prefer startAttack. */
   tryAttack(s: VillageScene, target: Mover, dmg: number, reach = 13, cooldown = 0.8): boolean {
     if (this.attackCd > 0 || this.dist(target) > reach) return false;
     this.dir = target.x < this.x ? -1 : 1;
     target.hit(dmg);
     this.attackCd = cooldown;
-    s.fx.push({ kind: 'hit', attacker: this, target, dmg });
+    s.fx.push({ kind: 'hit', attacker: this, target, dmg, crit: false, killed: !!target.dead });
     return true;
   }
 
   protected tickTimers(dt: number): void {
     this.attackCd = Math.max(0, this.attackCd - dt);
     this.hurtT += dt;
+    if (this.pushX || this.pushY) {
+      const nx = this.x + this.pushX * dt, ny = this.y + this.pushY * dt;
+      const t = World.toTile(nx, ny);
+      if (!this.world?.isBlocked(t.tx, t.ty)) { this.x = nx; this.y = ny; }
+      const k = Math.max(0, 1 - dt * 9);
+      this.pushX *= k; this.pushY *= k;
+      if (Math.abs(this.pushX) + Math.abs(this.pushY) < 2) this.pushX = this.pushY = 0;
+    }
+  }
+
+  /** set by the scene on spawn so pushes can respect walls */
+  world?: World;
+
+  /** Hitstop: true while this body is frozen this tick (counts the freeze down). */
+  protected frozen(dt: number): boolean {
+    if (this.freeze <= 0) return false;
+    this.freeze -= dt;
+    this.vx = this.vy = 0;
+    return true;
   }
 }
 
@@ -159,6 +230,7 @@ export class Villager extends Mover {
 
   update(dt: number, s: VillageScene): void {
     this.tickTimers(dt);
+    if (this.frozen(dt)) return;
     if (this.carriedBy) {
       if (this.carriedBy.dead) { this.carriedBy = null; this.clearGoal(); }
       else { this.x = this.carriedBy.x; this.y = this.carriedBy.y - 8; this.vx = this.vy = 0; this.task = 'being carried off!'; return; }
@@ -262,7 +334,8 @@ export class Villager extends Mover {
     }
     if (this.target && !this.target.dead) {
       this.task = 'fighting';
-      if (this.tryAttack(s, this.target, Math.round(p.soldierDmg * s.mods.soldierDmgMul), 13, 0.6)) return;
+      if (this.attackTick(dt, s)) return;
+      if (this.startAttack(s, this.target, Math.round(p.soldierDmg * s.mods.soldierDmgMul), 13, 0.15, 0.45)) return;
       this.setGoal(s, this.target.tile.tx, this.target.tile.ty);
       this.followPath(dt);
       return;
@@ -347,6 +420,7 @@ export class Raider extends Mover {
     super(x, y);
     this.boss = opts.boss ?? false;
     this.kind = this.boss ? 'warlord' : 'raider';
+    if (this.boss) this.pushScale = 0.15;
     this.hp = this.maxHp = this.boss ? 150 : Math.round(p.raiderHp * (opts.hpMul ?? 1));
     this.dmg = this.boss ? 10 : p.raiderDmg;
     this.speed = (this.boss ? 44 : 38) * (opts.speedMul ?? 1);
@@ -358,6 +432,8 @@ export class Raider extends Mover {
 
   update(dt: number, s: VillageScene): void {
     this.tickTimers(dt);
+    if (this.frozen(dt)) return;
+    if (this.attackTick(dt, s)) return;
     this.retarget -= dt;
     if (this.retarget <= 0 || !this.target || this.target.dead || this.target.hidden) {
       this.retarget = 0.5;
@@ -370,7 +446,7 @@ export class Raider extends Mover {
       return;
     }
     this.bored = 0;
-    if (this.tryAttack(s, this.target, this.dmg, this.boss ? 16 : 13)) return;
+    if (this.startAttack(s, this.target, this.dmg, this.boss ? 16 : 13, this.boss ? 0.35 : 0.25, this.boss ? 0.7 : 0.55)) return;
     this.setGoal(s, this.target.tile.tx, this.target.tile.ty);
     this.followPath(dt);
     // trample crops
@@ -387,22 +463,39 @@ export type Tool = 'hands' | 'hoe' | 'seeds' | 'axe' | 'sword' | 'house' | 'barr
 export const TOOLS: Tool[] = ['hands', 'hoe', 'seeds', 'axe', 'sword', 'house', 'barracks'];
 
 /** A sword swing in progress: an arc in front of the player that connects during its active window. */
+/** A sword swing in progress: an arc in front of the player that connects during its active window. */
 export interface Swing {
   t: number;
-  dur: number;
+  /** 0 slash, 1 backslash, 2 spin */
+  stage: number;
   /** direction the swing faces (unit) */
   dx: number;
   dy: number;
   /** targets already hit by this swing */
   hit: Set<number>;
+  /** a press landed during this swing: chain into the next stage when it ends */
+  queued: boolean;
 }
 
-export const SWING = { dur: 0.36, activeFrom: 0.08, activeTo: 0.22, reach: 24, halfAngleCos: 0.35 } as const;
+/** Per-stage timing of the three-hit combo. `spin` hits all around and always crits. */
+export const COMBO = [
+  { dur: 0.30, activeFrom: 0.07, activeTo: 0.18, dmgMul: 1, push: 14, spin: false },
+  { dur: 0.28, activeFrom: 0.06, activeTo: 0.17, dmgMul: 1, push: 14, spin: false },
+  { dur: 0.45, activeFrom: 0.10, activeTo: 0.30, dmgMul: 1.6, push: 60, spin: true },
+] as const;
+export const SWING = { reach: 24, halfAngleCos: 0.35, comboWindow: 0.5, recoverAfterSpin: 0.4, stepIn: 10 } as const;
 
 export class Player extends Mover {
   facing = { x: 0, y: 1 };
   tool: Tool = 'hands';
   swing: Swing | null = null;
+  /** stage the next swing will be, and how long since the last swing ended */
+  private nextStage = 0;
+  private sinceSwing = 99;
+  /** recovery after the spin finisher */
+  private recover = 0;
+  /** kills within the last 1.2 s, for DOUBLE!/TRIPLE! pops */
+  private recentKills: number[] = [];
   /** set by the scene: W/A/S/D key objects */
   keys!: Record<'W' | 'A' | 'S' | 'D', { isDown: boolean }>;
   /** virtual joystick axis (-1..1), set by the touch UI */
@@ -429,6 +522,9 @@ export class Player extends Mover {
 
   update(dt: number, s: VillageScene): void {
     this.tickTimers(dt);
+    this.sinceSwing += dt;
+    this.recover = Math.max(0, this.recover - dt);
+    if (this.frozen(dt)) return;
     let mx = (this.keys.D.isDown ? 1 : 0) - (this.keys.A.isDown ? 1 : 0);
     let my = (this.keys.S.isDown ? 1 : 0) - (this.keys.W.isDown ? 1 : 0);
     if (mx && my) { mx *= Math.SQRT1_2; my *= Math.SQRT1_2; }
@@ -439,39 +535,74 @@ export class Player extends Mover {
     }
     if (mx || my) this.facing = Math.abs(mx) >= Math.abs(my) ? { x: Math.sign(mx), y: 0 } : { x: 0, y: Math.sign(my) };
     if (mx) this.dir = mx < 0 ? -1 : 1;
-    // swinging slows you down a little
-    const slow = this.swing ? 0.5 : 1;
+    // swinging plants your feet; the swing itself steps you forward
+    const slow = this.swing ? 0.25 : this.recover > 0 ? 0.6 : 1;
     this.vx = mx * this.speed * slow; this.vy = my * this.speed * slow;
     this.moveWithCollision(dt, s.world);
     this.updateSwing(dt, s);
     if (s.mods.playerRegen && this.hp < this.maxHp && !s.nearestRaider(this.x, this.y, 40)) this.hp = Math.min(this.maxHp, this.hp + s.mods.playerRegen * dt);
   }
 
-  /** Start a sword swing in the facing direction. Returns false while one is still going. */
-  startSwing(): boolean {
-    if (this.swing) return false;
-    this.swing = { t: 0, dur: SWING.dur, dx: this.facing.x, dy: this.facing.y, hit: new Set() };
-    return true;
+  /**
+   * Press attack. Starts the next stage of the combo, or queues it if a swing is still running
+   * (so mashing chains instead of being eaten). Returns the stage started, or -1.
+   */
+  pressAttack(): number {
+    if (this.swing) { this.swing.queued = true; return -1; }
+    if (this.recover > 0) return -1;
+    if (this.sinceSwing > SWING.comboWindow) this.nextStage = 0;
+    return this.beginSwing(this.nextStage);
+  }
+
+  private beginSwing(stage: number): number {
+    this.swing = { t: 0, stage, dx: this.facing.x, dy: this.facing.y, hit: new Set(), queued: false };
+    this.nextStage = (stage + 1) % COMBO.length;
+    return stage;
   }
 
   /** Advance the swing; during the active window, anything in the arc gets hit once. */
   private updateSwing(dt: number, s: VillageScene): void {
     const sw = this.swing;
     if (!sw) return;
+    const c = COMBO[sw.stage];
+    const wasActive = sw.t >= c.activeFrom && sw.t <= c.activeTo;
     sw.t += dt;
-    if (sw.t >= SWING.activeFrom && sw.t <= SWING.activeTo) {
-      const dmg = Math.round(12 * s.mods.playerDmgMul);
-      s.grid.forEachInRadius(this.x, this.y, SWING.reach, (o, d2) => {
+    const active = sw.t >= c.activeFrom && sw.t <= c.activeTo;
+    // step into the swing
+    if (active && !c.spin) {
+      const nx = this.x + sw.dx * SWING.stepIn * (dt / (c.activeTo - c.activeFrom)), ny = this.y + sw.dy * SWING.stepIn * (dt / (c.activeTo - c.activeFrom));
+      const t = World.toTile(nx + sw.dx * 3, ny + sw.dy * 3);
+      if (!s.world.isBlocked(t.tx, t.ty)) { this.x = nx; this.y = ny; }
+    }
+    if (active || wasActive) {
+      const dmg = Math.round(12 * s.mods.playerDmgMul * c.dmgMul);
+      s.grid.forEachInRadius(this.x, this.y, SWING.reach + (c.spin ? 4 : 0), (o, d2) => {
         if (!(o instanceof Raider) || o.dead || sw.hit.has(o.id)) return;
         const d = Math.sqrt(d2) || 1;
-        const dot = ((o.x - this.x) / d) * sw.dx + ((o.y - this.y) / d) * sw.dy;
-        if (d > 6 && dot < SWING.halfAngleCos) return; // outside the arc (very close targets always count)
+        const ux = (o.x - this.x) / d, uy = (o.y - this.y) / d;
+        if (!c.spin && d > 6 && ux * sw.dx + uy * sw.dy < SWING.halfAngleCos) return; // outside the arc
         sw.hit.add(o.id);
         o.hit(dmg);
-        s.fx.push({ kind: 'hit', attacker: this, target: o, dmg });
+        o.shove(ux, uy, c.push);
+        const crit = c.spin;
+        const stop = o.dead ? 0.1 : crit ? 0.12 : 0.06;
+        o.freeze = Math.max(o.freeze, stop);
+        this.freeze = Math.max(this.freeze, stop * 0.7);
+        if (o.dead) {
+          const now = s.simTime;
+          this.recentKills = this.recentKills.filter((k) => now - k < 1.2);
+          this.recentKills.push(now);
+        }
+        s.fx.push({ kind: 'hit', attacker: this, target: o, dmg, crit, killed: !!o.dead, streak: o.dead ? this.recentKills.length : 0, ux, uy, push: c.push });
       });
     }
-    if (sw.t >= sw.dur) this.swing = null;
+    if (sw.t >= c.dur) {
+      const queued = sw.queued;
+      this.swing = null;
+      this.sinceSwing = 0;
+      if (c.spin) { this.recover = SWING.recoverAfterSpin; this.nextStage = 0; }
+      else if (queued) { const st = this.beginSwing(this.nextStage); s.fx.push({ kind: 'swing', who: this, dx: this.facing.x, dy: this.facing.y, stage: st }); }
+    }
   }
 
   private moveWithCollision(dt: number, w: World): void {
