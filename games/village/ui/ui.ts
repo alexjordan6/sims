@@ -104,9 +104,9 @@ export class UI {
       <div class="slots panel">
         <span class="cap slots-cap">TOOLS <kbd>1-8</kbd></span>
         ${slot('hands', 'farm', FARM.iconHand, 'HANDS', 'Harvest ripe crops')}
-        ${slot('hoe', 'town', TOWN.iconHoe, 'HOE', 'Till grass into soil')}
+        ${slot('hoe', 'town', TOWN.iconHoe, 'HOE', 'Till grass into soil; clears stumps, flattens soil back to grass')}
         ${slot('seeds', 'farm', FARM.grassTuft, 'SEEDS', 'Crops on tilled soil, trees on grass')}
-        ${slot('axe', 'town', TOWN.iconAxe, 'AXE', 'Chop trees for wood (3 hits)')}
+        ${slot('axe', 'town', TOWN.iconAxe, 'AXE', 'Chop trees for wood (3 hits); clears stumps and saplings')}
         ${slot('sword', 'dungeon', DUNGEON.sword, 'SWORD', 'Swing at raiders in front of you')}
         ${slot('house', 'town', TOWN.wallWoodDoor, 'HOUSE', 'A family of 4 lives here and has children', COST.house)}
         ${slot('barracks', 'town', TOWN.wallStoneDoor, 'BARRACKS', 'Kids raised near it grow into soldiers', COST.barracks)}
@@ -402,7 +402,7 @@ export class UI {
   private verbFor(hint: string): string {
     if (!hint.startsWith('E:')) return '…';
     const w = hint.slice(2).trim().split(/[ !(]/)[0].toUpperCase();
-    return { TILL: 'TILL', PLANT: 'PLANT', HARVEST: 'HARVEST', CHOP: 'CHOP', ATTACK: 'FIGHT', SWING: 'SWING', BUILD: 'BUILD', UPGRADE: 'UPGRADE', CLEAR: 'CLEAR' }[w] ?? 'USE';
+    return { TILL: 'TILL', PLANT: 'PLANT', HARVEST: 'HARVEST', CHOP: 'CHOP', ATTACK: 'FIGHT', SWING: 'SWING', BUILD: 'BUILD', UPGRADE: 'UPGRADE', CLEAR: 'CLEAR', DIG: 'DIG', FLATTEN: 'FLATTEN', CUT: 'CUT' }[w] ?? 'USE';
   }
 
   private renderInspector(force = false): void {
@@ -619,7 +619,7 @@ export class UI {
           ${who('farm', 103, 'farmer', 'Granary', 'Holds your food: ' + CAPS[1] + ' / ' + CAPS[2] + ' / ' + CAPS[3] + ' by level. Its yard fills as the store does.')}
           ${who('town', 92, 'woodcutter', 'Woodyard', 'Holds your wood: ' + CAPS[1] + ' / ' + CAPS[2] + ' / ' + CAPS[3] + ' by level. Log piles show how full it is.')}
           <p>Buildings can't be damaged. Use the <b>HAMMER</b> on one (3 hits) to upgrade it for wood — every building has three levels, shown by a chimney (Lv2) and a gable (Lv3) on the roof.</p>
-          <p>Trees grow back: a chopped tree leaves a sapling that regrows in ${SAPLING_DAYS} days, forests spread on their own, and <b>SEEDS</b> on grass plants a new tree.</p>
+          <p>Trees grow back: a chopped tree leaves a sapling that regrows in ${SAPLING_DAYS} days, forests spread on their own, and <b>SEEDS</b> on grass plants a new tree. Clear stumps and saplings with the <b>AXE</b> or <b>HOE</b>; the hoe also flattens soil back to grass. Buildings can go on grass, stumps or soil — just not on trees, crops or other buildings.</p>
         </section>
         <section>
           <h3>CONTROLS</h3>

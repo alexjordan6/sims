@@ -634,7 +634,7 @@ export class VillageScene extends SimScene {
   /** Why a building can't go at `a`, or null if it can. */
   buildProblem(a: { tx: number; ty: number }, kind: BuildingKind = this.player.build === 'none' ? 'house' : this.player.build): string | null {
     const { w, h } = BUILDINGS[kind];
-    if (!this.world.canBuild(kind, a.tx, a.ty)) return `Need a clear ${w}x${h} of grass to build`;
+    if (!this.world.canBuild(kind, a.tx, a.ty)) return `Need ${w}x${h} of open ground (no trees, crops or buildings)`;
     const inside = (m: Mover) => !m.hidden && m.x >= a.tx * TILE - 2 && m.x < (a.tx + w) * TILE + 2 && m.y >= a.ty * TILE - 2 && m.y < (a.ty + h) * TILE + 2;
     if (this.agents.some((m) => inside(m as Mover))) return "Someone's standing in the way";
     return null;
@@ -689,7 +689,8 @@ export class VillageScene extends SimScene {
         return;
       }
       case 'hoe':
-        if (t?.kind === 'grass' || t?.kind === 'sapling') this.world.set(tx, ty, 'tilled');
+        if (t?.kind === 'grass') this.world.set(tx, ty, 'tilled');
+        else if (t?.kind === 'sapling' || t?.kind === 'tilled') this.world.set(tx, ty, 'grass'); // dig out a stump / flatten soil
         this.fx.push({ kind: 'tool', tool: 'hoe', tx, ty });
         return;
       case 'seeds':
@@ -700,7 +701,7 @@ export class VillageScene extends SimScene {
         if (t?.kind === 'tree') {
           if (++t.work >= 3) { this.world.set(tx, ty, 'sapling'); this.addWood(TREE_YIELD); }
           else this.world.dirty.add(ty * COLS + tx);
-        }
+        } else if (t?.kind === 'sapling') this.world.set(tx, ty, 'grass'); // clear the stump
         this.fx.push({ kind: 'tool', tool: 'axe', tx, ty });
         return;
       case 'hands':
@@ -734,8 +735,8 @@ export class VillageScene extends SimScene {
       }
       case 'hoe':
         if (kind === 'grass') return 'E: till soil';
-        if (kind === 'sapling') return 'E: clear the sapling';
-        if (kind === 'tilled') return `tilled — ${need('seeds')}`;
+        if (kind === 'sapling') return t!.stage < 2 ? 'E: dig out the stump' : 'E: clear the sapling';
+        if (kind === 'tilled') return 'E: flatten back to grass';
         if (kind === 'crop') return t!.stage >= this.cropDays ? `ripe — ${need('hands')}` : `growing (${t!.stage}/${this.cropDays} days)`;
         if (kind === 'tree') return `tree — ${need('axe')}`;
         return 'hoe: face open grass';
@@ -747,7 +748,7 @@ export class VillageScene extends SimScene {
         return 'seeds: crops on soil, trees on grass';
       case 'axe':
         if (kind === 'tree') return `E: chop (${t!.work}/3)`;
-        if (kind === 'sapling') return `sapling — a tree in ${SAPLING_DAYS - t!.stage} days`;
+        if (kind === 'sapling') return t!.stage < 2 ? 'E: clear the stump' : 'E: cut down the sapling';
         return 'axe: face a tree';
       case 'hands':
         if (kind === 'crop') return t!.stage >= this.cropDays ? 'E: harvest' : `growing (${t!.stage}/${this.cropDays} days)`;

@@ -12,6 +12,8 @@ export const BUILDINGS: Record<BuildingKind, { w: number; h: number; door: numbe
   woodyard: { w: 3, h: 2, door: 1, name: 'Woodyard' },
 };
 export const MAX_LEVEL = 3;
+/** ground a building can go on (flattened when it goes up) */
+export const BUILDABLE: ReadonlySet<TileKind> = new Set<TileKind>(['grass', 'sapling', 'tilled']);
 
 export interface Building {
   kind: BuildingKind;
@@ -109,13 +111,13 @@ export class World {
     return { tx: Math.floor(x / TILE), ty: Math.floor(y / TILE) };
   }
 
-  /** Can a building of `kind` go here (footprint all open grass, roof ridge row in bounds)? */
+  /** Can a building of `kind` go here? The footprint may cover grass, stumps/saplings and bare soil (they get cleared) — not trees, crops or buildings. */
   canBuild(kind: BuildingKind, tx: number, ty: number): boolean {
     const f = BUILDINGS[kind];
     if (ty < 1) return false;
     for (let dy = 0; dy < f.h; dy++)
       for (let dx = 0; dx < f.w; dx++)
-        if (this.get(tx + dx, ty + dy)?.kind !== 'grass') return false;
+        if (!BUILDABLE.has(this.get(tx + dx, ty + dy)?.kind ?? 'tree')) return false;
     return true;
   }
 
