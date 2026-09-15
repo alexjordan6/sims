@@ -148,7 +148,7 @@ export class Fx {
       case 'impact': this.magic.explode(6, ev.x, ev.y); break;
       case 'tool': this.tool(ev.tool, ev.tx, ev.ty, sprites); break;
       case 'boss': this.bossArrive(ev.who, sprites); this.sfx.horn(); break;
-      case 'slowmo': this.zoomBump(0.08, 120, 420); break;
+      case 'slowmo': break; // the slow-motion itself is the effect; no camera zoom
       case 'death': break; // handled by die() when the renderer hands over the sprite
     }
   }
@@ -250,7 +250,6 @@ export class Fx {
       this.word(crit ? 'CRIT!' : POWS[Math.floor(Math.random() * POWS.length)], target.x - ux * 6, target.y - 22, crit ? '#ff9a3c' : '#ffffff', crit ? 8 : 7, 0.8);
       this.lastBlow.set(target.id, { ux, uy, push: ev.push ?? 40, crit });
       this.sfx.hit(crit);
-      if (crit) this.zoomBump(0.06, 60, 160);
       this.shake(crit ? 120 : 60, Math.min(0.012, 0.002 + dmg * 0.0003));
       if (killed && (ev.streak ?? 0) >= 2) {
         this.scene.time.delayedCall(120, () => { this.word(STREAKS[Math.min(4, ev.streak!)], this.scene.player.x, this.scene.player.y - 24, '#ffcf5a', 9, 1.2); this.sfx.streak(ev.streak!); });
@@ -330,7 +329,6 @@ export class Fx {
   celebrate(x: number, y: number): void {
     this.poof(x, y - 6, 1.6);
     this.sparks.explode(14, x, y - 8);
-    this.zoomBump(0.04, 80, 260);
   }
 
   /** A white cartoon cloud that puffs out and dissolves. */
@@ -382,13 +380,6 @@ export class Fx {
   }
 
   /** Quick camera zoom-in and back, for crits and big kills. */
-  private zoomBump(amount: number, inMs: number, outMs: number): void {
-    if (this.reduced) return;
-    const cam = this.scene.cameras.main;
-    const z = cam.zoom;
-    cam.zoomTo(z * (1 + amount), inMs, Phaser.Math.Easing.Quadratic.Out, false, (_c, p) => { if (p === 1) cam.zoomTo(z, outMs, Phaser.Math.Easing.Quadratic.InOut); });
-  }
-
   private textFromPool(): Phaser.GameObjects.Text | null {
     let t = this.numberPool.find((n) => !n.visible);
     if (!t) {
