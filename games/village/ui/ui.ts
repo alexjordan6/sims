@@ -1,7 +1,7 @@
 import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type Tool } from '../agents';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
-import { COST, p, RUN } from '../config';
+import { COST, p, RUN, CAPS, HOUSE_BEDS, SAPLING_DAYS, TREE_RESERVE } from '../config';
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 
@@ -79,8 +79,8 @@ export class UI {
     const tile = (cls: string, cap: string, inner: string, title = '') => `<div class="stat ${cls}" title="${esc(title)}"><span class="cap">${cap}</span><span class="val">${inner}</span></div>`;
     this.top = h(`<div class="topbar panel">
       ${tile('t-day', 'DAY', `<span class="sun"></span><span class="day"></span><span class="hour"></span>`, 'Survive to day 21 and beat the Warlord')}
-      ${tile('t-wood', 'WOOD', `${spr('town', TOWN.iconWood, 24)}<span class="num wood"></span>`, 'Chop trees. Houses cost 20, barracks 30')}
-      ${tile('t-food', 'FOOD', `${spr('farm', FARM.iconTomato, 24)}<span class="num food"></span>`, 'Each villager eats 1 a day. Harvest ripe crops')}
+      ${tile('t-wood', 'WOOD', `${spr('town', TOWN.iconWood, 24)}<span class="num wood"></span>`, 'Chop trees. Houses cost 20, barracks 30. The woodyard sets the cap')}
+      ${tile('t-food', 'FOOD', `${spr('farm', FARM.iconTomato, 24)}<span class="num food"></span>`, 'Each villager eats 1 a day. Harvest ripe crops. The granary sets the cap')}
       <div class="stat t-pop" title="Your villagers by role"><span class="cap">VILLAGERS</span><span class="val pop"></span></div>
       <div class="spacer"></div>
       <div class="stat t-raid" title="Raiders attack every few days; the Warlord comes on day 21"><span class="cap">NEXT RAID</span><span class="val raid"></span></div>
@@ -100,14 +100,15 @@ export class UI {
       `<div class="slot" data-tool="${tool}" title="${esc(title)}">${spr(key, frame, 32)}<span class="lbl">${label}</span>${cost ? `<span class="cost">${cost}${spr('town', TOWN.iconWood, 16)}</span>` : ''}</div>`;
     this.hotbar = h(`<div class="hotbar">
       <div class="slots panel">
-        <span class="cap slots-cap">TOOLS <kbd>1-7</kbd></span>
+        <span class="cap slots-cap">TOOLS <kbd>1-8</kbd></span>
         ${slot('hands', 'farm', FARM.iconHand, 'HANDS', 'Harvest ripe crops')}
         ${slot('hoe', 'town', TOWN.iconHoe, 'HOE', 'Till grass into soil')}
-        ${slot('seeds', 'farm', FARM.grassTuft, 'SEEDS', 'Plant on tilled soil')}
+        ${slot('seeds', 'farm', FARM.grassTuft, 'SEEDS', 'Crops on tilled soil, trees on grass')}
         ${slot('axe', 'town', TOWN.iconAxe, 'AXE', 'Chop trees for wood (3 hits)')}
         ${slot('sword', 'dungeon', DUNGEON.sword, 'SWORD', 'Swing at raiders in front of you')}
         ${slot('house', 'town', TOWN.wallWoodDoor, 'HOUSE', 'A family of 4 lives here and has children', COST.house)}
         ${slot('barracks', 'town', TOWN.wallStoneDoor, 'BARRACKS', 'Kids raised near it grow into soldiers', COST.barracks)}
+        ${slot('hammer', 'town', TOWN.iconHammer, 'HAMMER', 'Upgrade the building in front of you (3 hits)')}
       </div>
       <div class="hint"><kbd>click / C</kbd><span class="hint-text"></span></div>
     </div>`);
@@ -339,7 +340,7 @@ export class UI {
     const hour = Math.floor(s.dayTime * 24);
     const night = s.dayTime < 0.22 || s.dayTime > 0.8;
     const raidIn = s.nextRaidDay - s.day;
-    const key = `${s.day}|${hour}|${s.food | 0}|${s.wood | 0}|${count('farmer')}|${count('woodcutter')}|${count('kid')}|${count('soldier')}|${s.player.hp}|${s.raidActive}|${s.boss?.hp ?? ''}|${raidIn}|${s.speed}|${s.paused}|${night}`;
+    const key = `${s.day}|${hour}|${s.food | 0}/${s.foodCap}|${s.wood | 0}/${s.woodCap}|${count('farmer')}|${count('woodcutter')}|${count('kid')}|${count('soldier')}|${s.player.hp}|${s.raidActive}|${s.boss?.hp ?? ''}|${raidIn}|${s.speed}|${s.paused}|${night}`;
     if (key === this.lastTop) return;
     this.lastTop = key;
 
@@ -347,8 +348,8 @@ export class UI {
     q('.sun').classList.toggle('moon', night);
     q('.day').textContent = `DAY ${s.day}/${RUN.days}`;
     q('.hour').textContent = `${String(hour).padStart(2, '0')}:00`;
-    q('.wood').textContent = String(s.wood | 0);
-    q('.food').textContent = String(s.food | 0);
+    q('.wood').innerHTML = `${s.wood | 0}<small>/${s.woodCap}</small>`;
+    q('.food').innerHTML = `${s.food | 0}<small>/${s.foodCap}</small>`;
     q('.pop').innerHTML = ([
       ['farmer', CHAR.farmer, 'FARM'], ['woodcutter', CHAR.woodcutter, 'WOOD'], ['kid', CHAR.kid, 'KIDS'], ['soldier', CHAR.soldier, 'ARMY'],
     ] as [string, { key: string; frame: number }, string][]).map(([r, c, lbl]) => `<span class="chip ${r}" title="${ROLE_LABEL[r]}s">${spr(c.key, c.frame, 24)}<b>${count(r)}</b><i>${lbl}</i></span>`).join('');
@@ -392,7 +393,7 @@ export class UI {
   private verbFor(hint: string): string {
     if (!hint.startsWith('E:')) return '…';
     const w = hint.slice(2).trim().split(/[ !(]/)[0].toUpperCase();
-    return { TILL: 'TILL', PLANT: 'PLANT', HARVEST: 'HARVEST', CHOP: 'CHOP', ATTACK: 'FIGHT', SWING: 'SWING', BUILD: 'BUILD' }[w] ?? 'USE';
+    return { TILL: 'TILL', PLANT: 'PLANT', HARVEST: 'HARVEST', CHOP: 'CHOP', ATTACK: 'FIGHT', SWING: 'SWING', BUILD: 'BUILD', UPGRADE: 'UPGRADE', CLEAR: 'CLEAR' }[w] ?? 'USE';
   }
 
   private renderInspector(force = false): void {
@@ -518,7 +519,7 @@ export class UI {
           Survive ${RUN.days} days of raids and <b>beat the Warlord</b>.</p>
           <div class="controls">
             <kbd>WASD</kbd><span>move</span><kbd>click / C</kbd><span>use the tool you hold, toward the cursor</span>
-            <kbd>right click / X</kbd><span>check a villager</span><kbd>1-7 · Tab · wheel</kbd><span>pick a tool</span>
+            <kbd>right click / X</kbd><span>check a villager</span><kbd>1-8 · Tab · wheel</kbd><span>pick a tool</span>
             <kbd>E / Esc</kbd><span>menu</span><kbd>- / =</kbd><span>game speed</span>
           </div>
           <div class="row"><label class="sub">seed <input class="seed" value="${s.seed}"></label></div>
@@ -592,9 +593,9 @@ export class UI {
         </section>
         <section>
           <h3>WHO'S WHO</h3>
-          ${who('dungeon', DUNGEON.hero, 'player', 'You', 'Equip a tool, then E: hoe tills, seeds plant, hands harvest, axe chops, sword fights, hammer builds.')}
+          ${who('dungeon', DUNGEON.hero, 'player', 'You', 'Equip a tool, then click: hoe tills, seeds plant, hands harvest, axe chops, sword fights, hammer upgrades.')}
           ${who('farm', FARM.farmerHat, 'farmer', 'Farmer', 'Plants and harvests the fields on their own.')}
-          ${who('dungeon', DUNGEON.man, 'woodcutter', 'Woodcutter', 'Chops trees for wood.')}
+          ${who('dungeon', DUNGEON.man, 'woodcutter', 'Woodcutter', 'Chops trees for wood, but leaves the last ' + TREE_RESERVE + ' standing. Helps in the field when the woodyard is full.')}
           ${who('dungeon', DUNGEON.villager, 'kid', 'Child', 'Plays near home and soaks up what is around them.')}
           ${who('dungeon', DUNGEON.knight, 'soldier', 'Soldier', 'Guards the barracks and fights raiders.')}
           ${who('dungeon', DUNGEON.orc, 'raider', 'Raider', 'Walks at the nearest person and hits them. Tramples crops.')}
@@ -603,8 +604,12 @@ export class UI {
           ${who('dungeon', DUNGEON.orc, 'raider', 'Brute', 'Slow, huge, ignores knockback, hunts soldiers. Gang up.')}
           ${who('dungeon', DUNGEON.wizard, 'raider', 'Shaman', 'Keeps its distance and casts bolts. Close in on it.')}
           <h3>BUILDINGS</h3>
-          ${who('town', TOWN.wallWoodDoor, 'farmer', 'House · ' + COST.house + ' wood', 'Beds for ' + s.mods.houseCap + '. A couple here has children.')}
-          ${who('town', TOWN.wallStoneDoor, 'soldier', 'Barracks · ' + COST.barracks + ' wood', 'Children raised nearby become soldiers.')}
+          ${who('town', TOWN.wallWoodDoor, 'farmer', 'House · ' + COST.house + ' wood', 'Beds for ' + HOUSE_BEDS[1] + ' (Lv2: 6, Lv3: 8 and more births). A couple here has children.')}
+          ${who('town', TOWN.wallStoneDoor, 'soldier', 'Barracks · ' + COST.barracks + ' wood', 'Children raised nearby become soldiers. Lv2: tougher soldiers, wider reach. Lv3: stronger, regenerating soldiers.')}
+          ${who('farm', 103, 'farmer', 'Granary', 'Holds your food: ' + CAPS[1] + ' / ' + CAPS[2] + ' / ' + CAPS[3] + ' by level. Its yard fills as the store does.')}
+          ${who('town', 92, 'woodcutter', 'Woodyard', 'Holds your wood: ' + CAPS[1] + ' / ' + CAPS[2] + ' / ' + CAPS[3] + ' by level. Log piles show how full it is.')}
+          <p>Buildings can't be damaged. Use the <b>HAMMER</b> on one (3 hits) to upgrade it for wood — every building has three levels, shown by a chimney (Lv2) and a gable (Lv3) on the roof.</p>
+          <p>Trees grow back: a chopped tree leaves a sapling that regrows in ${SAPLING_DAYS} days, forests spread on their own, and <b>SEEDS</b> on grass plants a new tree.</p>
         </section>
         <section>
           <h3>CONTROLS</h3>
@@ -612,13 +617,13 @@ export class UI {
             <kbd>WASD</kbd><span>move (joystick on phone)</span>
             <kbd>click / C</kbd><span>use the tool you hold. A click also turns you toward the cursor. The bottom bar says what the tool will do. The sword swings an arc; it only hits what it reaches.</span>
             <kbd>right click / X</kbd><span>check a villager (opens the inspector)</span>
-            <kbd>1-7 · Tab · wheel</kbd><span>pick a tool — hands, hoe, seeds, axe, sword, house, barracks</span>
+            <kbd>1-8 · Tab · wheel</kbd><span>pick a tool — hands, hoe, seeds, axe, sword, house, barracks, hammer</span>
             <kbd>E / Esc</kbd><span>menu (pause, restart, how to play)</span>
             <kbd>- / =</kbd><span>game speed 1x / 4x / 16x</span>
             <kbd>\`</kbd><span>tuning sliders (debug)</span>
           </div>
           <h3>TOP BAR</h3>
-          <p><b>DAY</b> of ${RUN.days} and the hour · <b>WOOD</b> / <b>FOOD</b> stockpiles · <b>VILLAGERS</b> by role · <b>NEXT RAID</b> countdown · <b>YOUR HP</b>.</p>
+          <p><b>DAY</b> of ${RUN.days} and the hour · <b>WOOD</b> / <b>FOOD</b> stockpiles and their caps (upgrade the woodyard / granary) · <b>VILLAGERS</b> by role · <b>NEXT RAID</b> countdown · <b>YOUR HP</b>.</p>
         </section>
       </div>
     </div>`);

@@ -1,9 +1,9 @@
 import Phaser from 'phaser';
-import { World, BUILDING_W, BUILDING_H, type Tile } from './world';
+import { World, BUILDINGS, yardOf, type Tile, type Building, type BuildingKind } from './world';
 import { Mover, Villager, Raider, Player } from './agents';
 import { Bolt } from './enemies';
 import { TOWN, FARM, CHAR } from './atlas';
-import { TILE, COLS, ROWS } from './config';
+import { TILE, COLS, ROWS, CAPS } from './config';
 import type { VillageScene } from './main';
 import { Fx } from './fx';
 
@@ -15,8 +15,13 @@ import dungeonUrl from './assets/dungeon.png';
 const GID = { town: 1, farm: 1 + 132, dungeon: 1 + 264 } as const;
 const EMPTY = -1;
 
-/** 4x4 building art: parts are the footprint (row-major: two roof rows, two wall rows), ridge is the overhanging roof row above. */
-const BUILDING = {
+/**
+ * Building art per kind: `ridge` is the overhanging roof row drawn above the footprint (over agents),
+ * `parts` the footprint row-major. Gids are relative to the town sheet unless wrapped by farm().
+ * Level markers replace the ridge's end tiles: Lv2 adds a chimney, Lv3 a gable peak beside it.
+ */
+const farm = (f: number) => GID.farm - GID.town + f; // express a farm-sheet frame as a town-relative gid
+const BUILDING: Record<BuildingKind, { ridge: readonly number[]; parts: readonly number[]; chimney: number; peak: number }> = {
   house: {
     ridge: [52, 53, 53, 54],
     parts: [
@@ -25,6 +30,7 @@ const BUILDING = {
       72, 84, 84, 75, // wall edges with two windows
       72, TOWN.wallWoodDoor, 73, 75, // door, plain wall
     ],
+    chimney: 55, peak: 63,
   },
   barracks: {
     ridge: [48, 49, 49, 50],
@@ -34,7 +40,31 @@ const BUILDING = {
       76, 88, 88, 79,
       76, TOWN.wallStoneDoor, 77, 79,
     ],
+    chimney: 51, peak: 67,
   },
+  // red barn from the farm sheet: X-braced doors on top, plank walls below
+  granary: {
+    ridge: [farm(90), farm(91), farm(92)],
+    parts: [
+      farm(102), farm(103), farm(104),
+      farm(114), farm(115), farm(116),
+    ],
+    chimney: farm(96), peak: farm(97), // hay bale, then a grain barrel on the roofline
+  },
+  // open lumber shed: a wooden frame with a log stack inside, a beam across the top
+  woodyard: {
+    ridge: [80, 81, 82],
+    parts: [
+      44, 45, 46,
+      68, 92, 70,
+    ],
+    chimney: 83, peak: 57, // a sign, then a crate
+  },
+};
+/** Yard decorations: how many items to show for a fill fraction, and which frames (town-relative gids). */
+const YARD = {
+  granary: [farm(75), farm(96), farm(75)], // crate, hay bale, crate
+  woodyard: [92, 92, 92], // log piles
 } as const;
 
 export const DEPTH = { ground: 0, objects: 1, under: 5, agents: 10, roofs: 20, bars: 30, night: 40 } as const;
@@ -90,6 +120,7 @@ export class Renderer {
   /** Per-frame: patch changed tiles, sync sprites, overlays. */
   sync(dt: number): void {
     this.t += dt;
+    this.paintYards();
     this.drainDirty();
     this.syncSprites();
     for (const ev of this.scene.fx) this.fx.handle(ev, this.sprites);
@@ -99,6 +130,26 @@ export class Renderer {
   }
 
   // ---- tiles ---------------------------------------------------------------
+
+  private lastYard = new WeakMap<Building, number>();
+  /** The stockpile shows in the world: crates/hay in front of the granary, log piles at the woodyard. */
+  private paintYards(): void {
+    const s = this.scene;
+    for (const b of s.world.buildings) {
+      if (b.kind !== 'granary' && b.kind !== 'woodyard') continue;
+      const amount = b.kind === 'granary' ? s.food : s.wood;
+      const cap = CAPS[b.level];
+      const n = amount <= 0 ? 0 : Math.min(3, Math.max(1, Math.ceil((amount / cap) * 3)));
+      if (this.lastYard.get(b) === n) continue;
+      this.lastYard.set(b, n);
+      const frames = YARD[b.kind];
+      yardOf(b).forEach((q, i) => {
+        if (!s.world.inBounds(q.tx, q.ty)) return;
+        s.world.get(q.tx, q.ty)!.yard = i < n ? GID.town + frames[i] : 0;
+        s.world.markDirty(q.tx, q.ty);
+      });
+    }
+  }
 
   private drainDirty(): void {
     const w = this.scene.world;
@@ -111,11 +162,18 @@ export class Renderer {
     const t = w.get(tx, ty)!;
     const { ground, object } = tileFrames(t, this.scene.cropDays);
     this.ground.putTileAt(ground, tx, ty);
-    this.objects.putTileAt(object, tx, ty);
-    // the roof ridge overhangs the row above the footprint (drawn over agents)
-    if ((t.kind === 'house' || t.kind === 'barracks') && (t.part ?? 0) < BUILDING_W) {
-      const b = BUILDING[t.kind];
-      this.roofs.putTileAt(GID.town + b.ridge[t.part ?? 0], tx, ty - 1);
+    // yard stock (crates, log piles) sits on open ground in front of the supply buildings
+    const yard = t.yard && (t.kind === 'grass' || t.kind === 'tilled') ? t.yard : 0;
+    this.objects.putTileAt(yard || object, tx, ty);
+    // the roof ridge overhangs the row above the footprint (drawn over agents); level markers sit on it
+    const b = t.building;
+    if (b && (t.part ?? 0) < BUILDINGS[b.kind].w) {
+      const art = BUILDING[b.kind];
+      const col = t.part ?? 0, last = BUILDINGS[b.kind].w - 1;
+      let frame = art.ridge[col];
+      if (b.level >= 2 && col === last) frame = art.chimney;
+      if (b.level >= 3 && col === 0) frame = art.peak;
+      this.roofs.putTileAt(GID.town + frame, tx, ty - 1);
     }
   }
 
@@ -182,12 +240,14 @@ export class Renderer {
     if (s.world.inBounds(f.tx, f.ty)) {
       const build = s.player.build !== 'none';
       if (build) {
-        const a = s.buildAnchor();
-        const ok = !s.buildProblem(a);
+        const kind = s.player.build as BuildingKind;
+        const { w, h } = BUILDINGS[kind];
+        const a = s.buildAnchor(kind);
+        const ok = !s.buildProblem(a, kind);
         u.fillStyle(ok ? 0xffe066 : 0xff4040, 0.18);
-        u.fillRect(a.tx * TILE, a.ty * TILE, TILE * BUILDING_W, TILE * BUILDING_H);
+        u.fillRect(a.tx * TILE, a.ty * TILE, TILE * w, TILE * h);
         u.lineStyle(1, ok ? 0xffe066 : 0xff4040, 0.9);
-        u.strokeRect(a.tx * TILE + 0.5, a.ty * TILE + 0.5, TILE * BUILDING_W - 1, TILE * BUILDING_H - 1);
+        u.strokeRect(a.tx * TILE + 0.5, a.ty * TILE + 0.5, TILE * w - 1, TILE * h - 1);
       } else {
         u.lineStyle(1, 0xffffff, 0.5);
         u.strokeRect(f.tx * TILE + 0.5, f.ty * TILE + 0.5, TILE - 1, TILE - 1);
@@ -228,8 +288,11 @@ function tileFrames(t: Tile, cropDays: number): { ground: number; object: number
       const f = t.stage >= cropDays ? 3 : Math.min(2, Math.floor((t.stage / cropDays) * 3));
       return { ground: GID.farm + FARM.tilled, object: GID.farm + FARM.crop[f] };
     }
+    case 'sapling': return { ground: grass, object: t.stage < 2 ? GID.farm + FARM.bareTree : GID.town + TOWN.trees[3] };
     case 'house':
-    case 'barracks': return { ground: grass, object: GID.town + BUILDING[t.kind].parts[t.part ?? 0] };
+    case 'barracks':
+    case 'granary':
+    case 'woodyard': return { ground: grass, object: GID.town + BUILDING[t.kind].parts[t.part ?? 0] };
   }
 }
 

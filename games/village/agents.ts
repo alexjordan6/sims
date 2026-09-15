@@ -1,6 +1,6 @@
 import type { Agent } from '@shared/index';
 import { World, doorstep, buildingCenter, type House, type TilePos } from './world';
-import { p, TREE_YIELD } from './config';
+import { p, TREE_YIELD, TREE_RESERVE } from './config';
 import type { Mods } from './meta';
 import type { VillageScene } from './main';
 
@@ -202,6 +202,9 @@ export class Villager extends Mover {
     this.hp = this.maxHp;
   }
 
+  /** extra HP from the village's best barracks (set by the scene before applyRole) */
+  barracksHp = 0;
+
   get isAdult(): boolean {
     return this.role !== 'kid';
   }
@@ -211,7 +214,7 @@ export class Villager extends Mover {
       case 'kid': this.radius = 2; this.color = 0xf5d8a8; this.maxHp = 10; this.speed = 30; break;
       case 'farmer': this.radius = 3; this.color = 0x7fd37f; this.maxHp = 20; this.speed = 35; break;
       case 'woodcutter': this.radius = 3; this.color = 0xc9a26b; this.maxHp = 20; this.speed = 35; break;
-      case 'soldier': this.radius = 3; this.color = 0x6f9bff; this.maxHp = p.soldierHp + mods.soldierHpBonus; this.speed = 45; break;
+      case 'soldier': this.radius = 3; this.color = 0x6f9bff; this.maxHp = p.soldierHp + mods.soldierHpBonus + this.barracksHp; this.speed = 45; break;
     }
     this.maxHp = Math.round(this.maxHp * mods.hpMul);
     this.hp = Math.min(this.hp, this.maxHp);
@@ -222,6 +225,7 @@ export class Villager extends Mover {
   comeOfAge(s: VillageScene): void {
     const noise = s.rng.range(-0.15, 0.15) * (this.martial + this.civil + 1);
     this.role = this.martial + noise > this.civil ? 'soldier' : s.pickCivilRole();
+    this.barracksHp = s.world.barracksLevel >= 3 ? 30 : s.world.barracksLevel >= 2 ? 15 : 0;
     this.applyRole(s.mods);
     this.hp = this.maxHp;
     s.event(this.role === 'soldier' ? 'soldier' : 'grow', `${this.name} came of age — ${this.role}`, true);
@@ -243,7 +247,7 @@ export class Villager extends Mover {
     switch (this.role) {
       case 'kid': this.kidUpdate(dt, s); break;
       case 'farmer': this.civilUpdate(dt, s, true); break;
-      case 'woodcutter': this.civilUpdate(dt, s, false); break;
+      case 'woodcutter': this.civilUpdate(dt, s, this.helpingFarm(s)); break;
       case 'soldier': this.soldierUpdate(dt, s); break;
     }
   }
@@ -270,17 +274,27 @@ export class Villager extends Mover {
       if (o.role === 'soldier') this.martial += dt * mm;
       else if (o.role === 'farmer' || o.role === 'woodcutter') this.civil += dt;
     });
-    // exposure: what is nearby (5x5 tiles)
+    // exposure: what is nearby (5x5 tiles; a level-2+ barracks reaches 7x7)
     const t = this.tile;
-    for (let dy = -2; dy <= 2; dy++)
-      for (let dx = -2; dx <= 2; dx++) {
-        const k = s.world.get(t.tx + dx, t.ty + dy)?.kind;
-        if (k === 'barracks') this.martial += 0.6 * dt * mm; // 4x4 footprint: several tiles are usually in range
-        else if (k === 'crop' || k === 'tilled') this.civil += 0.4 * dt;
+    for (let dy = -3; dy <= 3; dy++)
+      for (let dx = -3; dx <= 3; dx++) {
+        const tile = s.world.get(t.tx + dx, t.ty + dy);
+        const k = tile?.kind;
+        const near = Math.abs(dx) <= 2 && Math.abs(dy) <= 2;
+        if (k === 'barracks' && (near || (tile!.building?.level ?? 1) >= 2)) this.martial += 0.6 * dt * mm; // 4x4 footprint: several tiles are usually in range
+        else if (near && (k === 'crop' || k === 'tilled')) this.civil += 0.4 * dt;
       }
   }
 
   // --- farmers / woodcutters ------------------------------------------------
+
+  /** Woodcutters farm instead when the woodyard is full (until it drops well below the cap) or the forest is at its floor. */
+  private helpingFarm(s: VillageScene): boolean {
+    if (s.wood >= s.woodCap) this.farmHelp = true;
+    else if (s.wood < s.woodCap * 0.55) this.farmHelp = false;
+    return this.farmHelp || s.world.count((t) => t.kind === 'tree') <= TREE_RESERVE;
+  }
+  private farmHelp = false;
 
   private civilUpdate(dt: number, s: VillageScene, farmer: boolean): void {
     if (s.nearestRaider(this.x, this.y, 90)) { this.task = 'fleeing'; this.goHome(s, dt); return; }
@@ -299,9 +313,9 @@ export class Villager extends Mover {
       const job = farmer
         ? w.nearest(this.x, this.y, (t) => t.kind === 'crop' && t.stage >= s.cropDays) ??
           w.nearest(this.x, this.y, (t) => t.kind === 'tilled')
-        : w.nearest(this.x, this.y, (t) => t.kind === 'tree');
-      if (job) { this.setGoal(s, job.tx, job.ty); this.task = farmer ? 'heading to the field' : 'looking for a tree'; }
-      else { this.wanderNear(s, this.home); this.task = farmer ? 'no crops to tend' : 'no trees left'; }
+        : w.count((t) => t.kind === 'tree') > TREE_RESERVE ? w.nearest(this.x, this.y, (t) => t.kind === 'tree') : null;
+      if (job) { this.setGoal(s, job.tx, job.ty); this.task = farmer ? (this.role === 'woodcutter' ? 'helping in the field' : 'heading to the field') : 'looking for a tree'; }
+      else { this.wanderNear(s, this.home); this.task = farmer ? 'no crops to tend' : 'leaving the last trees to regrow'; }
       return;
     }
 
@@ -318,9 +332,9 @@ export class Villager extends Mover {
   private finishWork(s: VillageScene, farmer: boolean): void {
     const g = this.goal!;
     const t = s.world.get(g.tx, g.ty)!;
-    if (farmer && t.kind === 'crop' && t.stage >= s.cropDays) { s.world.set(g.tx, g.ty, 'tilled'); s.food += s.mods.cropYield; }
+    if (farmer && t.kind === 'crop' && t.stage >= s.cropDays) { if (s.food < s.foodCap) { s.world.set(g.tx, g.ty, 'tilled'); s.addFood(s.mods.cropYield); } }
     else if (farmer && t.kind === 'tilled') { s.world.set(g.tx, g.ty, 'crop'); }
-    else if (!farmer && t.kind === 'tree') { s.world.set(g.tx, g.ty, 'grass'); s.wood += TREE_YIELD; }
+    else if (!farmer && t.kind === 'tree') { s.world.set(g.tx, g.ty, 'sapling'); s.addWood(TREE_YIELD); }
     this.clearGoal();
   }
 
@@ -335,14 +349,15 @@ export class Villager extends Mover {
     if (this.target && !this.target.dead) {
       this.task = 'fighting';
       if (this.attackTick(dt, s)) return;
-      if (this.startAttack(s, this.target, Math.round(p.soldierDmg * s.mods.soldierDmgMul), 13, 0.15, 0.45)) return;
+      if (this.startAttack(s, this.target, Math.round(p.soldierDmg * s.mods.soldierDmgMul * (s.world.barracksLevel >= 3 ? 1.2 : 1)), 13, 0.15, 0.45)) return;
       this.setGoal(s, this.target.tile.tx, this.target.tile.ty);
       this.followPath(dt);
       return;
     }
     this.target = null;
     this.task = 'on patrol';
-    if (s.mods.soldierRegen && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + s.mods.soldierRegen * dt);
+    const regen = s.mods.soldierRegen + (s.world.barracksLevel >= 3 ? 1 : 0);
+    if (regen && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + regen * dt);
     this.thinkTimer -= dt;
     if (this.followPath(dt) && this.thinkTimer <= 0) {
       this.thinkTimer = s.rng.range(3, 7);
@@ -459,8 +474,8 @@ export class Raider extends Mover {
 // player
 
 /** What the player holds. The equipped tool decides what E does. */
-export type Tool = 'hands' | 'hoe' | 'seeds' | 'axe' | 'sword' | 'house' | 'barracks';
-export const TOOLS: Tool[] = ['hands', 'hoe', 'seeds', 'axe', 'sword', 'house', 'barracks'];
+export type Tool = 'hands' | 'hoe' | 'seeds' | 'axe' | 'sword' | 'house' | 'barracks' | 'hammer';
+export const TOOLS: Tool[] = ['hands', 'hoe', 'seeds', 'axe', 'sword', 'house', 'barracks', 'hammer'];
 
 /** A sword swing in progress: an arc in front of the player that connects during its active window. */
 /** A sword swing in progress: an arc in front of the player that connects during its active window. */

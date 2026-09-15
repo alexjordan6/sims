@@ -471,3 +471,6 @@ body.touch .mobile .corner { display: none; }
 body.touch .ctrl-panel { position: absolute; right: 6px; bottom: 6px; }
 body.touch .ctrl-card { width: min(300px, 80vw); }
 body.touch .ctrl-tab { font-size: 7px; }
+
+/* stockpile caps next to the numbers */
+.topbar .num small { font-size: 10px; font-weight: 400; opacity: 0.7; margin-left: 1px; }

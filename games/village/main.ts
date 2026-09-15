@@ -1,9 +1,9 @@
 import Phaser from 'phaser';
 import { SimScene, launch } from '@shared/index';
-import { World, doorstep, BUILDING_W, BUILDING_H } from './world';
+import { World, doorstep, BUILDINGS, MAX_LEVEL, type Building, type BuildingKind } from './world';
 import { Villager, Raider, Player, Mover, TOOLS, type Role, type Tool } from './agents';
 import { Rat, Snatcher, Brute, Shaman, waveComposition } from './enemies';
-import { p, TILE, COLS, ROWS, ZOOM, COST, TREE_YIELD, RUN } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, TREE_YIELD, RUN, SAPLING_DAYS, TREE_SEED_CHANCE, CAPS, UPGRADE_COST, HOUSE_BEDS } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
@@ -129,7 +129,7 @@ export class VillageScene extends SimScene {
     for (let i = 0; i < this.mods.startSoldiers; i++) this.addVillager(home, 'soldier', 25);
     if (this.mods.extraAdults > 0) {
       // a second family, in the nearest open 2x2 to the left of the first house
-      const spot = [[-5, 0], [-6, 0], [5, 0], [0, 5], [-5, 5], [5, 5]].map(([dx, dy]) => ({ tx: home.tx + dx, ty: home.ty + dy })).find((q) => this.world.canBuild(q.tx, q.ty)) ?? { tx: home.tx - 3, ty: home.ty };
+      const spot = [[-5, 0], [-6, 0], [5, 0], [0, 5], [-5, 5], [5, 5]].map(([dx, dy]) => ({ tx: home.tx + dx, ty: home.ty + dy })).find((q) => this.world.canBuild('house', q.tx, q.ty)) ?? { tx: home.tx - 3, ty: home.ty };
       const h2 = this.world.placeHouse(spot.tx, spot.ty);
       for (let i = 0; i < this.mods.extraAdults; i++) this.addVillager(h2, i % 2 ? 'woodcutter' : 'farmer', 22);
     }
@@ -140,6 +140,7 @@ export class VillageScene extends SimScene {
     const d = doorstep(home);
     const c = World.center(d.tx, d.ty);
     const v = new Villager(c.x + this.rng.range(-4, 4), c.y + this.rng.range(-4, 4), home, role, age, NAMES[this.nameIdx++ % NAMES.length], this.mods);
+    if (role === 'soldier') { v.barracksHp = this.world.barracksLevel >= 3 ? 30 : this.world.barracksLevel >= 2 ? 15 : 0; v.applyRole(this.mods); v.hp = v.maxHp; }
     home.residents++;
     return this.spawn(v);
   }
@@ -151,7 +152,7 @@ export class VillageScene extends SimScene {
   create(): void {
     const kb = this.input.keyboard!;
     this.wasd = kb.addKeys('W,A,S,D') as typeof this.wasd;
-    // Stardew-style: C / left click = use tool, X / right click = check, E / Esc = menu, 1-7 or Tab / wheel = tools
+    // Stardew-style: C / left click = use tool, X / right click = check, E / Esc = menu, 1-8 or Tab / wheel = tools
     kb.on('keydown-C', () => this.interact());
     kb.on('keydown-X', () => this.select(this.hovered));
     kb.on('keydown-E', () => this.togglePause());
@@ -166,7 +167,7 @@ export class VillageScene extends SimScene {
     kb.removeAllListeners('keydown-ONE'); kb.removeAllListeners('keydown-TWO'); kb.removeAllListeners('keydown-THREE');
     kb.on('keydown-MINUS', () => (this.speed = this.speed > 4 ? 4 : 1));
     kb.on('keydown-PLUS', () => (this.speed = this.speed < 4 ? 4 : 16));
-    ['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN'].forEach((k, i) => kb.on(`keydown-${k}`, () => (this.player.tool = TOOLS[i])));
+    ['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT'].forEach((k, i) => kb.on(`keydown-${k}`, () => (this.player.tool = TOOLS[i])));
     // the kernel's R (restart) / N (new seed) are far too easy to hit mid-run: restart lives in the pause menu,
     // and R only works on the end screens where it means "new run"
     kb.removeAllListeners('keydown-R');
@@ -314,10 +315,14 @@ export class VillageScene extends SimScene {
     let html: string | null = null;
     switch (t?.kind) {
       case 'crop': html = `<div class="t">${t.stage >= this.cropDays ? 'Ripe crop' : 'Growing crop'}</div><div class="d">${Math.min(t.stage, this.cropDays)}/${this.cropDays} days · yields ${this.mods.cropYield} food</div>`; break;
-      case 'tilled': html = `<div class="t">Tilled soil</div><div class="d">plant with E, or a farmer will</div>`; break;
+      case 'tilled': html = `<div class="t">Tilled soil</div><div class="d">plant with seeds, or a farmer will</div>`; break;
       case 'tree': html = `<div class="t">Tree</div><div class="d">${t.work}/3 chopped · yields ${TREE_YIELD} wood</div>`; break;
-      case 'house': html = `<div class="t">House</div><div class="d">${t.house?.residents ?? 0}/${this.mods.houseCap} residents · couples here have children</div>`; break;
-      case 'barracks': html = `<div class="t">Barracks</div><div class="d">children raised nearby grow into soldiers</div>`; break;
+      case 'sapling': html = `<div class="t">${t.stage < 2 ? 'Stump' : 'Sapling'}</div><div class="d">grows into a tree in ${SAPLING_DAYS - t.stage} day${SAPLING_DAYS - t.stage === 1 ? '' : 's'}</div>`; break;
+      case 'house': case 'barracks': case 'granary': case 'woodyard': {
+        const b = t.building!;
+        html = `<div class="t">${this.buildingTitle(b)}</div><div class="d">${this.buildingBlurb(b)}</div>`;
+        break;
+      }
     }
     this.ui.tooltip(html, ev.clientX, ev.clientY);
   }
@@ -355,13 +360,26 @@ export class VillageScene extends SimScene {
     this.player.hp = Math.min(this.player.maxHp, this.player.hp + 30);
     // crops grow
     this.world.tiles.forEach((t, i) => { if (t.kind === 'crop') { t.stage++; this.world.dirty.add(i); } });
-    // saplings: next to a tree, or rarely anywhere
-    for (let i = 0; i < 3; i++) {
-      const tx = this.rng.int(0, COLS - 1), ty = this.rng.int(0, ROWS - 1);
-      const t = this.world.get(tx, ty);
-      const nearTree = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => this.world.get(tx + dx, ty + dy)?.kind === 'tree');
-      if (t?.kind === 'grass' && (nearTree || this.rng.chance(0.15))) this.world.set(tx, ty, 'tree');
+    // stumps and saplings grow back; trees seed their neighbours
+    const seeds: { tx: number; ty: number }[] = [];
+    this.world.tiles.forEach((t, i) => {
+      const tx = i % COLS, ty = (i / COLS) | 0;
+      if (t.kind === 'sapling') {
+        if (++t.stage >= SAPLING_DAYS) this.world.set(tx, ty, 'tree'); else this.world.dirty.add(i);
+      } else if (t.kind === 'tree' && this.rng.chance(TREE_SEED_CHANCE)) {
+        const [dx, dy] = this.rng.pick([[1, 0], [-1, 0], [0, 1], [0, -1]]);
+        if (this.world.get(tx + dx, ty + dy)?.kind === 'grass') seeds.push({ tx: tx + dx, ty: ty + dy });
+      }
+    });
+    // forests spread until the map is about a third trees, but never into the village clearing
+    const treeCap = Math.floor(COLS * ROWS * 0.3);
+    let trees = this.world.count((t) => t.kind === 'tree' || t.kind === 'sapling');
+    for (const q of seeds) {
+      if (trees >= treeCap || this.world.get(q.tx, q.ty)?.kind !== 'grass' || this.nearBuilding(q.tx, q.ty, 2)) continue;
+      this.world.set(q.tx, q.ty, 'sapling').stage = 2;
+      trees++;
     }
+    this.warnedFull = false;
 
     // villagers: eat, age, grow up, grow old
     const villagers = this.villagers();
@@ -379,9 +397,9 @@ export class VillageScene extends SimScene {
     // births: a couple sharing a house with room and food to spare
     for (const h of this.world.houses) {
       const adults = villagers.filter((v) => v.home === h && v.isAdult && !v.dead);
-      if (adults.length >= 2 && h.residents < this.mods.houseCap && this.food > 10 && this.rng.chance(p.birthChance + this.mods.birthBonus)) {
+      if (adults.length >= 2 && h.residents < this.beds(h) && this.food > 10 && this.rng.chance(p.birthChance + this.mods.birthBonus + (h.level >= 3 ? 0.15 : 0))) {
         const kid = this.addVillager(h, 'kid', 0);
-        if (h.residents < this.mods.houseCap && this.rng.chance(this.mods.twinChance)) {
+        if (h.residents < this.beds(h) && this.rng.chance(this.mods.twinChance)) {
           const twin = this.addVillager(h, 'kid', 0);
           this.event('birth', `Twins! ${kid.name} and ${twin.name} were born`, true);
         } else this.event('birth', `${kid.name} was born`, true);
@@ -390,7 +408,7 @@ export class VillageScene extends SimScene {
 
     // move-ins: adults from crowded houses take a spare room elsewhere
     for (const h of this.world.houses) {
-      if (h.residents >= this.mods.houseCap) continue;
+      if (h.residents >= this.beds(h)) continue;
       const mover = villagers.find((v) => v.isAdult && !v.dead && v.home !== h && villagers.filter((o) => o.home === v.home && o.isAdult).length > 2);
       if (mover) { mover.home.residents--; mover.home = h; h.residents++; this.event('info', `${mover.name} moved into a new house`); }
     }
@@ -543,30 +561,97 @@ export class VillageScene extends SimScene {
     return farmers <= cutters ? 'farmer' : 'woodcutter';
   }
 
+  // ---- buildings: beds, caps, upgrades ----------------------------------------------
+
+  /** Beds in a house: by level, or the Big Families boon if that is higher. */
+  beds(h: Building): number {
+    return Math.max(HOUSE_BEDS[h.level] ?? 4, this.mods.houseCap);
+  }
+  get foodCap(): number { return CAPS[this.world.granary?.level ?? 1]; }
+  get woodCap(): number { return CAPS[this.world.woodyard?.level ?? 1]; }
+  private warnedFull = false;
+
+  /** Add to the stockpile, respecting storage; says so (once a day) when the store is full. */
+  addFood(n: number): void {
+    const room = this.foodCap - this.food;
+    if (n > room && !this.warnedFull) { this.warnedFull = true; this.event('food', 'The granary is full — upgrade it with the hammer', true); }
+    this.food = Math.min(this.foodCap, this.food + n);
+  }
+  addWood(n: number): void {
+    const room = this.woodCap - this.wood;
+    if (n > room && !this.warnedFull) { this.warnedFull = true; this.event('wood', 'The woodyard is full — upgrade it with the hammer', true); }
+    this.wood = Math.min(this.woodCap, this.wood + n);
+  }
+
+  buildingTitle(b: Building): string {
+    return `${BUILDINGS[b.kind].name} Lv${b.level}`;
+  }
+  buildingBlurb(b: Building): string {
+    const up = b.level < MAX_LEVEL ? ` · hammer: upgrade (${UPGRADE_COST[b.kind][b.level]} wood)` : ' · max level';
+    switch (b.kind) {
+      case 'house': return `${b.residents}/${this.beds(b)} beds${b.level >= 3 ? ' · births +15%' : ''}${up}`;
+      case 'barracks': return `children raised nearby become soldiers${b.level >= 2 ? ` · soldiers +${b.level >= 3 ? 30 : 15} HP` : ''}${b.level >= 3 ? ' · +20% damage, regen' : ''}${up}`;
+      case 'granary': return `holds ${CAPS[b.level]} food (${this.food | 0} stored)${up}`;
+      case 'woodyard': return `holds ${CAPS[b.level]} wood (${this.wood | 0} stored)${up}`;
+    }
+  }
+
+  /** Why the hammer can't upgrade `b` right now, or null. */
+  upgradeProblem(b: Building): string | null {
+    if (b.level >= MAX_LEVEL) return `${BUILDINGS[b.kind].name} is already max level`;
+    const cost = UPGRADE_COST[b.kind][b.level];
+    if (this.wood < cost) return `need ${cost} wood (have ${this.wood | 0})`;
+    return null;
+  }
+
+  private upgrade(b: Building): void {
+    const cost = UPGRADE_COST[b.kind][b.level];
+    this.wood -= cost;
+    b.level++;
+    this.world.refresh(b);
+    this.event('build', `${BUILDINGS[b.kind].name} upgraded to level ${b.level}`, true);
+  }
+
   // ---- player actions -------------------------------------------------------
 
   /**
    * Top-left of the footprint a new building would take: always the full building in front of
    * the player (never overlapping them), roughly centred on the faced tile.
    */
-  buildAnchor(): { tx: number; ty: number } {
+  buildAnchor(kind: BuildingKind = this.player.build === 'none' ? 'house' : this.player.build): { tx: number; ty: number } {
     const f = this.player.faced, d = this.player.facing;
-    const half = Math.floor(BUILDING_W / 2) - 1;
+    const { w, h } = BUILDINGS[kind];
+    const half = Math.floor(w / 2) - 1;
     if (d.y > 0) return { tx: f.tx - half, ty: f.ty };
-    if (d.y < 0) return { tx: f.tx - half, ty: f.ty - BUILDING_H + 1 };
+    if (d.y < 0) return { tx: f.tx - half, ty: f.ty - h + 1 };
     if (d.x > 0) return { tx: f.tx, ty: f.ty - half };
-    return { tx: f.tx - BUILDING_W + 1, ty: f.ty - half };
+    return { tx: f.tx - w + 1, ty: f.ty - half };
   }
 
   /** Why a building can't go at `a`, or null if it can. */
-  buildProblem(a: { tx: number; ty: number }): string | null {
-    if (!this.world.canBuild(a.tx, a.ty)) return 'Need a clear 4x4 of grass to build';
-    const inside = (m: Mover) => !m.hidden && m.x >= a.tx * TILE - 2 && m.x < (a.tx + BUILDING_W) * TILE + 2 && m.y >= a.ty * TILE - 2 && m.y < (a.ty + BUILDING_H) * TILE + 2;
+  buildProblem(a: { tx: number; ty: number }, kind: BuildingKind = this.player.build === 'none' ? 'house' : this.player.build): string | null {
+    const { w, h } = BUILDINGS[kind];
+    if (!this.world.canBuild(kind, a.tx, a.ty)) return `Need a clear ${w}x${h} of grass to build`;
+    const inside = (m: Mover) => !m.hidden && m.x >= a.tx * TILE - 2 && m.x < (a.tx + w) * TILE + 2 && m.y >= a.ty * TILE - 2 && m.y < (a.ty + h) * TILE + 2;
     if (this.agents.some((m) => inside(m as Mover))) return "Someone's standing in the way";
     return null;
   }
 
-  /** E: do what the equipped tool does to the faced tile (or swing the sword). */
+  /** Is (tx, ty) within `pad` tiles of any building footprint (including its yard)? */
+  nearBuilding(tx: number, ty: number, pad: number): boolean {
+    return this.world.buildings.some((b) => {
+      const f = BUILDINGS[b.kind];
+      return tx >= b.tx - pad && tx < b.tx + f.w + pad && ty >= b.ty - pad && ty < b.ty + f.h + 1 + pad;
+    });
+  }
+
+  /** The building in front of the player, if any. */
+  facedBuilding(): Building | null {
+    const t = this.world.get(this.player.faced.tx, this.player.faced.ty);
+    return t?.building ?? null;
+  }
+
+  /** Use the equipped tool on the faced tile (or swing the sword). */
   interact(): void {
     if (this.screen !== 'playing') return;
     const pl = this.player;
@@ -581,42 +666,54 @@ export class VillageScene extends SimScene {
       }
       case 'house':
       case 'barracks': {
-        const a = this.buildAnchor();
-        const why = this.buildProblem(a);
+        const a = this.buildAnchor(pl.tool);
+        const why = this.buildProblem(a, pl.tool);
         if (why) { this.event('build', why); return; }
         if (this.wood < COST[pl.tool]) { this.event('build', `Need ${COST[pl.tool]} wood for a ${pl.tool}`); return; }
         this.wood -= COST[pl.tool];
-        if (pl.tool === 'house') this.world.placeHouse(a.tx, a.ty); else this.world.placeBarracks(a.tx, a.ty);
-        this.fx.push({ kind: 'tool', tool: 'hammer', tx: a.tx + 1, ty: a.ty + BUILDING_H - 1 });
+        this.world.place(pl.tool, a.tx, a.ty);
+        this.fx.push({ kind: 'tool', tool: 'hammer', tx: a.tx + 1, ty: a.ty + BUILDINGS[pl.tool].h - 1 });
         this.event('build', `Built a ${pl.tool}`, true);
         return;
       }
+      case 'hammer': {
+        const b = this.facedBuilding();
+        this.fx.push({ kind: 'tool', tool: 'hammer', tx, ty });
+        if (!b || !t) return;
+        const why = this.upgradeProblem(b);
+        if (why) { this.event('build', why); return; }
+        if (++t.work >= 3) { t.work = 0; this.upgrade(b); }
+        return;
+      }
       case 'hoe':
-        if (t?.kind === 'grass') { this.world.set(tx, ty, 'tilled'); this.fx.push({ kind: 'tool', tool: 'hoe', tx, ty }); }
-        else this.fx.push({ kind: 'tool', tool: 'hoe', tx, ty }); // swing anyway, feels responsive
+        if (t?.kind === 'grass' || t?.kind === 'sapling') this.world.set(tx, ty, 'tilled');
+        this.fx.push({ kind: 'tool', tool: 'hoe', tx, ty });
         return;
       case 'seeds':
         if (t?.kind === 'tilled') { this.world.set(tx, ty, 'crop'); this.fx.push({ kind: 'tool', tool: 'seed', tx, ty }); }
+        else if (t?.kind === 'grass') { this.world.set(tx, ty, 'sapling'); this.fx.push({ kind: 'tool', tool: 'seed', tx, ty }); }
         return;
       case 'axe':
         if (t?.kind === 'tree') {
-          if (++t.work >= 3) { this.world.set(tx, ty, 'grass'); this.wood += TREE_YIELD; }
+          if (++t.work >= 3) { this.world.set(tx, ty, 'sapling'); this.addWood(TREE_YIELD); }
           else this.world.dirty.add(ty * COLS + tx);
         }
         this.fx.push({ kind: 'tool', tool: 'axe', tx, ty });
         return;
       case 'hands':
-        if (t?.kind === 'crop' && t.stage >= this.cropDays) { this.world.set(tx, ty, 'tilled'); this.food += this.mods.cropYield; this.fx.push({ kind: 'tool', tool: 'seed', tx, ty }); }
+        if (t?.kind === 'crop' && t.stage >= this.cropDays) { this.world.set(tx, ty, 'tilled'); this.addFood(this.mods.cropYield); this.fx.push({ kind: 'tool', tool: 'seed', tx, ty }); }
         return;
     }
   }
 
-  /** What E would do right now, as "E: verb" (or a reason it won't). */
+  /** What the tool would do right now, as "E: verb" (or a reason it won't). */
   hint(): string {
     const pl = this.player;
     const t = this.world.get(pl.faced.tx, pl.faced.ty);
     const kind = t?.kind;
     const need = (tool: string) => `need the ${tool}`;
+    const b = t?.building;
+    if (b && pl.tool !== 'hammer' && pl.tool !== 'sword') return `${this.buildingTitle(b)} — ${this.buildingBlurb(b)}`;
     switch (pl.tool) {
       case 'sword': {
         const near = this.nearestRaider(pl.x, pl.y, 40);
@@ -624,30 +721,37 @@ export class VillageScene extends SimScene {
       }
       case 'house':
       case 'barracks': {
-        const why = this.buildProblem(this.buildAnchor());
+        const why = this.buildProblem(this.buildAnchor(pl.tool), pl.tool);
         return `E: build ${pl.tool} (${COST[pl.tool]} wood)${why ? ' — ' + why : ''}`;
+      }
+      case 'hammer': {
+        if (!b) return 'hammer: face a building to upgrade it';
+        const why = this.upgradeProblem(b);
+        return why ? `${this.buildingTitle(b)} — ${why}` : `E: upgrade ${BUILDINGS[b.kind].name} to Lv${b.level + 1} (${UPGRADE_COST[b.kind][b.level]} wood, ${3 - (t?.work ?? 0)} hits)`;
       }
       case 'hoe':
         if (kind === 'grass') return 'E: till soil';
+        if (kind === 'sapling') return 'E: clear the sapling';
         if (kind === 'tilled') return `tilled — ${need('seeds')}`;
         if (kind === 'crop') return t!.stage >= this.cropDays ? `ripe — ${need('hands')}` : `growing (${t!.stage}/${this.cropDays} days)`;
         if (kind === 'tree') return `tree — ${need('axe')}`;
         return 'hoe: face open grass';
       case 'seeds':
-        if (kind === 'tilled') return 'E: plant';
-        if (kind === 'grass') return `grass — ${need('hoe')} first`;
+        if (kind === 'tilled') return 'E: plant crops';
+        if (kind === 'grass') return `E: plant a tree (grows in ${SAPLING_DAYS} days)`;
+        if (kind === 'sapling') return `sapling — a tree in ${SAPLING_DAYS - t!.stage} days`;
         if (kind === 'crop') return t!.stage >= this.cropDays ? `ripe — ${need('hands')}` : `growing (${t!.stage}/${this.cropDays} days)`;
-        return 'seeds: face tilled soil';
+        return 'seeds: crops on soil, trees on grass';
       case 'axe':
         if (kind === 'tree') return `E: chop (${t!.work}/3)`;
+        if (kind === 'sapling') return `sapling — a tree in ${SAPLING_DAYS - t!.stage} days`;
         return 'axe: face a tree';
       case 'hands':
         if (kind === 'crop') return t!.stage >= this.cropDays ? 'E: harvest' : `growing (${t!.stage}/${this.cropDays} days)`;
         if (kind === 'grass') return `grass — ${need('hoe')} to till`;
         if (kind === 'tilled') return `tilled — ${need('seeds')}`;
         if (kind === 'tree') return `tree — ${need('axe')}`;
-        if (kind === 'house') return `house — ${t!.house?.residents ?? 0}/${this.mods.houseCap} beds used`;
-        if (kind === 'barracks') return 'barracks — kids raised nearby become soldiers';
+        if (kind === 'sapling') return `sapling — a tree in ${SAPLING_DAYS - t!.stage} days`;
         return 'hands: harvest ripe crops';
     }
   }

@@ -24,3 +24,19 @@ export const p = params({
 
 export const COST = { house: 20, barracks: 30 } as const;
 export const TREE_YIELD = 8;
+
+// ---- trees, storage, upgrades --------------------------------------------------------------
+/** days for a stump/sapling to become a tree */
+export const SAPLING_DAYS = 4;
+/** daily chance each tree seeds an adjacent grass tile */
+export const TREE_SEED_CHANCE = 0.04;
+/** woodcutters leave at least this many trees standing */
+export const TREE_RESERVE = 8;
+/** food / wood the granary / woodyard can hold, by level (index = level) */
+export const CAPS = [0, 150, 300, 600] as const;
+/** wood to upgrade a building to level 2 / 3 (index = current level) */
+export const UPGRADE_COST: Record<'house' | 'barracks' | 'granary' | 'woodyard', readonly number[]> = {
+  house: [0, 30, 60], barracks: [0, 40, 80], granary: [0, 30, 60], woodyard: [0, 30, 60],
+};
+/** beds per house level (index = level); overridden upward by the Big Families boon */
+export const HOUSE_BEDS = [0, 4, 6, 8] as const;

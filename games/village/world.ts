@@ -1,51 +1,70 @@
 import type { Rng } from '@shared/index';
 import { TILE, COLS, ROWS } from './config';
 
-export type TileKind = 'grass' | 'tree' | 'tilled' | 'crop' | 'house' | 'barracks';
+export type TileKind = 'grass' | 'tree' | 'sapling' | 'tilled' | 'crop' | 'house' | 'barracks' | 'granary' | 'woodyard';
+export type BuildingKind = 'house' | 'barracks' | 'granary' | 'woodyard';
 
-/** Buildings are 4x4 tiles; (tx, ty) is the top-left. The door is on the bottom row at DOOR_COL. */
-export const BUILDING_W = 4;
-export const BUILDING_H = 4;
-export const DOOR_COL = 1;
+/** Footprint per building kind; (tx, ty) is the top-left, the door sits on the bottom row at `door`. */
+export const BUILDINGS: Record<BuildingKind, { w: number; h: number; door: number; name: string }> = {
+  house: { w: 4, h: 4, door: 1, name: 'House' },
+  barracks: { w: 4, h: 4, door: 1, name: 'Barracks' },
+  granary: { w: 3, h: 2, door: 1, name: 'Granary' },
+  woodyard: { w: 3, h: 2, door: 1, name: 'Woodyard' },
+};
+export const MAX_LEVEL = 3;
 
-export interface House {
+export interface Building {
+  kind: BuildingKind;
   tx: number;
   ty: number;
-  residents: number; // count of villagers who call this home
+  level: number;
+  /** houses: count of villagers who call this home */
+  residents: number;
 }
+/** Houses are buildings; kept as a named type because half the sim talks about "home". */
+export type House = Building;
 
 /** The walkable tile just outside a building's door. */
-export function doorstep(b: TilePos): TilePos {
-  return { tx: b.tx + DOOR_COL, ty: b.ty + BUILDING_H };
+export function doorstep(b: Building): TilePos {
+  const f = BUILDINGS[b.kind];
+  return { tx: b.tx + f.door, ty: b.ty + f.h };
 }
 /** Centre of a building, in tiles (fractional). */
-export function buildingCenter(b: TilePos): TilePos {
-  return { tx: b.tx + BUILDING_W / 2, ty: b.ty + BUILDING_H / 2 };
+export function buildingCenter(b: Building): TilePos {
+  const f = BUILDINGS[b.kind];
+  return { tx: b.tx + f.w / 2, ty: b.ty + f.h / 2 };
+}
+/** The row of tiles just below a building (where supply buildings show their stock). */
+export function yardOf(b: Building): TilePos[] {
+  const f = BUILDINGS[b.kind];
+  return Array.from({ length: f.w }, (_, i) => ({ tx: b.tx + i, ty: b.ty + f.h }));
 }
 
 export interface Tile {
   kind: TileKind;
-  /** crop growth 0..cropDays; mature when >= cropDays */
+  /** crops: growth 0..cropDays (mature when >=); saplings: days until a tree */
   stage: number;
-  /** trees: chop progress accumulated by workers */
+  /** trees: chop progress accumulated by workers; buildings: upgrade hammering */
   work: number;
   /** visual variant (grass/tree frame choice), picked when the tile is set */
   v: number;
-  house?: House;
-  /** for buildings: which footprint cell this tile is (col + row * BUILDING_W), for rendering */
+  /** the building this tile belongs to, if any */
+  building?: Building;
+  /** for buildings: which footprint cell this tile is (col + row * w), for rendering */
   part?: number;
+  /** yard stock decoration: tile gid to draw (0 = none), set by the renderer from the stockpile */
+  yard?: number;
 }
 
 export interface TilePos { tx: number; ty: number }
 
 export const BLOCKING: Record<TileKind, boolean> = {
-  grass: false, tilled: false, crop: false, tree: true, house: true, barracks: true,
+  grass: false, tilled: false, crop: false, sapling: false, tree: true, house: true, barracks: true, granary: true, woodyard: true,
 };
 
 export class World {
   tiles: Tile[] = [];
-  houses: House[] = [];
-  barracks: TilePos[] = [];
+  buildings: Building[] = [];
   /** tile indices changed since the renderer last drained this */
   dirty = new Set<number>();
 
@@ -53,18 +72,31 @@ export class World {
     for (let i = 0; i < cols * rows; i++) { this.tiles.push({ kind: 'grass', stage: 0, work: 0, v: (i * 7919) % 97 }); this.dirty.add(i); }
   }
 
+  get houses(): Building[] { return this.buildings.filter((b) => b.kind === 'house'); }
+  get barracks(): Building[] { return this.buildings.filter((b) => b.kind === 'barracks'); }
+  get granary(): Building | undefined { return this.buildings.find((b) => b.kind === 'granary'); }
+  get woodyard(): Building | undefined { return this.buildings.find((b) => b.kind === 'woodyard'); }
+  /** The best barracks level in the village (0 if none). */
+  get barracksLevel(): number { return this.barracks.reduce((m, b) => Math.max(m, b.level), 0); }
+
   inBounds(tx: number, ty: number): boolean {
     return tx >= 0 && ty >= 0 && tx < this.cols && ty < this.rows;
   }
   get(tx: number, ty: number): Tile | undefined {
     return this.inBounds(tx, ty) ? this.tiles[ty * this.cols + tx] : undefined;
   }
+  /** Change a tile. Refuses to touch building tiles: buildings are never destroyed. */
   set(tx: number, ty: number, kind: TileKind): Tile {
     const i = ty * this.cols + tx;
     const t = this.tiles[i];
-    t.kind = kind; t.stage = 0; t.work = 0; t.house = undefined; t.part = undefined; t.v = (t.v + 31) % 97;
+    if (t.building && !this.stamping) return t;
+    t.kind = kind; t.stage = 0; t.work = 0; t.building = undefined; t.part = undefined; t.yard = undefined; t.v = (t.v + 31) % 97;
     this.dirty.add(i);
     return t;
+  }
+  private stamping = false;
+  markDirty(tx: number, ty: number): void {
+    this.dirty.add(ty * this.cols + tx);
   }
   isBlocked(tx: number, ty: number): boolean {
     const t = this.get(tx, ty);
@@ -79,33 +111,38 @@ export class World {
     return { tx: Math.floor(x / TILE), ty: Math.floor(y / TILE) };
   }
 
-  /** Can a building go here (all footprint tiles open grass, roof ridge row in bounds)? */
-  canBuild(tx: number, ty: number): boolean {
+  /** Can a building of `kind` go here (footprint all open grass, roof ridge row in bounds)? */
+  canBuild(kind: BuildingKind, tx: number, ty: number): boolean {
+    const f = BUILDINGS[kind];
     if (ty < 1) return false;
-    for (let dy = 0; dy < BUILDING_H; dy++)
-      for (let dx = 0; dx < BUILDING_W; dx++)
+    for (let dy = 0; dy < f.h; dy++)
+      for (let dx = 0; dx < f.w; dx++)
         if (this.get(tx + dx, ty + dy)?.kind !== 'grass') return false;
     return true;
   }
 
-  private stamp(tx: number, ty: number, kind: 'house' | 'barracks', house?: House): void {
-    for (let dy = 0; dy < BUILDING_H; dy++)
-      for (let dx = 0; dx < BUILDING_W; dx++) {
+  place(kind: BuildingKind, tx: number, ty: number): Building {
+    const b: Building = { kind, tx, ty, level: 1, residents: 0 };
+    const f = BUILDINGS[kind];
+    this.stamping = true;
+    for (let dy = 0; dy < f.h; dy++)
+      for (let dx = 0; dx < f.w; dx++) {
         const t = this.set(tx + dx, ty + dy, kind);
-        t.part = dx + dy * BUILDING_W;
-        t.house = house;
+        t.part = dx + dy * f.w;
+        t.building = b;
       }
+    this.stamping = false;
+    this.buildings.push(b);
+    return b;
   }
+  placeHouse(tx: number, ty: number): Building { return this.place('house', tx, ty); }
+  placeBarracks(tx: number, ty: number): Building { return this.place('barracks', tx, ty); }
 
-  placeHouse(tx: number, ty: number): House {
-    const h: House = { tx, ty, residents: 0 };
-    this.stamp(tx, ty, 'house', h);
-    this.houses.push(h);
-    return h;
-  }
-  placeBarracks(tx: number, ty: number): void {
-    this.stamp(tx, ty, 'barracks');
-    this.barracks.push({ tx, ty });
+  /** Repaint a building (after a level change). */
+  refresh(b: Building): void {
+    const f = BUILDINGS[b.kind];
+    for (let dy = -1; dy <= f.h; dy++)
+      for (let dx = 0; dx < f.w; dx++) if (this.inBounds(b.tx + dx, b.ty + dy)) this.markDirty(b.tx + dx, b.ty + dy);
   }
 
   /** Iterate all tiles matching a predicate. */
@@ -113,6 +150,12 @@ export class World {
     for (let ty = 0; ty < this.rows; ty++)
       for (let tx = 0; tx < this.cols; tx++)
         if (pred(this.tiles[ty * this.cols + tx], tx, ty)) yield { tx, ty };
+  }
+
+  count(pred: (t: Tile) => boolean): number {
+    let n = 0;
+    for (const t of this.tiles) if (pred(t)) n++;
+    return n;
   }
 
   /** Nearest tile (by squared pixel distance from x,y) matching pred. */
@@ -165,9 +208,9 @@ export class World {
     return out.reverse();
   }
 
-  /** Starting map: scattered tree clusters, one house, a tilled patch, a barracks. */
+  /** Starting map: tree clusters, a house, a barracks, the field, and the two supply buildings. */
   generate(rng: Rng, fieldW = 3): void {
-    for (let k = 0; k < 14; k++) {
+    for (let k = 0; k < 18; k++) {
       const cx = rng.int(1, this.cols - 2), cy = rng.int(1, this.rows - 2);
       for (let i = 0; i < 6; i++) {
         const tx = cx + rng.int(-2, 2), ty = cy + rng.int(-2, 2);
@@ -186,5 +229,7 @@ export class World {
         const t = this.set(tx, ty, 'crop');
         t.stage = rng.int(0, 2);
       }
+    this.place('granary', hx + half + 2, hy + 1);
+    this.place('woodyard', hx - 9, hy + 1);
   }
 }
