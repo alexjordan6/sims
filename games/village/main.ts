@@ -225,6 +225,8 @@ export class VillageScene extends SimScene {
   static readonly ZOOMS = [1, 1.5, 2, 3] as const;
   /** index into ZOOMS; null = automatic */
   zoomChoice: number | null = null;
+  /** the zoom the camera should rest at; fx bumps zoom in briefly and always return here */
+  baseZoom = 2;
 
   /**
    * The world is bigger than any normal screen, so the camera follows the player: 2x on
@@ -233,18 +235,21 @@ export class VillageScene extends SimScene {
    */
   fitCamera(): void {
     const cam = this.cameras.main;
+    cam.zoomEffect.reset(); // a zoom bump in flight would otherwise snap back to the old zoom
     const vw = this.scale.width, vh = this.scale.height;
     const fit = Math.min(vw / this.W, vh / this.H);
     if (fit >= 2 && this.zoomChoice === null) {
       this.following = false;
       cam.removeBounds();
-      cam.setZoom(Math.min(4, Math.floor(fit * 2) / 2));
+      this.baseZoom = Math.min(4, Math.floor(fit * 2) / 2);
+      cam.setZoom(this.baseZoom);
       cam.centerOn(this.W / 2, this.H / 2);
       return;
     }
     const auto = Math.min(vw, vh) < 500 ? 1.5 : 2;
     const zoom = this.zoomChoice === null ? auto : VillageScene.ZOOMS[this.zoomChoice];
     this.following = true;
+    this.baseZoom = zoom;
     cam.setZoom(zoom);
     cam.setBounds(0, 0, this.W, this.H, true);
     if (this.player) cam.centerOn(this.player.x, this.player.y);
