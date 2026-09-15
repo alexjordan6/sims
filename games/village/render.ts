@@ -278,8 +278,8 @@ export class Renderer {
     const s = this.scene;
     const u = this.under;
     u.clear();
-    // faced-tile cursor; in build mode a 2x2 footprint preview, red when blocked
-    const f = s.player.faced;
+    // target-tile cursor; in build mode the footprint preview, red when blocked
+    const f = s.target;
     if (s.world.inBounds(f.tx, f.ty)) {
       const build = s.player.build !== 'none';
       if (build) {
@@ -300,8 +300,15 @@ export class Renderer {
           u.lineBetween(s.player.x, s.player.y, (a.tx + w / 2) * TILE, (a.ty + h / 2) * TILE);
         }
       } else {
-        u.lineStyle(1, 0xffffff, 0.5);
-        u.strokeRect(f.tx * TILE + 0.5, f.ty * TILE + 0.5, TILE - 1, TILE - 1);
+        // gold when the held tool can act here ("E: …"), white otherwise; a dim box marks an out-of-reach hover
+        const can = s.hint().startsWith('E:');
+        u.lineStyle(2, can ? 0xffe066 : 0xffffff, can ? 0.95 : 0.55);
+        u.strokeRect(f.tx * TILE + 1, f.ty * TILE + 1, TILE - 2, TILE - 2);
+        const hv = s.hoverTile;
+        if (hv && !s.cursorAiming && s.world.inBounds(hv.tx, hv.ty)) {
+          u.lineStyle(1, 0xffffff, 0.2);
+          u.strokeRect(hv.tx * TILE + 0.5, hv.ty * TILE + 0.5, TILE - 1, TILE - 1);
+        }
       }
     }
     // selection ring

@@ -752,9 +752,30 @@ export class VillageScene extends SimScene {
     });
   }
 
-  /** The building in front of the player, if any. */
+  /** How far from the player's tile the mouse can aim a tool (Chebyshev), in tiles. */
+  static readonly TOOL_REACH = 1;
+  /** Is the mouse aiming the tool (hovering a tile within reach)? */
+  get cursorAiming(): boolean {
+    const hv = this.hoverTile, pt = this.player.tile;
+    return !!hv && Math.max(Math.abs(hv.tx - pt.tx), Math.abs(hv.ty - pt.ty)) <= VillageScene.TOOL_REACH;
+  }
+  /** The tile a tool acts on: the hovered tile when it's next to you (mouse), else the tile you face. */
+  get target(): TilePos {
+    return this.cursorAiming ? this.hoverTile! : this.player.faced;
+  }
+  /** flatten-in-progress bookkeeping: the tile being hammered/flattened resets when you move on */
+  private workTile: TilePos | null = null;
+  private workOn(tx: number, ty: number): void {
+    if (this.workTile && (this.workTile.tx !== tx || this.workTile.ty !== ty)) {
+      const prev = this.world.get(this.workTile.tx, this.workTile.ty);
+      if (prev && (prev.kind === 'tilled' || prev.building)) { prev.work = 0; this.world.markDirty(this.workTile.tx, this.workTile.ty); }
+    }
+    this.workTile = { tx, ty };
+  }
+
+  /** The building in front of the player (or under the mouse when aiming), if any. */
   facedBuilding(): Building | null {
-    const t = this.world.get(this.player.faced.tx, this.player.faced.ty);
+    const t = this.world.get(this.target.tx, this.target.ty);
     return t?.building ?? null;
   }
 
@@ -762,8 +783,9 @@ export class VillageScene extends SimScene {
   interact(): void {
     if (this.screen !== 'playing') return;
     const pl = this.player;
-    const { tx, ty } = pl.faced;
+    const { tx, ty } = this.target;
     const t = this.world.get(tx, ty);
+    if (pl.tool !== 'sword') this.workOn(tx, ty); // acting elsewhere abandons a half-done flatten / upgrade
 
     switch (pl.tool) {
       case 'sword': {
@@ -794,7 +816,10 @@ export class VillageScene extends SimScene {
       }
       case 'hoe':
         if (t?.kind === 'grass') this.world.set(tx, ty, 'tilled');
-        else if (t?.kind === 'sapling' || t?.kind === 'tilled') this.world.set(tx, ty, 'grass'); // dig out a stump / flatten soil
+        else if (t?.kind === 'sapling') this.world.set(tx, ty, 'grass'); // dig out a stump
+        else if (t?.kind === 'tilled') { // flattening soil is deliberate: three hits on the same tile
+          if (++t.work >= 3) this.world.set(tx, ty, 'grass');
+        }
         this.fx.push({ kind: 'tool', tool: 'hoe', tx, ty });
         return;
       case 'seeds':
@@ -817,7 +842,8 @@ export class VillageScene extends SimScene {
   /** What the tool would do right now, as "E: verb" (or a reason it won't). */
   hint(): string {
     const pl = this.player;
-    const t = this.world.get(pl.faced.tx, pl.faced.ty);
+    const tg = this.target;
+    const t = this.world.get(tg.tx, tg.ty);
     const kind = t?.kind;
     const need = (tool: string) => `need the ${tool}`;
     const b = t?.building;
@@ -840,14 +866,14 @@ export class VillageScene extends SimScene {
       case 'hoe':
         if (kind === 'grass') return 'E: till soil';
         if (kind === 'sapling') return t!.stage < 2 ? 'E: dig out the stump' : 'E: clear the sapling';
-        if (kind === 'tilled') return 'E: flatten back to grass';
-        if (kind === 'crop') return t!.stage >= this.cropDays ? `ripe — ${need('hands')}` : `growing (${t!.stage}/${this.cropDays} days)`;
+        if (kind === 'tilled') return `E: flatten back to grass (${t!.work}/3 — hit it three times)`;
+        if (kind === 'crop') return t!.stage >= this.cropDays ? `ripe — ${need('hands')}` : `growing (${t!.stage}/${this.cropDays} days) — harvest with hands`;
         if (kind === 'tree') return `tree — ${need('axe')}`;
         return 'hoe: face open grass';
       case 'seeds':
         if (kind === 'tilled') return 'E: plant crops';
-        if (kind === 'grass') return `E: plant a tree (grows in ${this.saplingDays(pl.faced.tx, pl.faced.ty)} days${this.world.treeNeighbours(pl.faced.tx, pl.faced.ty) >= 2 ? ', sheltered' : ''})`;
-        if (kind === 'sapling') return `sapling — a tree in ${this.saplingDays(pl.faced.tx, pl.faced.ty) - t!.stage} days`;
+        if (kind === 'grass') return `E: plant a tree (grows in ${this.saplingDays(tg.tx, tg.ty)} days${this.world.treeNeighbours(tg.tx, tg.ty) >= 2 ? ', sheltered' : ''})`;
+        if (kind === 'sapling') return `sapling — a tree in ${this.saplingDays(tg.tx, tg.ty) - t!.stage} days`;
         if (kind === 'crop') return t!.stage >= this.cropDays ? `ripe — ${need('hands')}` : `growing (${t!.stage}/${this.cropDays} days)`;
         return 'seeds: crops on soil, trees on grass';
       case 'axe':
@@ -859,7 +885,7 @@ export class VillageScene extends SimScene {
         if (kind === 'grass') return `grass — ${need('hoe')} to till`;
         if (kind === 'tilled') return `tilled — ${need('seeds')}`;
         if (kind === 'tree') return `tree — ${need('axe')}`;
-        if (kind === 'sapling') return `sapling — a tree in ${this.saplingDays(pl.faced.tx, pl.faced.ty) - t!.stage} days`;
+        if (kind === 'sapling') return `sapling — a tree in ${this.saplingDays(tg.tx, tg.ty) - t!.stage} days`;
         return 'hands: harvest ripe crops';
     }
   }

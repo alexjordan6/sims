@@ -556,8 +556,10 @@ export class Player extends Mover {
   }
 
   /** The tile just in front of the player. */
+  /** The neighbouring tile in the direction faced — stable until you turn or cross a tile edge. */
   get faced(): TilePos {
-    return World.toTile(this.x + this.facing.x * 11, this.y + this.facing.y * 11);
+    const t = this.tile;
+    return { tx: t.tx + this.facing.x, ty: t.ty + this.facing.y };
   }
 
   update(dt: number, s: VillageScene): void {
