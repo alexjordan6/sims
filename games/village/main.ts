@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { SimScene, launch } from '@shared/index';
-import { World, doorstep, buildingCenter, BUILDINGS, MAX_LEVEL, type Building, type BuildingKind, type Tile } from './world';
+import { World, doorstep, buildingCenter, BUILDINGS, MAX_LEVEL, type Building, type BuildingKind, type Tile, type TilePos } from './world';
 import { Villager, Raider, Player, Mover, TOOLS, type Role, type Tool } from './agents';
 import { Rat, Snatcher, Brute, Shaman, waveComposition } from './enemies';
 import { p, TILE, COLS, ROWS, ZOOM, COST, TREE_YIELD, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, OLD_YIELD, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, CADET_AGE_BEFORE } from './config';
@@ -204,7 +204,7 @@ export class VillageScene extends SimScene {
       this.interact();
     });
     this.input.on('wheel', (_p: unknown, _o: unknown, _dx: number, dy: number) => this.player.cycleTool(dy > 0 ? 1 : -1));
-    this.input.on('gameout', () => { this.hovered = null; this.ui?.tooltip(null); });
+    this.input.on('gameout', () => { this.hovered = null; this.hoverTile = null; this.ui?.tooltip(null); });
 
     this.scale.on('resize', () => this.fitCamera());
     // Phaser only watches the window; the stage can change on its own (drawer, orientation, layout)
@@ -350,7 +350,11 @@ export class VillageScene extends SimScene {
     this.hovered = m;
   }
 
+  /** tile under the mouse (null on touch / when the pointer left the canvas); drives cursor placement */
+  hoverTile: TilePos | null = null;
+
   private onPointerMove(ptr: Phaser.Input.Pointer): void {
+    this.hoverTile = document.body.classList.contains('touch') ? null : { tx: Math.floor(ptr.worldX / TILE), ty: Math.floor(ptr.worldY / TILE) };
     if (!this.ui || (this.screen !== 'playing' && this.screen !== 'paused')) { this.ui?.tooltip(null); return; }
     const ev = ptr.event as MouseEvent;
     const m = this.hovered;
@@ -678,27 +682,52 @@ export class VillageScene extends SimScene {
 
   // ---- player actions -------------------------------------------------------
 
+  /** How far from the player the mouse can place a building, in tiles. */
+  static readonly BUILD_REACH = 6;
+
   /**
-   * Top-left of the footprint a new building would take: always the full building in front of
-   * the player (never overlapping them), roughly centred on the faced tile.
+   * Top-left of the footprint a new building would take. With a mouse nearby, the footprint
+   * follows the pointer (the hovered tile becomes the door tile). Otherwise it sits one whole
+   * tile in front of the player's own tile, so the player can never be inside it.
    */
   buildAnchor(kind: BuildingKind = this.player.build === 'none' ? 'house' : this.player.build): { tx: number; ty: number } {
-    const f = this.player.faced, d = this.player.facing;
-    const { w, h } = BUILDINGS[kind];
+    const { w, h, door } = BUILDINGS[kind];
+    const pt = this.player.tile, d = this.player.facing;
+    const hv = this.hoverTile;
+    if (hv && Math.max(Math.abs(hv.tx - pt.tx), Math.abs(hv.ty - pt.ty)) <= VillageScene.BUILD_REACH) {
+      return { tx: hv.tx - door, ty: hv.ty - h + 1 }; // door on the hovered tile
+    }
     const half = Math.floor(w / 2) - 1;
-    if (d.y > 0) return { tx: f.tx - half, ty: f.ty };
-    if (d.y < 0) return { tx: f.tx - half, ty: f.ty - h + 1 };
-    if (d.x > 0) return { tx: f.tx, ty: f.ty - half };
-    return { tx: f.tx - w + 1, ty: f.ty - half };
+    if (d.y > 0) return { tx: pt.tx - half, ty: pt.ty + 1 };
+    if (d.y < 0) return { tx: pt.tx - half, ty: pt.ty - h };
+    if (d.x > 0) return { tx: pt.tx + 1, ty: pt.ty - half };
+    return { tx: pt.tx - w, ty: pt.ty - half };
+  }
+  /** Is the current build anchor following the mouse (vs. sitting in front of the player)? */
+  get cursorPlacing(): boolean {
+    const hv = this.hoverTile, pt = this.player.tile;
+    return !!hv && Math.max(Math.abs(hv.tx - pt.tx), Math.abs(hv.ty - pt.ty)) <= VillageScene.BUILD_REACH;
   }
 
   /** Why a building can't go at `a`, or null if it can. */
   buildProblem(a: { tx: number; ty: number }, kind: BuildingKind = this.player.build === 'none' ? 'house' : this.player.build): string | null {
     const { w, h } = BUILDINGS[kind];
     if (!this.world.canBuild(kind, a.tx, a.ty)) return `Need ${w}x${h} of open ground (no trees, crops or buildings)`;
-    const inside = (m: Mover) => !m.hidden && m.x >= a.tx * TILE - 2 && m.x < (a.tx + w) * TILE + 2 && m.y >= a.ty * TILE - 2 && m.y < (a.ty + h) * TILE + 2;
-    if (this.agents.some((m) => inside(m as Mover))) return "Someone's standing in the way";
+    if (this.agents.some((m) => m instanceof Raider && !m.dead && this.insideFootprint(m, a, kind))) return 'A raider is in the way';
     return null;
+  }
+  private insideFootprint(m: Mover, a: { tx: number; ty: number }, kind: BuildingKind): boolean {
+    const { w, h } = BUILDINGS[kind];
+    return !m.hidden && m.x >= a.tx * TILE && m.x < (a.tx + w) * TILE && m.y >= a.ty * TILE && m.y < (a.ty + h) * TILE;
+  }
+  /** After a building goes up, anyone standing in it (you included) steps out onto the doorstep. */
+  private stepOut(b: Building): void {
+    const d = doorstep(b), c = World.center(d.tx, d.ty);
+    for (const m of this.agents as Mover[]) {
+      if (m instanceof Raider || !this.insideFootprint(m, b, b.kind)) continue;
+      m.x = c.x; m.y = c.y; m.vx = m.vy = 0;
+      m.clearGoal();
+    }
   }
 
   // ---- groves: trees shelter each other and age into old growth ------------------------------
@@ -749,7 +778,7 @@ export class VillageScene extends SimScene {
         if (why) { this.event('build', why); return; }
         if (this.wood < COST[pl.tool]) { this.event('build', `Need ${COST[pl.tool]} wood for a ${pl.tool}`); return; }
         this.wood -= COST[pl.tool];
-        this.world.place(pl.tool, a.tx, a.ty);
+        this.stepOut(this.world.place(pl.tool, a.tx, a.ty));
         this.fx.push({ kind: 'tool', tool: 'hammer', tx: a.tx + 1, ty: a.ty + BUILDINGS[pl.tool].h - 1 });
         this.event('build', `Built a ${pl.tool}`, true);
         return;
@@ -801,7 +830,7 @@ export class VillageScene extends SimScene {
       case 'house':
       case 'barracks': {
         const why = this.buildProblem(this.buildAnchor(pl.tool), pl.tool);
-        return `E: build ${pl.tool} (${COST[pl.tool]} wood)${why ? ' — ' + why : ''}`;
+        return `E: build ${pl.tool} ${this.cursorPlacing ? 'where you point' : 'ahead'} (${COST[pl.tool]} wood)${why ? ' — ' + why : ''}`;
       }
       case 'hammer': {
         if (!b) return 'hammer: face a building to upgrade it';

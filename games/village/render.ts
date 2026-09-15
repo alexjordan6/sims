@@ -291,6 +291,14 @@ export class Renderer {
         u.fillRect(a.tx * TILE, a.ty * TILE, TILE * w, TILE * h);
         u.lineStyle(1, ok ? 0xffe066 : 0xff4040, 0.9);
         u.strokeRect(a.tx * TILE + 0.5, a.ty * TILE + 0.5, TILE * w - 1, TILE * h - 1);
+        // the door tile, and a guide line from the player when the footprint sits ahead of them
+        const dx = (a.tx + BUILDINGS[kind].door) * TILE, dy = (a.ty + h - 1) * TILE;
+        u.fillStyle(ok ? 0xffe066 : 0xff4040, 0.5);
+        u.fillRect(dx + 4, dy + 8, TILE - 8, TILE - 8);
+        if (!s.cursorPlacing) {
+          u.lineStyle(1, 0xffffff, 0.35);
+          u.lineBetween(s.player.x, s.player.y, (a.tx + w / 2) * TILE, (a.ty + h / 2) * TILE);
+        }
       } else {
         u.lineStyle(1, 0xffffff, 0.5);
         u.strokeRect(f.tx * TILE + 0.5, f.ty * TILE + 0.5, TILE - 1, TILE - 1);
