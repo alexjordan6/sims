@@ -134,6 +134,7 @@ export class UI {
     document.body.append(this.tooltipEl);
 
     if (this.touch) this.mountTouch();
+    this.mountControls();
 
     // debug sliders hidden until backtick
     getGui().hide();
@@ -142,6 +143,60 @@ export class UI {
     });
 
     this.renderInspector(true);
+  }
+
+  // ---- controls reference (collapsible) ---------------------------------------------
+
+  /**
+   * A small always-available key reference: a tab in the corner that flips open into a card.
+   * Toggle by clicking the tab, pressing H, or the × — it never pauses the game.
+   * Open by default for new players; remembers the last state.
+   */
+  private mountControls(): void {
+    const rows: [string, string][] = this.touch
+      ? [
+          ['MOVE stick', 'walk'],
+          ['USE', 'use the tool you hold (the button says what)'],
+          ['TOOL', 'next tool — or tap a slot'],
+          ['tap a villager', 'inspect them'],
+          ['FOLK', 'villagers list'],
+          ['ZOOM', 'camera 1× / 1.5× / 2×'],
+          ['PAUSE', 'menu'],
+          ['HELP', 'how to play'],
+        ]
+      : [
+          ['W A S D', 'move'],
+          ['click · C', 'use the held tool, toward the cursor'],
+          ['right click · X', 'check a villager'],
+          ['1 – 7', 'pick a tool'],
+          ['Tab · wheel', 'next / previous tool'],
+          ['E · Esc', 'menu'],
+          ['- · =', 'game speed'],
+          ['H', 'this panel'],
+          ['?', 'how to play'],
+        ];
+    const panel = h(`<div class="ctrl-panel">
+      <button class="ctrl-tab" title="Controls (H)">${spr('town', TOWN.iconKey, 16)} CONTROLS <span class="arrow">▴</span></button>
+      <div class="ctrl-card panel">
+        <div class="ph">${spr('town', TOWN.iconKey, 24)}<h2>Controls</h2><button class="btn small ctrl-close">×</button></div>
+        <div class="ctrl-rows">${rows.map(([k, d]) => `<kbd>${esc(k)}</kbd><span>${esc(d)}</span>`).join('')}</div>
+        ${this.touch ? '' : '<div class="ctrl-foot">Hold a tool, face something, click. The bar above the belt tells you what will happen.</div>'}
+      </div>
+    </div>`);
+    let open = true;
+    try { open = localStorage.getItem('village.controls') !== 'closed'; } catch { /* ignore */ }
+    const set = (v: boolean) => {
+      open = v;
+      panel.classList.toggle('open', open);
+      try { localStorage.setItem('village.controls', open ? 'open' : 'closed'); } catch { /* ignore */ }
+    };
+    panel.querySelector('.ctrl-tab')!.addEventListener('click', () => set(!open));
+    panel.querySelector('.ctrl-close')!.addEventListener('click', () => set(false));
+    window.addEventListener('keydown', (e) => {
+      if ((e.key === 'h' || e.key === 'H') && !(e.target as HTMLElement).closest('input')) set(!open);
+    });
+    (this.touch ? document.getElementById('game')! : this.overlay).append(panel);
+    set(open);
   }
 
   // ---- touch controls ----------------------------------------------------------
