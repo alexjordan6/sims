@@ -146,6 +146,16 @@ function plaque(ctx: Ctx, x: number, y: number, level: number, p: Palette): void
   for (let i = 0; i < level; i++) px(ctx, x + 2 + i * 3, y + 2, BRASS, 2, 2);
 }
 
+/** Crenellations: merlons 4 wide every 8 px with a lighter cap, dark embrasures between. */
+function merlons(ctx: Ctx, x: number, y: number, w: number, p: Palette): void {
+  for (let c = x; c < x + w; c += 8) {
+    px(ctx, c, y, INK, 5, 7); px(ctx, c + 1, y + 1, p.wall, 3, 5); px(ctx, c + 1, y + 1, p.wallLight, 3, 1);
+  }
+  px(ctx, x, y + 6, INK, w, 1);
+}
+/** Arrow slit: a dark 2x6 slot with a stone lip. */
+function slit(ctx: Ctx, x: number, y: number): void { px(ctx, x - 1, y - 1, STONE_DARK, 4, 8); px(ctx, x, y, INK, 2, 6); }
+
 function flowerBox(ctx: Ctx, x: number, y: number, w: number): void {
   px(ctx, x, y, INK, w, 3); px(ctx, x + 1, y + 1, BARK, w - 2, 1);
   for (let c = x + 1; c < x + w - 1; c += 2) px(ctx, c, y - 1, c % 4 ? '#e85a7a' : GLOW, 1, 1);
@@ -211,27 +221,39 @@ function drawHouse(ctx: Ctx, ox: number, level: number): void {
 
 function drawBarracks(ctx: Ctx, ox: number, level: number): void {
   const p = PALETTES.barracks;
-  const roofH = 34, wallTop = roofH - 2;
-  wall(ctx, ox + 4, wallTop, 56, BIG_H - wallTop, p);
+  // the keep: a stone block from under the parapet to the ground
+  wall(ctx, ox + 4, 18, 56, BIG_H - 18, p);
+  // parapet with crenellations along the roof row, corner towers a little taller
+  px(ctx, ox + 4, 16, INK, 56, 4); px(ctx, ox + 5, 17, p.wallLight, 54, 1); px(ctx, ox + 5, 18, p.wallDark, 54, 1);
+  merlons(ctx, ox + 14, 10, 36, p);
+  for (const tx of [2, 52]) {
+    px(ctx, ox + tx, 12, INK, 10, 20); px(ctx, ox + tx + 1, 13, p.wall, 8, 18);
+    for (let r = 17; r < 30; r += 4) px(ctx, ox + tx + 1, r, p.wallDark, 8, 1);
+    px(ctx, ox + tx + 1, 13, p.wallLight, 8, 1);
+    merlons(ctx, ox + tx, 6, 10, p);
+  }
+  // door with a stone arch, arrow slits either side
+  px(ctx, ox + 23, 57, STONE_DARK, 18, 3); px(ctx, ox + 25, 56, STONE_DARK, 14, 1); px(ctx, ox + 24, 58, INK, 16, 1);
   doubleDoor(ctx, ox + 25, 60, 14, 20, p);
-  windowAt(ctx, ox + 10, 46, 7, 7, p); windowAt(ctx, ox + 47, 46, 7, 7, p);
-  banner(ctx, ox + 44, 40, BLUE, '#274a9c');
+  slit(ctx, ox + 13, 40); slit(ctx, ox + 49, 40); slit(ctx, ox + 31, 30);
+  banner(ctx, ox + 44, 44, BLUE, '#274a9c');
   if (level >= 2) {
     shield(ctx, ox + 16, 62); shield(ctx, ox + 41, 62);
     stakes(ctx, ox + 4, 76, 56, ox + 22, ox + 42);
   }
-  gableRoof(ctx, ox, 0, BIG_W, roofH, p);
   if (level >= 3) {
-    // watchtower rising through the right slope
-    px(ctx, ox + 47, 4, INK, 13, 32); px(ctx, ox + 48, 5, p.wall, 11, 30);
-    for (let r = 9; r < 34; r += 4) px(ctx, ox + 48, r, p.wallDark, 11, 1);
-    px(ctx, ox + 52, 12, INK, 3, 6); px(ctx, ox + 53, 13, GLASS, 1, 4);
-    px(ctx, ox + 46, 2, INK, 15, 3); px(ctx, ox + 47, 3, p.roofDark, 13, 1);
-    px(ctx, ox + 49, 0, INK, 1, 2); px(ctx, ox + 50, 0, RED, 4, 2); px(ctx, ox + 46, 1, INK, 1, 1);
+    // the right corner grows into a tall round tower with a slate cap and a flag
+    px(ctx, ox + 50, 4, INK, 14, 30); px(ctx, ox + 51, 5, p.wall, 12, 28);
+    px(ctx, ox + 51, 5, p.wallLight, 2, 28); px(ctx, ox + 61, 5, p.wallDark, 2, 28);
+    for (let r = 9; r < 32; r += 4) px(ctx, ox + 53, r, p.wallDark, 8, 1);
+    slit(ctx, ox + 56, 14);
+    for (let r = 0; r < 6; r++) { const hw = 1 + r; px(ctx, ox + 57 - hw, r, INK, hw * 2 + 1, 1); if (r > 0) px(ctx, ox + 58 - hw, r, r % 2 ? p.roofDark : p.roof, hw * 2 - 1, 1); }
+    px(ctx, ox + 49, 6, INK, 16, 1);
+    px(ctx, ox + 57, 0, INK, 1, 1); px(ctx, ox + 58, 0, RED, 5, 3); px(ctx, ox + 62, 1, INK, 1, 1);
     torch(ctx, ox + 21, 56); torch(ctx, ox + 43, 56);
-    banner(ctx, ox + 12, 40, RED, RED_DARK);
+    banner(ctx, ox + 12, 44, RED, RED_DARK);
   }
-  plaque(ctx, ox + 26, 53, level, p);
+  plaque(ctx, ox + 26, 49, level, p);
 }
 
 function drawGranary(ctx: Ctx, ox: number, level: number): void {
@@ -294,6 +316,52 @@ function buildingTexture(scene: Phaser.Scene, key: string, w: number, h: number,
   for (let i = 0; i < 3; i++) tex.add(i, 0, i * w, 0, w, h);
 }
 
+/**
+ * Where each building gives off light at night (window centres, lanterns, torches), in texture
+ * pixels from the sprite's top-left, per level (index = level). `warm` = firelight (torches).
+ */
+export const LIGHTS: Record<'house' | 'barracks' | 'granary' | 'woodyard', readonly (readonly { x: number; y: number; r: number; warm?: boolean }[])[]> = {
+  house: [
+    [],
+    [{ x: 13, y: 50, r: 16 }, { x: 26, y: 50, r: 16 }],
+    [{ x: 13, y: 50, r: 16 }, { x: 26, y: 50, r: 16 }, { x: 53, y: 50, r: 16 }],
+    [{ x: 13, y: 50, r: 16 }, { x: 26, y: 50, r: 16 }, { x: 53, y: 50, r: 16 }, { x: 13, y: 34, r: 14 }, { x: 26, y: 34, r: 14 }, { x: 39, y: 34, r: 16 }, { x: 52, y: 34, r: 14 }, { x: 49, y: 66, r: 20, warm: true }],
+  ],
+  barracks: [
+    [],
+    [{ x: 14, y: 43, r: 8 }, { x: 50, y: 43, r: 8 }],
+    [{ x: 14, y: 43, r: 8 }, { x: 50, y: 43, r: 8 }],
+    [{ x: 14, y: 43, r: 8 }, { x: 50, y: 43, r: 8 }, { x: 21, y: 57, r: 22, warm: true }, { x: 43, y: 57, r: 22, warm: true }, { x: 57, y: 17, r: 8 }],
+  ],
+  granary: [[], [], [{ x: 25, y: 39, r: 10 }], [{ x: 25, y: 39, r: 10 }]],
+  woodyard: [
+    [],
+    [{ x: 11, y: 34, r: 14 }],
+    [{ x: 11, y: 34, r: 14 }],
+    [{ x: 11, y: 34, r: 14 }, { x: 11, y: 43, r: 12 }, { x: 29, y: 37, r: 20, warm: true }],
+  ],
+};
+/** Chimney tops (smoke rises from here), per level. */
+export const CHIMNEYS: Record<'house' | 'barracks' | 'granary' | 'woodyard', readonly (readonly { x: number; y: number }[])[]> = {
+  house: [[], [], [{ x: 48, y: 9 }], [{ x: 48, y: 5 }]],
+  barracks: [[], [], [], []],
+  granary: [[], [], [], []],
+  woodyard: [[], [], [{ x: 25, y: 3 }], [{ x: 25, y: 3 }]],
+};
+
+/** Soft radial light, 64x64, white centre fading to transparent — erased from the night to make pools of light. */
+export function ensureGlowTexture(scene: Phaser.Scene): void {
+  if (scene.textures.exists('glow')) return;
+  const tex = scene.textures.createCanvas('glow', 64, 64)!;
+  const ctx = tex.getContext();
+  const grad = ctx.createRadialGradient(32, 32, 2, 32, 32, 32);
+  grad.addColorStop(0, 'rgba(255,255,255,1)');
+  grad.addColorStop(0.45, 'rgba(255,255,255,0.55)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, 64, 64);
+  tex.refresh();
+}
+
 /** Texture key for a building kind; frame = level - 1. */
 export const BUILDING_TEXTURE = { house: 'bld-house', barracks: 'bld-barracks', granary: 'bld-granary', woodyard: 'cabin' } as const;
 
@@ -305,6 +373,7 @@ export function ensureBuildingArt(scene: Phaser.Scene): void {
   buildingTexture(scene, 'cabin', CABIN_W, CABIN_H, drawCabin);
   stackTexture(scene, 'logstack', logEnd);
   stackTexture(scene, 'cratestack', crateFace);
+  ensureGlowTexture(scene);
 }
 
 /** PNG data URL of one frame of a generated texture, for the DOM help screen. */

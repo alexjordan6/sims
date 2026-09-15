@@ -5,6 +5,7 @@ import { COST, p, RUN, LEVEL_PERKS, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
+import { skyAt } from '../night';
 import { frameDataUrl, BUILDING_TEXTURE } from '../pixelart';
 import type { BuildingKind } from '../world';
 
@@ -357,6 +358,9 @@ export class UI {
 
     const q = (sel: string) => this.top.querySelector<HTMLElement>(sel)!;
     q('.sun').classList.toggle('moon', night);
+    // the day chip takes on the sky's colour: peach at dawn, blue at night
+    const sky = skyAt(s.dayTime);
+    this.top.style.setProperty('--sky', `rgba(${sky.r}, ${sky.g}, ${sky.b}, ${Math.min(0.85, sky.alpha * 1.3).toFixed(2)})`);
     q('.day').textContent = `DAY ${s.day}/${RUN.days}`;
     q('.hour').textContent = `${String(hour).padStart(2, '0')}:00`;
     q('.wood').innerHTML = `${s.wood | 0}<small>/${s.woodCap}</small>`;

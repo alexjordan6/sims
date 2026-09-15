@@ -7,6 +7,7 @@ import { TILE, COLS, ROWS, CAPS, OLD_GROWTH_DAYS } from './config';
 import type { VillageScene } from './main';
 import { Fx } from './fx';
 import { ensureBuildingArt, BUILDING_TEXTURE, STACK_ROWS } from './pixelart';
+import { Night } from './night';
 
 import townUrl from './assets/town.png';
 import farmUrl from './assets/farm.png';
@@ -16,7 +17,7 @@ import dungeonUrl from './assets/dungeon.png';
 const GID = { town: 1, farm: 1 + 132, dungeon: 1 + 264 } as const;
 const EMPTY = -1;
 
-export const DEPTH = { ground: 0, objects: 1, under: 5, agents: 10, bars: 30, night: 40, arrows: 50 } as const;
+export const DEPTH = { ground: 0, objects: 1, under: 5, agents: 10, bars: 30, arrows: 50 } as const; // night wash lives at 40-42 (night.ts)
 
 /** Load the three spritesheets. Call from the scene's preload(). */
 export function preloadArt(scene: Phaser.Scene): void {
@@ -37,7 +38,7 @@ export class Renderer {
   private buildings = new Map<Building, { body: Phaser.GameObjects.Image; stock?: Phaser.GameObjects.Image }>();
   private under: Phaser.GameObjects.Graphics;
   private bars: Phaser.GameObjects.Graphics;
-  private night: Phaser.GameObjects.Rectangle;
+  private night: Night;
   /** screen-space arrows toward off-screen raiders */
   private arrows: Phaser.GameObjects.Graphics;
   /** set on frames where tiles were repainted (the minimap redraws its terrain then) */
@@ -55,10 +56,10 @@ export class Renderer {
     this.objects = map.createBlankLayer('objects', sets)!.setDepth(DEPTH.objects);
     this.under = scene.add.graphics().setDepth(DEPTH.under);
     this.bars = scene.add.graphics().setDepth(DEPTH.bars);
-    this.night = scene.add.rectangle(0, 0, COLS * TILE, ROWS * TILE, 0x060612, 0).setOrigin(0).setDepth(DEPTH.night);
     this.arrows = scene.add.graphics().setDepth(DEPTH.arrows).setScrollFactor(0);
     this.fx = new Fx(scene);
     ensureBuildingArt(scene);
+    this.night = new Night(scene); // after Fx, which makes the 'px' texture
   }
 
   /** Redraw every tile and drop all sprites (after a reset). */
@@ -86,6 +87,7 @@ export class Renderer {
     this.scene.fx.length = 0;
     this.fx.update(dt, this.sprites);
     this.drawOverlays();
+    this.night.update(dt, this.buildings);
     this.drawRaidArrows();
   }
 
@@ -282,9 +284,6 @@ export class Renderer {
       b.fillStyle(0x000000, 0.7); b.fillRect(x - 1, y - 1, bw + 2, 3);
       b.fillStyle(m.hp / m.maxHp > 0.4 ? 0x5fdc5f : 0xff4040, 1); b.fillRect(x, y, Math.max(1, Math.round(bw * m.hp / m.maxHp)), 1);
     }
-    // day/night: darkest at dayTime 0, clear at 0.5
-    const nightness = Math.max(0, -Math.cos((s.dayTime - 0.5) * Math.PI * 2));
-    this.night.setAlpha(nightness * 0.55);
   }
 }
 

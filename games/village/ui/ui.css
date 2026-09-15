@@ -486,3 +486,6 @@ body.touch .ctrl-tab { font-size: 7px; }
 .lv { display: flex; flex-direction: column; align-items: center; gap: 2px; width: 118px; font-size: 12px; text-align: center; }
 .lv .art { image-rendering: pixelated; height: 60px; width: auto; }
 .lv i { color: var(--ink-dim); font-style: normal; font-size: 11px; }
+
+/* the day/hour chip is tinted by the sky */
+.topbar .t-day .val { background: var(--sky, transparent); border-radius: 4px; padding: 0 5px; margin-left: -5px; transition: background .6s; }

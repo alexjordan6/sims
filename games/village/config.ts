@@ -55,7 +55,7 @@ export const LEVEL_PERKS: Record<'house' | 'barracks' | 'granary' | 'woodyard', 
 /** what changes on the building itself at each level, for the help screen */
 export const LEVEL_LOOKS: Record<'house' | 'barracks' | 'granary' | 'woodyard', readonly [string, string, string, string]> = {
   house: ['', 'cottage', 'chimney, flower boxes, porch', 'second storey'],
-  barracks: ['', 'banner', 'shields and stakes', 'watchtower and torches'],
+  barracks: ['', 'stone keep', 'shields and stakes', 'tower and torches'],
   granary: ['', 'barn', 'open hay loft', 'silo'],
   woodyard: ['', 'cabin', 'chimney', 'lantern and loft window'],
 };
