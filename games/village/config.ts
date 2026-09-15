@@ -1,8 +1,8 @@
 import { params } from '@shared/index';
 
 export const TILE = 16;
-export const COLS = 40;
-export const ROWS = 22;
+export const COLS = 80;
+export const ROWS = 44;
 export const ZOOM = 2; // 16 px tiles shown at 32 px
 
 /** One run: survive escalating raids until the warlord arrives, then beat him. */

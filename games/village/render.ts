@@ -65,7 +65,7 @@ const BUILDING: Record<BuildingKind, { ridge: readonly number[]; parts: readonly
 /** Granary yard stock, by tier: crate, hay bale, grain barrel (farm-sheet frames). */
 const GRANARY_STOCK = [FARM.crate, FARM.hayBale, 97] as const;
 
-export const DEPTH = { ground: 0, objects: 1, under: 5, agents: 10, roofs: 20, bars: 30, night: 40 } as const;
+export const DEPTH = { ground: 0, objects: 1, under: 5, agents: 10, roofs: 20, bars: 30, night: 40, arrows: 50 } as const;
 
 /** Load the three spritesheets. Call from the scene's preload(). */
 export function preloadArt(scene: Phaser.Scene): void {
@@ -88,6 +88,10 @@ export class Renderer {
   private under: Phaser.GameObjects.Graphics;
   private bars: Phaser.GameObjects.Graphics;
   private night: Phaser.GameObjects.Rectangle;
+  /** screen-space arrows toward off-screen raiders */
+  private arrows: Phaser.GameObjects.Graphics;
+  /** set on frames where tiles were repainted (the minimap redraws its terrain then) */
+  tilesChanged = false;
   private t = 0;
   readonly fx: Fx;
 
@@ -103,6 +107,7 @@ export class Renderer {
     this.under = scene.add.graphics().setDepth(DEPTH.under);
     this.bars = scene.add.graphics().setDepth(DEPTH.bars);
     this.night = scene.add.rectangle(0, 0, COLS * TILE, ROWS * TILE, 0x060612, 0).setOrigin(0).setDepth(DEPTH.night);
+    this.arrows = scene.add.graphics().setDepth(DEPTH.arrows).setScrollFactor(0);
     this.fx = new Fx(scene);
     ensureLogPiles(scene);
   }
@@ -130,6 +135,7 @@ export class Renderer {
     this.scene.fx.length = 0;
     this.fx.update(dt, this.sprites);
     this.drawOverlays();
+    this.drawRaidArrows();
   }
 
   // ---- tiles ---------------------------------------------------------------
@@ -167,6 +173,7 @@ export class Renderer {
 
   private drainDirty(): void {
     const w = this.scene.world;
+    this.tilesChanged = w.dirty.size > 0;
     if (w.dirty.size === 0) return;
     for (const i of w.dirty) this.paintTile(w, i % w.cols, (i / w.cols) | 0);
     w.dirty.clear();
@@ -242,6 +249,47 @@ export class Renderer {
   }
 
   // ---- overlays ------------------------------------------------------------
+
+  /**
+   * During a raid, a red arrow sits on the edge of the view for every raider that's off screen,
+   * pointing along the line from the view centre to it (the boss gets a big gold one).
+   */
+  private drawRaidArrows(): void {
+    const g = this.arrows;
+    g.clear();
+    const s = this.scene;
+    if (!s.raidActive) return;
+    const cam = s.cameras.main;
+    const view = cam.worldView;
+    const cx = view.centerX, cy = view.centerY;
+    // scrollFactor(0) objects are still scaled by the zoom around the screen centre, so work
+    // in zoom-divided units from the centre
+    const zoom = cam.zoom;
+    const sw = cam.width, sh = cam.height;
+    const pad = 14;
+    for (const a of s.agents) {
+      if (!(a instanceof Raider) || a.dead) continue;
+      const inside = a.x > view.x - 4 && a.x < view.right + 4 && a.y > view.y - 4 && a.y < view.bottom + 4;
+      if (inside) continue;
+      const dx = a.x - cx, dy = a.y - cy;
+      const len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len, uy = dy / len;
+      // where the ray from the screen centre leaves the (padded) screen rectangle
+      const hw = (sw / 2 - pad) / zoom, hh = (sh / 2 - pad) / zoom;
+      const t = Math.min(hw / Math.abs(ux || 1e-6), hh / Math.abs(uy || 1e-6));
+      const px = sw / 2 + ux * t, py = sh / 2 + uy * t;
+      const size = (a.boss ? 11 : 7) / zoom;
+      const colour = a.boss ? 0xffcc33 : 0xff4a3d;
+      const ang = Math.atan2(uy, ux);
+      const tip = { x: px + Math.cos(ang) * size, y: py + Math.sin(ang) * size };
+      const l = { x: px + Math.cos(ang + 2.4) * size, y: py + Math.sin(ang + 2.4) * size };
+      const r = { x: px + Math.cos(ang - 2.4) * size, y: py + Math.sin(ang - 2.4) * size };
+      g.fillStyle(0x000000, 0.5);
+      g.fillTriangle(tip.x + 1, tip.y + 1, l.x + 1, l.y + 1, r.x + 1, r.y + 1);
+      g.fillStyle(colour, 0.95);
+      g.fillTriangle(tip.x, tip.y, l.x, l.y, r.x, r.y);
+    }
+  }
 
   private drawOverlays(): void {
     const s = this.scene;

@@ -208,7 +208,7 @@ export class World {
 
   /** Starting map: tree clusters, a house, a barracks, the field, and the two supply buildings. */
   generate(rng: Rng, fieldW = 3): void {
-    for (let k = 0; k < 18; k++) {
+    for (let k = 0; k < 72; k++) {
       const cx = rng.int(1, this.cols - 2), cy = rng.int(1, this.rows - 2);
       for (let i = 0; i < 6; i++) {
         const tx = cx + rng.int(-2, 2), ty = cy + rng.int(-2, 2);

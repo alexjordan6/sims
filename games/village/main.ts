@@ -60,6 +60,8 @@ export class VillageScene extends SimScene {
   following = false;
 
   // the kernel sizes its grid from W/H; in resize mode the viewport varies, the world does not
+  /** true on frames where the renderer repainted tiles (the minimap follows) */
+  get tilesChanged(): boolean { return this.view?.tilesChanged ?? false; }
   get W(): number { return COLS * TILE; }
   get H(): number { return ROWS * TILE; }
 
@@ -160,6 +162,7 @@ export class VillageScene extends SimScene {
     kb.on('keydown-TAB', (e: KeyboardEvent) => { e.preventDefault?.(); this.player.cycleTool(e.shiftKey ? -1 : 1); });
     kb.on('keydown-Q', () => this.player.cycleTool());
     kb.on('keydown-M', () => this.toggleMute());
+    kb.on('keydown-Z', () => this.cycleZoom());
 
     super.create(); // creates gfx + hud, then calls reset() -> setup()
     kb.removeAllListeners('keydown-SPACE'); // Esc handles pause; Space is free for later
@@ -212,14 +215,14 @@ export class VillageScene extends SimScene {
   }
 
   /** Follow-camera zoom levels the player can cycle through on small screens. */
-  static readonly ZOOMS = [1, 1.5, 2] as const;
+  static readonly ZOOMS = [1, 1.5, 2, 3] as const;
   /** index into ZOOMS; null = automatic */
   zoomChoice: number | null = null;
 
   /**
-   * Desktop: the whole world fits, so show it all at the largest crisp zoom.
-   * Small screens: follow the player. The default zoom keeps about 16-18 tiles across the
-   * narrow side, so a phone in portrait isn't filled by a single building.
+   * The world is bigger than any normal screen, so the camera follows the player: 2x on
+   * desktop (a 40x22-tile window), 1.5x on phones so a portrait screen isn't filled by a single
+   * building. Z / the ZOOM button cycle ZOOMS. Only a huge display shows the whole map at once.
    */
   fitCamera(): void {
     const cam = this.cameras.main;
@@ -240,7 +243,7 @@ export class VillageScene extends SimScene {
     if (this.player) cam.centerOn(this.player.x, this.player.y);
   }
 
-  /** Cycle 1x → 1.5x → 2x (touch zoom button). */
+  /** Cycle 1x → 1.5x → 2x → 3x (Z, or the touch zoom button). */
   cycleZoom(): void {
     const zooms: readonly number[] = VillageScene.ZOOMS;
     const cur = this.zoomChoice ?? Math.max(0, zooms.indexOf(this.cameras.main.zoom));

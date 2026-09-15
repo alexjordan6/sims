@@ -4,6 +4,7 @@ import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
 import { COST, p, RUN, CAPS, HOUSE_BEDS, SAPLING_DAYS, TREE_RESERVE } from '../config';
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
+import { Minimap } from './minimap';
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -58,6 +59,7 @@ export class UI {
   private toasts!: HTMLElement;
   private inspector!: HTMLElement;
   private roster!: HTMLElement;
+  private minimap!: Minimap;
   private tooltipEl!: HTMLElement;
 
   private lastTop = '';
@@ -123,6 +125,11 @@ export class UI {
     this.roster = h(`<div class="roster panel"><div class="ph">${spr('dungeon', DUNGEON.villager, 24)}<h2>Villagers</h2><span class="cap">pick one to inspect</span></div><div class="legend-row">
       <span class="rl farmer">${spr('farm', FARM.farmerHat, 16)} farmer</span><span class="rl woodcutter">${spr('dungeon', DUNGEON.man, 16)} cutter</span><span class="rl kid">${spr('dungeon', DUNGEON.villager, 16)} child</span><span class="rl soldier">${spr('dungeon', DUNGEON.knight, 16)} soldier</span>
     </div><div class="list"></div></div>`);
+    // --- minimap: top of the side panel (the drawer on phones) so it never covers the world
+    this.minimap = new Minimap(s, 2);
+    const box = h('<div class="minimap-panel panel"><span class="cap">MAP</span></div>');
+    box.append(this.minimap.el);
+    this.side.append(box);
     this.side.append(this.inspector, this.roster);
     this.roster.addEventListener('click', (e) => {
       const row = (e.target as HTMLElement).closest<HTMLElement>('.row');
@@ -161,7 +168,7 @@ export class UI {
           ['TOOL', 'next tool — or tap a slot'],
           ['tap a villager', 'inspect them'],
           ['FOLK', 'villagers list'],
-          ['ZOOM', 'camera 1× / 1.5× / 2×'],
+          ['ZOOM', 'camera 1× / 1.5× / 2× / 3×'],
           ['PAUSE', 'menu'],
           ['HELP', 'how to play'],
         ]
@@ -169,8 +176,9 @@ export class UI {
           ['W A S D', 'move'],
           ['click · C', 'use the held tool, toward the cursor'],
           ['right click · X', 'check a villager'],
-          ['1 – 7', 'pick a tool'],
+          ['1 – 8', 'pick a tool'],
           ['Tab · wheel', 'next / previous tool'],
+          ['Z', 'camera zoom'],
           ['E · Esc', 'menu'],
           ['- · =', 'game speed'],
           ['H', 'this panel'],
@@ -326,6 +334,7 @@ export class UI {
       if (s.selected) { this.showTab('inspector'); this.side.classList.add('open'); }
     }
     this.topT += dt; this.rosterT += dt;
+    this.minimap.render(dt, s.tilesChanged);
     if (this.topT > 0.1) {
       this.topT = 0; this.renderTop(); this.renderHotbar(); this.renderInspector();
     }
@@ -484,6 +493,7 @@ export class UI {
 
   /** Reset transient DOM state after a scene reset. */
   clear(): void {
+    this.minimap.invalidate();
     this.feed.innerHTML = '';
     this.feedSeen = 0;
     this.lastTop = this.lastRoster = this.lastInspector = '';
@@ -618,6 +628,7 @@ export class UI {
             <kbd>click / C</kbd><span>use the tool you hold. A click also turns you toward the cursor. The bottom bar says what the tool will do. The sword swings an arc; it only hits what it reaches.</span>
             <kbd>right click / X</kbd><span>check a villager (opens the inspector)</span>
             <kbd>1-8 · Tab · wheel</kbd><span>pick a tool — hands, hoe, seeds, axe, sword, house, barracks, hammer</span>
+            <kbd>Z</kbd><span>camera zoom 1× / 1.5× / 2× / 3× — 1× shows most of the map</span>
             <kbd>E / Esc</kbd><span>menu (pause, restart, how to play)</span>
             <kbd>- / =</kbd><span>game speed 1x / 4x / 16x</span>
             <kbd>\`</kbd><span>tuning sliders (debug)</span>
