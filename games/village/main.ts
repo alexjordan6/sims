@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { SimScene, launch } from '@shared/index';
 import { World, doorstep, BUILDING_W, BUILDING_H } from './world';
-import { Villager, Raider, Player, Mover, type Role, type Tool } from './agents';
+import { Villager, Raider, Player, Mover, TOOLS, type Role, type Tool } from './agents';
 import { Rat, Snatcher, Brute, Shaman, waveComposition } from './enemies';
 import { p, TILE, COLS, ROWS, ZOOM, COST, TREE_YIELD, RUN } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
@@ -130,13 +130,21 @@ export class VillageScene extends SimScene {
   create(): void {
     const kb = this.input.keyboard!;
     this.wasd = kb.addKeys('W,A,S,D') as typeof this.wasd;
-    kb.on('keydown-E', () => this.interact());
-    kb.on('keydown-Q', () => this.player.cycleTool());
-    kb.on('keydown-TAB', (e: KeyboardEvent) => { e.preventDefault?.(); this.player.cycleTool(-1); });
+    // Stardew-style: C / left click = use tool, X / right click = check, E / Esc = menu, 1-7 or Tab / wheel = tools
+    kb.on('keydown-C', () => this.interact());
+    kb.on('keydown-X', () => this.select(this.hovered));
+    kb.on('keydown-E', () => this.togglePause());
     kb.on('keydown-ESC', () => this.togglePause());
+    kb.on('keydown-TAB', (e: KeyboardEvent) => { e.preventDefault?.(); this.player.cycleTool(e.shiftKey ? -1 : 1); });
+    kb.on('keydown-Q', () => this.player.cycleTool());
 
     super.create(); // creates gfx + hud, then calls reset() -> setup()
     kb.removeAllListeners('keydown-SPACE'); // Esc handles pause; Space is free for later
+    // number keys pick tools; game speed moves to - / =
+    kb.removeAllListeners('keydown-ONE'); kb.removeAllListeners('keydown-TWO'); kb.removeAllListeners('keydown-THREE');
+    kb.on('keydown-MINUS', () => (this.speed = this.speed > 4 ? 4 : 1));
+    kb.on('keydown-PLUS', () => (this.speed = this.speed < 4 ? 4 : 16));
+    ['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN'].forEach((k, i) => kb.on(`keydown-${k}`, () => (this.player.tool = TOOLS[i])));
     // the kernel's R (restart) / N (new seed) are far too easy to hit mid-run: restart lives in the pause menu,
     // and R only works on the end screens where it means "new run"
     kb.removeAllListeners('keydown-R');
@@ -151,7 +159,18 @@ export class VillageScene extends SimScene {
 
     // hover / click on the map
     this.input.on('pointermove', (ptr: Phaser.Input.Pointer) => this.onPointerMove(ptr));
-    this.input.on('pointerdown', (_ptr: Phaser.Input.Pointer, objs: unknown[]) => { if (objs.length === 0) this.select(null); });
+    this.input.mouse?.disableContextMenu();
+    this.input.on('pointerdown', (ptr: Phaser.Input.Pointer, objs: Phaser.GameObjects.GameObject[]) => {
+      if (document.body.classList.contains('touch')) { this.select((objs[0]?.getData('agent') as Mover) ?? null); return; }
+      if (ptr.rightButtonDown()) { this.select((objs[0]?.getData('agent') as Mover) ?? null); return; }
+      if (this.screen !== 'playing') return;
+      // left click: face the cursor and use the tool there
+      const dx = ptr.worldX - this.player.x, dy = ptr.worldY - this.player.y;
+      if (Math.hypot(dx, dy) > 4) this.player.facing = Math.abs(dx) >= Math.abs(dy) ? { x: Math.sign(dx), y: 0 } : { x: 0, y: Math.sign(dy) };
+      if (dx) this.player.dir = dx < 0 ? -1 : 1;
+      this.interact();
+    });
+    this.input.on('wheel', (_p: unknown, _o: unknown, _dx: number, dy: number) => this.player.cycleTool(dy > 0 ? 1 : -1));
     this.input.on('gameout', () => { this.hovered = null; this.ui?.tooltip(null); });
 
     this.scale.on('resize', () => this.fitCamera());

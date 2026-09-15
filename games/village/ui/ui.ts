@@ -87,7 +87,7 @@ export class UI {
       ${tile('t-hp', 'YOUR HP', `<span class="hearts"></span>`, 'You heal overnight. If you die the run ends')}
       <div class="stat t-speed" title="Game speed"><span class="cap">SPEED</span><span class="val speed">
         <button class="btn small" data-speed="1">1x</button><button class="btn small" data-speed="4">4x</button><button class="btn small" data-speed="16">16x</button>
-        <button class="btn small pause" title="Pause (Esc)">II</button>
+        <button class="btn small pause" title="Menu (E / Esc)">II</button>
       </span></div>
       <button class="btn small help" title="How to play">?</button>
     </div>`);
@@ -100,7 +100,7 @@ export class UI {
       `<div class="slot" data-tool="${tool}" title="${esc(title)}">${spr(key, frame, 32)}<span class="lbl">${label}</span>${cost ? `<span class="cost">${cost}${spr('town', TOWN.iconWood, 16)}</span>` : ''}</div>`;
     this.hotbar = h(`<div class="hotbar">
       <div class="slots panel">
-        <span class="cap slots-cap">TOOLS <kbd>Q</kbd></span>
+        <span class="cap slots-cap">TOOLS <kbd>1-7</kbd></span>
         ${slot('hands', 'farm', FARM.iconHand, 'HANDS', 'Harvest ripe crops')}
         ${slot('hoe', 'town', TOWN.iconHoe, 'HOE', 'Till grass into soil')}
         ${slot('seeds', 'farm', FARM.grassTuft, 'SEEDS', 'Plant on tilled soil')}
@@ -109,7 +109,7 @@ export class UI {
         ${slot('house', 'town', TOWN.wallWoodDoor, 'HOUSE', 'A family of 4 lives here and has children', COST.house)}
         ${slot('barracks', 'town', TOWN.wallStoneDoor, 'BARRACKS', 'Kids raised near it grow into soldiers', COST.barracks)}
       </div>
-      <div class="hint"><kbd>E</kbd><span class="hint-text"></span></div>
+      <div class="hint"><kbd>click / C</kbd><span class="hint-text"></span></div>
     </div>`);
     this.hotbar.querySelectorAll<HTMLElement>('.slot').forEach((el) => el.addEventListener('click', () => s.setTool(el.dataset.tool as Tool)));
 
@@ -119,7 +119,7 @@ export class UI {
 
     // --- side
     this.inspector = h('<div class="inspector panel"></div>');
-    this.roster = h(`<div class="roster panel"><div class="ph">${spr('dungeon', DUNGEON.villager, 24)}<h2>Villagers</h2><span class="cap">tap one to inspect</span></div><div class="legend-row">
+    this.roster = h(`<div class="roster panel"><div class="ph">${spr('dungeon', DUNGEON.villager, 24)}<h2>Villagers</h2><span class="cap">pick one to inspect</span></div><div class="legend-row">
       <span class="rl farmer">${spr('farm', FARM.farmerHat, 16)} farmer</span><span class="rl woodcutter">${spr('dungeon', DUNGEON.man, 16)} cutter</span><span class="rl kid">${spr('dungeon', DUNGEON.villager, 16)} child</span><span class="rl soldier">${spr('dungeon', DUNGEON.knight, 16)} soldier</span>
     </div><div class="list"></div></div>`);
     this.side.append(this.inspector, this.roster);
@@ -455,9 +455,9 @@ export class UI {
           <p class="sub">Farm. Raise a family. The children you raise beside the barracks become your army.<br>
           Survive ${RUN.days} days of raids and <b>beat the Warlord</b>.</p>
           <div class="controls">
-            <kbd>WASD</kbd><span>move</span><kbd>E</kbd><span>till · plant · harvest · chop · fight · build</span>
-            <kbd>Q</kbd><span>choose what to build</span><kbd>Esc</kbd><span>pause</span>
-            <kbd>1 2 3</kbd><span>game speed</span><kbd>click</kbd><span>inspect a villager</span>
+            <kbd>WASD</kbd><span>move</span><kbd>click / C</kbd><span>use the tool you hold, toward the cursor</span>
+            <kbd>right click / X</kbd><span>check a villager</span><kbd>1-7 · Tab · wheel</kbd><span>pick a tool</span>
+            <kbd>E / Esc</kbd><span>menu</span><kbd>- / =</kbd><span>game speed</span>
           </div>
           <div class="row"><label class="sub">seed <input class="seed" value="${s.seed}"></label></div>
           <div class="row"><button class="btn ok start">NEW VILLAGE</button><button class="btn howto">HOW TO PLAY</button></div>
@@ -548,11 +548,11 @@ export class UI {
           <h3>CONTROLS</h3>
           <div class="controls">
             <kbd>WASD</kbd><span>move (joystick on phone)</span>
-            <kbd>E</kbd><span>use the equipped tool on what's in front of you — the bottom bar says what. The sword swings an arc; it only hits what it reaches.</span>
-            <kbd>Q</kbd><span>next tool (Tab: previous) — hands, hoe, seeds, axe, sword, house, barracks</span>
-            <kbd>Esc</kbd><span>pause</span>
-            <kbd>1 2 3</kbd><span>game speed 1x / 4x / 16x</span>
-            <kbd>click</kbd><span>inspect a villager</span>
+            <kbd>click / C</kbd><span>use the tool you hold. A click also turns you toward the cursor. The bottom bar says what the tool will do. The sword swings an arc; it only hits what it reaches.</span>
+            <kbd>right click / X</kbd><span>check a villager (opens the inspector)</span>
+            <kbd>1-7 · Tab · wheel</kbd><span>pick a tool — hands, hoe, seeds, axe, sword, house, barracks</span>
+            <kbd>E / Esc</kbd><span>menu (pause, restart, how to play)</span>
+            <kbd>- / =</kbd><span>game speed 1x / 4x / 16x</span>
             <kbd>\`</kbd><span>tuning sliders (debug)</span>
           </div>
           <h3>TOP BAR</h3>

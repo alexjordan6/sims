@@ -132,7 +132,7 @@ export class Renderer {
         sp = this.scene.add.sprite(m.x, m.y, c.key, c.frame).setOrigin(0.5, 0.75).setDepth(DEPTH.agents);
         sp.setData('agent', m);
         if (!(m instanceof Bolt)) sp.setInteractive({ useHandCursor: true });
-        sp.on('pointerdown', () => this.scene.select(m));
+        // selection is handled by the scene's pointerdown (right click on desktop, tap on touch)
         sp.on('pointerover', () => this.scene.hoverAgent(m));
         sp.on('pointerout', () => this.scene.hoverAgent(null));
         this.sprites.set(m.id, sp);
