@@ -91,7 +91,7 @@ export class VillageScene extends SimScene {
 
   /** Next raid day; the warlord's day caps the schedule. */
   get nextRaidDay(): number {
-    const next = (Math.floor(this.day / p.raidEvery) + 1) * p.raidEvery;
+    const next = (Math.floor(this.day / this.raidEvery) + 1) * this.raidEvery;
     return Math.min(next, RUN.bossDay);
   }
 
@@ -107,6 +107,8 @@ export class VillageScene extends SimScene {
     this.world.generate(this.rng, this.mods.fieldWide ? 5 : 3);
     this.food = this.mods.startFood;
     this.wood = this.mods.startWood;
+    if (this.world.granary) this.world.granary.level = this.mods.startGranaryLevel;
+    if (this.world.woodyard) this.world.woodyard.level = this.mods.startWoodyardLevel;
     this.day = 1;
     this.dayTime = 0.3;
     this.raidActive = false;
@@ -377,7 +379,8 @@ export class VillageScene extends SimScene {
       case 'tilled': html = `<div class="t">Tilled soil</div><div class="d">plant with seeds, or a farmer will</div>`; break;
       case 'tree': {
         const old = this.isOldGrowth(t), grove = this.world.groveSize(tx, ty);
-        const age = old ? `old growth · yields ${OLD_YIELD} wood` : `young · old growth in ${OLD_GROWTH_DAYS - t.stage} day${OLD_GROWTH_DAYS - t.stage === 1 ? '' : 's'} · yields ${TREE_YIELD} wood`;
+        const left = this.oldGrowthDays - t.stage;
+        const age = old ? `old growth · yields ${this.treeYield(t)} wood` : `young · old growth in ${left} day${left === 1 ? '' : 's'} · yields ${this.treeYield(t)} wood`;
         html = `<div class="t">${old ? 'Old growth' : 'Tree'}</div><div class="d">${age} · grove of ${grove}${grove >= 200 ? '+' : ''} · spreads ${Math.round(this.seedChance(tx, ty) * 100)}%/day${t.work ? ` · ${t.work}/3 chopped` : ''}</div>`;
         break;
       }
@@ -435,7 +438,7 @@ export class VillageScene extends SimScene {
       if (t.kind === 'sapling') {
         if (++t.stage >= this.saplingDays(tx, ty)) this.world.set(tx, ty, 'tree'); else this.world.dirty.add(i);
       } else if (t.kind === 'tree') {
-        if (++t.stage === OLD_GROWTH_DAYS) this.world.dirty.add(i); // grows tall
+        if (++t.stage === this.oldGrowthDays) this.world.dirty.add(i); // grows tall
         if (this.rng.chance(this.seedChance(tx, ty))) {
           const [dx, dy] = this.rng.pick([[1, 0], [-1, 0], [0, 1], [0, -1]]);
           if (this.world.get(tx + dx, ty + dy)?.kind === 'grass') seeds.push({ tx: tx + dx, ty: ty + dy });
@@ -457,11 +460,11 @@ export class VillageScene extends SimScene {
     for (const v of villagers) {
       const ration = p.foodPerDay * this.mods.foodPerDayMul;
       if (this.food >= ration) { this.food -= ration; v.hungerDays = 0; }
-      else if (++v.hungerDays >= 3) { v.dead = true; v.hp = 0; this.event('death', `${v.name} starved`, true); continue; }
+      else if (++v.hungerDays >= 3 + this.mods.starveDaysDelta) { v.dead = true; v.hp = 0; this.event('death', `${v.name} starved`, true); continue; }
       else this.event('food', `${v.name} went hungry`);
       if (v.cadetAt(this) && this.world.barracks.length) v.drilled++; // yesterday's drill
       v.age++;
-      v.hp = v.maxHp; // a night's rest
+      if (this.mods.dawnHeal) v.hp = v.maxHp; // Second Wind: a night's rest heals everything
       if (v.role === 'kid' && v.age >= Math.max(1, p.adultAge + this.mods.adultAgeDelta)) v.comeOfAge(this);
       else if (v.age >= p.oldAge && this.rng.chance(0.25)) { v.dead = true; this.event('death', `${v.name} died of old age`); }
     }
@@ -485,16 +488,23 @@ export class VillageScene extends SimScene {
       if (mover) { mover.home.residents--; mover.home = h; h.residents++; this.event('info', `${mover.name} moved into a new house`); }
     }
 
+    const every = this.raidEvery, warn = 1 + this.mods.warnDaysDelta;
     if (this.day === RUN.bossDay) this.spawnRaid(true);
-    else if (this.day % p.raidEvery === 0 && this.day < RUN.bossDay) this.spawnRaid();
+    else if (this.day % every === 0 && this.day < RUN.bossDay) this.spawnRaid();
     else if (this.day === RUN.bossDay - RUN.warnDays) this.event('raid', `The Warlord marches — he arrives in ${RUN.warnDays} days`, true);
-    else if ((this.day + 1) % p.raidEvery === 0 || this.day + 1 === RUN.bossDay) this.event('raid', 'Raiders sighted — they arrive tomorrow', true);
+    else if ((this.day + warn) % every === 0 || this.day + warn === RUN.bossDay) this.event('raid', warn > 1 ? `Scouts report raiders — they arrive in ${warn} days` : 'Raiders sighted — they arrive tomorrow', true);
   }
 
+  /** Days between raids (Long Peace stretches it). */
+  get raidEvery(): number { return p.raidEvery + this.mods.raidEveryDelta; }
+
   spawnRaid(boss = false): void {
-    const wave = Math.max(1, Math.floor(this.day / p.raidEvery));
+    const wave = Math.max(1, Math.floor(this.day / this.raidEvery));
     const mix = waveComposition(wave, boss);
-    const opts = { hpMul: (1 + 0.08 * wave) * this.mods.raiderHpMul, speedMul: this.mods.raiderSpeedMul };
+    // Scouts: every wave is a raider short (never below one); Hearsay: the Warlord's escort halves
+    mix.raider = Math.max(1, mix.raider - this.mods.waveShrink);
+    if (boss && this.mods.bossEscortMul < 1) for (const k of Object.keys(mix) as (keyof typeof mix)[]) mix[k] = Math.max(k === 'raider' ? 1 : 0, Math.floor(mix[k] * this.mods.bossEscortMul));
+    const opts = { hpMul: (1 + 0.08 * wave) * this.mods.raiderHpMul, speedMul: this.mods.raiderSpeedMul, snatchDelayMul: this.mods.snatchDelayMul, noSnatch: this.mods.noSnatch, harmlessRats: this.mods.ratsHarmless };
     const side = this.rng.int(0, 3);
     const spawnAt = (): { x: number; y: number } => {
       let tx = side === 0 ? 0 : side === 1 ? COLS - 1 : this.rng.int(0, COLS - 1);
@@ -561,6 +571,10 @@ export class VillageScene extends SimScene {
       if (a.carrying && !a.carrying.dead) { const kid = a.carrying; kid.carriedBy = null; a.carrying = null; this.event('grow', `${kid.name} was rescued!`, true); }
       if (a.hp <= 0) {
         this.stats.raidersKilled++;
+        // Bounty: spoils and a second wind for the village head
+        if (this.mods.killWood) this.addWood(this.mods.killWood);
+        if (this.mods.killFood) this.addFood(this.mods.killFood);
+        if (this.mods.killHeal) this.player.hp = Math.min(this.player.maxHp, this.player.hp + this.mods.killHeal);
         this.event('raid', a.boss ? 'The Warlord has fallen!' : `${a.name} slain`, a.boss);
       }
     }
@@ -637,10 +651,10 @@ export class VillageScene extends SimScene {
 
   /** Beds in a house: by level, or the Big Families boon if that is higher. */
   beds(h: Building): number {
-    return Math.max(HOUSE_BEDS[h.level] ?? 4, this.mods.houseCap);
+    return Math.max(HOUSE_BEDS[h.level] ?? 4, this.mods.houseCap) + this.mods.bedBonus;
   }
-  get foodCap(): number { return CAPS[this.world.granary?.level ?? 1]; }
-  get woodCap(): number { return CAPS[this.world.woodyard?.level ?? 1]; }
+  get foodCap(): number { return Math.round(CAPS[this.world.granary?.level ?? 1] * this.mods.capMul); }
+  get woodCap(): number { return Math.round(CAPS[this.world.woodyard?.level ?? 1] * this.mods.capMul); }
   private warnedFull = false;
 
   /** Add to the stockpile, respecting storage; says so (once a day) when the store is full. */
@@ -664,20 +678,25 @@ export class VillageScene extends SimScene {
       : b.kind === 'granary' ? `${this.food | 0}/${CAPS[b.level]} food`
       : b.kind === 'woodyard' ? `${this.wood | 0}/${CAPS[b.level]} wood`
       : LEVEL_PERKS.barracks[b.level];
-    const next = b.level < MAX_LEVEL ? ` · next Lv${b.level + 1}: ${LEVEL_PERKS[b.kind][b.level + 1]} (${UPGRADE_COST[b.kind][b.level]} wood, hammer)` : ' · max level';
+    const next = b.level < MAX_LEVEL ? ` · next Lv${b.level + 1}: ${LEVEL_PERKS[b.kind][b.level + 1]} (${this.upgradeCost(b)} wood, hammer)` : ' · max level';
     return now + next;
   }
 
   /** Why the hammer can't upgrade `b` right now, or null. */
   upgradeProblem(b: Building): string | null {
     if (b.level >= MAX_LEVEL) return `${BUILDINGS[b.kind].name} is already max level`;
-    const cost = UPGRADE_COST[b.kind][b.level];
+    const cost = this.upgradeCost(b);
     if (this.wood < cost) return `need ${cost} wood (have ${this.wood | 0})`;
     return null;
   }
 
+  /** Wood to take a building to its next level (Cheap Timber discounts it). */
+  upgradeCost(b: Building): number { return Math.round(UPGRADE_COST[b.kind][b.level] * this.mods.upgradeCostMul); }
+  /** Wood to raise a new house or barracks (Master Builder halves it). */
+  buildCost(kind: 'house' | 'barracks'): number { return Math.round(COST[kind] * this.mods.buildCostMul); }
+
   private upgrade(b: Building): void {
-    const cost = UPGRADE_COST[b.kind][b.level];
+    const cost = this.upgradeCost(b);
     this.wood -= cost;
     b.level++;
     this.world.refresh(b);
@@ -739,15 +758,17 @@ export class VillageScene extends SimScene {
 
   /** A tree's daily chance to seed a neighbour: lone trees barely spread, a grove spreads fast. */
   seedChance(tx: number, ty: number): number {
-    return SEED_BASE + SEED_PER_NEIGHBOUR * Math.min(4, this.world.treeNeighbours(tx, ty));
+    return (SEED_BASE + SEED_PER_NEIGHBOUR * Math.min(4, this.world.treeNeighbours(tx, ty))) * this.mods.seedMul;
   }
   /** Days a sapling at (tx, ty) needs: quicker with two or more trees around it. */
   saplingDays(tx: number, ty: number): number {
-    return this.world.treeNeighbours(tx, ty) >= 2 ? SHELTERED_SAPLING_DAYS : SAPLING_DAYS;
+    return this.world.treeNeighbours(tx, ty) >= 2 ? Math.max(1, SHELTERED_SAPLING_DAYS + this.mods.shelteredDaysDelta) : SAPLING_DAYS;
   }
-  isOldGrowth(t: Tile): boolean { return t.kind === 'tree' && t.stage >= OLD_GROWTH_DAYS; }
+  /** Days a tree takes to become old growth (Old Growth boon shortens it). */
+  get oldGrowthDays(): number { return Math.max(1, OLD_GROWTH_DAYS + this.mods.oldGrowthDaysDelta); }
+  isOldGrowth(t: Tile): boolean { return t.kind === 'tree' && t.stage >= this.oldGrowthDays; }
   /** Wood a tree pays when felled. */
-  treeYield(t: Tile): number { return this.isOldGrowth(t) ? OLD_YIELD : TREE_YIELD; }
+  treeYield(t: Tile): number { return (this.isOldGrowth(t) ? OLD_YIELD + this.mods.oldYieldBonus : TREE_YIELD) + this.mods.treeYieldBonus; }
 
   /** Is (tx, ty) within `pad` tiles of any building footprint (including its yard)? */
   nearBuilding(tx: number, ty: number, pad: number): boolean {
@@ -803,8 +824,8 @@ export class VillageScene extends SimScene {
         const a = this.buildAnchor(pl.tool);
         const why = this.buildProblem(a, pl.tool);
         if (why) { this.event('build', why); return; }
-        if (this.wood < COST[pl.tool]) { this.event('build', `Need ${COST[pl.tool]} wood for a ${pl.tool}`); return; }
-        this.wood -= COST[pl.tool];
+        if (this.wood < this.buildCost(pl.tool)) { this.event('build', `Need ${this.buildCost(pl.tool)} wood for a ${pl.tool}`); return; }
+        this.wood -= this.buildCost(pl.tool);
         this.stepOut(this.world.place(pl.tool, a.tx, a.ty));
         this.fx.push({ kind: 'tool', tool: 'hammer', tx: a.tx + 1, ty: a.ty + BUILDINGS[pl.tool].h - 1 });
         this.event('build', `Built a ${pl.tool}`, true);
@@ -816,7 +837,7 @@ export class VillageScene extends SimScene {
         if (!b || !t) return;
         const why = this.upgradeProblem(b);
         if (why) { this.event('build', why); return; }
-        if (++t.work >= 3) { t.work = 0; this.upgrade(b); }
+        if (++t.work >= this.mods.hammerHits) { t.work = 0; this.upgrade(b); }
         return;
       }
       case 'hoe':
@@ -861,12 +882,12 @@ export class VillageScene extends SimScene {
       case 'house':
       case 'barracks': {
         const why = this.buildProblem(this.buildAnchor(pl.tool), pl.tool);
-        return `E: build ${pl.tool} ${this.cursorPlacing ? 'where you point' : 'ahead'} (${COST[pl.tool]} wood)${why ? ' — ' + why : ''}`;
+        return `E: build ${pl.tool} ${this.cursorPlacing ? 'where you point' : 'ahead'} (${this.buildCost(pl.tool)} wood)${why ? ' — ' + why : ''}`;
       }
       case 'hammer': {
         if (!b) return 'hammer: face a building to upgrade it';
         const why = this.upgradeProblem(b);
-        return why ? `${this.buildingTitle(b)} — ${why}` : `E: upgrade ${BUILDINGS[b.kind].name} → Lv${b.level + 1}: ${LEVEL_PERKS[b.kind][b.level + 1]} (${UPGRADE_COST[b.kind][b.level]} wood, ${3 - (t?.work ?? 0)} hits)`;
+        return why ? `${this.buildingTitle(b)} — ${why}` : `E: upgrade ${BUILDINGS[b.kind].name} → Lv${b.level + 1}: ${LEVEL_PERKS[b.kind][b.level + 1]} (${this.upgradeCost(b)} wood, ${this.mods.hammerHits - (t?.work ?? 0)} hits)`;
       }
       case 'hoe':
         if (kind === 'grass') return 'E: till soil';

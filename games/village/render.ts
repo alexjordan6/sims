@@ -3,7 +3,7 @@ import { World, BUILDINGS, doorstep, type Tile, type Building, type BuildingKind
 import { Mover, Villager, Raider, Player } from './agents';
 import { Bolt } from './enemies';
 import { TOWN, CHAR } from './atlas';
-import { TILE, COLS, ROWS, CAPS, OLD_GROWTH_DAYS } from './config';
+import { TILE, COLS, ROWS, CAPS } from './config';
 import type { VillageScene } from './main';
 import { Fx } from './fx';
 import { ensureBuildingArt, ensureFlora, FLORA, BUILDING_TEXTURE, LIT_TEXTURE, STACK_ROWS } from './pixelart';
@@ -182,7 +182,7 @@ export class Renderer {
 
   private paintTile(w: World, tx: number, ty: number): void {
     const t = w.get(tx, ty)!;
-    const { ground, object, canopy } = tileFrames(t, this.scene.cropDays, this.scene.dayTime);
+    const { ground, object, canopy } = tileFrames(t, this.scene.cropDays, this.scene.dayTime, this.scene.oldGrowthDays);
     this.ground.putTileAt(ground, tx, ty);
     this.objects.putTileAt(object, tx, ty);
     // a tall tree's crown-top lives in the tile above; anything else clears it
@@ -369,14 +369,14 @@ function cropPhase(t: Tile, cropDays: number, dayTime: number): number {
 }
 
 /** Ground + object gids for a tile (and the crown-top for the tile above, for tall trees). */
-function tileFrames(t: Tile, cropDays: number, dayTime: number): { ground: number; object: number; canopy?: number } {
+function tileFrames(t: Tile, cropDays: number, dayTime: number, oldDays: number): { ground: number; object: number; canopy?: number } {
   const grass = GID.town + TOWN.grass[t.v % TOWN.grass.length];
   const F = GID.flora;
   switch (t.kind) {
     case 'grass': return { ground: grass, object: EMPTY };
     case 'tree': {
       if (t.work >= 2) return { ground: grass, object: F + FLORA.bare };
-      const old = t.stage >= OLD_GROWTH_DAYS;
+      const old = t.stage >= oldDays;
       if (!old) return { ground: grass, object: F + (t.work === 1 ? FLORA.youngChopped : FLORA.young[t.v % 3]) };
       const pine = t.v % 3 === 1;
       return { ground: grass, object: F + (t.work === 1 ? FLORA.oakChopped : pine ? FLORA.pineTrunk : FLORA.oakTrunk), canopy: F + (pine ? FLORA.pineTop : FLORA.oakTop) };

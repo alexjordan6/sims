@@ -1,7 +1,7 @@
 import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type Tool } from '../agents';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
-import { COST, p, RUN, LEVEL_PERKS, UPGRADE_COST, CADET_AGE_BEFORE, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS, TREE_YIELD, OLD_YIELD } from '../config';
+import { COST, p, RUN, LEGACY_TEST_MODE, LEVEL_PERKS, UPGRADE_COST, CADET_AGE_BEFORE, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS, TREE_YIELD, OLD_YIELD } from '../config';
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
@@ -766,6 +766,7 @@ export class UI {
 
     el.innerHTML = `<h2>Legacy</h2>
       <div class="legacy-stats"><span><b>${st.renown}</b> renown</span><span><b>${st.runs}</b> runs</span><span><b>${st.wins}</b> wins</span><span>best day <b>${st.bestDay}</b></span></div>
+      ${LEGACY_TEST_MODE ? '<p class="testmode">TEST MODE — every path is unlocked and there is a slot per branch. Equip what you want to try.</p>' : ''}
       <h3>paths equipped · ${st.loadout.length}/${meta.slots}</h3>
       <div class="trees">${BRANCHES.map((b) => tree(b.id)).join('')}</div>
       <p class="sub small">Each branch forks. Buy down a path, then equip its deepest node — a whole path takes one slot (${meta.slots} slots${st.wins ? '' : ', a third after your first win'}).</p>`;

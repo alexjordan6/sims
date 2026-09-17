@@ -41,6 +41,9 @@ export const OLD_YIELD = 12;
 export const TREE_RESERVE = 8;
 /** food / wood the granary / woodyard can hold, by level (index = level) */
 export const CAPS = [0, 150, 300, 600] as const;
+
+/** Playtest switch: every Legacy node unlocked and a slot per branch. Flip to false to restore progression (saved progress is untouched either way). */
+export const LEGACY_TEST_MODE = true;
 /** wood to upgrade a building to level 2 / 3 (index = current level) */
 export const UPGRADE_COST: Record<'house' | 'barracks' | 'granary' | 'woodyard', readonly number[]> = {
   house: [0, 30, 60], barracks: [0, 40, 80], granary: [0, 30, 60], woodyard: [0, 30, 60],

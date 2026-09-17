@@ -228,14 +228,14 @@ export class Villager extends Mover {
       case 'woodcutter': this.radius = 3; this.color = 0xc9a26b; this.maxHp = 20; this.speed = 35; break;
       case 'soldier': this.radius = 3; this.color = 0x6f9bff; this.maxHp = p.soldierHp + mods.soldierHpBonus + this.barracksHp; this.speed = 45; break;
     }
-    this.maxHp = Math.round(this.maxHp * mods.hpMul);
+    this.maxHp = Math.round(this.maxHp * mods.hpMul * (this.role === 'soldier' ? 1 : mods.villagerHpMul));
     this.hp = Math.min(this.hp, this.maxHp);
     this.clearGoal();
   }
 
   /** Called on the day the kid reaches adultAge. */
   comeOfAge(s: VillageScene): void {
-    const drilled = this.drilled >= Villager.drillNeeded(s);
+    const drilled = s.mods.fullDrill || this.drilled >= Villager.drillNeeded(s);
     this.role = this.home.sworn && drilled ? 'soldier' : s.pickCivilRole();
     if (this.home.sworn && !drilled) s.event('grow', `${this.name} came of age before finishing drill — a ${this.role} instead`, true);
     this.barracksHp = s.world.barracksLevel >= 3 ? 30 : s.world.barracksLevel >= 2 ? 15 : 0;
@@ -304,7 +304,7 @@ export class Villager extends Mover {
   private helpingFarm(s: VillageScene): boolean {
     if (s.wood >= s.woodCap) this.farmHelp = true;
     else if (s.wood < s.woodCap * 0.55) this.farmHelp = false;
-    return this.farmHelp || s.world.count((t) => t.kind === 'tree') <= TREE_RESERVE;
+    return this.farmHelp || (!s.mods.ignoreReserve && s.world.count((t) => t.kind === 'tree') <= TREE_RESERVE);
   }
   private farmHelp = false;
 
@@ -325,7 +325,7 @@ export class Villager extends Mover {
       const job = farmer
         ? w.nearest(this.x, this.y, (t) => t.kind === 'crop' && t.stage >= s.cropDays) ??
           w.nearest(this.x, this.y, (t) => t.kind === 'tilled')
-        : w.count((t) => t.kind === 'tree') > TREE_RESERVE ? this.pickTree(s) : null;
+        : s.mods.ignoreReserve || w.count((t) => t.kind === 'tree') > TREE_RESERVE ? this.pickTree(s) : null;
       if (job) { this.setGoal(s, job.tx, job.ty); this.task = farmer ? (this.role === 'woodcutter' ? 'helping in the field' : 'heading to the field') : 'looking for a tree'; }
       else { this.wanderNear(s, this.home); this.task = farmer ? 'no crops to tend' : 'leaving the last trees to regrow'; }
       return;
@@ -335,7 +335,7 @@ export class Villager extends Mover {
       const t = s.world.get(this.goal.tx, this.goal.ty);
       const isJob = farmer ? t?.kind === 'crop' || t?.kind === 'tilled' : t?.kind === 'tree';
       if (isJob && this.adjacentTo(this.goal)) {
-        this.workTimer = (farmer ? 1.2 : 2.5) / (farmer ? s.mods.farmerSpeedMul : 1);
+        this.workTimer = (farmer ? 1.2 : 2.5) / (farmer ? s.mods.farmerSpeedMul : s.mods.cutterSpeedMul);
         this.task = farmer ? (t!.kind === 'crop' ? 'harvesting' : 'planting') : 'chopping';
       } else this.clearGoal();
     }
@@ -435,6 +435,10 @@ export interface RaiderOpts {
   /** wave scaling on HP */
   hpMul?: number;
   speedMul?: number;
+  /** Bounty boons: snatchers need longer to get hold of a child, or can't at all; rats leave crops */
+  snatchDelayMul?: number;
+  noSnatch?: boolean;
+  harmlessRats?: boolean;
 }
 
 /**

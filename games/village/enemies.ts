@@ -22,6 +22,7 @@ export class Rat extends Raider {
     this.speed = 55 * (opts.speedMul ?? 1);
     this.radius = 2.5;
     this.task = 'sniffing for crops';
+    if (opts.harmlessRats) this.bored = 99; // Foragers: rats find nothing worth eating and leave
   }
 
   update(dt: number, s: VillageScene): void {
@@ -51,7 +52,7 @@ export class Rat extends Raider {
       this.crop = w.nearest(this.x, this.y, (t) => t.kind === 'crop' && t.stage >= s.cropDays) ?? w.nearest(this.x, this.y, (t) => t.kind === 'crop');
       if (this.crop) this.setGoal(s, this.crop.tx, this.crop.ty, true);
     }
-    if (!this.crop) {
+    if (!this.crop || this.bored >= 99) {
       this.bored += dt;
       this.task = 'nothing to eat';
       if (this.bored > 8) this.dead = true; // scampers off
@@ -89,9 +90,14 @@ export class Rat extends Raider {
 /** Quick imp that grabs a child and runs for the map edge. Kill it before it gets there. */
 export class Snatcher extends Raider {
   private edge: TilePos | null = null;
+  private grabT = 0;
+  private snatchDelayMul: number;
+  private noSnatch: boolean;
 
   constructor(x: number, y: number, opts: RaiderOpts = {}) {
     super(x, y, opts);
+    this.snatchDelayMul = opts.snatchDelayMul ?? 1;
+    this.noSnatch = !!opts.noSnatch;
     this.kind = 'snatcher';
     this.name = 'Snatcher';
     this.hp = this.maxHp = Math.round(14 * (opts.hpMul ?? 1));
@@ -130,8 +136,11 @@ export class Snatcher extends Raider {
       return;
     }
     this.bored = 0;
-    const kid = this.target instanceof Villager && this.target.role === 'kid' ? this.target : null;
-    if (kid && this.dist(kid) < 10 && !kid.carriedBy && !kid.hidden) {
+    const kid = this.target instanceof Villager && this.target.role === 'kid' && !this.noSnatch ? this.target : null;
+    // getting hold of a child takes a moment of contact (Quick Hands stretches it)
+    if (kid && this.dist(kid) < 10 && !kid.carriedBy && !kid.hidden) this.grabT += dt; else this.grabT = 0;
+    if (kid && this.grabT >= 0.35 * this.snatchDelayMul && !kid.carriedBy && !kid.hidden) {
+      this.grabT = 0;
       kid.carriedBy = this;
       this.carrying = kid;
       this.edge = null;

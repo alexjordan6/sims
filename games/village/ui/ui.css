@@ -501,3 +501,5 @@ body.touch .ctrl-tab { font-size: 7px; }
 .roster .outlook { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; }
 .roster .outlook.m { color: var(--martial); }
 .roster .outlook.c { color: var(--civil); }
+
+.testmode { color: var(--accent); font-size: 12px; margin: 4px 0 8px; }
