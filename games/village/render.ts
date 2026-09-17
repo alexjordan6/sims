@@ -1,9 +1,9 @@
 import Phaser from 'phaser';
 import { World, BUILDINGS, doorstep, type Tile, type Building, type BuildingKind } from './world';
-import { Mover, Villager, Raider, Player } from './agents';
+import { Mover, Villager, Raider, Player, Arrow } from './agents';
 import { Bolt } from './enemies';
 import { TOWN, CHAR } from './atlas';
-import { TILE, COLS, ROWS, CAPS } from './config';
+import { TILE, COLS, ROWS, CAPS, WALL_HEIGHT } from './config';
 import type { VillageScene } from './main';
 import { Fx } from './fx';
 import { ensureBuildingArt, ensureFlora, FLORA, BUILDING_TEXTURE, LIT_TEXTURE, STACK_ROWS } from './pixelart';
@@ -37,6 +37,8 @@ export class Renderer {
   private canopy!: Phaser.Tilemaps.TilemapLayer;
   private cropT = 0;
   private sprites = new Map<number, Phaser.GameObjects.Sprite>();
+  private forts = new Map<number, Phaser.GameObjects.Image>();
+  private bows = new Map<number, Phaser.GameObjects.Image>();
   /** each building's sprite (frame = level - 1) and, for the supply buildings, its climbing stock column */
   private buildings = new Map<Building, { body: Phaser.GameObjects.Image; lit: Phaser.GameObjects.Image; stock?: Phaser.GameObjects.Image; banner?: Phaser.GameObjects.Image }>();
   /** the sky's tint, multiplied into tiles and sprites; tiles repaint only when it changes */
@@ -73,6 +75,8 @@ export class Renderer {
 
   /** Redraw every tile and drop all sprites (after a reset). */
   rebuild(): void {
+    for (const sp of this.forts.values()) sp.destroy(); this.forts.clear();
+    for (const sp of this.bows.values()) sp.destroy(); this.bows.clear();
     for (const s of this.sprites.values()) s.destroy();
     this.sprites.clear();
     this.fx.clear();
@@ -88,6 +92,7 @@ export class Renderer {
     this.t += dt;
     this.tint = this.night.sky.tint;
     this.paintBuildings();
+    this.paintDefenses();
     this.growCrops(dt);
     this.drainDirty();
     this.tintTiles();
@@ -105,6 +110,19 @@ export class Renderer {
   }
 
   // ---- tiles ---------------------------------------------------------------
+
+  private paintDefenses(): void {
+    const s = this.scene;
+    for (const [id, d] of s.world.defenses) {
+      let sp = this.forts.get(id);
+      if (!sp) { sp = s.add.image(d.tx * TILE, (d.ty + 1) * TILE, 'fort', 0).setOrigin(0, 1); this.forts.set(id, sp); }
+      const friendly = d.kind === 'gate' && s.agents.some(a => a instanceof Mover && !a.hostile && !a.elevated && !a.hidden && a.dist(World.center(d.tx, d.ty)) < 19);
+      sp.setFrame(d.kind === 'stairs' ? 3 : d.kind === 'gate' ? d.open || friendly ? 2 : 1 : 0).setTint(s.posting ? 0x99dcff : this.tint);
+      sp.setDepth(DEPTH.agents + ((d.ty + 1) * TILE) / 1000);
+      sp.setAlpha(s.player.elevated ? 1 : s.player.y < (d.ty + 1) * TILE && s.player.y > (d.ty + 1) * TILE - WALL_HEIGHT && Math.abs(s.player.x - (d.tx + 0.5) * TILE) < 20 ? 0.5 : 1);
+    }
+    for (const [id, sp] of this.forts) if (!s.world.defenses.has(id)) { sp.destroy(); this.forts.delete(id); }
+  }
 
   /**
    * Buildings are sprites drawn in one hand-made style; the frame is the level, so upgrades
@@ -219,7 +237,7 @@ export class Renderer {
         const c = charFor(m);
         sp = this.scene.add.sprite(m.x, m.y, c.key, c.frame).setOrigin(0.5, 0.75).setDepth(DEPTH.agents);
         sp.setData('agent', m);
-        if (!(m instanceof Bolt)) sp.setInteractive({ useHandCursor: true });
+        if (!(m instanceof Bolt) && !(m instanceof Arrow)) sp.setInteractive({ useHandCursor: true });
         // selection is handled by the scene's pointerdown (right click on desktop, tap on touch)
         sp.on('pointerover', () => this.scene.hoverAgent(m));
         sp.on('pointerout', () => this.scene.hoverAgent(null));
@@ -233,12 +251,19 @@ export class Renderer {
       const bob = moving ? Math.abs(Math.sin(this.t * (hurt ? 9 : 14) + m.id)) * 1.5 : 0;
       const a = this.fx.anims.get(m.id);
       const base = m instanceof Villager && m.role === 'kid' ? 0.7 : m instanceof Raider ? ENEMY_SCALE[m.kind] : m instanceof Bolt ? 3 : 1;
-      sp.setPosition(Math.round(m.x + (a?.ox ?? 0)), Math.round(m.y - bob + (a?.oy ?? 0)));
+      const height = m instanceof Arrow ? (m.elevated ? WALL_HEIGHT * Math.max(0, 1 - m.travelled / m.dropDistance) : 0) : m.elevated ? WALL_HEIGHT : 0;
+      sp.setPosition(Math.round(m.x + (a?.ox ?? 0)), Math.round(m.y - height - bob + (a?.oy ?? 0)));
       sp.setFlipX(m.dir < 0);
       sp.setVisible(!m.hidden);
       sp.setScale(base * (a?.sx ?? 1), base * (a?.sy ?? 1));
       sp.setRotation(a?.rot ?? 0);
       sp.setDepth(DEPTH.agents + m.y / 1000);
+      if (m.elevated) sp.setDepth(DEPTH.agents + (m.y + TILE) / 1000 + 0.001);
+      if (m instanceof Arrow) sp.setRotation(Math.atan2(m.uy, m.ux)).setFlipX(false);
+      const armed = (m instanceof Villager && m.role === 'soldier' && m.weapon === 'bow') || (m instanceof Player && m.tool === 'bow');
+      let bow = this.bows.get(m.id);
+      if (armed && !bow) { bow = this.scene.add.image(0, 0, 'bow'); this.bows.set(m.id, bow); }
+      bow?.setPosition(sp.x + m.aim.x * 7, sp.y - 3 + m.aim.y * 7).setRotation(Math.atan2(m.aim.y, m.aim.x)).setScale(1, m.attackCd > 0.45 ? 0.8 : 1).setDepth(sp.depth + 0.01).setVisible(armed && !m.hidden).setTint(this.tint);
       if (m.hurtT < 0.15) sp.setTintFill(0xffffff);
       else if (m instanceof Raider) sp.setTint(mulColor(m.boss ? 0xff6a6a : m.kind === 'brute' ? 0xb07070 : 0xffd0d0, this.tint));
       else if (m instanceof Bolt) sp.setTint(0xb46bff);
@@ -246,6 +271,7 @@ export class Renderer {
       else sp.setTint(this.tint);
     }
     for (const [id, sp] of this.sprites) if (!seen.has(id)) { this.sprites.delete(id); this.fx.die(sp, sp.getData('agent') as Mover); }
+    for (const [id, sp] of this.bows) if (!seen.has(id)) { sp.destroy(); this.bows.delete(id); }
   }
 
   /** Screen-space centre of an agent's sprite (for DOM tooltips). */
@@ -306,6 +332,14 @@ export class Renderer {
     const s = this.scene;
     const u = this.under;
     u.clear();
+    if (['wall', 'gate', 'stairs'].includes(s.player.tool)) {
+      const q = s.defenseTarget();
+      u.lineStyle(2, 0xffd578, 1); u.strokeRect(q.tx * TILE, q.ty * TILE, TILE, TILE);
+      u.lineStyle(1, 0xffd578, 0.45); u.strokeRect(q.tx * TILE, q.ty * TILE - WALL_HEIGHT, TILE, TILE);
+    }
+    if (s.posting) {
+      for (const d of s.world.defenses.values()) { u.fillStyle(0x78d8f0, 0.5); u.fillRect(d.tx * TILE + 2, d.ty * TILE - WALL_HEIGHT + 2, 12, 12); }
+    }
     // target-tile cursor; in build mode the footprint preview, red when blocked
     const f = s.target;
     if (s.world.inBounds(f.tx, f.ty)) {
@@ -351,9 +385,13 @@ export class Renderer {
       const m = a as Mover;
       if (m.hidden || m.hp >= m.maxHp) continue;
       const big = m instanceof Raider && m.boss;
-      const bw = big ? 20 : 10, x = Math.round(m.x - bw / 2), y = Math.round(m.y - (big ? 20 : 14));
+      const bw = big ? 20 : 10, x = Math.round(m.x - bw / 2), y = Math.round(m.y - (m.elevated ? WALL_HEIGHT : 0) - (big ? 20 : 14));
       b.fillStyle(0x000000, 0.7); b.fillRect(x - 1, y - 1, bw + 2, 3);
       b.fillStyle(m.hp / m.maxHp > 0.4 ? 0x5fdc5f : 0xff4040, 1); b.fillRect(x, y, Math.max(1, Math.round(bw * m.hp / m.maxHp)), 1);
+    }
+    for (const d of s.world.defenses.values()) if (d.hp < d.maxHp) {
+      b.fillStyle(0x1a1a25); b.fillRect(d.tx * TILE, d.ty * TILE - WALL_HEIGHT - 3, 16, 3);
+      b.fillStyle(0xeab765); b.fillRect(d.tx * TILE, d.ty * TILE - WALL_HEIGHT - 3, 16 * d.hp / d.maxHp, 2);
     }
   }
 }
@@ -390,13 +428,14 @@ function tileFrames(t: Tile, cropDays: number, dayTime: number, oldDays: number)
     case 'house':
     case 'barracks':
     case 'granary':
-    case 'woodyard': return { ground: grass, object: EMPTY }; // the building sprite sits on top
+    case 'woodyard': case 'tavern': case 'wall': case 'gate': case 'stairs': return { ground: grass, object: EMPTY }; // the building sprite sits on top
   }
 }
 
 const ENEMY_SCALE: Record<string, number> = { raider: 1, warlord: 1.5, rat: 0.8, snatcher: 0.9, brute: 1.3, shaman: 1 };
 
 function charFor(m: Mover): { key: string; frame: number } {
+  if (m instanceof Arrow) return { key: 'arrow', frame: 0 };
   if (m instanceof Player) return CHAR.player;
   if (m instanceof Bolt) return { key: 'px', frame: 0 };
   if (m instanceof Raider) return CHAR[m.kind];

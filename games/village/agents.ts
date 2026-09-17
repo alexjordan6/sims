@@ -1,5 +1,5 @@
 import type { Agent } from '@shared/index';
-import { World, doorstep, buildingCenter, yardOf, type House, type TilePos } from './world';
+import { World, doorstep, buildingCenter, yardOf, type House, type TilePos, type Defense, type BuildingKind } from './world';
 import { p, TREE_RESERVE, CADET_AGE_BEFORE, CADET_DAYS, STAR_BONUS, FLEE_RANGE, BEDTIME, TRAITS, type Calling, type Trait } from './config';
 import type { Mods } from './meta';
 import type { VillageScene } from './main';
@@ -22,6 +22,10 @@ export abstract class Mover implements Agent {
   attackCd = 0;
   /** true while tucked away inside a house (not drawn, not targetable). */
   hidden = false;
+  elevated = false;
+  hostile = false;
+  aim = { x: 1, y: 0 };
+  private pathRevision = -1;
   /** -1 faces left, 1 faces right (sprite flip). */
   dir = 1;
   /** seconds since last hit, for the hurt flash */
@@ -42,9 +46,10 @@ export abstract class Mover implements Agent {
 
   /** Re-path only when the goal tile changes (or `force`). */
   setGoal(s: VillageScene, tx: number, ty: number, force = false): void {
-    if (!force && this.goal && this.goal.tx === tx && this.goal.ty === ty) return;
+    if (!force && this.pathRevision === s.world.revision && this.goal && this.goal.tx === tx && this.goal.ty === ty) return;
     this.goal = { tx, ty };
-    this.path = s.world.bfs(this.tile, this.goal);
+    this.pathRevision = s.world.revision;
+    this.path = s.world.bfs(this.tile, this.goal, this.hostile, this.elevated);
   }
 
   clearGoal(): void {
@@ -55,6 +60,7 @@ export abstract class Mover implements Agent {
   /** Advance along the path. Returns true when there is nowhere left to go. */
   followPath(dt: number): boolean {
     if (this.path.length === 0) { this.vx = this.vy = 0; return true; }
+    if (this.world?.isBlocked(this.path[0].tx, this.path[0].ty, this.hostile, this.elevated)) { this.clearGoal(); this.vx = this.vy = 0; return true; }
     const next = World.center(this.path[0].tx, this.path[0].ty);
     const dx = next.x - this.x, dy = next.y - this.y;
     const d = Math.hypot(dx, dy);
@@ -107,7 +113,7 @@ export abstract class Mover implements Agent {
    * step away), then recover. Returns true while an attack is running so callers hold position.
    */
   startAttack(s: VillageScene, target: Mover, dmg: number, reach: number, windup: number, recover: number): boolean {
-    if (this.attack || this.attackCd > 0 || this.dist(target) > reach + 4) return false;
+    if (this.attack || this.attackCd > 0 || this.dist(target) > reach + 4 || this.elevated !== target.elevated || !s.world.lineClear(this, target, this.elevated)) return false;
     this.dir = target.x < this.x ? -1 : 1;
     this.attack = { target, t: 0, windup, recover, dmg, reach, struck: false };
     this.vx = this.vy = 0;
@@ -123,7 +129,8 @@ export abstract class Mover implements Agent {
     if (!a.struck && a.t >= a.windup) {
       a.struck = true;
       const t = a.target;
-      if (!t.dead && !t.hidden && this.dist(t) <= a.reach) {
+      s.fx.push({ kind: 'melee', who: this, x: t.x, y: t.y });
+      if (!t.dead && !t.hidden && this.elevated === t.elevated && this.dist(t) <= a.reach && s.world.lineClear(this, t, this.elevated)) {
         this.dir = t.x < this.x ? -1 : 1;
         t.hit(a.dmg);
         const d = this.dist(t) || 1;
@@ -154,7 +161,7 @@ export abstract class Mover implements Agent {
     if (this.pushX || this.pushY) {
       const nx = this.x + this.pushX * dt, ny = this.y + this.pushY * dt;
       const t = World.toTile(nx, ny);
-      if (!this.world?.isBlocked(t.tx, t.ty)) { this.x = nx; this.y = ny; }
+      if (!this.world?.isBlocked(t.tx, t.ty, this.hostile, this.elevated)) { this.x = nx; this.y = ny; }
       const k = Math.max(0, 1 - dt * 9);
       this.pushX *= k; this.pushY *= k;
       if (Math.abs(this.pushX) + Math.abs(this.pushY) < 2) this.pushX = this.pushY = 0;
@@ -179,6 +186,10 @@ export abstract class Mover implements Agent {
 export type Role = 'kid' | 'farmer' | 'woodcutter' | 'soldier';
 
 export class Villager extends Mover {
+  weapon: 'sword' | 'bow' = 'sword';
+  post: TilePos | null = null;
+  private stairsGoal: TilePos | null = null;
+  indoors: House | null = null;
   role: Role;
   age: number; // days
   hungerDays = 0;
@@ -366,7 +377,7 @@ export class Villager extends Mover {
   private helpingFarm(s: VillageScene): boolean {
     if (s.wood >= s.woodCap) this.farmHelp = true;
     else if (s.wood < s.woodCap * 0.55) this.farmHelp = false;
-    return this.farmHelp || (!s.mods.ignoreReserve && s.world.count((t) => t.kind === 'tree') <= TREE_RESERVE);
+    return this.farmHelp || (!s.mods.ignoreReserve && s.world.treeCount <= TREE_RESERVE);
   }
   private farmHelp = false;
 
@@ -387,7 +398,7 @@ export class Villager extends Mover {
       const job = farmer
         ? w.nearest(this.x, this.y, (t) => t.kind === 'crop' && t.stage >= s.cropDays) ??
           w.nearest(this.x, this.y, (t) => t.kind === 'tilled')
-        : s.mods.ignoreReserve || w.count((t) => t.kind === 'tree') > TREE_RESERVE ? this.pickTree(s) : null;
+        : s.mods.ignoreReserve || w.treeCount > TREE_RESERVE ? this.pickTree(s) : null;
       if (job) { this.setGoal(s, job.tx, job.ty); this.task = farmer ? (this.role === 'woodcutter' ? 'helping in the field' : 'heading to the field') : 'looking for a tree'; }
       else { this.wanderNear(s, this.home); this.task = farmer ? 'no crops to tend' : 'leaving the last trees to regrow'; }
       return;
@@ -434,21 +445,46 @@ export class Villager extends Mover {
   // --- soldiers -------------------------------------------------------------
 
   private soldierUpdate(dt: number, s: VillageScene): void {
+    if (this.post && !s.world.get(this.post.tx, this.post.ty)?.defense) { this.post = null; this.clearGoal(); }
+    if (this.post && !this.elevated) {
+      if (!this.stairsGoal || !s.world.get(this.stairsGoal.tx, this.stairsGoal.ty)?.defense) this.stairsGoal = s.reachableStairs(this, this.post);
+      if (!this.stairsGoal) { this.task = 'post needs connected stairs'; return; }
+      this.setGoal(s, this.stairsGoal.tx, this.stairsGoal.ty);
+      this.followPath(dt);
+      if (this.dist(World.center(this.stairsGoal.tx, this.stairsGoal.ty)) < 3) { this.elevated = true; this.clearGoal(); this.stairsGoal = null; }
+      this.task = 'climbing to wall post';
+      return;
+    }
+    if (this.elevated && !this.post) {
+      const exit = s.reachableStairs(this);
+      if (exit) { this.setGoal(s, exit.tx, exit.ty); this.followPath(dt); if (this.dist(World.center(exit.tx, exit.ty)) < 3) { this.elevated = false; this.clearGoal(); } }
+      this.task = 'returning down the stairs'; return;
+    }
     this.retarget -= dt;
     if (this.retarget <= 0) {
       this.retarget = 0.4;
-      this.target = s.bestTarget(this.x, this.y, 130);
+      this.target = s.bestTarget(this.x, this.y, this.weapon === 'bow' ? 190 : 130);
     }
     if (this.target && !this.target.dead) {
       this.task = 'fighting';
       if (this.attackTick(dt, s)) return;
       const dmg = p.soldierDmg * s.mods.soldierDmgMul * (s.world.barracksLevel >= 3 ? 1.2 : 1) * (this.skilled ? 1.15 : 1) * (this.trait === 'brave' ? 1.2 : 1);
+      if (this.weapon === 'bow') {
+        const range = this.elevated ? 210 : 160;
+        if (this.dist(this.target) <= range && s.world.lineClear(this, this.target, this.elevated)) {
+          this.vx = this.vy = 0; this.task = this.post ? 'archer holding the wall' : 'firing arrows';
+          if (this.attackCd <= 0) { s.shoot(this, this.target.x - this.x, this.target.y - this.y, Math.round(dmg)); this.attackCd = 0.9; }
+          return;
+        }
+      }
+      if (this.post) { this.setGoal(s, this.post.tx, this.post.ty); this.followPath(dt); this.task = 'holding wall post'; return; }
       if (this.startAttack(s, this.target, Math.round(dmg), 13, 0.15, 0.45)) return;
       this.setGoal(s, this.target.tile.tx, this.target.tile.ty);
       this.followPath(dt);
       return;
     }
     this.target = null;
+    if (this.post) { this.setGoal(s, this.post.tx, this.post.ty); this.followPath(dt); this.task = 'watching from the wall'; return; }
     this.task = 'on patrol';
     const regen = s.mods.soldierRegen + (s.world.barracksLevel >= 3 ? 1 : 0);
     if (regen && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + regen * dt);
@@ -492,6 +528,7 @@ export class Villager extends Mover {
     const arrived = this.followPath(dt);
     if (arrived && this.adjacentTo(door)) {
       this.hidden = true;
+      this.indoors = b;
       const c = buildingCenter(b);
       this.x = c.tx * 16; this.y = c.ty * 16;
       this.clearGoal();
@@ -512,6 +549,7 @@ export class Villager extends Mover {
     const arrived = this.followPath(dt);
     if (arrived && this.adjacentTo(door)) {
       this.hidden = true;
+      this.indoors = this.home;
       const c = buildingCenter(this.home);
       this.x = c.tx * 16; this.y = c.ty * 16;
       this.clearGoal();
@@ -520,6 +558,7 @@ export class Villager extends Mover {
 
   private unhide(s: VillageScene): void {
     this.hidden = false;
+    this.indoors = null;
     const door = doorstep(s.nearestShelter(this.x, this.y) ?? this.home);
     const spots: TilePos[] = [door, { tx: door.tx + 1, ty: door.ty }, { tx: door.tx, ty: door.ty + 1 }, { tx: door.tx - 1, ty: door.ty }];
     const spot = spots.find((q) => !s.world.isBlocked(q.tx, q.ty)) ?? spots[0];
@@ -551,6 +590,35 @@ export interface RaiderOpts {
  * every `instanceof Raider` check — soldier targeting, the sword arc, villagers fleeing — covers them.
  */
 export class Raider extends Mover {
+  protected siege: { defense: Defense; t: number; struck: boolean } | null = null;
+  /** Enemies can breach fortifications, while homes and supply buildings remain indestructible. */
+  breach(dt: number, s: VillageScene): boolean {
+    if (this.harmless) return false;
+    if (!this.siege) {
+      if (this.path.length) return false;
+      const candidates = [...s.world.defenses.values()].filter(d => d.kind !== 'stairs' && !(d.kind === 'gate' && d.open))
+        .sort((a, b) => this.dist(World.center(a.tx, a.ty)) - this.dist(World.center(b.tx, b.ty)));
+      const d = candidates[0];
+      if (!d) return false;
+      const c = World.center(d.tx, d.ty);
+      this.siege = { defense: d, t: 0, struck: false };
+      this.dir = c.x < this.x ? -1 : 1;
+    }
+    const a = this.siege, c = World.center(a.defense.tx, a.defense.ty);
+    if (a.defense.hp <= 0 || (a.defense.kind === 'gate' && a.defense.open)) { this.siege = null; this.clearGoal(); return false; }
+    if (this.dist(c) > 25) { this.setGoal(s, a.defense.tx, a.defense.ty); this.followPath(dt); this.task = 'approaching fortifications'; return true; }
+    if (a.t === 0) s.fx.push({ kind: 'telegraph', who: this, ms: 300 });
+    a.t += dt; this.vx = this.vy = 0; this.task = 'battering the wall';
+    if (!a.struck && a.t >= 0.3) {
+      a.struck = true;
+      s.fx.push({ kind: 'melee', who: this, x: c.x, y: c.y });
+      if (a.defense.hp > 0 && s.world.damageDefense(a.defense, this.dmg * (this.kind === 'brute' ? 3 : 1))) {
+        s.event('raid', 'The defenses have been breached!', true); s.rescueFallenGuards();
+      }
+    }
+    if (a.t >= (this.kind === 'brute' ? 0.6 : 1.1)) { this.siege = null; this.clearGoal(); }
+    return true;
+  }
   protected target: Mover | null = null;
   protected retarget = 0;
   protected bored = 0;
@@ -567,6 +635,7 @@ export class Raider extends Mover {
 
   constructor(x: number, y: number, opts: RaiderOpts = {}) {
     super(x, y);
+    this.hostile = true;
     this.boss = opts.boss ?? false;
     this.kind = this.boss ? 'warlord' : 'raider';
     if (this.boss) this.pushScale = 0.15;
@@ -582,6 +651,7 @@ export class Raider extends Mover {
   update(dt: number, s: VillageScene): void {
     this.tickTimers(dt);
     if (this.frozen(dt)) return;
+    if (this.siege && this.breach(dt, s)) return;
     if (this.attackTick(dt, s)) return;
     this.retarget -= dt;
     if (this.retarget <= 0 || !this.target || this.target.dead || this.target.hidden) {
@@ -597,6 +667,7 @@ export class Raider extends Mover {
     this.bored = 0;
     if (this.startAttack(s, this.target, this.dmg, this.boss ? 16 : 13, this.boss ? 0.35 : 0.25, this.boss ? 0.7 : 0.55)) return;
     this.setGoal(s, this.target.tile.tx, this.target.tile.ty);
+    if (!this.path.length && (this.dist(this.target) > 14 || !s.world.lineClear(this, this.target) || this.target.elevated) && this.breach(dt, s)) return;
     this.followPath(dt);
     // trample crops
     const t = this.tile;
@@ -604,12 +675,37 @@ export class Raider extends Mover {
   }
 }
 
+/** A physical arrow, swept in small steps so fast shots cannot tunnel through bodies or walls. */
+export class Arrow extends Mover {
+  travelled = 0;
+  readonly range: number;
+  constructor(x: number, y: number, public ux: number, public uy: number, public dmg: number, public owner: Mover, public dropDistance = 170) {
+    super(x, y); this.speed = 230; this.radius = 2; this.hp = this.maxHp = 1;
+    this.elevated = owner.elevated; this.range = this.elevated ? 220 : 170;
+  }
+  update(dt: number, s: VillageScene): void {
+    const total = this.speed * dt, steps = Math.ceil(total / 3), step = total / steps;
+    for (let i = 0; i < steps && !this.dead; i++) {
+      this.x += this.ux * step; this.y += this.uy * step; this.travelled += step;
+      const t = s.world.get(this.tile.tx, this.tile.ty);
+      if (this.travelled > this.range || !t || (!(this.elevated && t.defense) && s.world.isBlocked(this.tile.tx, this.tile.ty, true))) { this.dead = true; break; }
+      let target: Raider | null = null;
+      s.grid.forEachInRadius(this.x, this.y, 8, o => { if (o instanceof Raider && !o.dead && this.dist(o) <= o.radius + 2) target = o; });
+      if (target) {
+        const hit = target as Raider; hit.hit(this.dmg); hit.shove(this.ux, this.uy, 6);
+        s.fx.push({ kind: 'hit', attacker: this, target: hit, dmg: this.dmg, crit: false, killed: !!hit.dead });
+        this.dead = true;
+      }
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // player
 
 /** What the player holds. The equipped tool decides what E does. */
-export type Tool = 'hands' | 'hoe' | 'seeds' | 'axe' | 'sword' | 'house' | 'barracks' | 'hammer';
-export const TOOLS: Tool[] = ['hands', 'hoe', 'seeds', 'axe', 'sword', 'house', 'barracks', 'hammer'];
+export type Tool = 'hands' | 'hoe' | 'seeds' | 'axe' | 'sword' | 'house' | 'barracks' | 'hammer' | 'bow' | 'tavern' | 'wall' | 'gate' | 'stairs';
+export const TOOLS: Tool[] = ['hands', 'hoe', 'seeds', 'axe', 'sword', 'house', 'barracks', 'hammer', 'bow', 'tavern', 'wall', 'gate', 'stairs'];
 
 /** A sword swing in progress: an arc in front of the player that connects during its active window. */
 /** A sword swing in progress: an arc in front of the player that connects during its active window. */
@@ -660,8 +756,8 @@ export class Player extends Mover {
   }
 
   /** The building the tool would place, if it's a building tool. */
-  get build(): 'house' | 'barracks' | 'none' {
-    return this.tool === 'house' || this.tool === 'barracks' ? this.tool : 'none';
+  get build(): BuildingKind | 'none' {
+    return this.tool === 'house' || this.tool === 'barracks' || this.tool === 'tavern' ? this.tool : 'none';
   }
 
   /** The tile just in front of the player. */
@@ -675,6 +771,7 @@ export class Player extends Mover {
   busy = 0;
 
   update(dt: number, s: VillageScene): void {
+    if (s.interior.active) { s.interior.update(dt); return; }
     this.tickTimers(dt);
     this.sinceSwing += dt;
     this.recover = Math.max(0, this.recover - dt);
@@ -727,12 +824,13 @@ export class Player extends Mover {
     if (active && !c.spin) {
       const nx = this.x + sw.dx * SWING.stepIn * (dt / (c.activeTo - c.activeFrom)), ny = this.y + sw.dy * SWING.stepIn * (dt / (c.activeTo - c.activeFrom));
       const t = World.toTile(nx + sw.dx * 3, ny + sw.dy * 3);
-      if (!s.world.isBlocked(t.tx, t.ty)) { this.x = nx; this.y = ny; }
+      if (!s.world.isBlocked(t.tx, t.ty, false, this.elevated)) { this.x = nx; this.y = ny; }
     }
     if (active || wasActive) {
       const dmg = Math.round(12 * s.mods.playerDmgMul * c.dmgMul);
       s.grid.forEachInRadius(this.x, this.y, SWING.reach + (c.spin ? 4 : 0), (o, d2) => {
         if (!(o instanceof Raider) || o.dead || sw.hit.has(o.id)) return;
+        if (o.elevated !== this.elevated || !s.world.lineClear(this, o, this.elevated)) return;
         const d = Math.sqrt(d2) || 1;
         const ux = (o.x - this.x) / d, uy = (o.y - this.y) / d;
         if (!c.spin && d > 6 && ux * sw.dx + uy * sw.dy < SWING.halfAngleCos) return; // outside the arc
@@ -765,16 +863,15 @@ export class Player extends Mover {
     const free = (x: number, y: number): boolean => {
       for (const [ox, oy] of [[-r, -r], [r, -r], [-r, r], [r, r]]) {
         const t = World.toTile(x + ox, y + oy);
-        if (w.isBlocked(t.tx, t.ty)) return false;
+        if (w.isBlocked(t.tx, t.ty, false, this.elevated)) return false;
       }
       return true;
     };
     // if we are somehow inside something solid, let any movement through so we can never be trapped
-    const stuck = !free(this.x, this.y);
     const nx = this.x + this.vx * dt;
-    if (stuck || free(nx, this.y)) this.x = nx;
+    if (free(nx, this.y)) this.x = nx;
     const ny = this.y + this.vy * dt;
-    if (stuck || free(this.x, ny)) this.y = ny;
+    if (free(this.x, ny)) this.y = ny;
   }
 
   cycleTool(dir = 1): void {

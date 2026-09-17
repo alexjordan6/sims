@@ -13,11 +13,15 @@
   --side-w: 300px;
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 16px; overflow: hidden; }
 body { display: flex; }
 #stage { position: relative; flex: 1; min-width: 0; height: 100vh; }
-#game { position: absolute; inset: 0; }
+#game { position: absolute; inset: 0; isolation: isolate; }
+body:not(.touch) #game .interior-view { top: 122px; bottom: 150px; height: calc(100% - 272px); }
 #game canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+#game .interior-view { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #1b151b; z-index: 1; touch-action: none; }
+#game .interior-view[hidden] { display: none; }
 #overlay { position: absolute; inset: 0; pointer-events: none; }
 #overlay > * { pointer-events: auto; }
 #side { width: var(--side-w); height: 100vh; display: flex; flex-direction: column; gap: 8px; padding: 8px; border-left: 4px solid #0d0a08; background: #241c16; overflow: hidden; }
@@ -72,7 +76,11 @@ h3 { font-size: 9px; color: var(--ink-dim); margin-bottom: 6px; }
 
 /* ---- hotbar ------------------------------------------------------------- */
 .hotbar { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 4px; }
-.slots { display: flex; gap: 6px; padding: 2px 4px; }
+.slots { display: flex; gap: 6px; padding: 2px 4px; max-width: 100%; overflow-x: auto; }
+.slot { flex-shrink: 0; }
+.hotbar { max-width: calc(100% - 16px); }
+.quiver { display: flex; flex-wrap: wrap; gap: 4px; flex-shrink: 0; font-size: 12px; }
+.quiver-count { width: 100%; color: var(--accent); }
 .slot { position: relative; width: 56px; height: 56px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; border: 10px solid transparent; border-image: url(../assets/ui/brown_inlay.png) 14 fill repeat; cursor: pointer; }
 .slot.on { border-image-source: url(../assets/ui/tan_inlay.png); }
 .slot.off { opacity: .45; }

@@ -16,6 +16,7 @@ const TERRAIN: Record<TileKind, [number, number, number]> = {
   barracks: [104, 122, 156],
   granary: [214, 110, 60],
   woodyard: [160, 116, 66],
+  tavern: [210, 164, 88], wall: [163, 169, 178], gate: [209, 177, 113], stairs: [128, 194, 218],
 };
 
 const ROLE = { kid: '#f5d8a8', farmer: '#7fd37f', woodcutter: '#c9a26b', soldier: '#6f9bff' } as const;
@@ -32,8 +33,9 @@ export class Minimap {
     this.el.className = 'minimap';
     this.el.width = COLS;
     this.el.height = ROWS;
-    this.el.style.width = `${COLS * scale}px`;
-    this.el.style.height = `${ROWS * scale}px`;
+    this.el.style.width = '100%';
+    this.el.style.height = 'auto';
+    this.el.style.maxWidth = `${Math.min(260, COLS * scale)}px`;
     this.el.title = 'Minimap — your village, the forests, and anyone approaching';
     this.ctx = this.el.getContext('2d')!;
     this.terrain = this.ctx.createImageData(COLS, ROWS);

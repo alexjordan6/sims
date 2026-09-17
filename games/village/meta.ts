@@ -75,7 +75,6 @@ export interface Mods {
   /** children come of age fully drilled */
   fullDrill: boolean;
 }
-
 export const DEFAULT_MODS: Mods = {
   startFood: 40, startWood: 25, extraAdults: 0, startSoldiers: 0,
   cropYield: 6, cropDaysDelta: 0, farmerSpeedMul: 1, fieldWide: false, foodPerDayMul: 1,
@@ -154,7 +153,7 @@ export const NODES: Node[] = [
   { id: 'masonry3b', branch: 'masonry', tier: 3, side: 'b', requires: 'masonry2b', name: 'Great Hall', cost: 200, blurb: 'Houses get +2 beds at every level', icon: { key: 'town', frame: 85 }, apply: (m) => (m.bedBonus += 2) },
   // ---- Bounty
   { id: 'bounty1', branch: 'bounty', tier: 1, name: 'Plunder', cost: 50, blurb: 'Every raider slain drops 3 wood', icon: { key: 'dungeon', frame: 89 }, apply: (m) => (m.killWood += 3) },
-  { id: 'bounty2a', branch: 'bounty', tier: 2, side: 'a', requires: 'bounty1', name: 'Foragers', cost: 100, blurb: 'Rats can\'t eat crops; kills also drop 2 food', icon: { key: 'farm', frame: 44 }, apply: (m) => { m.ratsHarmless = true; m.killFood += 2; } },
+  { id: 'bounty2a', branch: 'bounty', tier: 2, side: 'a', requires: 'bounty1', name: 'Foragers', cost: 100, blurb: 'Rats take twice as long to eat crops; kills also drop 2 food', icon: { key: 'farm', frame: 44 }, apply: (m) => { m.ratsHarmless = true; m.killFood += 2; } },
   { id: 'bounty3a', branch: 'bounty', tier: 3, side: 'a', requires: 'bounty2a', name: 'Trophies', cost: 200, blurb: 'Each kill heals you 5 HP; soldiers +20% HP', icon: { key: 'dungeon', frame: 116 }, apply: (m) => { m.killHeal += 5; m.soldierHpBonus += 12; } },
   { id: 'bounty2b', branch: 'bounty', tier: 2, side: 'b', requires: 'bounty1', name: 'Quick Hands', cost: 100, blurb: 'Snatchers take twice as long to grab a child', icon: { key: 'dungeon', frame: 110 }, apply: (m) => (m.snatchDelayMul *= 2) },
   { id: 'bounty3b', branch: 'bounty', tier: 3, side: 'b', requires: 'bounty2b', name: 'Guardians', cost: 250, blurb: 'Children can\'t be snatched at all', icon: { key: 'dungeon', frame: 102 }, apply: (m) => (m.noSnatch = true) },
@@ -324,3 +323,4 @@ export class Meta {
     return b;
   }
 }
+

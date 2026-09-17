@@ -7,7 +7,7 @@ import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
 import { skyAt } from '../night';
 import { frameDataUrl, BUILDING_TEXTURE } from '../pixelart';
-import { BUILDINGS, MAX_LEVEL, type BuildingKind } from '../world';
+import { BUILDINGS, MAX_LEVEL, doorstep, World, type BuildingKind } from '../world';
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -106,7 +106,7 @@ export class UI {
       `<div class="slot" data-tool="${tool}" title="${esc(title)}">${spr(key, frame, 32)}<span class="lbl">${label}</span>${cost ? `<span class="cost">${cost}${spr('town', TOWN.iconWood, 16)}</span>` : ''}</div>`;
     this.hotbar = h(`<div class="hotbar">
       <div class="slots panel">
-        <span class="cap slots-cap">TOOLS <kbd>1-8</kbd></span>
+        <span class="cap slots-cap">TOOLS <kbd>1-9</kbd></span>
         ${slot('hands', 'farm', FARM.iconHand, 'HANDS', 'Harvest ripe crops')}
         ${slot('hoe', 'town', TOWN.iconHoe, 'HOE', 'Till grass into soil; clears stumps; three hits on soil flatten it back to grass')}
         ${slot('seeds', 'farm', FARM.grassTuft, 'SEEDS', 'Crops on tilled soil, trees on grass')}
@@ -115,6 +115,11 @@ export class UI {
         ${slot('house', 'town', TOWN.wallWoodDoor, 'HOUSE', 'A family of 4 lives here and has children', COST.house)}
         ${slot('barracks', 'town', TOWN.wallStoneDoor, 'BARRACKS', 'Sponsors sworn houses: their children drill here and become soldiers', COST.barracks)}
         ${slot('hammer', 'town', TOWN.iconHammer, 'HAMMER', 'Upgrade the building in front of you (3 hits)')}
+        ${slot('bow', 'dungeon', DUNGEON.sword, 'BOW', 'Fire physical arrows. Shared ammunition is made at the barracks')}
+        ${slot('wall', 'town', TOWN.wallStoneDoor, 'WALL', 'Build a connected stone perimeter. 4 wood per segment', 4)}
+        ${slot('gate', 'town', TOWN.wallWoodDoor, 'GATE', 'Friendly villagers pass; X toggles opening to everyone', 12)}
+        ${slot('stairs', 'town', TOWN.iconHammer, 'STAIRS', 'Connect stairs to your walls. Use hands or X to climb and descend', 10)}
+        ${slot('tavern', 'town', TOWN.wallWoodDoor, 'TAVERN', 'A cozy place to eat, rest and gather', COST.tavern)}
       </div>
       <div class="hint"><kbd>click / C</kbd><span class="hint-text"></span></div>
     </div>`);
@@ -135,6 +140,10 @@ export class UI {
     box.append(this.minimap.el);
     this.side.append(box);
     this.side.append(this.inspector, this.roster);
+    const supply = h('<div class="quiver panel"><span class="quiver-count"></span><button class="btn small fletch">+10 ARROWS · 2 WOOD</button><button class="btn small leave-room" hidden>EXIT BUILDING</button></div>');
+    supply.querySelector('.fletch')!.addEventListener('click', () => s.craftArrows());
+    supply.querySelector('.leave-room')!.addEventListener('click', () => s.interior.leave());
+    this.side.prepend(supply);
     this.roster.addEventListener('click', (e) => {
       const row = (e.target as HTMLElement).closest<HTMLElement>('.row');
       if (!row) return;
@@ -180,7 +189,7 @@ export class UI {
           ['W A S D', 'move'],
           ['click · C', 'use the held tool, toward the cursor'],
           ['right click · X', 'check a villager'],
-          ['1 – 8', 'pick a tool'],
+          ['1 – 9', 'pick a tool'],
           ['Tab · wheel', 'next / previous tool'],
           ['Z', 'camera zoom'],
           ['E · Esc', 'menu'],
@@ -391,6 +400,8 @@ export class UI {
 
   private renderTop(): void {
     const s = this.scene;
+    const quiver = this.side.querySelector('.quiver-count'); if (quiver) quiver.textContent = `SHARED QUIVER · ${s.arrows} arrows`;
+    const exit = this.side.querySelector<HTMLButtonElement>('.leave-room'); if (exit) exit.hidden = !s.interior.active;
     const vs = s.villagers();
     const count = (r: string) => vs.filter((v) => v.role === r).length;
     const hour = Math.floor(s.dayTime * 24);
@@ -468,6 +479,11 @@ export class UI {
       if (b.kind === 'house') html += `<b>Beds</b><span>${b.residents} / ${s.beds(b)}</span>`;
       if (b.kind === 'barracks') html += `<b>Sponsors</b><span>${s.world.swornHouses.length} / ${s.world.sponsorship(s.mods.sponsorBonus)} houses sworn</span>`;
       html += `<b>Next</b><span>${b.level < MAX_LEVEL ? `Lv${b.level + 1}: ${LEVEL_PERKS[b.kind][b.level + 1]} <em>· ${cost} wood with the hammer</em>` : 'max level'}</span></div>`;
+      if (['house', 'barracks', 'tavern'].includes(b.kind)) {
+        const d = doorstep(b), near = s.player.dist(World.center(d.tx, d.ty)) < 25;
+        html += `<button class="btn small enter-room" ${!near || s.interior.active ? 'disabled' : ''}>ENTER${near ? '' : ' · WALK TO DOOR'}</button>`;
+      }
+      if (b.kind === 'barracks') html += `<p>Equip soldiers with bows in their cards. SET WALL POST, then tap a connected battlement. Stairs are required.</p><button class="btn small craft-arrows">FLETCH 10 ARROWS · 2 WOOD</button>`;
       if (b.kind === 'house') {
         const calling = b.calling ?? 'farmer';
         const why = calling === 'soldier' ? null : s.swearProblem(b);
@@ -480,6 +496,8 @@ export class UI {
       if (force || html !== this.lastInspector) {
         this.inspector.innerHTML = html; this.lastInspector = html;
         this.inspector.querySelector('.close')?.addEventListener('click', () => s.selectBuilding(null));
+        this.inspector.querySelector('.enter-room')?.addEventListener('click', () => { s.interior.enter(b); this.side.classList.remove('open'); });
+        this.inspector.querySelector('.craft-arrows')?.addEventListener('click', () => s.craftArrows());
         this.inspector.querySelectorAll<HTMLButtonElement>('[data-raise]').forEach((el) => el.addEventListener('click', () => { s.setCalling(b, el.dataset.raise as Calling); this.renderInspector(true); }));
         this.inspector.querySelectorAll<HTMLButtonElement>('[data-rations]').forEach((el) => el.addEventListener('click', () => { s.setRations(b, el.dataset.rations === 'hearty'); this.renderInspector(true); }));
       }
@@ -518,11 +536,15 @@ export class UI {
     } else if (m instanceof Villager) {
       html += `<div class="upbring"><div class="cap">RAISED</div><div class="stars">${'★'.repeat(m.stars)}<span class="dim">${'☆'.repeat(5 - m.stars)}</span> <small>${m.skilled ? 'skilled' : 'plain'}${m.trait ? ` · ${TRAITS[m.trait].name} — ${TRAITS[m.trait].blurb}` : ''}</small></div></div>`;
     }
+    if (m instanceof Villager && m.role === 'soldier') html += `<div class="raise"><div class="cap">EQUIPMENT & ORDERS</div><div class="seg"><button class="btn small ${m.weapon === 'sword' ? 'on' : ''}" data-weapon="sword">SWORD</button><button class="btn small ${m.weapon === 'bow' ? 'on' : ''}" data-weapon="bow">BOW</button></div><p>Arrows in shared quiver: ${s.arrows}. ${m.post ? `Post: ${m.post.tx}, ${m.post.ty}.` : 'Patrolling on the ground.'}</p><button class="btn small post-soldier">${s.posting === m ? 'CANCEL PLACEMENT' : 'SET WALL POST'}</button><button class="btn small recall-soldier">RETURN TO PATROL</button></div>`;
     if (html !== this.lastInspector) {
       this.inspector.innerHTML = html;
       this.lastInspector = html;
       this.inspector.querySelector('.close')?.addEventListener('click', () => s.select(null));
       this.inspector.querySelector('.encourage')?.addEventListener('click', () => { if (m instanceof Villager) s.encourage(m); this.renderInspector(true); });
+      this.inspector.querySelectorAll<HTMLElement>('[data-weapon]').forEach(el => el.addEventListener('click', () => { if (m instanceof Villager) s.equipSoldier(m, el.dataset.weapon as 'bow' | 'sword'); this.renderInspector(true); }));
+      this.inspector.querySelector('.post-soldier')?.addEventListener('click', () => { if (m instanceof Villager) s.posting = s.posting === m ? null : m; this.side.classList.remove('open'); this.renderInspector(true); });
+      this.inspector.querySelector('.recall-soldier')?.addEventListener('click', () => { if (m instanceof Villager) { m.post = null; m.clearGoal(); s.posting = null; } this.renderInspector(true); });
     }
   }
 
@@ -606,11 +628,11 @@ export class UI {
         <div class="card panel">
           <h1>VILLAGE</h1>
           ${cast}
-          <p class="sub">Farm. Raise a family. The children you raise beside the barracks become your army.<br>
+          <p class="sub">Farm. Raise a family. Plan their upbringing. Train the next generation to defend your town.<br>
           Survive ${RUN.days} days of raids and <b>beat the Warlord</b>.</p>
           <div class="controls">
             <kbd>WASD</kbd><span>move</span><kbd>click / C</kbd><span>use the tool you hold, toward the cursor</span>
-            <kbd>right click / X</kbd><span>check a villager</span><kbd>1-8 · Tab · wheel</kbd><span>pick a tool</span>
+            <kbd>right click / X</kbd><span>check a villager</span><kbd>1-9 · Tab · wheel</kbd><span>pick a tool</span>
             <kbd>E / Esc</kbd><span>menu</span><kbd>- / =</kbd><span>game speed</span>
           </div>
           <div class="row"><label class="sub">seed <input class="seed" value="${s.seed}"></label></div>
@@ -681,6 +703,10 @@ export class UI {
       <div class="help-cols">
         <section>
           <h3>THE GOAL</h3>
+          <p><b>Wilderness:</b> the world is 240 × 160 tiles. Most seeds have dense forest regions; others are open meadow and scattered groves. Follow the woodland trails.</p>
+          <p><b>Fortify:</b> scroll the tool belt for WALL, GATE and STAIRS. Each takes one ground tile and wood for construction. Join walls into a perimeter and connect stairs. With hands equipped, use stairs to climb or descend. Walk along connected wall tops. Gates admit allies automatically; X opens them to enemies too. Hammer repairs damage. Brutes can breach walls; homes and supply buildings remain indestructible.</p>
+          <p><b>Archers:</b> select a soldier, equip BOW, then SET WALL POST and click a battlement top connected to stairs. RETURN TO PATROL recalls them. Player bow is key 9. Everyone uses the shared quiver; craft 10 arrows for 2 wood at the barracks or its supply button. Arrows hit bodies and cover; wall archers shoot over ramparts.</p>
+          <p><b>Come inside:</b> walk to a house, barracks or tavern door and use hands or X. WASD / joystick moves indoors; tapping the floor also walks there. Use nearby furnishings. The barracks rack makes arrows; tavern meals heal more with upgrades. Walk through the bottom doorway or choose EXIT. Raids continue outside.</p>
           <p>Survive <b>${RUN.days} days</b>. Raiders attack every ${p.raidEvery} days and get stronger. On day ${RUN.bossDay} the <b>Warlord</b> comes — beat him to win. If <b>you</b> die, the run ends (you keep the renown).</p>
           <h3>THE TRICK</h3>
           <p>You can't recruit anyone. <b>Every adult was a child you raised.</b> See RAISING CHILDREN below.</p>
@@ -695,9 +721,9 @@ export class UI {
           ${who('dungeon', DUNGEON.villager, 'kid', 'Child', 'Plays near home. Becomes a worker — or a soldier, if their house is sworn and they finish drill.')}
           ${who('dungeon', DUNGEON.knight, 'soldier', 'Soldier', 'Guards the barracks and fights raiders.')}
           ${who('dungeon', DUNGEON.orc, 'raider', 'Raider', 'Walks at the nearest person and hits them. Tramples crops.')}
-          ${who('dungeon', 123, 'raider', 'Rat', 'Harmless to people; eats your crops. Scatters from soldiers and you.')}
+          ${who('dungeon', 123, 'raider', 'Rat swarm', 'At least 10 arrive together and spread across the field. Foragers doubles their eating time, but crops are never immune. Scare them with equipped weapons or stop them with gates.')}
           ${who('dungeon', DUNGEON.imp, 'raider', 'Snatcher', 'Grabs a child and runs for the map edge. Kill it to free them; kids indoors are safe.')}
-          ${who('dungeon', DUNGEON.orc, 'raider', 'Brute', 'Slow, huge, ignores knockback, hunts soldiers. Gang up.')}
+          ${who('dungeon', DUNGEON.orc, 'raider', 'Brute', '180 base HP, 24 damage, twice the speed, reach and attack rate, half the knockback. The axe winds up and swings even when you dodge. Devastates fortifications.')}
           ${who('dungeon', DUNGEON.wizard, 'raider', 'Shaman', 'Keeps its distance and casts bolts. Close in on it.')}
           <h3>BUILDINGS</h3>
           <p>Buildings can't be damaged. Use the <b>HAMMER</b> on one (3 hits) to upgrade it for wood. Every building has three levels — the brass studs on the sign by the door count them, and each level changes the building itself:</p>
@@ -724,7 +750,7 @@ export class UI {
             <kbd>WASD</kbd><span>move (joystick on phone)</span>
             <kbd>click / C</kbd><span>use the tool you hold. A click also turns you toward the cursor. The bottom bar says what the tool will do. The sword swings an arc; it only hits what it reaches.</span>
             <kbd>right click / X</kbd><span>check a villager (opens the inspector)</span>
-            <kbd>1-8 · Tab · wheel</kbd><span>pick a tool — hands, hoe, seeds, axe, sword, house, barracks, hammer</span>
+            <kbd>1-9 · Tab · wheel</kbd><span>pick a tool — hands, hoe, seeds, axe, sword, house, barracks, hammer</span>
             <kbd>Z</kbd><span>camera zoom 1× / 1.5× / 2× / 3× — 1× shows most of the map</span>
             <kbd>E / Esc</kbd><span>menu (pause, restart, how to play)</span>
             <kbd>- / =</kbd><span>game speed 1x / 4x / 16x</span>

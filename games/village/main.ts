@@ -1,7 +1,9 @@
 import Phaser from 'phaser';
 import { SimScene, launch } from '@shared/index';
-import { World, doorstep, buildingCenter, BUILDINGS, MAX_LEVEL, type Building, type BuildingKind, type Tile, type TilePos } from './world';
-import { Villager, Raider, Player, Mover, TOOLS, type Role, type Tool } from './agents';
+import { World, doorstep, buildingCenter, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos } from './world';
+import { Villager, Raider, Player, Mover, Arrow, TOOLS, type Role, type Tool } from './agents';
+import { DEFENSE_COST, WALL_HEIGHT } from './config';
+import { Interior } from './interior';
 import { Rat, Snatcher, Brute, Shaman, waveComposition } from './enemies';
 import { p, TILE, COLS, ROWS, ZOOM, COST, TREE_YIELD, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, OLD_YIELD, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, CADET_AGE_BEFORE, HEARTY_RATION, CALLING_NAME, type Calling } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
@@ -25,7 +27,9 @@ export type FxEvent =
   | { kind: 'cast'; who: Mover }
   | { kind: 'impact'; x: number; y: number }
   | { kind: 'upgrade'; building: Building }
-  | { kind: 'hearts'; who: Mover };
+  | { kind: 'hearts'; who: Mover }
+  | { kind: 'melee'; who: Mover; x: number; y: number }
+  | { kind: 'arrow'; who: Mover };
 
 export type Screen = 'title' | 'playing' | 'paused' | 'over' | 'won';
 
@@ -36,6 +40,9 @@ export class VillageScene extends SimScene {
   player!: Player;
   food = 0;
   wood = 0;
+  arrows = 30;
+  interior = new Interior(this);
+  posting: Villager | null = null;
   day = 1;
   /** 0..1 within the day; night around 0.8..0.2 */
   dayTime = 0.3;
@@ -103,6 +110,9 @@ export class VillageScene extends SimScene {
   }
 
   setup(): void {
+    this.interior.leave();
+    this.posting = null;
+    this.arrows = 30;
     this.mods = this.meta.mods();
     this.world = new World();
     this.world.generate(this.rng, this.mods.fieldWide ? 5 : 3);
@@ -114,6 +124,7 @@ export class VillageScene extends SimScene {
     this.dayTime = 0.3;
     this.raidActive = false;
     this.selected = null;
+    this.selectedBuilding = null;
     this.journal = [];
     this.fx = [];
     if (this.slowUntil) { clearTimeout(this.slowUntil); this.slowUntil = 0; }
@@ -141,7 +152,7 @@ export class VillageScene extends SimScene {
       const h2 = this.world.placeHouse(spot.tx, spot.ty);
       for (let i = 0; i < this.mods.extraAdults; i++) this.addVillager(h2, i % 2 ? 'woodcutter' : 'farmer', 22);
     }
-    this.event('info', 'A new village. Till soil, plant, and keep everyone fed.');
+    this.event('info', `A new village in ${this.world.denseForests ? 'the deep woodland' : 'the open meadows'}. Follow trails to explore. Build walls and stairs, then station archers.`);
   }
 
   private addVillager(home: (typeof this.world.houses)[number], role: Role, age: number): Villager {
@@ -163,6 +174,8 @@ export class VillageScene extends SimScene {
     // Stardew-style: C / left click = use tool, X / right click = check, E / Esc = menu, 1-8 or Tab / wheel = tools
     kb.on('keydown-C', () => this.interact());
     kb.on('keydown-X', () => {
+      if (this.interior.active) { this.interior.act(); return; }
+      if (this.checkNearby()) return;
       if (this.hovered) { this.select(this.hovered); return; }
       const b = this.facedBuilding() ?? this.world.get(this.player.tile.tx, this.player.tile.ty)?.building ?? null;
       if (b) this.selectBuilding(b); else this.select(null);
@@ -180,7 +193,7 @@ export class VillageScene extends SimScene {
     kb.removeAllListeners('keydown-ONE'); kb.removeAllListeners('keydown-TWO'); kb.removeAllListeners('keydown-THREE');
     kb.on('keydown-MINUS', () => (this.speed = this.speed > 4 ? 4 : 1));
     kb.on('keydown-PLUS', () => (this.speed = this.speed < 4 ? 4 : 16));
-    ['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT'].forEach((k, i) => kb.on(`keydown-${k}`, () => (this.player.tool = TOOLS[i])));
+    ['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE'].forEach((k, i) => kb.on(`keydown-${k}`, () => (this.player.tool = TOOLS[i])));
     // the kernel's R (restart) / N (new seed) are far too easy to hit mid-run: restart lives in the pause menu,
     // and R only works on the end screens where it means "new run"
     kb.removeAllListeners('keydown-R');
@@ -197,6 +210,7 @@ export class VillageScene extends SimScene {
     this.input.on('pointermove', (ptr: Phaser.Input.Pointer) => this.onPointerMove(ptr));
     this.input.mouse?.disableContextMenu();
     this.input.on('pointerdown', (ptr: Phaser.Input.Pointer, objs: Phaser.GameObjects.GameObject[]) => {
+      if (this.posting) { const q = World.toTile(ptr.worldX, ptr.worldY + WALL_HEIGHT); this.assignPost(this.posting, q); return; }
       if (document.body.classList.contains('touch')) { this.pick(ptr, objs); return; }
       if (ptr.rightButtonDown()) { this.pick(ptr, objs); return; }
       if (this.screen !== 'playing') return;
@@ -323,6 +337,7 @@ export class VillageScene extends SimScene {
   }
   /** Pick whatever is under the pointer: an agent first, else a building tile. */
   private pick(ptr: Phaser.Input.Pointer, objs: Phaser.GameObjects.GameObject[]): void {
+    if (this.checkNearby(World.toTile(ptr.worldX, ptr.worldY))) return;
     const m = (objs[0]?.getData('agent') as Mover) ?? null;
     if (m) { this.select(m); return; }
     const b = this.world.get(Math.floor(ptr.worldX / TILE), Math.floor(ptr.worldY / TILE))?.building ?? null;
@@ -457,7 +472,7 @@ export class VillageScene extends SimScene {
         html = `<div class="t">${t.stage < 2 ? 'Stump' : 'Sapling'}</div><div class="d">grows into a tree in ${days} day${days === 1 ? '' : 's'}${this.world.treeNeighbours(tx, ty) >= 2 ? ' · sheltered by the grove' : ''}</div>`;
         break;
       }
-      case 'house': case 'barracks': case 'granary': case 'woodyard': {
+      case 'house': case 'barracks': case 'granary': case 'woodyard': case 'tavern': {
         const b = t.building!;
         html = `<div class="t">${this.buildingTitle(b)}</div><div class="d">${this.buildingBlurb(b)}</div>`;
         break;
@@ -517,7 +532,7 @@ export class VillageScene extends SimScene {
     const treeCap = Math.floor(COLS * ROWS * 0.3);
     let trees = this.world.count((t) => t.kind === 'tree' || t.kind === 'sapling');
     for (const q of seeds) {
-      if (trees >= treeCap || this.world.get(q.tx, q.ty)?.kind !== 'grass' || this.nearBuilding(q.tx, q.ty, 2)) continue;
+      if (trees >= treeCap || this.world.get(q.tx, q.ty)?.kind !== 'grass' || this.world.get(q.tx, q.ty)?.trail || this.nearBuilding(q.tx, q.ty, 2)) continue;
       this.world.set(q.tx, q.ty, 'sapling').stage = 2;
       trees++;
     }
@@ -588,14 +603,19 @@ export class VillageScene extends SimScene {
     // Scouts: every wave is a raider short (never below one); Hearsay: the Warlord's escort halves
     mix.raider = Math.max(1, mix.raider - this.mods.waveShrink);
     if (boss && this.mods.bossEscortMul < 1) for (const k of Object.keys(mix) as (keyof typeof mix)[]) mix[k] = Math.max(k === 'raider' ? 1 : 0, Math.floor(mix[k] * this.mods.bossEscortMul));
+    if (mix.rat > 0) mix.rat = Math.max(10, mix.rat);
     const opts = { hpMul: (1 + 0.08 * wave) * this.mods.raiderHpMul, speedMul: this.mods.raiderSpeedMul, snatchDelayMul: this.mods.snatchDelayMul, noSnatch: this.mods.noSnatch, harmlessRats: this.mods.ratsHarmless };
     const side = this.rng.int(0, 3);
     const spawnAt = (): { x: number; y: number } => {
-      let tx = side === 0 ? 0 : side === 1 ? COLS - 1 : this.rng.int(0, COLS - 1);
-      let ty = side === 2 ? 0 : side === 3 ? ROWS - 1 : this.rng.int(0, ROWS - 1);
-      const dx = side === 0 ? 1 : side === 1 ? -1 : 0, dy = side === 2 ? 1 : side === 3 ? -1 : 0;
-      while (this.world.isBlocked(tx, ty) && this.world.inBounds(tx + dx, ty + dy)) { tx += dx; ty += dy; }
-      return World.center(tx, ty);
+      // Raids approach from the wilderness frontier, not a several-minute walk from the far map edge.
+      const hx = COLS / 2, hy = ROWS / 2;
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const distance = this.rng.int(35, 48), along = this.rng.int(-22, 22);
+        const tx = hx + (side === 0 ? -distance : side === 1 ? distance : along);
+        const ty = hy + (side === 2 ? -distance : side === 3 ? distance : along);
+        if (!this.world.isBlocked(tx, ty, true) && this.world.bfs({ tx, ty }, { tx: hx, ty: hy }, true).length) return World.center(tx, ty);
+      }
+      return World.center(hx, side === 2 ? hy - 35 : hy + 35);
     };
     const make: Record<keyof typeof mix, (x: number, y: number) => Raider> = {
       raider: (x, y) => new Raider(x, y, opts),
@@ -762,7 +782,7 @@ export class VillageScene extends SimScene {
     const now = b.kind === 'house' ? `${b.residents}/${this.beds(b)} beds${b.level >= 3 ? ' · births +15%' : ''}${' · raises ' + CALLING_NAME[b.calling ?? 'farmer']}${b.hearty ? ' · hearty rations' : ''}`
       : b.kind === 'granary' ? `${this.food | 0}/${CAPS[b.level]} food`
       : b.kind === 'woodyard' ? `${this.wood | 0}/${CAPS[b.level]} wood`
-      : LEVEL_PERKS.barracks[b.level];
+      : LEVEL_PERKS[b.kind][b.level];
     const next = b.level < MAX_LEVEL ? ` · next Lv${b.level + 1}: ${LEVEL_PERKS[b.kind][b.level + 1]} (${this.upgradeCost(b)} wood, hammer)` : ' · max level';
     return now + next;
   }
@@ -778,7 +798,7 @@ export class VillageScene extends SimScene {
   /** Wood to take a building to its next level (Cheap Timber discounts it). */
   upgradeCost(b: Building): number { return Math.round(UPGRADE_COST[b.kind][b.level] * this.mods.upgradeCostMul); }
   /** Wood to raise a new house or barracks (Master Builder halves it). */
-  buildCost(kind: 'house' | 'barracks'): number { return Math.round(COST[kind] * this.mods.buildCostMul); }
+  buildCost(kind: 'house' | 'barracks' | 'tavern'): number { return Math.round(COST[kind] * this.mods.buildCostMul); }
 
   private upgrade(b: Building): void {
     const cost = this.upgradeCost(b);
@@ -790,6 +810,73 @@ export class VillageScene extends SimScene {
   }
 
   // ---- player actions -------------------------------------------------------
+
+  shoot(who: Mover, dx: number, dy: number, dmg: number): boolean {
+    if (this.arrows <= 0) { who.task = 'out of arrows'; if (who === this.player) this.event('info', 'Out of arrows. Craft a bundle at the barracks.'); return false; }
+    const len = Math.hypot(dx, dy) || 1;
+    who.aim = { x: dx / len, y: dy / len }; who.dir = dx < 0 ? -1 : 1;
+    this.arrows--; who.attackCd = 0.65;
+    this.spawn(new Arrow(who.x, who.y, dx / len, dy / len, dmg, who, len > 2 ? len : who.elevated ? 220 : 170));
+    this.fx.push({ kind: 'arrow', who });
+    return true;
+  }
+  craftArrows(): void {
+    if (!this.world.barracks.length || this.wood < 2) { this.event('info', 'A barracks and 2 wood are needed for 10 arrows.', true); return; }
+    this.wood -= 2; this.arrows += 10; this.event('wood', 'Fletched 10 arrows for the shared quiver.');
+  }
+  equipSoldier(v: Villager, weapon: 'sword' | 'bow'): void {
+    if (v.role !== 'soldier' || v.dead) return;
+    v.weapon = weapon; v.attack = null; v.clearGoal();
+  }
+  reachableStairs(m: Mover, post?: TilePos): TilePos | null {
+    const candidates = [...this.world.defenses.values()].filter(d => d.kind === 'stairs').sort((a, b) => m.dist(World.center(a.tx, a.ty)) - m.dist(World.center(b.tx, b.ty)));
+    for (const q of candidates) {
+      const ground = m.dist(World.center(q.tx, q.ty)) < 3 || this.world.bfs(m.tile, q, false, m.elevated).length > 0;
+      if (ground && (!post || (post.tx === q.tx && post.ty === q.ty) || this.world.bfs(q, post, false, true).length > 0)) return q;
+    }
+    return null;
+  }
+  assignPost(v: Villager, q: TilePos): boolean {
+    if (!this.world.get(q.tx, q.ty)?.defense || !this.reachableStairs(v, q)) { this.event('info', 'Choose a wall top connected to reachable stairs.', true); return false; }
+    if (this.villagers().some(o => o !== v && o.post?.tx === q.tx && o.post?.ty === q.ty)) { this.event('info', 'That post is already occupied.', true); return false; }
+    v.post = q; this.equipSoldier(v, 'bow'); this.posting = null;
+    this.event('soldier', `${v.name} is taking an archer post.`, true); return true;
+  }
+  rescueFallenGuards(): void {
+    for (const m of this.agents as Mover[]) if (m.elevated && !this.world.get(m.tile.tx, m.tile.ty)?.defense) {
+      const q = this.world.nearest(m.x, m.y, (_t, tx, ty) => !this.world.isBlocked(tx, ty));
+      if (q) { Object.assign(m, World.center(q.tx, q.ty)); m.elevated = false; m.clearGoal(); if (m instanceof Villager) m.post = null; }
+    }
+  }
+  defenseTarget(): TilePos {
+    const hv = this.hoverTile, t = this.player.tile;
+    return hv && Math.max(Math.abs(hv.tx - t.tx), Math.abs(hv.ty - t.ty)) <= 6 ? hv : this.player.faced;
+  }
+  buildDefense(kind: DefenseKind): void {
+    const q = this.defenseTarget(), cost = DEFENSE_COST[kind];
+    if (this.wood < cost) { this.event('build', `Need ${cost} wood for construction.`); return; }
+    if (!BUILDABLE.has(this.world.get(q.tx, q.ty)?.kind ?? 'tree')) { this.event('build', 'Clear trees and crops before building defenses.'); return; }
+    if (this.world.buildings.some(b => { const d = doorstep(b); return d.tx === q.tx && d.ty === q.ty; })) { this.event('build', 'Leave the doorway clear.'); return; }
+    if ((this.agents as Mover[]).some(m => !m.hidden && !m.dead && m.tile.tx === q.tx && m.tile.ty === q.ty)) { this.event('build', 'Place the wall beside people, not beneath them.'); return; }
+    if (this.world.placeDefense(kind, q.tx, q.ty)) { this.wood -= cost; this.fx.push({ kind: 'tool', tool: 'hammer', ...q }); }
+  }
+  /** Context action: use a nearby doorway, stairs, or gate. Both mouse and touch use this path. */
+  checkNearby(point?: TilePos): boolean {
+    if (this.screen !== 'playing') return false;
+    if (this.interior.active) { this.interior.act(); return true; }
+    const pl = this.player;
+    const q = point ?? this.target;
+    const d = this.world.get(q.tx, q.ty)?.defense ?? this.world.get(pl.tile.tx, pl.tile.ty)?.defense;
+    if (d && pl.dist(World.center(d.tx, d.ty)) < 28) {
+      if (d.kind === 'stairs') { Object.assign(pl, World.center(d.tx, d.ty)); pl.elevated = !pl.elevated; pl.clearGoal(); return true; }
+      if (d.kind === 'gate' && !pl.elevated) { d.open = !d.open; this.world.revision++; this.world.markDirty(d.tx, d.ty); this.event('build', d.open ? 'Gate open to everyone — enemies can enter.' : 'Gate guarded — allies can pass, enemies must break it.'); return true; }
+    }
+    if (pl.elevated) return false;
+    const b = point ? this.world.get(point.tx, point.ty)?.building : null;
+    const nearby = (b ? [b] : this.world.buildings).find(b => ['house', 'barracks', 'tavern'].includes(b.kind) && pl.dist(World.center(doorstep(b).tx, doorstep(b).ty)) < 25);
+    if (nearby) { this.interior.enter(nearby); return true; }
+    return false;
+  }
 
   /** How far from the player the mouse can place a building, in tiles. */
   static readonly BUILD_REACH = 6;
@@ -893,18 +980,31 @@ export class VillageScene extends SimScene {
   /** Use the equipped tool on the faced tile (or swing the sword). */
   interact(): void {
     if (this.screen !== 'playing') return;
+    if (this.interior.active) { this.interior.act(); return; }
     const pl = this.player;
+    if (pl.busy > 0) return;
+    if (pl.tool === 'hands' && this.checkNearby()) return;
+    if (pl.elevated && pl.tool !== 'bow' && pl.tool !== 'sword' && pl.tool !== 'hands') { this.event('info', 'Use the stairs to return to ground level first.'); return; }
     const { tx, ty } = this.target;
     const t = this.world.get(tx, ty);
     if (pl.tool !== 'sword') this.workOn(tx, ty); // acting elsewhere abandons a half-done flatten / upgrade
 
     switch (pl.tool) {
+      case 'bow': {
+        if (pl.attackCd > 0) return;
+        const hv = this.hoverTile, aim = hv ? World.center(hv.tx, hv.ty) : null;
+        const auto = !aim ? this.bestTarget(pl.x, pl.y, 165) : null;
+        this.shoot(pl, aim ? aim.x - pl.x : auto ? auto.x - pl.x : pl.facing.x, aim ? aim.y - pl.y : auto ? auto.y - pl.y : pl.facing.y, Math.round(14 * this.mods.playerDmgMul));
+        return;
+      }
+      case 'wall': case 'gate': case 'stairs': this.buildDefense(pl.tool); return;
       case 'sword': {
         const stage = pl.pressAttack();
         if (stage >= 0) this.fx.push({ kind: 'swing', who: pl, dx: pl.facing.x, dy: pl.facing.y, stage });
         return;
       }
       case 'house':
+      case 'tavern':
       case 'barracks': {
         const a = this.buildAnchor(pl.tool);
         const why = this.buildProblem(a, pl.tool);
@@ -917,6 +1017,10 @@ export class VillageScene extends SimScene {
         return;
       }
       case 'hammer': {
+        if (t?.defense) {
+          if (this.wood < 1 || t.defense.hp === t.defense.maxHp) return;
+          this.wood--; t.defense.hp = Math.min(t.defense.maxHp, t.defense.hp + 80); this.fx.push({ kind: 'tool', tool: 'hammer', tx, ty }); return;
+        }
         const b = this.facedBuilding();
         this.fx.push({ kind: 'tool', tool: 'hammer', tx, ty });
         if (!b || !t) return;
@@ -952,6 +1056,8 @@ export class VillageScene extends SimScene {
 
   /** What the tool would do right now, as "E: verb" (or a reason it won't). */
   hint(): string {
+    if (this.interior.active) return this.interior.hint();
+    if (this.posting) return `Pick a connected battlement for ${this.posting.name} (or cancel in their card)`;
     const pl = this.player;
     const tg = this.target;
     const t = this.world.get(tg.tx, tg.ty);
@@ -960,16 +1066,20 @@ export class VillageScene extends SimScene {
     const b = t?.building;
     if (b && pl.tool !== 'hammer' && pl.tool !== 'sword') return `${this.buildingTitle(b)} — ${this.buildingBlurb(b)}`;
     switch (pl.tool) {
+      case 'bow': return `E: shoot arrow (${this.arrows} left · craft 10 for 2 wood in the barracks)`;
+      case 'wall': case 'gate': case 'stairs': return `E: build ${pl.tool} (${DEFENSE_COST[pl.tool]} wood construction) · ${pl.tool === 'stairs' ? 'connect to a wall; hands to climb' : pl.tool === 'gate' ? 'allies pass; X opens to everyone' : 'connect segments into a perimeter'}`;
       case 'sword': {
         const near = this.nearestRaider(pl.x, pl.y, 40);
         return near ? 'E: attack!' : 'E: swing sword';
       }
       case 'house':
+      case 'tavern':
       case 'barracks': {
         const why = this.buildProblem(this.buildAnchor(pl.tool), pl.tool);
         return `E: build ${pl.tool} ${this.cursorPlacing ? 'where you point' : 'ahead'} (${this.buildCost(pl.tool)} wood)${why ? ' — ' + why : ''}`;
       }
       case 'hammer': {
+        if (t?.defense) return `E: repair ${t.kind} (${Math.ceil(t.defense.hp)}/${t.defense.maxHp} HP · 1 wood repairs 80)`;
         if (!b) return 'hammer: face a building to upgrade it';
         const why = this.upgradeProblem(b);
         return why ? `${this.buildingTitle(b)} — ${why}` : `E: upgrade ${BUILDINGS[b.kind].name} → Lv${b.level + 1}: ${LEVEL_PERKS[b.kind][b.level + 1]} (${this.upgradeCost(b)} wood, ${this.mods.hammerHits - (t?.work ?? 0)} hits)`;
@@ -992,6 +1102,8 @@ export class VillageScene extends SimScene {
         if (kind === 'sapling') return t!.stage < 2 ? 'E: clear the stump' : 'E: cut down the sapling';
         return 'axe: face a tree';
       case 'hands':
+        if (t?.defense?.kind === 'stairs' || this.world.get(pl.tile.tx, pl.tile.ty)?.kind === 'stairs') return `E: ${pl.elevated ? 'descend' : 'climb'} stairs`;
+        if (t?.defense?.kind === 'gate') return `E: ${t.defense.open ? 'close' : 'open'} gate`;
         if (kind === 'crop') return t!.stage >= this.cropDays ? 'E: harvest' : `growing (${t!.stage}/${this.cropDays} days)`;
         if (kind === 'grass') return `grass — ${need('hoe')} to till`;
         if (kind === 'tilled') return `tilled — ${need('seeds')}`;
@@ -1008,10 +1120,11 @@ export class VillageScene extends SimScene {
     if (this.following) {
       const cam = this.cameras.main;
       const k = Math.min(1, dt * 8);
-      cam.centerOn(cam.midPoint.x + (this.player.x - cam.midPoint.x) * k, cam.midPoint.y + (this.player.y - cam.midPoint.y) * k);
+      cam.centerOn(cam.midPoint.x + (this.player.x - cam.midPoint.x) * k, cam.midPoint.y + (this.player.y - (this.player.elevated ? WALL_HEIGHT : 0) - cam.midPoint.y) * k);
     }
     this.view?.sync(dt);
     this.ui?.render(dt);
+    this.interior.draw();
   }
 }
 

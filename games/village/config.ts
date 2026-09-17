@@ -1,8 +1,8 @@
 import { params } from '@shared/index';
 
 export const TILE = 16;
-export const COLS = 80;
-export const ROWS = 44;
+export const COLS = 240;
+export const ROWS = 160;
 export const ZOOM = 2; // 16 px tiles shown at 32 px
 
 /** One run: survive escalating raids until the warlord arrives, then beat him. */
@@ -22,7 +22,9 @@ export const p = params({
   soldierDmg: [10, 1, 30, 1],
 });
 
-export const COST = { house: 20, barracks: 30 } as const;
+export const COST = { house: 20, barracks: 30, tavern: 50 } as const;
+export const DEFENSE_COST = { wall: 4, gate: 12, stairs: 10 } as const;
+export const WALL_HEIGHT = 64;
 export const TREE_YIELD = 8;
 
 // ---- trees, storage, upgrades --------------------------------------------------------------
@@ -45,18 +47,21 @@ export const CAPS = [0, 150, 300, 600] as const;
 /** Playtest switch: every Legacy node unlocked and a slot per branch. Flip to false to restore progression (saved progress is untouched either way). */
 export const LEGACY_TEST_MODE = true;
 /** wood to upgrade a building to level 2 / 3 (index = current level) */
-export const UPGRADE_COST: Record<'house' | 'barracks' | 'granary' | 'woodyard', readonly number[]> = {
+export const UPGRADE_COST: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern', readonly number[]> = {
+  tavern: [0, 40, 80],
   house: [0, 30, 60], barracks: [0, 40, 80], granary: [0, 30, 60], woodyard: [0, 30, 60],
 };
 /** what each level of a building gives, in a few words (index = level); shown in tooltips, hints and help */
-export const LEVEL_PERKS: Record<'house' | 'barracks' | 'granary' | 'woodyard', readonly [string, string, string, string]> = {
+export const LEVEL_PERKS: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern', readonly [string, string, string, string]> = {
+  tavern: ['', 'hearth meals restore 20 HP', 'hearth meals restore 35 HP', 'hearth meals restore 50 HP · family hall'],
   house: ['', '4 beds', '6 beds', '8 beds · births +15%'],
   barracks: ['', 'sponsors 1 house', 'sponsors 2 houses · soldiers +15 HP', 'sponsors 3 houses · soldiers +30 HP · +20% dmg · regen'],
   granary: ['', 'holds 150 food', 'holds 300 food', 'holds 600 food'],
   woodyard: ['', 'holds 150 wood', 'holds 300 wood', 'holds 600 wood'],
 };
 /** what changes on the building itself at each level, for the help screen */
-export const LEVEL_LOOKS: Record<'house' | 'barracks' | 'granary' | 'woodyard', readonly [string, string, string, string]> = {
+export const LEVEL_LOOKS: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern', readonly [string, string, string, string]> = {
+  tavern: ['', 'green roof, hanging mug sign', 'flower boxes and second chimney', 'guest loft and lanterns'],
   house: ['', 'cottage', 'chimney, flower boxes, porch', 'second storey'],
   barracks: ['', 'stone keep', 'shields and stakes', 'tower and torches'],
   granary: ['', 'barn', 'open hay loft', 'silo'],

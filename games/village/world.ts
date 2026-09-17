@@ -1,8 +1,10 @@
 import type { Rng } from '@shared/index';
 import { TILE, COLS, ROWS, type Calling } from './config';
 
-export type TileKind = 'grass' | 'tree' | 'sapling' | 'tilled' | 'crop' | 'house' | 'barracks' | 'granary' | 'woodyard';
-export type BuildingKind = 'house' | 'barracks' | 'granary' | 'woodyard';
+export type DefenseKind = 'wall' | 'gate' | 'stairs';
+export interface Defense extends TilePos { kind: DefenseKind; hp: number; maxHp: number; open: boolean }
+export type TileKind = 'grass' | 'tree' | 'sapling' | 'tilled' | 'crop' | BuildingKind | DefenseKind;
+export type BuildingKind = 'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern';
 
 /** Footprint per building kind; (tx, ty) is the top-left, the door sits on the bottom row at `door`. */
 export const BUILDINGS: Record<BuildingKind, { w: number; h: number; door: number; name: string }> = {
@@ -10,6 +12,7 @@ export const BUILDINGS: Record<BuildingKind, { w: number; h: number; door: numbe
   barracks: { w: 4, h: 4, door: 1, name: 'Barracks' },
   granary: { w: 3, h: 2, door: 1, name: 'Granary' },
   woodyard: { w: 3, h: 2, door: 1, name: 'Woodyard' },
+  tavern: { w: 4, h: 4, door: 1, name: 'The Copper Acorn' },
 };
 export const MAX_LEVEL = 3;
 /** ground a building can go on (flattened when it goes up) */
@@ -58,17 +61,25 @@ export interface Tile {
   building?: Building;
   /** for buildings: which footprint cell this tile is (col + row * w), for rendering */
   part?: number;
+  defense?: Defense;
+  biome?: 'meadow' | 'woodland' | 'deepwood';
+  trail?: boolean;
 }
 
 export interface TilePos { tx: number; ty: number }
 
 export const BLOCKING: Record<TileKind, boolean> = {
   grass: false, tilled: false, crop: false, sapling: false, tree: true, house: true, barracks: true, granary: true, woodyard: true,
+  tavern: true, wall: true, gate: false, stairs: false,
 };
 
 export class World {
   tiles: Tile[] = [];
   buildings: Building[] = [];
+  defenses = new Map<number, Defense>();
+  denseForests = false;
+  revision = 0;
+  treeCount = 0;
   /** tile indices changed since the renderer last drained this */
   dirty = new Set<number>();
 
@@ -96,7 +107,10 @@ export class World {
   set(tx: number, ty: number, kind: TileKind): Tile {
     const i = ty * this.cols + tx;
     const t = this.tiles[i];
-    if (t.building && !this.stamping) return t;
+    if ((t.building || t.defense) && !this.stamping) return t;
+    if (t.kind === 'tree') this.treeCount--;
+    if (kind === 'tree') this.treeCount++;
+    this.revision++;
     t.kind = kind; t.stage = 0; t.work = 0; t.building = undefined; t.part = undefined; t.v = (t.v + 31) % 97;
     this.dirty.add(i);
     return t;
@@ -105,9 +119,30 @@ export class World {
   markDirty(tx: number, ty: number): void {
     this.dirty.add(ty * this.cols + tx);
   }
-  isBlocked(tx: number, ty: number): boolean {
+  isBlocked(tx: number, ty: number, enemy = false, elevated = false): boolean {
     const t = this.get(tx, ty);
+    if (elevated) return !t?.defense;
+    if (t?.defense) return t.kind === 'wall' || (t.kind === 'gate' && enemy && !t.defense.open);
     return !t || BLOCKING[t.kind];
+  }
+
+  placeDefense(kind: DefenseKind, tx: number, ty: number): Defense | null {
+    if (!BUILDABLE.has(this.get(tx, ty)?.kind ?? 'tree')) return null;
+    const t = this.set(tx, ty, kind);
+    const hp = kind === 'gate' ? 240 : 400;
+    const d: Defense = { kind, tx, ty, hp, maxHp: hp, open: false };
+    t.defense = d;
+    this.defenses.set(ty * this.cols + tx, d);
+    return d;
+  }
+  damageDefense(d: Defense, damage: number): boolean {
+    d.hp = Math.max(0, d.hp - damage);
+    this.markDirty(d.tx, d.ty);
+    if (d.hp) return false;
+    this.get(d.tx, d.ty)!.defense = undefined;
+    this.defenses.delete(d.ty * this.cols + d.tx);
+    this.set(d.tx, d.ty, 'grass');
+    return true;
   }
 
   /** Pixel centre of a tile. */
@@ -118,6 +153,18 @@ export class World {
     return { tx: Math.floor(x / TILE), ty: Math.floor(y / TILE) };
   }
 
+  /** Segment visibility; arrows from battlements clear the rampart but buildings and trees stop them. */
+  lineClear(a: { x: number; y: number }, b: { x: number; y: number }, aboveWall = false): boolean {
+    const dist = Math.hypot(b.x - a.x, b.y - a.y), steps = Math.ceil(dist / 4);
+    for (let i = 1; i < steps; i++) {
+      const q = World.toTile(a.x + (b.x - a.x) * i / steps, a.y + (b.y - a.y) * i / steps);
+      const t = this.get(q.tx, q.ty);
+      if (aboveWall && t?.defense) continue;
+      if (this.isBlocked(q.tx, q.ty, true)) return false;
+    }
+    return true;
+  }
+
   /** Can a building of `kind` go here? The footprint may cover grass, stumps/saplings and bare soil (they get cleared) — not trees, crops or buildings. */
   canBuild(kind: BuildingKind, tx: number, ty: number): boolean {
     const f = BUILDINGS[kind];
@@ -125,7 +172,7 @@ export class World {
     for (let dy = 0; dy < f.h; dy++)
       for (let dx = 0; dx < f.w; dx++)
         if (!BUILDABLE.has(this.get(tx + dx, ty + dy)?.kind ?? 'tree')) return false;
-    return true;
+    return !this.isBlocked(tx + f.door, ty + f.h);
   }
 
   place(kind: BuildingKind, tx: number, ty: number): Building {
@@ -208,30 +255,56 @@ export class World {
    * BFS path on the 4-grid from `from` to `to`. If `to` is blocked, the path ends on a
    * passable tile adjacent to it. Returns tile positions excluding `from`; [] if unreachable/already there.
    */
-  bfs(from: TilePos, to: TilePos): TilePos[] {
+  bfs(from: TilePos, to: TilePos, enemy = false, elevated = false): TilePos[] {
+    if (!this.inBounds(from.tx, from.ty) || !this.inBounds(to.tx, to.ty)) return [];
     const n = this.cols * this.rows;
     const start = from.ty * this.cols + from.tx;
     const goal = to.ty * this.cols + to.tx;
-    const goalBlocked = this.isBlocked(to.tx, to.ty);
+    const goalBlocked = this.isBlocked(to.tx, to.ty, enemy, elevated);
     if (start === goal) return [];
     const prev = new Int32Array(n).fill(-1);
     prev[start] = start;
-    const queue = [start];
+    // A* keeps long journeys cheap: only expand promising tiles, using a binary heap.
+    const costs = new Float64Array(n).fill(Infinity);
+    costs[start] = 0;
+    const queue: { i: number; score: number }[] = [];
+    const push = (i: number, score: number) => {
+      let k = queue.length; queue.push({ i, score });
+      while (k > 0) { const p = (k - 1) >> 1; if (queue[p].score <= score) break; queue[k] = queue[p]; k = p; }
+      queue[k] = { i, score };
+    };
+    const pop = () => {
+      const first = queue[0], last = queue.pop()!;
+      if (queue.length) {
+        let k = 0;
+        while (k * 2 + 1 < queue.length) {
+          let c = k * 2 + 1;
+          if (c + 1 < queue.length && queue[c + 1].score < queue[c].score) c++;
+          if (last.score <= queue[c].score) break;
+          queue[k] = queue[c]; k = c;
+        }
+        queue[k] = last;
+      }
+      return first.i;
+    };
+    push(start, 0);
     const dirs = [1, -1, this.cols, -this.cols];
-    for (let qi = 0; qi < queue.length; qi++) {
-      const cur = queue[qi];
+    while (queue.length) {
+      const cur = pop();
       const cx = cur % this.cols, cy = (cur / this.cols) | 0;
+      if (cur === goal) return this.unwind(prev, start, cur);
       if (goalBlocked && Math.abs(cx - to.tx) + Math.abs(cy - to.ty) === 1) return this.unwind(prev, start, cur);
       for (let d = 0; d < 4; d++) {
         const nx = cx + (d === 0 ? 1 : d === 1 ? -1 : 0);
         const ny = cy + (d === 2 ? 1 : d === 3 ? -1 : 0);
         if (!this.inBounds(nx, ny)) continue;
         const ni = cur + dirs[d];
-        if (prev[ni] !== -1) continue;
-        if (ni === goal && !goalBlocked) { prev[ni] = cur; return this.unwind(prev, start, ni); }
-        if (this.isBlocked(nx, ny)) continue;
+        if (this.isBlocked(nx, ny, enemy, elevated)) continue;
+        const cost = costs[cur] + 1;
+        if (cost >= costs[ni]) continue;
+        costs[ni] = cost;
         prev[ni] = cur;
-        queue.push(ni);
+        push(ni, cost + Math.abs(nx - to.tx) + Math.abs(ny - to.ty));
       }
     }
     return [];
@@ -245,14 +318,32 @@ export class World {
 
   /** Starting map: tree clusters, a house, a barracks, the field, and the two supply buildings. */
   generate(rng: Rng, fieldW = 3): void {
-    for (let k = 0; k < 72; k++) {
-      const cx = rng.int(1, this.cols - 2), cy = rng.int(1, this.rows - 2);
-      for (let i = 0; i < 6; i++) {
-        const tx = cx + rng.int(-2, 2), ty = cy + rng.int(-2, 2);
-        if (this.inBounds(tx, ty) && this.get(tx, ty)!.kind === 'grass') this.set(tx, ty, 'tree').stage = rng.int(0, 10);
-      }
+    this.denseForests = rng.chance(0.65);
+    // Broad overlapping forest regions leave meadows between them; some seeds have only open groves.
+    const groves = Array.from({ length: this.denseForests ? 22 : 12 }, () => ({
+      x: rng.int(8, this.cols - 9), y: rng.int(8, this.rows - 9), rx: rng.int(14, 34), ry: rng.int(12, 25),
+    }));
+    for (let ty = 0; ty < this.rows; ty++) for (let tx = 0; tx < this.cols; tx++) {
+      const t = this.get(tx, ty)!;
+      let density = 0;
+      for (const g of groves) density = Math.max(density, 1 - ((tx - g.x) / g.rx) ** 2 - ((ty - g.y) / g.ry) ** 2);
+      t.biome = this.denseForests && density > 0.35 ? 'deepwood' : density > 0 ? 'woodland' : 'meadow';
+      const chance = t.biome === 'deepwood' ? 0.78 : t.biome === 'woodland' ? 0.2 : 0.018;
+      if (rng.chance(chance)) this.set(tx, ty, 'tree').stage = rng.int(0, 12);
     }
     const hx = (this.cols / 2) | 0, hy = (this.rows / 2) | 0;
+    // Connected woodland trails cross the entire map, so a dense seed cannot seal off a region.
+    const clearTrail = (x: number, y: number) => {
+      for (let d = -1; d <= 1; d++) if (this.inBounds(x + d, y)) { const t = this.set(x + d, y, 'grass'); t.trail = true; }
+    };
+    for (let y = 0; y < this.rows; y++) {
+      clearTrail(hx, y);
+      for (const base of [32, this.cols - 33]) clearTrail(base + Math.round(Math.sin(y / 13) * 4), y);
+    }
+    for (const base of [hy, 24, this.rows - 25]) for (let x = 0; x < this.cols; x++) {
+      const y = base === hy ? hy : base + Math.round(Math.sin(x / 17) * 4);
+      for (let d = -1; d <= 1; d++) if (this.inBounds(x, y + d)) { const t = this.set(x, y + d, 'grass'); t.trail = true; }
+    }
     // clear the village centre
     for (let ty = hy - 7; ty <= hy + 4; ty++)
       for (let tx = hx - 11; tx <= hx + 10; tx++) this.set(tx, ty, 'grass');
@@ -266,5 +357,9 @@ export class World {
       }
     this.place('granary', hx + half + 2, hy + 1);
     this.place('woodyard', hx - 9, hy + 1);
+    // A small reliable starter grove; the wider seed still determines the wilderness.
+    for (let y = hy + 8; y < hy + 12; y++) for (let x = hx - 8; x < hx - 3; x++) {
+      if (!this.get(x, y)?.trail && rng.chance(0.65)) this.set(x, y, 'tree').stage = rng.int(0, 10);
+    }
   }
 }

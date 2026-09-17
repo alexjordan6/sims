@@ -7,6 +7,7 @@ import type { VillageScene } from './main';
 
 /** Fast, weak, harmless to people: eats the fields. Flees from anyone armed. */
 export class Rat extends Raider {
+  private gnawSeconds = 1.5;
   private gnaw = 0;
   private flee = 0;
   private crop: TilePos | null = null;
@@ -22,7 +23,7 @@ export class Rat extends Raider {
     this.speed = 55 * (opts.speedMul ?? 1);
     this.radius = 2.5;
     this.task = 'sniffing for crops';
-    if (opts.harmlessRats) this.bored = 99; // Foragers: rats find nothing worth eating and leave
+    this.gnawSeconds = opts.harmlessRats ? 3 : 1.5; // Foragers buys time, never immunity.
   }
 
   update(dt: number, s: VillageScene): void {
@@ -38,7 +39,7 @@ export class Rat extends Raider {
       const dx = this.x - from.x, dy = this.y - from.y, d = Math.hypot(dx, dy) || 1;
       const nx = this.x + (dx / d) * this.speed * dt, ny = this.y + (dy / d) * this.speed * dt;
       const t = World.toTile(nx, ny);
-      if (!s.world.isBlocked(t.tx, t.ty)) { this.x = nx; this.y = ny; this.vx = (dx / d) * this.speed; this.vy = (dy / d) * this.speed; }
+      if (!s.world.isBlocked(t.tx, t.ty, true)) { this.x = nx; this.y = ny; this.vx = (dx / d) * this.speed; this.vy = (dy / d) * this.speed; }
       this.dir = dx < 0 ? -1 : 1;
       this.clearGoal();
       this.gnaw = 0;
@@ -49,10 +50,12 @@ export class Rat extends Raider {
     if (!this.crop || this.retarget <= 0 || s.world.get(this.crop.tx, this.crop.ty)?.kind !== 'crop') {
       this.retarget = 1;
       const w = s.world;
-      this.crop = w.nearest(this.x, this.y, (t) => t.kind === 'crop' && t.stage >= s.cropDays) ?? w.nearest(this.x, this.y, (t) => t.kind === 'crop');
+      // Spread a swarm across the field instead of sending every rat to the same plant.
+      const crops = [...w.find(t => t.kind === 'crop')].sort((a, b) => this.dist(World.center(a.tx, a.ty)) - this.dist(World.center(b.tx, b.ty)));
+      this.crop = crops.length ? crops[this.id % Math.min(crops.length, 20)] : null;
       if (this.crop) this.setGoal(s, this.crop.tx, this.crop.ty, true);
     }
-    if (!this.crop || this.bored >= 99) {
+    if (!this.crop) {
       this.bored += dt;
       this.task = 'nothing to eat';
       if (this.bored > 8) this.dead = true; // scampers off
@@ -65,7 +68,7 @@ export class Rat extends Raider {
       this.vx = this.vy = 0;
       this.task = 'gnawing the crops';
       this.gnaw += dt;
-      if (this.gnaw >= 1.5) {
+      if (this.gnaw >= this.gnawSeconds) {
         this.gnaw = 0;
         s.world.set(this.crop.tx, this.crop.ty, 'tilled');
         s.cropEaten();
@@ -80,7 +83,7 @@ export class Rat extends Raider {
   private nearestArmed(s: VillageScene, r: number): Mover | null {
     let best: Mover | null = null, bd = Infinity;
     s.grid.forEachInRadius(this.x, this.y, r, (o, d2) => {
-      const armed = o instanceof Player || (o instanceof Villager && o.role === 'soldier');
+      const armed = (o instanceof Player && (o.tool === 'sword' || o.tool === 'bow')) || (o instanceof Villager && o.role === 'soldier' && !o.elevated);
       if (armed && !(o as Mover).hidden && d2 < bd) { bd = d2; best = o as Mover; }
     });
     return best;
@@ -167,10 +170,10 @@ export class Brute extends Raider {
     this.kind = 'brute';
     this.name = 'Brute';
     this.heavy = true;
-    this.pushScale = 0.3;
-    this.hp = this.maxHp = Math.round(90 * (opts.hpMul ?? 1));
-    this.dmg = 12;
-    this.speed = 28 * (opts.speedMul ?? 1);
+    this.pushScale = 0.15;
+    this.hp = this.maxHp = Math.round(180 * (opts.hpMul ?? 1));
+    this.dmg = 24;
+    this.speed = 56 * (opts.speedMul ?? 1);
     this.radius = 4.5;
     this.task = 'lumbering in';
   }
@@ -178,6 +181,7 @@ export class Brute extends Raider {
   update(dt: number, s: VillageScene): void {
     this.tickTimers(dt);
     if (this.frozen(dt)) return;
+    if (this.siege && this.breach(dt, s)) return;
     if (this.attackTick(dt, s)) return;
     this.retarget -= dt;
     if (this.retarget <= 0 || !this.target || this.target.dead || this.target.hidden) {
@@ -192,8 +196,10 @@ export class Brute extends Raider {
     }
     this.bored = 0;
     this.task = this.target instanceof Villager && this.target.role === 'soldier' ? 'smashing soldiers' : 'smashing';
-    if (this.startAttack(s, this.target, this.dmg, 15, 0.4, 0.8)) return;
+    if (this.startAttack(s, this.target, this.dmg, 30, 0.2, 0.4)) return;
     this.setGoal(s, this.target.tile.tx, this.target.tile.ty);
+    if (!this.path.length && (this.dist(this.target) > 30 || !s.world.lineClear(this, this.target)) && this.breach(dt, s)) return;
+    if (!this.path.length && this.target.elevated && this.breach(dt, s)) return;
     this.followPath(dt);
     const t = this.tile;
     if (s.world.get(t.tx, t.ty)?.kind === 'crop') s.world.set(t.tx, t.ty, 'tilled');
@@ -238,7 +244,7 @@ export class Shaman extends Raider {
       this.task = 'backing off';
       const nx = this.x - dx * this.speed * dt, ny = this.y - dy * this.speed * dt;
       const t = World.toTile(nx, ny);
-      if (!s.world.isBlocked(t.tx, t.ty)) { this.x = nx; this.y = ny; this.vx = -dx * this.speed; this.vy = -dy * this.speed; }
+      if (!s.world.isBlocked(t.tx, t.ty, true)) { this.x = nx; this.y = ny; this.vx = -dx * this.speed; this.vy = -dy * this.speed; }
       else { this.vx = this.vy = 0; }
       this.clearGoal();
     } else if (d > 110) {
@@ -251,7 +257,7 @@ export class Shaman extends Raider {
       this.clearGoal();
     }
     this.cast -= dt;
-    if (this.cast <= 0 && d <= 140) {
+    if (this.cast <= 0 && d <= 140 && s.world.lineClear(this, this.target, false)) {
       this.cast = 2;
       s.spawn(new Bolt(this.x, this.y - 4, dx, dy, this.dmg));
       s.fx.push({ kind: 'cast', who: this });
@@ -281,11 +287,11 @@ export class Bolt extends Mover {
     this.travelled += step;
     if (this.travelled >= this.range || this.x < 0 || this.y < 0 || this.x > COLS * TILE || this.y > ROWS * TILE) { this.dead = true; return; }
     const t = this.tile;
-    if (s.world.isBlocked(t.tx, t.ty)) { this.dead = true; s.fx.push({ kind: 'impact', x: this.x, y: this.y }); return; }
+    if (s.world.isBlocked(t.tx, t.ty, true)) { this.dead = true; s.fx.push({ kind: 'impact', x: this.x, y: this.y }); return; }
     let hit: Mover | null = null;
     s.grid.forEachInRadius(this.x, this.y, 7, (o) => {
       const m = o as Mover;
-      if (hit || m.hidden || m.dead) return;
+      if (hit || m.hidden || m.dead || m.elevated) return;
       if (m instanceof Player || (m instanceof Villager && !m.carriedBy)) hit = m;
     });
     if (hit) {
@@ -311,10 +317,10 @@ export function waveComposition(w: number, boss = false): Record<'raider' | 'rat
   if (boss) return { raider: 3, rat: 0, snatcher: 2, brute: 1, shaman: 1 };
   switch (Math.max(1, Math.min(6, w))) {
     case 1: return { raider: 2, rat: 0, snatcher: 0, brute: 0, shaman: 0 };
-    case 2: return { raider: 2, rat: 3, snatcher: 0, brute: 0, shaman: 0 };
-    case 3: return { raider: 2, rat: 2, snatcher: 1, brute: 0, shaman: 0 };
+    case 2: return { raider: 2, rat: 10, snatcher: 0, brute: 0, shaman: 0 };
+    case 3: return { raider: 2, rat: 12, snatcher: 1, brute: 0, shaman: 0 };
     case 4: return { raider: 3, rat: 0, snatcher: 1, brute: 1, shaman: 0 };
-    case 5: return { raider: 3, rat: 4, snatcher: 1, brute: 0, shaman: 1 };
+    case 5: return { raider: 3, rat: 16, snatcher: 1, brute: 0, shaman: 1 };
     default: return { raider: 3, rat: 0, snatcher: 2, brute: 1, shaman: 1 };
   }
 }

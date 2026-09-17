@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { Mover, Villager, Raider, Player, COMBO } from './agents';
+import { Mover, Villager, Raider, Player, Arrow, COMBO } from './agents';
 import { Bolt } from './enemies';
 import { DUNGEON, TOWN } from './atlas';
 import { TILE } from './config';
@@ -104,7 +104,7 @@ export class Fx {
         const r = 11;
         sw.sprite.setPosition(cx + Math.cos(ang - Math.PI / 2) * r, cy + Math.sin(ang - Math.PI / 2) * r).setRotation(ang).setDepth(owner.depth + (Math.sin(ang - Math.PI / 2) < 0 ? -0.5 : 0.5));
       } else {
-        sw.sprite.setPosition(cx + sw.ux * 9, cy + sw.uy * 9).setDepth(owner.depth + (sw.uy < 0 ? -0.5 : 0.5));
+        sw.sprite.setPosition(cx + sw.ux * 9, cy + sw.uy * 9).setRotation(ang).setDepth(owner.depth + (sw.uy < 0 ? -0.5 : 0.5));
       }
       // swoosh: an arc from the start of the sweep to where the blade is now, fading as the swing ends
       const g = sw.swoosh;
@@ -133,11 +133,10 @@ export class Fx {
     switch (ev.kind) {
       case 'hit':
         if (ev.attacker instanceof Bolt) this.magic.explode(8, ev.target.x, ev.target.y - 4);
-        // NPC swings happen at the strike moment (their windup was the telegraph)
-        if (ev.attacker instanceof Raider && ev.attacker.kind !== 'rat' && ev.attacker.kind !== 'shaman') this.swing(ev.attacker, ev.target, sprites);
-        if (ev.attacker instanceof Villager) this.swing(ev.attacker, ev.target, sprites);
         this.hit(ev, sprites);
         break;
+      case 'melee': this.swing(ev.who, ev, sprites, this.weaponFor(ev.who), ev.who instanceof Raider && ev.who.kind === 'brute' ? 240 : 150); this.sfx.swing(0); break;
+      case 'arrow': this.sfx.swing(0); break;
       case 'swing': {
         const c = COMBO[ev.stage] ?? COMBO[0];
         this.swing(ev.who, { x: ev.who.x + ev.dx * 20, y: ev.who.y + ev.dy * 20 }, sprites, 'sword', c.dur * 1000, ev.stage);
@@ -280,7 +279,7 @@ export class Fx {
     sprite.disableInteractive();
     const done = () => { this.dying.delete(sprite); sprite.destroy(); };
     if (who) { this.anims.delete(who.id); this.weapons.get(who.id)?.setVisible(false); const sw = this.swings.get(who.id); if (sw) { sw.swoosh.destroy(); this.swings.delete(who.id); } }
-    if (who instanceof Bolt) { sprite.destroy(); this.dying.delete(sprite); return; }
+    if (who instanceof Bolt || who instanceof Arrow) { sprite.destroy(); this.dying.delete(sprite); return; }
     if (who instanceof Raider) {
       const boss = who.boss;
       const blow = this.lastBlow.get(who.id);

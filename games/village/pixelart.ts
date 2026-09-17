@@ -297,6 +297,45 @@ function drawCabin(ctx: Ctx, ox: number, level: number): void {
   plaque(ctx, ox + 17, 27, level, p);
 }
 
+function drawTavern(ctx: Ctx, ox: number, level: number): void {
+  const p: Palette = { ...PALETTES.house, roof: '#567454', roofDark: '#334b3d', roofLight: '#809767' };
+  wall(ctx, ox + 4, 27, 56, 53, p);
+  gableRoof(ctx, ox, 0, 64, 30, p);
+  archDoor(ctx, ox + 20, 61, 11, 19, p);
+  windowAt(ctx, ox + 8, 43, 12, 11, p); windowAt(ctx, ox + 39, 43, 12, 11, p);
+  chimney(ctx, ox + 48, 8);
+  px(ctx, ox + 44, 58, INK, 2, 15); px(ctx, ox + 40, 60, p.frame, 14, 10);
+  px(ctx, ox + 44, 62, GLOW, 5, 6); px(ctx, ox + 49, 63, GLOW, 2, 3); // hanging mug sign
+  if (level >= 2) { flowerBox(ctx, ox + 8, 55, 12); flowerBox(ctx, ox + 39, 55, 12); chimney(ctx, ox + 9, 16); }
+  if (level >= 3) { windowAt(ctx, ox + 26, 14, 11, 10, p); lantern(ctx, ox + 6, 65); lantern(ctx, ox + 56, 65); }
+  plaque(ctx, ox + 21, 54, level, p);
+}
+
+/** Crenellated ramparts rise the same 64 pixels as the keep's fighting platform. */
+export function ensureFortArt(scene: Phaser.Scene): void {
+  if (scene.textures.exists('fort')) return;
+  const tex = scene.textures.createCanvas('fort', 16 * 4, 80)!, c = tex.getContext();
+  for (let frame = 0; frame < 4; frame++) {
+    const x = frame * 16;
+    wall(c, x, 13, 16, 67, PALETTES.barracks);
+    px(c, x, 10, '#3f444e', 16, 9); px(c, x + 1, 11, '#c0b8a4', 14, 6);
+    for (let i = 0; i < 16; i += 6) { px(c, x + i, 5, INK, 5, 7); px(c, x + i + 1, 6, '#a4a6a2', 3, 5); }
+    if (frame === 1 || frame === 2) {
+      px(c, x + 2, 57, '#29252c', 12, 23); px(c, x + 4, 54, '#29252c', 8, 3);
+      if (frame === 1) for (let i = 3; i < 14; i += 3) { px(c, x + i, 58, '#8f7251', 2, 22); px(c, x + 2, 65, '#bbb3a0', 12, 2); }
+      else px(c, x + 2, 58, '#bbb3a0', 12, 3);
+    }
+    if (frame === 3) {
+      for (let y = 20; y < 79; y += 5) { const left = (Math.floor(y / 15) % 2) ? 1 : 5; px(c, x + left, y, '#292a33', 10, 4); px(c, x + left, y, '#d0c8af', 10, 1); }
+    }
+  }
+  tex.refresh(); for (let i = 0; i < 4; i++) tex.add(i, 0, i * 16, 0, 16, 80);
+  const arrow = scene.textures.createCanvas('arrow', 16, 5)!, a = arrow.getContext();
+  px(a, 1, 2, '#cc9b58', 12, 1); px(a, 12, 1, '#eef1db', 3, 3); px(a, 15, 2, '#eef1db'); px(a, 1, 0, '#eee6ce', 3, 1); px(a, 1, 4, '#eee6ce', 3, 1); arrow.refresh();
+  const bow = scene.textures.createCanvas('bow', 12, 18)!, bc = bow.getContext();
+  for (let y = 1; y < 17; y++) { const bx = 3 + Math.round(Math.sin(y / 18 * Math.PI) * 5); px(bc, bx, y, '#dda965', 2, 1); px(bc, 3, y, '#f3ddb7'); } bow.refresh();
+}
+
 function stackTexture(scene: Phaser.Scene, key: string, unit: (ctx: Ctx, x: number, y: number) => void): void {
   if (scene.textures.exists(key)) return;
   const tex = scene.textures.createCanvas(key, STACK_W * (STACK_ROWS + 1), STACK_H)!;
@@ -332,7 +371,8 @@ function buildingTexture(scene: Phaser.Scene, key: string, w: number, h: number,
  * Where each building gives off light at night (window centres, lanterns, torches), in texture
  * pixels from the sprite's top-left, per level (index = level). `warm` = firelight (torches).
  */
-export const LIGHTS: Record<'house' | 'barracks' | 'granary' | 'woodyard', readonly (readonly { x: number; y: number; r: number; warm?: boolean }[])[]> = {
+export const LIGHTS: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern', readonly (readonly { x: number; y: number; r: number; warm?: boolean }[])[]> = {
+  tavern: [[], [{ x: 14, y: 48, r: 22 }, { x: 45, y: 48, r: 22 }], [{ x: 14, y: 48, r: 24 }, { x: 45, y: 48, r: 24 }], [{ x: 14, y: 48, r: 24 }, { x: 45, y: 48, r: 24 }, { x: 31, y: 19, r: 16 }, { x: 7, y: 65, r: 20, warm: true }]],
   house: [
     [],
     [{ x: 13, y: 50, r: 16 }, { x: 26, y: 50, r: 16 }],
@@ -354,7 +394,8 @@ export const LIGHTS: Record<'house' | 'barracks' | 'granary' | 'woodyard', reado
   ],
 };
 /** Chimney tops (smoke rises from here), per level. */
-export const CHIMNEYS: Record<'house' | 'barracks' | 'granary' | 'woodyard', readonly (readonly { x: number; y: number }[])[]> = {
+export const CHIMNEYS: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern', readonly (readonly { x: number; y: number }[])[]> = {
+  tavern: [[], [{ x: 50, y: 7 }], [{ x: 50, y: 7 }, { x: 11, y: 15 }], [{ x: 50, y: 7 }, { x: 11, y: 15 }]],
   house: [[], [], [{ x: 48, y: 9 }], [{ x: 48, y: 5 }]],
   barracks: [[], [], [], []],
   granary: [[], [], [], []],
@@ -384,12 +425,15 @@ export function ensureGlowTexture(scene: Phaser.Scene): void {
 }
 
 /** Texture key for a building kind; frame = level - 1. */
-export const BUILDING_TEXTURE = { house: 'bld-house', barracks: 'bld-barracks', granary: 'bld-granary', woodyard: 'cabin' } as const;
+export const BUILDING_TEXTURE = { house: 'bld-house', barracks: 'bld-barracks', granary: 'bld-granary', woodyard: 'cabin', tavern: 'bld-tavern' } as const;
 /** The same buildings' windows, lanterns and torches alone — laid over the body at night. */
-export const LIT_TEXTURE = { house: 'bld-house-lit', barracks: 'bld-barracks-lit', granary: 'bld-granary-lit', woodyard: 'cabin-lit' } as const;
+export const LIT_TEXTURE = { house: 'bld-house-lit', barracks: 'bld-barracks-lit', granary: 'bld-granary-lit', woodyard: 'cabin-lit', tavern: 'bld-tavern-lit' } as const;
 
 /** Create every building and stock texture (safe to call more than once). */
 export function ensureBuildingArt(scene: Phaser.Scene): void {
+  ensureFortArt(scene);
+  buildingTexture(scene, 'bld-tavern', BIG_W, BIG_H, drawTavern);
+  buildingTexture(scene, 'bld-tavern-lit', BIG_W, BIG_H, drawTavern, true);
   buildingTexture(scene, 'bld-house', BIG_W, BIG_H, drawHouse);
   buildingTexture(scene, 'bld-barracks', BIG_W, BIG_H, drawBarracks);
   buildingTexture(scene, 'bld-granary', CABIN_W, CABIN_H, drawGranary);
