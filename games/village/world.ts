@@ -1,5 +1,5 @@
 import type { Rng } from '@shared/index';
-import { TILE, COLS, ROWS } from './config';
+import { TILE, COLS, ROWS, type Calling } from './config';
 
 export type TileKind = 'grass' | 'tree' | 'sapling' | 'tilled' | 'crop' | 'house' | 'barracks' | 'granary' | 'woodyard';
 export type BuildingKind = 'house' | 'barracks' | 'granary' | 'woodyard';
@@ -22,8 +22,10 @@ export interface Building {
   level: number;
   /** houses: count of villagers who call this home */
   residents: number;
-  /** houses: sworn to the barracks — its children are raised as soldiers */
-  sworn?: boolean;
+  /** houses: what its children are raised to be (farmers when unset); 'soldier' needs barracks sponsorship */
+  calling?: Calling;
+  /** houses: children eat a double ration and count as well fed */
+  hearty?: boolean;
 }
 /** Houses are buildings; kept as a named type because half the sim talks about "home". */
 export type House = Building;
@@ -82,7 +84,7 @@ export class World {
   get barracksLevel(): number { return this.barracks.reduce((m, b) => Math.max(m, b.level), 0); }
   /** Houses a barracks can sponsor: one per level, summed over every barracks (+ any bonus). */
   sponsorship(bonusPerBarracks = 0): number { return this.barracks.reduce((n, b) => n + b.level + bonusPerBarracks, 0); }
-  get swornHouses(): Building[] { return this.houses.filter((h) => h.sworn); }
+  get swornHouses(): Building[] { return this.houses.filter((h) => h.calling === 'soldier'); }
 
   inBounds(tx: number, ty: number): boolean {
     return tx >= 0 && ty >= 0 && tx < this.cols && ty < this.rows;

@@ -55,6 +55,7 @@ export class Fx {
   private gold: Phaser.GameObjects.Particles.ParticleEmitter;
   private magic: Phaser.GameObjects.Particles.ParticleEmitter;
   private puff: Phaser.GameObjects.Particles.ParticleEmitter;
+  private heartsEmitter: Phaser.GameObjects.Particles.ParticleEmitter;
   private reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
   private wasPaused = false;
   /** sprites of the dead, kept alive until their tween ends */
@@ -67,6 +68,7 @@ export class Fx {
     const mk = (tint: number | number[], extra: Phaser.Types.GameObjects.Particles.ParticleEmitterConfig = {}) =>
       scene.add.particles(0, 0, 'px', { emitting: false, lifespan: 320, speed: { min: 18, max: 55 }, scale: { start: 1, end: 0 }, gravityY: 70, tint, ...extra }).setDepth(DEPTH.particles);
     this.sparks = mk([0xffffff, 0xffe066, 0xffcf5a]);
+    this.heartsEmitter = mk([0xff7aa2, 0xffb0c8, 0xff5a8a], { lifespan: 900, speed: { min: 6, max: 18 }, gravityY: -30, scale: { start: 1.4, end: 0.4 } });
     this.blood = mk([0xd94a4a, 0x8a2020], { gravityY: 110, lifespan: 420 });
     this.dust = mk([0xb8a88e, 0x8a6a4a], { speed: { min: 8, max: 25 }, gravityY: 20, lifespan: 380 });
     this.seeds = mk([0x8fd35a, 0x3a6b2a], { speed: { min: 10, max: 30 }, gravityY: 90 });
@@ -324,6 +326,12 @@ export class Fx {
       ],
       onComplete: () => { this.poof(sprite.x, sprite.y - 3, who.kind === 'rat' ? 0.8 : 1.2); done(); },
     });
+  }
+
+  /** A moment with a child: a few pink hearts drift up. */
+  hearts(x: number, y: number): void {
+    this.heartsEmitter.explode(6, x, y);
+    this.sfx.streak(3);
   }
 
   /** Something good happened here (an upgrade): a big puff and a ring of sparks. */

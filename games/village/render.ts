@@ -94,6 +94,7 @@ export class Renderer {
     this.syncSprites();
     for (const ev of this.scene.fx) {
       if (ev.kind === 'upgrade') { this.upgradePop(ev.building); continue; }
+      if (ev.kind === 'hearts') { this.fx.hearts(ev.who.x, ev.who.y - 10); continue; }
       this.fx.handle(ev, this.sprites);
     }
     this.scene.fx.length = 0;
@@ -133,10 +134,12 @@ export class Renderer {
       e.lit.setFrame(Math.min(2, b.level - 1)).setAlpha(this.night.sky.night);
       e.stock?.setTint(this.tint);
       e.banner?.setTint(this.tint);
-      // a sworn house flies the barracks' banner from its roof
+      // a house flies a banner for its calling: blue for the barracks, tan for the woodyard (farmers, the default, fly none)
       if (b.kind === 'house') {
-        if (b.sworn && !e.banner) e.banner = s.add.image(e.body.x + 54, e.body.y + 6, 'banner').setOrigin(0, 0).setDepth(e.body.depth + 0.0001);
-        else if (!b.sworn && e.banner) { e.banner.destroy(); e.banner = undefined; }
+        const calling = b.calling ?? 'farmer';
+        if (calling !== 'farmer' && !e.banner) e.banner = s.add.image(e.body.x + 54, e.body.y + 6, 'banner').setOrigin(0, 0).setDepth(e.body.depth + 0.0001);
+        else if (calling === 'farmer' && e.banner) { e.banner.destroy(); e.banner = undefined; }
+        e.banner?.setTint(mulColor(calling === 'woodcutter' ? 0xd8b070 : 0xffffff, this.tint));
       }
       if (e.stock) {
         const amount = b.kind === 'granary' ? s.food : s.wood;

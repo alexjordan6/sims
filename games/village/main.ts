@@ -3,7 +3,7 @@ import { SimScene, launch } from '@shared/index';
 import { World, doorstep, buildingCenter, BUILDINGS, MAX_LEVEL, type Building, type BuildingKind, type Tile, type TilePos } from './world';
 import { Villager, Raider, Player, Mover, TOOLS, type Role, type Tool } from './agents';
 import { Rat, Snatcher, Brute, Shaman, waveComposition } from './enemies';
-import { p, TILE, COLS, ROWS, ZOOM, COST, TREE_YIELD, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, OLD_YIELD, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, CADET_AGE_BEFORE } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, TREE_YIELD, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, OLD_YIELD, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, CADET_AGE_BEFORE, HEARTY_RATION, CALLING_NAME, type Calling } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
@@ -24,7 +24,8 @@ export type FxEvent =
   | { kind: 'swing'; who: Mover; dx: number; dy: number; stage: number }
   | { kind: 'cast'; who: Mover }
   | { kind: 'impact'; x: number; y: number }
-  | { kind: 'upgrade'; building: Building };
+  | { kind: 'upgrade'; building: Building }
+  | { kind: 'hearts'; who: Mover };
 
 export type Screen = 'title' | 'playing' | 'paused' | 'over' | 'won';
 
@@ -45,7 +46,7 @@ export class VillageScene extends SimScene {
   selectedBuilding: Building | null = null;
   journal: GameEvent[] = [];
   fx: FxEvent[] = [];
-  stats = { peakPop: 0, soldiersRaised: 0, raidsRepelled: 0, raidersKilled: 0 };
+  stats = { peakPop: 0, soldiersRaised: 0, childrenRaised: 0, starsTotal: 0, raidsRepelled: 0, raidersKilled: 0 };
   /** persists across runs (localStorage) */
   meta = new Meta();
   /** this run's modifiers, compiled from the equipped boons */
@@ -117,7 +118,7 @@ export class VillageScene extends SimScene {
     this.fx = [];
     if (this.slowUntil) { clearTimeout(this.slowUntil); this.slowUntil = 0; }
     if (this.speed < 1) this.speed = 1;
-    this.stats = { peakPop: 0, soldiersRaised: 0, raidsRepelled: 0, raidersKilled: 0 };
+    this.stats = { peakPop: 0, soldiersRaised: 0, childrenRaised: 0, starsTotal: 0, raidsRepelled: 0, raidersKilled: 0 };
     this.boss = null;
     this.result = null;
     this.nameIdx = this.rng.int(0, NAMES.length - 1);
@@ -130,9 +131,9 @@ export class VillageScene extends SimScene {
     this.player.maxHp += this.mods.playerHpBonus;
     this.player.hp = this.player.maxHp;
 
-    this.addVillager(home, 'farmer', 22);
-    this.addVillager(home, 'woodcutter', 22);
-    this.addVillager(home, 'kid', 4);
+    const ma = this.addVillager(home, 'farmer', 22);
+    const pa = this.addVillager(home, 'woodcutter', 22);
+    this.addVillager(home, 'kid', 4).parents = [ma, pa];
     for (let i = 0; i < this.mods.startSoldiers; i++) this.addVillager(home, 'soldier', 25);
     if (this.mods.extraAdults > 0) {
       // a second family, in the nearest open 2x2 to the left of the first house
@@ -291,7 +292,7 @@ export class VillageScene extends SimScene {
   /** The run is over: bank renown and show the result. */
   private endRun(won: boolean): void {
     if (this.result) return;
-    const renown = this.meta.bankRun({ won, day: this.day, raidersKilled: this.stats.raidersKilled, soldiersRaised: this.stats.soldiersRaised });
+    const renown = this.meta.bankRun({ won, day: this.day, raidersKilled: this.stats.raidersKilled, childrenRaised: this.stats.childrenRaised, stars: this.stats.starsTotal });
     this.result = { won, renown };
     this.screen = won ? 'won' : 'over';
     this.paused = true;
@@ -313,6 +314,8 @@ export class VillageScene extends SimScene {
   select(m: Mover | null): void {
     this.selected = m;
     if (m) this.selectedBuilding = null;
+    // picking a child you're standing next to is how you encourage them
+    if (m instanceof Villager && m.role === 'kid' && this.screen === 'playing' && !this.encourageProblem(m)) this.encourage(m);
   }
   selectBuilding(b: Building | null): void {
     this.selectedBuilding = b;
@@ -333,24 +336,89 @@ export class VillageScene extends SimScene {
     return best;
   }
 
-  /** Why a house can't be sworn right now, or null. */
+  /** Why a house can't be sworn to the barracks right now, or null. */
   swearProblem(h: Building): string | null {
     if (h.kind !== 'house') return 'Only houses can be sworn';
-    if (h.sworn) return null;
+    if (h.calling === 'soldier') return null;
     const cap = this.world.sponsorship(this.mods.sponsorBonus);
     const used = this.world.swornHouses.length;
     if (!cap) return 'Build a barracks first';
     if (used >= cap) return `Your barracks sponsor ${cap} house${cap === 1 ? '' : 's'} — upgrade one or build another`;
     return null;
   }
-  /** Swear a house to the barracks (its children drill and become soldiers) or release it. */
-  swear(h: Building): boolean {
-    if (h.sworn) { h.sworn = false; this.event('info', 'House released — it raises workers again', true); return true; }
-    const why = this.swearProblem(h);
-    if (why) { this.event('info', why, true); return false; }
-    h.sworn = true;
-    this.event('soldier', `House sworn to the barracks — its children will drill from age ${this.adultAge - CADET_AGE_BEFORE}`, true);
+  /** Decide what a house raises its children to be. Soldiers need barracks sponsorship. */
+  setCalling(h: Building, calling: Calling): boolean {
+    if ((h.calling ?? 'farmer') === calling) return true;
+    if (calling === 'soldier') {
+      const why = this.swearProblem(h);
+      if (why) { this.event('info', why, true); return false; }
+      h.calling = 'soldier';
+      this.event('soldier', `House sworn to the barracks — its children will drill from age ${this.adultAge - CADET_AGE_BEFORE}`, true);
+      return true;
+    }
+    const wasSworn = h.calling === 'soldier';
+    h.calling = calling;
+    this.event('info', `${wasSworn ? 'House released — it' : 'This house'} now raises ${CALLING_NAME[calling]}`, true);
     return true;
+  }
+  /** kept for older callers: toggles the soldier calling */
+  swear(h: Building): boolean { return this.setCalling(h, h.calling === 'soldier' ? 'farmer' : 'soldier'); }
+  /** Hearty rations: the house's children eat double and count as well fed. */
+  setRations(h: Building, hearty: boolean): void {
+    h.hearty = hearty;
+    this.event('food', hearty ? `Hearty rations for the children of this house (${HEARTY_RATION} food a day each)` : 'Back to plain rations', true);
+  }
+
+  // ---- child rearing ----------------------------------------------------------------------
+
+  /** Can the head encourage this child right now? null when yes, else the reason. */
+  encourageProblem(kid: Villager): string | null {
+    if (kid.role !== 'kid') return 'only children';
+    if (kid.dead) return null;
+    if (kid.hidden) return `${kid.name} is indoors`;
+    if (kid.encouragedDay === this.day) return 'already today — come back tomorrow';
+    if (Math.hypot(kid.x - this.player.x, kid.y - this.player.y) > 28) return 'walk over to them';
+    return null;
+  }
+  /**
+   * A moment with a child: the head stops for a second and a half, hearts, and the child gets a
+   * care point for the day plus a day's worth of apprenticeship. During a raid it also sends them home.
+   */
+  encourage(kid: Villager): boolean {
+    const why = this.encourageProblem(kid);
+    if (why) { this.event('info', `Can't encourage ${kid.name}: ${why}`); return false; }
+    kid.encouragedDay = this.day;
+    if (kid.apprenticeAt(this)) kid.trained = Math.min(Villager.drillNeeded(this), kid.trained + 1);
+    if (this.raidActive) kid.sentHome = true;
+    this.player.busy = 1.5;
+    this.player.vx = this.player.vy = 0;
+    this.fx.push({ kind: 'hearts', who: kid });
+    this.event('birth', `You encouraged ${kid.name}${this.raidActive ? ' — go inside!' : ''}`, false);
+    return true;
+  }
+  /** The care checklist for today, as the UI shows it (what's true right now). */
+  careToday(kid: Villager): { label: string; ok: boolean; note?: string }[] {
+    const sibling = this.villagers().some((v) => v !== kid && v.role === 'kid' && v.home === kid.home && !v.dead);
+    const parents = kid.parents.filter((q) => !q.dead).length;
+    return [
+      { label: 'Fed', ok: kid.hungerDays === 0 },
+      { label: 'Well fed', ok: !!kid.home.hearty && kid.hungerDays === 0, note: 'hearty rations' },
+      { label: 'Family', ok: parents >= 2, note: parents === 1 ? 'one parent' : parents === 0 ? 'no parents' : undefined },
+      { label: 'Company', ok: sibling, note: 'another child at home' },
+      { label: 'Home', ok: kid.home.level >= 2, note: 'house Lv2+' },
+      { label: 'Attention', ok: kid.encouragedDay === this.day, note: 'encourage them' },
+      { label: 'Safe', ok: kid.fledDay !== this.day, note: 'ran from raiders' },
+    ];
+  }
+  /** Where a child runs when raiders come: the nearest house or barracks door. */
+  nearestShelter(x: number, y: number): Building | null {
+    let best: Building | null = null, bd = Infinity;
+    for (const b of this.world.buildings) {
+      if (b.kind !== 'house' && b.kind !== 'barracks') continue;
+      const d = doorstep(b), c = World.center(d.tx, d.ty), dd = (c.x - x) ** 2 + (c.y - y) ** 2;
+      if (dd < bd) { bd = dd; best = b; }
+    }
+    return best;
   }
 
   hoverAgent(m: Mover | null): void {
@@ -458,11 +526,25 @@ export class VillageScene extends SimScene {
     // villagers: eat, age, grow up, grow old
     const villagers = this.villagers();
     for (const v of villagers) {
-      const ration = p.foodPerDay * this.mods.foodPerDayMul;
-      if (this.food >= ration) { this.food -= ration; v.hungerDays = 0; }
+      const hearty = v.role === 'kid' && !!v.home.hearty;
+      const ration = p.foodPerDay * this.mods.foodPerDayMul * (hearty ? HEARTY_RATION : 1);
+      let wellFed = false;
+      if (this.food >= ration) { this.food -= ration; v.hungerDays = 0; wellFed = hearty; }
+      else if (hearty && this.food >= ration / HEARTY_RATION) { this.food -= ration / HEARTY_RATION; v.hungerDays = 0; } // enough for a plain meal at least
       else if (++v.hungerDays >= 3 + this.mods.starveDaysDelta) { v.dead = true; v.hp = 0; this.event('death', `${v.name} starved`, true); continue; }
       else this.event('food', `${v.name} went hungry`);
-      if (v.cadetAt(this) && this.world.barracks.length) v.drilled++; // yesterday's drill
+      if (v.role === 'kid') {
+        // yesterday's care, tallied at dawn: what they ate, who was around, where they live, whether you came by
+        const fed = v.hungerDays === 0;
+        const parents = v.parents.filter((q) => !q.dead).length;
+        const sibling = villagers.some((o) => o !== v && o.role === 'kid' && o.home === v.home && !o.dead);
+        let pts = (fed ? 1 : -1) + (wellFed ? 1 : 0) + (parents >= 2 ? 1 : 0) + (sibling ? 1 : 0) + (v.home.level >= 2 ? 1 : 0) + (v.encouragedDay === this.day ? 1 : 0) - (v.fledDay === this.day ? 1 : 0);
+        v.care += pts; v.careDays++;
+        v.stars = v.starsNow();
+        // yesterday's apprenticeship: only if they had somewhere to go
+        const canTrain = v.calling === 'soldier' ? this.world.barracks.length > 0 : v.calling === 'woodcutter' ? !!this.world.woodyard : true;
+        if (v.apprenticeAt(this) && canTrain) v.trained = Math.min(Villager.drillNeeded(this), v.trained + 1);
+      }
       v.age++;
       if (this.mods.dawnHeal) v.hp = v.maxHp; // Second Wind: a night's rest heals everything
       if (v.role === 'kid' && v.age >= Math.max(1, p.adultAge + this.mods.adultAgeDelta)) v.comeOfAge(this);
@@ -474,8 +556,10 @@ export class VillageScene extends SimScene {
       const adults = villagers.filter((v) => v.home === h && v.isAdult && !v.dead);
       if (adults.length >= 2 && h.residents < this.beds(h) && this.food > 10 && this.rng.chance(p.birthChance + this.mods.birthBonus + (h.level >= 3 ? 0.15 : 0))) {
         const kid = this.addVillager(h, 'kid', 0);
+        kid.parents = [adults[0], adults[1]];
         if (h.residents < this.beds(h) && this.rng.chance(this.mods.twinChance)) {
           const twin = this.addVillager(h, 'kid', 0);
+          twin.parents = [adults[0], adults[1]];
           this.event('birth', `Twins! ${kid.name} and ${twin.name} were born`, true);
         } else this.event('birth', `${kid.name} was born`, true);
       }
@@ -566,6 +650,7 @@ export class VillageScene extends SimScene {
     if (a === this.hovered) this.hovered = null;
     if (a instanceof Villager) {
       a.home.residents--;
+      for (const k of this.villagers()) if (k.role === 'kid' && k.parents.includes(a)) k.care -= 1; // losing a parent
       if (a.hp <= 0 && a.hungerDays < 3) this.event('death', `${a.name} the ${a.role} was killed`, true);
     } else if (a instanceof Raider) {
       if (a.carrying && !a.carrying.dead) { const kid = a.carrying; kid.carriedBy = null; a.carrying = null; this.event('grow', `${kid.name} was rescued!`, true); }
@@ -674,7 +759,7 @@ export class VillageScene extends SimScene {
   }
   /** What the building does now, and what the next level adds. */
   buildingBlurb(b: Building): string {
-    const now = b.kind === 'house' ? `${b.residents}/${this.beds(b)} beds${b.level >= 3 ? ' · births +15%' : ''}${b.sworn ? ' · sworn: raises soldiers' : ' · raises workers'}`
+    const now = b.kind === 'house' ? `${b.residents}/${this.beds(b)} beds${b.level >= 3 ? ' · births +15%' : ''}${' · raises ' + CALLING_NAME[b.calling ?? 'farmer']}${b.hearty ? ' · hearty rations' : ''}`
       : b.kind === 'granary' ? `${this.food | 0}/${CAPS[b.level]} food`
       : b.kind === 'woodyard' ? `${this.wood | 0}/${CAPS[b.level]} wood`
       : LEVEL_PERKS.barracks[b.level];

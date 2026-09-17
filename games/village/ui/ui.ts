@@ -1,7 +1,7 @@
 import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type Tool } from '../agents';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
-import { COST, p, RUN, LEGACY_TEST_MODE, LEVEL_PERKS, UPGRADE_COST, CADET_AGE_BEFORE, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS, TREE_YIELD, OLD_YIELD } from '../config';
+import { COST, p, RUN, LEGACY_TEST_MODE, LEVEL_PERKS, CALLING_NAME, TRAITS, HEARTY_RATION, type Calling, UPGRADE_COST, CADET_AGE_BEFORE, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS, TREE_YIELD, OLD_YIELD } from '../config';
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
@@ -469,23 +469,24 @@ export class UI {
       if (b.kind === 'barracks') html += `<b>Sponsors</b><span>${s.world.swornHouses.length} / ${s.world.sponsorship(s.mods.sponsorBonus)} houses sworn</span>`;
       html += `<b>Next</b><span>${b.level < MAX_LEVEL ? `Lv${b.level + 1}: ${LEVEL_PERKS[b.kind][b.level + 1]} <em>· ${cost} wood with the hammer</em>` : 'max level'}</span></div>`;
       if (b.kind === 'house') {
-        const why = b.sworn ? null : s.swearProblem(b);
-        html += `<div class="raise"><div class="cap">RAISE CHILDREN AS</div><div class="seg"><button class="btn small ${b.sworn ? '' : 'on'}" data-raise="workers">WORKERS</button><button class="btn small ${b.sworn ? 'on' : ''}" data-raise="soldiers" ${why ? 'disabled' : ''}>SOLDIERS</button></div>
-          <div class="d">${b.sworn ? `Sworn to the barracks: children drill from age ${s.adultAge - CADET_AGE_BEFORE} and come of age as soldiers.` : why ? `<em class="warn">${esc(why)}</em>` : 'Swear this house to the barracks and its children will drill to become soldiers.'}</div></div>`;
+        const calling = b.calling ?? 'farmer';
+        const why = calling === 'soldier' ? null : s.swearProblem(b);
+        const seg = (c: Calling, label: string, dis = false) => `<button class="btn small ${calling === c ? 'on' : ''}" data-raise="${c}" ${dis ? 'disabled' : ''}>${label}</button>`;
+        html += `<div class="raise"><div class="cap">RAISE CHILDREN AS</div><div class="seg">${seg('farmer', 'FARMERS')}${seg('woodcutter', 'CUTTERS')}${seg('soldier', 'SOLDIERS', !!why)}</div>
+          <div class="d">${calling === 'soldier' ? `Sworn to the barracks: children drill from age ${s.adultAge - CADET_AGE_BEFORE} and come of age as soldiers.` : `Children apprentice at ${calling === 'farmer' ? 'the field' : 'the woodyard'} from age ${s.adultAge - CADET_AGE_BEFORE} and come of age <b>skilled</b>.`}${why ? ` <em class="warn">Soldiers: ${esc(why)}</em>` : ''}</div></div>`;
+        html += `<div class="raise"><div class="cap">CHILDREN'S RATIONS</div><div class="seg"><button class="btn small ${b.hearty ? '' : 'on'}" data-rations="plain">PLAIN</button><button class="btn small ${b.hearty ? 'on' : ''}" data-rations="hearty">HEARTY</button></div>
+          <div class="d">${b.hearty ? `Each child eats ${HEARTY_RATION} food a day and grows up <b>well fed</b> — a care star's worth every day.` : 'Hearty rations cost double food per child but count toward their care.'}</div></div>`;
       }
       if (force || html !== this.lastInspector) {
         this.inspector.innerHTML = html; this.lastInspector = html;
         this.inspector.querySelector('.close')?.addEventListener('click', () => s.selectBuilding(null));
-        this.inspector.querySelectorAll<HTMLButtonElement>('[data-raise]').forEach((el) => el.addEventListener('click', () => {
-          const wantSoldiers = el.dataset.raise === 'soldiers';
-          if (wantSoldiers !== !!b.sworn) s.swear(b);
-          this.renderInspector(true);
-        }));
+        this.inspector.querySelectorAll<HTMLButtonElement>('[data-raise]').forEach((el) => el.addEventListener('click', () => { s.setCalling(b, el.dataset.raise as Calling); this.renderInspector(true); }));
+        this.inspector.querySelectorAll<HTMLButtonElement>('[data-rations]').forEach((el) => el.addEventListener('click', () => { s.setRations(b, el.dataset.rations === 'hearty'); this.renderInspector(true); }));
       }
       return;
     }
     if (!m || m.dead) {
-      const html = `${head}<p class="empty">Click or tap a villager or a building.<br>Children become <span class="rl soldier">soldiers</span> if their house is <b>sworn</b> to the barracks and they finish their drill, otherwise <span class="rl farmer">workers</span>.</p>`;
+      const html = `${head}<p class="empty">Click or tap a villager or a building.<br>Children are the point: pick each house's <b>calling</b>, feed them well, keep them safe, and <b>encourage</b> them — how they're raised is who they become.</p>`;
       if (force || this.lastInspector !== html) { this.inspector.innerHTML = html; this.lastInspector = html; }
       return;
     }
@@ -498,21 +499,30 @@ export class UI {
     html += `<b>Health</b><div class="bar hp ${hpPct < 40 ? 'low' : ''}"><i style="width:${hpPct}%"></i><span class="bar-txt">${Math.max(0, m.hp | 0)} / ${m.maxHp}</span></div>`;
     if (m instanceof Villager) {
       html += `<b>Age</b><span>${m.age} days${m.role === 'kid' ? ` <em>· grows up in ${Math.max(0, p.adultAge + s.mods.adultAgeDelta - m.age)}</em>` : ''}</span>`;
-      html += `<b>Home</b><span>${m.home.residents} of ${s.beds(m.home)} beds${m.home.sworn ? ' · <span class="rl soldier">sworn</span>' : ''}</span>`;
+      html += `<b>Home</b><span>${m.home.residents} of ${s.beds(m.home)} beds · raises ${CALLING_NAME[m.home.calling ?? 'farmer']}${m.home.hearty ? ' · hearty' : ''}</span>`;
       html += `<b>Fed</b><span>${m.hungerDays === 0 ? 'yes' : `<em class="warn">hungry for ${m.hungerDays} days</em>`}</span>`;
     }
     html += `<b>Doing</b><span>${esc(m.task || '—')}${m instanceof Villager && m.carriedBy ? ` <em class="warn">— kill the ${esc(m.carriedBy.name.toLowerCase())} to free them</em>` : ''}</span></div>`;
     if (m instanceof Villager && m.role === 'kid') {
-      const outlook = m.outlook(s), need = Villager.drillNeeded(s), cadetAge = s.adultAge - CADET_AGE_BEFORE;
-      const line = !m.home.sworn ? 'home raises workers — swear the house to change that'
-        : m.age < cadetAge ? `cadet from age ${cadetAge} · needs ${need} days of drill`
-        : `cadet · drilled ${m.drilled}/${need}${outlook === 'worker' ? ' — <em class="warn">too late to finish</em>' : ''}`;
-      html += `<div class="upbring"><div class="cap">UPBRINGING</div><div class="lean ${outlook === 'soldier' ? 'm' : 'c'}">will become a ${outlook === 'soldier' ? 'SOLDIER' : 'WORKER'} at age ${s.adultAge}</div><div class="d">${line}</div></div>`;
+      const o = m.outlook(s), need = Villager.drillNeeded(s), startAge = s.adultAge - CADET_AGE_BEFORE;
+      const stars = m.starsNow();
+      const line = m.age < startAge ? `apprentices from age ${startAge} · ${need} days to be skilled`
+        : `apprentice · ${m.trained}/${need} days${m.calling === 'soldier' && o.role !== 'soldier' ? ' — <em class="warn">too late to finish drill</em>' : ''}`;
+      const list = s.careToday(m).map((c) => `<li class="${c.ok ? 'ok' : ''}">${c.ok ? '✓' : '✗'} ${c.label}${!c.ok && c.note ? ` <small>· ${esc(c.note)}</small>` : ''}</li>`).join('');
+      const why = s.encourageProblem(m);
+      html += `<div class="upbring"><div class="cap">UPBRINGING</div>
+        <div class="stars">${'★'.repeat(stars)}<span class="dim">${'☆'.repeat(5 - stars)}</span> <small>${stars === 5 ? 'gifted' : stars >= 3 ? 'well raised' : stars >= 2 ? 'getting by' : m.careDays ? 'neglected' : 'a fresh start'}</small></div>
+        <div class="lean ${o.role === 'soldier' ? 'm' : 'c'}">will be ${o.skilled ? 'a skilled' : 'a plain'} ${o.role.toUpperCase()} at age ${s.adultAge}</div><div class="d">${line}</div>
+        <ul class="care">${list}</ul>
+        <button class="btn small ok encourage" ${why ? 'disabled' : ''}>ENCOURAGE${why ? ` · ${esc(why)}` : ''}</button></div>`;
+    } else if (m instanceof Villager) {
+      html += `<div class="upbring"><div class="cap">RAISED</div><div class="stars">${'★'.repeat(m.stars)}<span class="dim">${'☆'.repeat(5 - m.stars)}</span> <small>${m.skilled ? 'skilled' : 'plain'}${m.trait ? ` · ${TRAITS[m.trait].name} — ${TRAITS[m.trait].blurb}` : ''}</small></div></div>`;
     }
     if (html !== this.lastInspector) {
       this.inspector.innerHTML = html;
       this.lastInspector = html;
       this.inspector.querySelector('.close')?.addEventListener('click', () => s.select(null));
+      this.inspector.querySelector('.encourage')?.addEventListener('click', () => { if (m instanceof Villager) s.encourage(m); this.renderInspector(true); });
     }
   }
 
@@ -527,13 +537,14 @@ export class UI {
     let html = '';
     for (const [label, cls, list] of groups) {
       if (!list.length) continue;
-      html += `<div class="grp ${cls}">${label} <b>${list.length}</b>${cls === 'kid' ? '<span class="grp-note">sword = will be a soldier</span>' : ''}</div>`;
+      html += `<div class="grp ${cls}">${label} <b>${list.length}</b>${cls === 'kid' ? '<span class="grp-note">calling · care stars</span>' : ''}</div>`;
       for (const v of list) {
         const c = CHAR[v.role];
         let bar = '';
         if (v.role === 'kid') {
-          const soldier = v.outlook(s) === 'soldier';
-          bar = `<span class="outlook ${soldier ? 'm' : 'c'}">${soldier ? spr('dungeon', DUNGEON.sword, 16) : spr('town', TOWN.iconHoe, 16)}${v.cadetAt(s) ? ` ${v.drilled}/${Villager.drillNeeded(s)}` : ''}</span>`;
+          const o = v.outlook(s);
+          const icon = o.role === 'soldier' ? spr('dungeon', DUNGEON.sword, 16) : o.role === 'woodcutter' ? spr('town', TOWN.iconAxe, 16) : spr('town', TOWN.iconHoe, 16);
+          bar = `<span class="outlook ${o.role === 'soldier' ? 'm' : 'c'}">${icon}${v.apprenticeAt(s) ? ` ${v.trained}/${Villager.drillNeeded(s)}` : ''} <span class="rstars">${'★'.repeat(v.starsNow())}</span></span>`;
         } else {
           const pct = Math.max(0, v.hp / v.maxHp * 100);
           bar = `<div class="bar hp ${pct < 40 ? 'low' : ''}"><i style="width:${pct}%"></i></div>`;
@@ -635,10 +646,10 @@ export class UI {
         <p>${won ? `Your village stands. Day ${s.day}, and the raiders are broken.` : `You died on day ${s.day}.`}</p>
         <div class="stats">
           <div><b>${s.day}</b>days</div><div><b>${st.peakPop}</b>peak population</div>
-          <div><b>${st.soldiersRaised}</b>soldiers raised</div><div><b>${st.raidersKilled}</b>raiders slain</div>
+          <div><b>${st.childrenRaised}</b>children raised</div><div><b>${st.childrenRaised ? (st.starsTotal / st.childrenRaised).toFixed(1) : '—'}</b>avg stars</div><div><b>${st.raidersKilled}</b>raiders slain</div>
         </div>
         ${r ? `<div class="renown"><div class="lbl">RENOWN EARNED</div>
-          <div class="parts"><span>days ${r.days}</span><span>kills ${r.kills}</span><span>soldiers ${r.soldiers}</span>${r.victory ? `<span>victory ${r.victory}</span>` : ''}</div>
+          <div class="parts"><span>days ${r.days}</span><span>kills ${r.kills}</span><span>children ${r.children}</span>${r.victory ? `<span>victory ${r.victory}</span>` : ''}</div>
           <div class="total">+${r.total} <small>· ${meta.renown} banked</small></div>
           ${won && meta.wins === 1 ? '<div class="unlock">First victory: a third boon slot is yours.</div>' : ''}
         </div>` : ''}
@@ -672,7 +683,7 @@ export class UI {
           <h3>THE GOAL</h3>
           <p>Survive <b>${RUN.days} days</b>. Raiders attack every ${p.raidEvery} days and get stronger. On day ${RUN.bossDay} the <b>Warlord</b> comes — beat him to win. If <b>you</b> die, the run ends (you keep the renown).</p>
           <h3>THE TRICK</h3>
-          <p>You can't recruit soldiers. <b>Children become soldiers if their house is sworn to the barracks</b> and they finish their drill; everyone else grows up a worker. See RAISING SOLDIERS below.</p>
+          <p>You can't recruit anyone. <b>Every adult was a child you raised.</b> See RAISING CHILDREN below.</p>
           <h3>EACH DAY</h3>
           <p>Every villager eats 1 food. Crops ripen in ${s.cropDays} day${s.cropDays > 1 ? 's' : ''}. Couples with a spare bed have children. Everyone heals overnight.</p>
         </section>
@@ -694,7 +705,13 @@ export class UI {
           ${building('barracks', 'Barracks · ' + COST.barracks + ' wood', 'Sponsors sworn houses; cadets drill in its yard.')}
           ${building('granary', 'Granary', 'Holds your food; the crate stack beside it climbs as the store fills.')}
           ${building('woodyard', 'Woodyard', 'Holds your wood; the log stack beside the cabin climbs as it fills.')}
-          <h3>RAISING SOLDIERS</h3>
+          <h3>RAISING CHILDREN</h3>
+          <p><b>Callings.</b> Pick a house (right click / X, or tap it) and set RAISE CHILDREN AS: <b>FARMERS</b>, <b>CUTTERS</b> or <b>SOLDIERS</b>. From age ${s.adultAge - CADET_AGE_BEFORE} its children apprentice every working day — at the field, the woodyard or the barracks yard — and after ${Villager.drillNeeded(s)} days come of age <b>skilled</b>: faster work, bigger harvests and loads, tougher soldiers. Unfinished apprentices grow up plain.</p>
+          <p><b>Care.</b> Each dawn a child earns care for the day before: fed · <b>well fed</b> (the house on HEARTY rations, ${HEARTY_RATION} food a day) · both parents alive · another child at home · a Lv2+ house · your <b>encouragement</b>. Running from raiders, going hungry or losing a parent costs care. It averages into <b>stars</b> (★ to ★★★★★) that are fixed at coming of age and last for life: each star is +6% HP and work speed; five stars make a <b>gifted</b> adult with a trait (Hardy, Quick, Brave, Green Thumb, Tireless); a neglected child grows up frail.</p>
+          <p><b>Encourage.</b> Walk up to a child and press X (or tap them, or the button on their card): a moment together, once a day, worth a care point and a day of apprenticeship. During a raid it also sends them inside.</p>
+          <p><b>Children go to bed at dusk</b> and sleep indoors until dawn, and they <b>run for the nearest door</b> when raiders are near. Snatchers take children caught in the open.</p>
+          <p><b>Renown</b> comes from children raised: 20 each, plus 8 per star.</p>
+          <h3>SOLDIERS</h3>
           <p>Pick a house (right click / X, or tap it) and set <b>RAISE CHILDREN AS: SOLDIERS</b> to <b>swear</b> it to the barracks — it flies a banner. A barracks sponsors <b>one sworn house per level</b> (two barracks Lv2 = 4 houses). Children of a sworn house become <b>cadets</b> ${CADET_AGE_BEFORE} days before coming of age: each day they walk to the barracks yard and drill. ${Villager.drillNeeded(s)} days of drill make a soldier at age ${s.adultAge}; a child sworn too late comes of age a worker. Every child's outlook is shown in the inspector and the villagers list — no surprises.</p>
           <h3>GROVES</h3>
           <p>Trees spread onto neighbouring grass — but a lone tree barely does (about 1% a day) while a tree inside a grove seeds fast (up to 11%). A sapling with two or more trees beside it grows in ${SHELTERED_SAPLING_DAYS} days instead of ${SAPLING_DAYS}. So plant trees <b>together</b>, near the woodyard, and let the grove do the work.</p>

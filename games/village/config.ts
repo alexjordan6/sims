@@ -62,8 +62,28 @@ export const LEVEL_LOOKS: Record<'house' | 'barracks' | 'granary' | 'woodyard', 
   granary: ['', 'barn', 'open hay loft', 'silo'],
   woodyard: ['', 'cabin', 'chimney', 'lantern and loft window'],
 };
-/** a child in a sworn house starts drilling this many days before coming of age, and needs CADET_DAYS of drill to be a soldier */
+// ---- children ------------------------------------------------------------------------------
+/** a child starts apprenticing this many days before coming of age, and needs CADET_DAYS at it to come of age skilled */
 export const CADET_AGE_BEFORE = 3;
 export const CADET_DAYS = 3;
+/** care stars: +6% HP and work speed per star for life */
+export const STAR_BONUS = 0.06;
+/** a child on hearty rations eats this much a day (and is "well fed") */
+export const HEARTY_RATION = 2;
+/** children run for the nearest door when a raider is this close */
+export const FLEE_RANGE = 120;
+/** children are asleep indoors between these times of day */
+export const BEDTIME = { start: 0.8, end: 0.28 } as const;
+export type Calling = 'farmer' | 'woodcutter' | 'soldier';
+export const CALLING_NAME: Record<Calling, string> = { farmer: 'farmers', woodcutter: 'woodcutters', soldier: 'soldiers' };
+/** gifted traits: a five-star child gets one for life */
+export type Trait = 'hardy' | 'quick' | 'brave' | 'greenthumb' | 'tireless';
+export const TRAITS: Record<Trait, { name: string; blurb: string }> = {
+  hardy: { name: 'Hardy', blurb: '+25% HP' },
+  quick: { name: 'Quick', blurb: 'moves 20% faster' },
+  brave: { name: 'Brave', blurb: 'soldiers deal +20%' },
+  greenthumb: { name: 'Green Thumb', blurb: 'a quarter of harvests yield double' },
+  tireless: { name: 'Tireless', blurb: 'works 25% faster' },
+};
 /** beds per house level (index = level); overridden upward by the Big Families boon */
 export const HOUSE_BEDS = [0, 4, 6, 8] as const;

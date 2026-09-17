@@ -196,10 +196,12 @@ export interface RunResult {
   won: boolean;
   day: number;
   raidersKilled: number;
-  soldiersRaised: number;
+  /** children who came of age this run, and the care stars they were raised with (summed) */
+  childrenRaised: number;
+  stars: number;
 }
 
-export interface RenownBreakdown { days: number; kills: number; soldiers: number; victory: number; total: number }
+export interface RenownBreakdown { days: number; kills: number; children: number; victory: number; total: number }
 
 const KEY = 'village.meta';
 
@@ -307,8 +309,8 @@ export class Meta {
   }
 
   static renownFor(r: RunResult): RenownBreakdown {
-    const days = r.day * 10, kills = r.raidersKilled * 5, soldiers = r.soldiersRaised * 25, victory = r.won ? 500 : 0;
-    return { days, kills, soldiers, victory, total: days + kills + soldiers + victory };
+    const days = r.day * 10, kills = r.raidersKilled * 5, children = r.childrenRaised * 20 + r.stars * 8, victory = r.won ? 500 : 0;
+    return { days, kills, children, victory, total: days + kills + children + victory };
   }
 
   /** Bank a finished run. */
