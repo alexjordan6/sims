@@ -243,8 +243,8 @@ function drawBarracks(ctx: Ctx, ox: number, level: number): void {
     merlons(ctx, ox + tx, 6, 10, p);
   }
   // door with a stone arch, arrow slits either side
-  px(ctx, ox + 23, 57, STONE_DARK, 18, 3); px(ctx, ox + 25, 56, STONE_DARK, 14, 1); px(ctx, ox + 24, 58, INK, 16, 1);
-  doubleDoor(ctx, ox + 25, 60, 14, 20, p);
+  px(ctx, ox + 15, 57, STONE_DARK, 18, 3); px(ctx, ox + 17, 56, STONE_DARK, 14, 1); px(ctx, ox + 16, 58, INK, 16, 1);
+  doubleDoor(ctx, ox + 17, 60, 14, 20, p);
   slit(ctx, ox + 13, 40); slit(ctx, ox + 49, 40); slit(ctx, ox + 31, 30);
   banner(ctx, ox + 44, 44, BLUE, '#274a9c');
   if (level >= 2) {

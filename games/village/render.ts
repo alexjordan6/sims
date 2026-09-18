@@ -50,6 +50,8 @@ export class Renderer {
   private night: Night;
   /** screen-space arrows toward off-screen raiders */
   private arrows: Phaser.GameObjects.Graphics;
+  /** a translucent wall/gate/stairs where the held tool would build, drawn over everything so it shows behind other walls */
+  private ghost: Phaser.GameObjects.Image;
   /** set on frames where tiles were repainted (the minimap redraws its terrain then) */
   tilesChanged = false;
   private t = 0;
@@ -69,6 +71,7 @@ export class Renderer {
     this.under = scene.add.graphics().setDepth(DEPTH.under);
     this.bars = scene.add.graphics().setDepth(DEPTH.bars);
     this.arrows = scene.add.graphics().setDepth(DEPTH.arrows).setScrollFactor(0);
+    this.ghost = scene.add.image(0, 0, 'fort', 0).setOrigin(0, 1).setDepth(DEPTH.bars - 1).setAlpha(0.6).setVisible(false);
     this.fx = new Fx(scene);
     ensureBuildingArt(scene);
     this.night = new Night(scene); // after Fx, which makes the 'px' texture
@@ -336,11 +339,13 @@ export class Renderer {
     const s = this.scene;
     const u = this.under;
     u.clear();
-    if (['wall', 'gate', 'stairs'].includes(s.player.tool)) {
+    const tool = s.player.tool;
+    if (tool === 'wall' || tool === 'gate' || tool === 'stairs') {
       const q = s.defenseTarget();
-      u.lineStyle(2, 0xffd578, 1); u.strokeRect(q.tx * TILE, q.ty * TILE, TILE, TILE);
-      u.lineStyle(1, 0xffd578, 0.45); u.strokeRect(q.tx * TILE, q.ty * TILE - WALL_HEIGHT, TILE, TILE);
-    }
+      const ok = !s.defenseProblem(tool, q);
+      u.lineStyle(2, ok ? 0xffd578 : 0xff4040, 1); u.strokeRect(q.tx * TILE, q.ty * TILE, TILE, TILE);
+      this.ghost.setPosition(q.tx * TILE, (q.ty + 1) * TILE).setFrame(tool === 'stairs' ? 3 : tool === 'gate' ? 1 : 0).setTint(ok ? 0xffe066 : 0xff6060).setVisible(s.screen === 'playing' && !s.interior.active);
+    } else this.ghost.setVisible(false);
     if (s.posting) {
       for (const d of s.world.defenses.values()) { u.fillStyle(0x78d8f0, 0.5); u.fillRect(d.tx * TILE + 2, d.ty * TILE - WALL_HEIGHT + 2, 12, 12); }
     }

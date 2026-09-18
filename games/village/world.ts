@@ -8,7 +8,7 @@ export type BuildingKind = 'house' | 'barracks' | 'granary' | 'woodyard' | 'tave
 
 /** Footprint per building kind; (tx, ty) is the top-left, the door sits on the bottom row at `door`. */
 export const BUILDINGS: Record<BuildingKind, { w: number; h: number; door: number; name: string }> = {
-  house: { w: 4, h: 4, door: 1, name: 'House' },
+  house: { w: 4, h: 4, door: 2, name: 'House' },
   barracks: { w: 4, h: 4, door: 1, name: 'Barracks' },
   granary: { w: 3, h: 2, door: 1, name: 'Granary' },
   woodyard: { w: 3, h: 2, door: 1, name: 'Woodyard' },

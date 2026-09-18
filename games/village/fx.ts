@@ -147,7 +147,7 @@ export class Fx {
       case 'miss': this.dust.explode(4, ev.who.x + ev.who.dir * 10, ev.who.y + 2); this.sfx.whiff(); break;
       case 'cast': this.magic.explode(10, ev.who.x, ev.who.y - 8); this.scene.tweens.add({ targets: this.anim(ev.who.id), sy: 1.15, sx: 0.9, duration: 120, yoyo: true }); this.sfx.bolt(); break;
       case 'impact': this.magic.explode(6, ev.x, ev.y); break;
-      case 'tool': this.tool(ev.tool, ev.tx, ev.ty, sprites); break;
+      case 'tool': this.tool(ev.tool, ev.tx, ev.ty, sprites, ev.who); break;
       case 'boss': this.bossArrive(ev.who, sprites); this.sfx.horn(); break;
       case 'slowmo': this.zoomBump(0.08, 120, 420); break;
       case 'death': break; // handled by die() when the renderer hands over the sprite
@@ -281,8 +281,8 @@ export class Fx {
     void sprites;
   }
 
-  private tool(tool: 'hoe' | 'axe' | 'seed' | 'hammer', tx: number, ty: number, sprites: Map<number, Phaser.GameObjects.Sprite>): void {
-    const pl = this.scene.player;
+  private tool(tool: 'hoe' | 'axe' | 'seed' | 'hammer', tx: number, ty: number, sprites: Map<number, Phaser.GameObjects.Sprite>, who?: Mover): void {
+    const pl = who ?? this.scene.player;
     const cx = (tx + 0.5) * TILE, cy = (ty + 0.5) * TILE;
     if (tool === 'seed') { this.seeds.explode(7, cx, cy - 2); this.scene.tweens.add({ targets: this.anim(pl.id), sy: 0.9, duration: 60, yoyo: true }); this.sfx.dig(); return; }
     this.swing(pl, { x: cx, y: cy }, sprites, tool === 'hoe' ? 'hoe' : tool === 'axe' ? 'woodAxe' : 'hammer', 160);

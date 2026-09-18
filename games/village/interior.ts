@@ -1,6 +1,8 @@
 import type { VillageScene } from './main';
 import { BUILDINGS, World, doorstep, type Building } from './world';
-import { CHAR } from './atlas';
+import { ensureCharacter, frameSize } from './characters';
+import { lookFor } from './render';
+import type { Mover } from './agents';
 
 type Furnishing = { x: number; y: number; w: number; h: number; kind: 'bed' | 'table' | 'hearth' | 'rack' | 'bar' | 'shelf'; label: string };
 
@@ -15,6 +17,8 @@ export class Interior {
   private destination: { x: number; y: number } | null = null;
   private time = 0;
   private mealAt = -99;
+  /** walking this frame (for the gait) */
+  private moving = false;
   constructor(private s: VillageScene) {}
   get active(): boolean { return !!this.building; }
 
@@ -78,6 +82,7 @@ export class Interior {
       dx = this.destination.x - this.x; dy = this.destination.y - this.y;
       if (Math.hypot(dx, dy) < 3) { this.destination = null; dx = dy = 0; }
     }
+    this.moving = !!(dx || dy);
     const len = Math.hypot(dx, dy) || 1; dx /= len; dy /= len;
     const nx = this.x + dx * 55 * dt, ny = this.y + dy * 55 * dt;
     if (this.free(nx, this.y)) this.x = nx;
@@ -155,14 +160,19 @@ export class Interior {
         rect(x + w / 2, y + 6, 3, 7, '#f6d992'); rect(x + w / 2 + 1, y + 3, 1, 3, '#ffbd53');
       }
     }
-    const person = (x: number, y: number, key: string, frame: number, scale = 1) => {
-      const tex = this.s.textures.getFrame(key, frame); if (!tex) return;
-      c.drawImage(tex.source.image as CanvasImageSource, tex.cutX, tex.cutY, tex.width, tex.height, Math.round(x - 8 * scale), Math.round(y - 12 * scale), 16 * scale, 16 * scale);
+    // people are drawn with their real looks (outfit, armor, dye), the same textures the world uses
+    const person = (x: number, y: number, m: Mover, walk = false) => {
+      const look = lookFor(m); if (!look) return;
+      const key = ensureCharacter(this.s, look), { w, h } = frameSize(look.body);
+      const tex = this.s.textures.getFrame(key, walk ? 1 : 0); if (!tex) return;
+      c.drawImage(tex.source.image as CanvasImageSource, tex.cutX, tex.cutY, tex.width, tex.height, Math.round(x - w / 2), Math.round(y - h * 0.75), w, h);
     };
     const residents = this.s.villagers().filter(v => v.hidden && v.indoors === b);
-    residents.forEach((v, i) => { const art = CHAR[v.role]; person(46 + i % 3 * 28, 86 + Math.floor(i / 3) * 46, art.key, art.frame, v.role === 'kid' ? 0.75 : 1); });
-    if (b.kind === 'tavern') person(247, 47, CHAR.farmer.key, CHAR.farmer.frame);
-    person(this.x, this.y, CHAR.player.key, CHAR.player.frame);
+    residents.forEach((v, i) => person(46 + i % 3 * 28, 86 + Math.floor(i / 3) * 46, v));
+    const keeper = this.s.villagers().find(v => v.role !== 'kid');
+    if (b.kind === 'tavern' && keeper) person(247, 47, keeper);
+    const p = this.s.player;
+    person(this.x, this.y, p, this.moving && Math.floor(this.time / 0.18) % 2 === 1);
     // Warm radial firelight, contained inside the room; the outside night keeps advancing.
     const glow = c.createRadialGradient(160, 60, 5, 160, 90, 145); glow.addColorStop(0, '#ffc36a24'); glow.addColorStop(1, '#00000000'); c.fillStyle = glow; c.fillRect(20, 30, 280, 177);
     c.font = '10px monospace'; c.fillStyle = '#f0d4a2'; c.fillText(`${BUILDINGS[b.kind].name} · Lv${b.level}`, 19, 17);

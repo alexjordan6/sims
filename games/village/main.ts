@@ -21,7 +21,7 @@ export type FxEvent =
   | { kind: 'telegraph'; who: Mover; ms: number }
   | { kind: 'miss'; who: Mover }
   | { kind: 'slowmo' }
-  | { kind: 'tool'; tool: 'hoe' | 'axe' | 'seed' | 'hammer'; tx: number; ty: number }
+  | { kind: 'tool'; tool: 'hoe' | 'axe' | 'seed' | 'hammer'; tx: number; ty: number; who?: Mover }
   | { kind: 'death'; who: Mover; x: number; y: number }
   | { kind: 'boss'; who: Mover }
   | { kind: 'swing'; who: Mover; dx: number; dy: number; stage: number }
@@ -936,16 +936,26 @@ export class VillageScene extends SimScene {
       if (q) { Object.assign(m, World.center(q.tx, q.ty)); m.elevated = false; m.clearGoal(); if (m instanceof Villager) m.post = null; }
     }
   }
+  /** Where a wall/gate/stairs would go: the pointed-at tile (walls are placed where you point, even behind other walls), else the tile ahead. */
   defenseTarget(): TilePos {
-    const hv = this.hoverTile, t = this.player.tile;
-    return hv && Math.max(Math.abs(hv.tx - t.tx), Math.abs(hv.ty - t.ty)) <= 6 ? hv : this.player.faced;
+    return this.hoverTile ?? this.player.faced;
+  }
+  /** Why a defense can't be built at `q` right now, or null. */
+  defenseProblem(kind: DefenseKind, q: TilePos): string | null {
+    const t = this.player.tile, cost = DEFENSE_COST[kind];
+    if (Math.max(Math.abs(q.tx - t.tx), Math.abs(q.ty - t.ty)) > VillageScene.BUILD_REACH) return `Too far — build within ${VillageScene.BUILD_REACH} tiles of you`;
+    if (this.wood < cost) return `Need ${cost} wood for construction`;
+    const tile = this.world.get(q.tx, q.ty);
+    if (tile?.defense) return `There is already a ${tile.defense.kind} here`;
+    if (!BUILDABLE.has(tile?.kind ?? 'tree')) return 'Clear trees and crops before building defenses';
+    if (this.world.buildings.some(b => { const d = doorstep(b); return d.tx === q.tx && d.ty === q.ty; })) return 'Leave the doorway clear';
+    if ((this.agents as Mover[]).some(m => !m.hidden && !m.dead && m.tile.tx === q.tx && m.tile.ty === q.ty)) return 'Place the wall beside people, not beneath them';
+    return null;
   }
   buildDefense(kind: DefenseKind): void {
     const q = this.defenseTarget(), cost = DEFENSE_COST[kind];
-    if (this.wood < cost) { this.event('build', `Need ${cost} wood for construction.`); return; }
-    if (!BUILDABLE.has(this.world.get(q.tx, q.ty)?.kind ?? 'tree')) { this.event('build', 'Clear trees and crops before building defenses.'); return; }
-    if (this.world.buildings.some(b => { const d = doorstep(b); return d.tx === q.tx && d.ty === q.ty; })) { this.event('build', 'Leave the doorway clear.'); return; }
-    if ((this.agents as Mover[]).some(m => !m.hidden && !m.dead && m.tile.tx === q.tx && m.tile.ty === q.ty)) { this.event('build', 'Place the wall beside people, not beneath them.'); return; }
+    const why = this.defenseProblem(kind, q);
+    if (why) { this.event('build', why + '.'); return; }
     if (this.world.placeDefense(kind, q.tx, q.ty)) { this.wood -= cost; this.fx.push({ kind: 'tool', tool: 'hammer', ...q }); }
   }
   /** Context action: use a nearby doorway, stairs, or gate. Both mouse and touch use this path. */
@@ -1176,7 +1186,11 @@ export class VillageScene extends SimScene {
     if (b && pl.tool !== 'hammer' && pl.tool !== 'sword') return `${this.buildingTitle(b)} — ${this.buildingBlurb(b)}`;
     switch (pl.tool) {
       case 'bow': return `E: shoot arrow (${this.arrows} left · craft 10 for 2 wood in the barracks)`;
-      case 'wall': case 'gate': case 'stairs': return `E: build ${pl.tool} (${DEFENSE_COST[pl.tool]} wood construction) · ${pl.tool === 'stairs' ? 'connect to a wall; hands to climb' : pl.tool === 'gate' ? 'allies pass; X opens to everyone' : 'connect segments into a perimeter'}`;
+      case 'wall': case 'gate': case 'stairs': {
+        const why = this.defenseProblem(pl.tool, this.defenseTarget());
+        if (why) return `${pl.tool}: ${why}`;
+        return `E: build ${pl.tool} (${DEFENSE_COST[pl.tool]} wood construction) · ${pl.tool === 'stairs' ? 'connect to a wall; hands to climb' : pl.tool === 'gate' ? 'allies pass; X opens to everyone' : 'point where it goes — walls stand behind walls too'}`;
+      }
       case 'sword': {
         const near = this.nearestRaider(pl.x, pl.y, 40);
         return near ? 'E: attack!' : 'E: swing sword';

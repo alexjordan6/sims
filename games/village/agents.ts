@@ -370,7 +370,7 @@ export class Villager extends Mover {
         if (this.thinkTimer <= 0) {
           this.thinkTimer = s.rng.range(1.2, 2.2);
           if (c === 'soldier') s.fx.push({ kind: 'swing', who: this, dx: this.dir, dy: 0, stage: 0 });
-          else s.fx.push({ kind: 'tool', tool: c === 'farmer' ? 'hoe' : 'axe', tx: spot.tx, ty: spot.ty });
+          else s.fx.push({ kind: 'tool', tool: c === 'farmer' ? 'hoe' : 'axe', tx: spot.tx, ty: spot.ty, who: this });
         }
       } else this.task = c === 'soldier' ? 'off to drill' : c === 'farmer' ? 'off to the field' : 'off to the woodyard';
       return;
@@ -845,8 +845,7 @@ export class Player extends Mover {
     // step into the swing
     if (active && !c.spin) {
       const nx = this.x + sw.dx * SWING.stepIn * (dt / (c.activeTo - c.activeFrom)), ny = this.y + sw.dy * SWING.stepIn * (dt / (c.activeTo - c.activeFrom));
-      const t = World.toTile(nx + sw.dx * 3, ny + sw.dy * 3);
-      if (!s.world.isBlocked(t.tx, t.ty, false, this.elevated)) { this.x = nx; this.y = ny; }
+      if (this.fits(nx, ny, s.world)) { this.x = nx; this.y = ny; }
     }
     if (active || wasActive) {
       const dmg = Math.round(12 * s.mods.playerDmgMul * c.dmgMul);
@@ -880,20 +879,23 @@ export class Player extends Mover {
     }
   }
 
-  private moveWithCollision(dt: number, w: World): void {
+  /** Does the whole body (all four corners) stand on walkable ground at (x, y)? */
+  fits(x: number, y: number, w: World): boolean {
     const r = this.radius - 0.5;
-    const free = (x: number, y: number): boolean => {
-      for (const [ox, oy] of [[-r, -r], [r, -r], [-r, r], [r, r]]) {
-        const t = World.toTile(x + ox, y + oy);
-        if (w.isBlocked(t.tx, t.ty, false, this.elevated)) return false;
-      }
-      return true;
-    };
-    // if we are somehow inside something solid, let any movement through so we can never be trapped
+    for (const [ox, oy] of [[-r, -r], [r, -r], [-r, r], [r, r]]) {
+      const t = World.toTile(x + ox, y + oy);
+      if (w.isBlocked(t.tx, t.ty, false, this.elevated)) return false;
+    }
+    return true;
+  }
+
+  private moveWithCollision(dt: number, w: World): void {
+    // if we are somehow inside something solid (a shove, a swing's step), let any movement through so we can never be trapped
+    const stuck = !this.fits(this.x, this.y, w);
     const nx = this.x + this.vx * dt;
-    if (free(nx, this.y)) this.x = nx;
+    if (stuck || this.fits(nx, this.y, w)) this.x = nx;
     const ny = this.y + this.vy * dt;
-    if (free(this.x, ny)) this.y = ny;
+    if (stuck || this.fits(this.x, ny, w)) this.y = ny;
   }
 
   cycleTool(dir = 1): void {
