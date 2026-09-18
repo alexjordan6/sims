@@ -729,9 +729,10 @@ export class Raider extends Mover {
 export class Arrow extends Mover {
   travelled = 0;
   readonly range: number;
-  constructor(x: number, y: number, public ux: number, public uy: number, public dmg: number, public owner: Mover, public dropDistance = 170) {
+  /** `owner` is null for a barracks tower shot, which is always loosed from the roof (elevated). */
+  constructor(x: number, y: number, public ux: number, public uy: number, public dmg: number, public owner: Mover | null, public dropDistance = 170) {
     super(x, y); this.speed = 230; this.radius = 2; this.hp = this.maxHp = 1;
-    this.elevated = owner.elevated; this.range = this.elevated ? 220 : 170;
+    this.elevated = owner ? owner.elevated : true; this.range = owner ? (this.elevated ? 220 : 170) : dropDistance;
   }
   update(dt: number, s: VillageScene): void {
     const total = this.speed * dt, steps = Math.ceil(total / 3), step = total / steps;

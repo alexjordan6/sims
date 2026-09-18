@@ -4,7 +4,7 @@ import { Mover, Villager, Raider, Player, Arrow } from './agents';
 import { Bolt } from './enemies';
 import { TOWN, CHAR } from './atlas';
 import { ensureCharacter, seedLook, type Look } from './characters';
-import { TILE, COLS, ROWS, CAPS, WALL_HEIGHT, OGRE } from './config';
+import { p, TILE, COLS, ROWS, CAPS, WALL_HEIGHT, OGRE } from './config';
 import type { VillageScene } from './main';
 import { Fx } from './fx';
 import { ensureBuildingArt, ensureFlora, FLORA, BUILDING_TEXTURE, LIT_TEXTURE, STACK_ROWS } from './pixelart';
@@ -378,6 +378,8 @@ export class Renderer {
         const dx = (a.tx + BUILDINGS[kind].door) * TILE, dy = (a.ty + h - 1) * TILE;
         u.fillStyle(ok ? 0xffe066 : 0xff4040, 0.5);
         u.fillRect(dx + 4, dy + 8, TILE - 8, TILE - 8);
+        // a barracks shows how far its arrows reach
+        if (kind === 'barracks') this.rangeRing((a.tx + w / 2) * TILE, (a.ty + h / 2) * TILE, p.towerRange, ok ? 0xffe066 : 0xff4040, 1);
         if (!s.cursorPlacing) {
           u.lineStyle(1, 0xffffff, 0.35);
           u.lineBetween(s.player.x, s.player.y, (a.tx + w / 2) * TILE, (a.ty + h / 2) * TILE);
@@ -399,6 +401,9 @@ export class Renderer {
       u.lineStyle(1, 0xffe066, 1);
       u.strokeEllipse(s.selected.x, s.selected.y + 1, 12, 6);
     }
+    // a selected barracks keeps showing its arrow range (dimmer than the build preview)
+    const sb = s.selectedBuilding;
+    if (sb?.kind === 'barracks' && !s.interior.active) { const c = s.towerCenter(sb); this.rangeRing(c.x, c.y, s.towerRange(sb), 0xffe066, 0.5); }
     // hp bars
     const b = this.bars;
     b.clear();
@@ -415,6 +420,19 @@ export class Renderer {
       b.fillStyle(0x1a1a25); b.fillRect(d.tx * TILE, d.ty * TILE - WALL_HEIGHT - 3, 16, 3);
       b.fillStyle(0xeab765); b.fillRect(d.tx * TILE, d.ty * TILE - WALL_HEIGHT - 3, 16 * d.hp / d.maxHp, 2);
     }
+    // every barracks wears its arrow stock above the roof: gold, red when low, a pulsing empty frame when dry
+    for (const t of s.world.barracks) {
+      const ammo = t.ammo ?? 0, cap = s.towerCap(t), bw = 24, x = Math.round((t.tx + BUILDINGS.barracks.w / 2) * TILE - bw / 2), y = t.ty * TILE - 7;
+      b.fillStyle(0x000000, 0.7); b.fillRect(x - 1, y - 1, bw + 2, 5);
+      if (ammo > 0) { b.fillStyle(ammo / cap > 0.25 ? 0xffd578 : 0xff5a3c, 1); b.fillRect(x, y, Math.max(1, Math.round(bw * ammo / cap)), 3); }
+      else { b.lineStyle(1, 0xff4040, 0.55 + 0.45 * Math.sin(s.time.now / 150)); b.strokeRect(x + 0.5, y + 0.5, bw - 1, 2); }
+    }
+  }
+  /** A translucent disc with a rim, used for the barracks' arrow reach. */
+  private rangeRing(x: number, y: number, r: number, colour: number, strength: number): void {
+    const u = this.under;
+    u.fillStyle(colour, 0.06 * strength); u.fillCircle(x, y, r);
+    u.lineStyle(1, colour, 0.6 * strength); u.strokeCircle(x, y, r);
   }
 }
 

@@ -1,5 +1,5 @@
 import type { Rng } from '@shared/index';
-import { TILE, COLS, ROWS, type Calling } from './config';
+import { TILE, COLS, ROWS, TOWER, type Calling } from './config';
 
 export type DefenseKind = 'wall' | 'gate' | 'stairs';
 export interface Defense extends TilePos { kind: DefenseKind; hp: number; maxHp: number; open: boolean }
@@ -30,6 +30,12 @@ export interface Building {
   calling?: Calling;
   /** houses: children eat a double ration and count as well fed */
   hearty?: boolean;
+  /** barracks: arrows left in the tower's chest */
+  ammo?: number;
+  /** barracks: seconds until the tower may fire again */
+  fireCd?: number;
+  /** barracks: the "out of arrows" warning has been posted since the last restock */
+  dryWarned?: boolean;
 }
 /** Houses are buildings; kept as a named type because half the sim talks about "home". */
 export type House = Building;
@@ -190,6 +196,7 @@ export class World {
 
   place(kind: BuildingKind, tx: number, ty: number): Building {
     const b: Building = { kind, tx, ty, level: 1, residents: 0 };
+    if (kind === 'barracks') { b.ammo = TOWER.start; b.fireCd = 0; }
     const f = BUILDINGS[kind];
     this.stamping = true;
     for (let dy = 0; dy < f.h; dy++)

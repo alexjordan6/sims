@@ -6,7 +6,7 @@ import { DEFENSE_COST, WALL_HEIGHT } from './config';
 import { Interior } from './interior';
 import { Rat, Snatcher, Brute, Shaman, Ogre, waveComposition } from './enemies';
 import { Fog } from './fog';
-import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, type LoadKind, TREE_YIELD, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, OLD_YIELD, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, CADET_AGE_BEFORE, HEARTY_RATION, CALLING_NAME, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, type Calling, type ArmorSlot } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, type LoadKind, TREE_YIELD, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, OLD_YIELD, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, CADET_AGE_BEFORE, HEARTY_RATION, CALLING_NAME, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, type Calling, type ArmorSlot } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
@@ -49,6 +49,8 @@ export class VillageScene extends SimScene {
   scrap = 0;
   /** the ARMORY panel's current wearer, or null when closed */
   armoryFor: Mover | null = null;
+  /** the barracks whose chest the open armory restocks */
+  armoryChest: Building | null = null;
   interior = new Interior(this);
   posting: Villager | null = null;
   day = 1;
@@ -449,9 +451,11 @@ export class VillageScene extends SimScene {
   setHelmetStyle(who: Mover, style: number): void { who.helmetStyle = (Math.max(0, Math.min(2, style)) as 0 | 1 | 2); }
   setPlume(who: Mover, plume: number): void { who.plume = ((plume % PLUMES.length) + PLUMES.length) % PLUMES.length; }
   /** Open the armory (needs a barracks) for a wearer, or close it. */
-  openArmory(who: Mover | null): void {
+  openArmory(who: Mover | null, chest?: Building | null): void {
     if (who && !this.world.barracks.length) { this.event('info', 'Build a barracks to open an armory', true); return; }
     this.armoryFor = who;
+    const sel = this.interior.building?.kind === 'barracks' ? this.interior.building : this.selectedBuilding?.kind === 'barracks' ? this.selectedBuilding : null;
+    this.armoryChest = who ? chest ?? sel ?? this.nearestBarracks(this.player.x, this.player.y) : null;
     this.ui?.renderArmory();
   }
 
@@ -566,6 +570,7 @@ export class VillageScene extends SimScene {
 
 
     for (const a of this.agents) a.update(dt, this);
+    this.tickTowers(dt);
     for (const a of this.agents) if (a.dead) this.onDeath(a as Mover);
     this.removeDead();
 
@@ -938,6 +943,67 @@ export class VillageScene extends SimScene {
     if (!this.world.barracks.length || this.wood < 2) { this.event('info', 'A barracks and 2 wood are needed for 10 arrows.', true); return; }
     this.wood -= 2; this.arrows += 10; this.event('wood', 'Fletched 10 arrows for the shared quiver.');
   }
+
+  // ---- barracks towers ------------------------------------------------------
+  // Every barracks looses arrows at raiders in range from its own chest; the chest is refilled with wood inside.
+
+  towerRange(b: Building): number { return p.towerRange + (b.level - 1) * TOWER.rangePerLevel; }
+  towerCap(b: Building): number { return TOWER.cap + (b.level - 1) * TOWER.capPerLevel; }
+  towerCenter(b: Building): { x: number; y: number } { const c = buildingCenter(b); return { x: c.tx * TILE, y: c.ty * TILE }; }
+  /** Where a shot leaves the roof: just past the footprint along the aim, so the arrow's own sweep doesn't die on the barracks tiles. */
+  private towerMuzzle(b: Building, ux: number, uy: number): { x: number; y: number } {
+    const c = this.towerCenter(b);
+    let d = 0;
+    for (; d < TILE * 4; d += 4) { const q = World.toTile(c.x + ux * d, c.y + uy * d); if (this.world.get(q.tx, q.ty)?.building !== b) break; }
+    return { x: c.x + ux * (d + 2), y: c.y + uy * (d + 2) };
+  }
+  tickTowers(dt: number): void {
+    for (const b of this.world.barracks) {
+      b.fireCd = Math.max(0, (b.fireCd ?? 0) - dt);
+      if (b.fireCd > 0 || !(b.ammo ?? 0)) continue;
+      const c = this.towerCenter(b), range = this.towerRange(b);
+      // nearest raider with a clear line from the roof (trees and buildings are cover, walls are not);
+      // no fog test: the barracks is itself a sight source, and fog is only painted for the camera's view
+      const inRange: { r: Raider; d2: number }[] = [];
+      this.grid.forEachInRadius(c.x, c.y, range, (o, d2) => { if (o instanceof Raider && !o.dead && !o.harmless) inRange.push({ r: o, d2 }); });
+      inRange.sort((a, z) => a.d2 - z.d2);
+      let shot: { t: Raider; m: { x: number; y: number }; ux: number; uy: number } | null = null;
+      for (const { r: t } of inRange) {
+        const len = Math.hypot(t.x - c.x, t.y - c.y) || 1, ux = (t.x - c.x) / len, uy = (t.y - c.y) / len;
+        const m = this.towerMuzzle(b, ux, uy);
+        if (this.world.lineClear(m, t, true)) { shot = { t, m, ux, uy }; break; }
+      }
+      if (!shot) continue;
+      const { m, ux, uy } = shot;
+      const arrow = this.spawn(new Arrow(m.x, m.y, ux, uy, p.towerDmg, null, range + 24));
+      this.fx.push({ kind: 'arrow', who: arrow });
+      b.ammo!--; b.fireCd = p.towerCd;
+      if (!b.ammo && !b.dryWarned) { b.dryWarned = true; this.event('raid', 'The barracks tower is out of arrows — restock at its chest.', true); }
+    }
+  }
+  /** Why the tower chest can't be restocked right now, or null. */
+  restockProblem(b: Building): string | null {
+    if ((b.ammo ?? 0) >= this.towerCap(b)) return 'the chest is full';
+    if (this.wood < TOWER.restockWood) return `need ${TOWER.restockWood} wood (have ${this.wood | 0})`;
+    return null;
+  }
+  /** Put a bundle of arrows in a barracks' chest for wood. */
+  restockTower(b: Building): boolean {
+    const why = this.restockProblem(b);
+    if (why) { this.event('info', `Can't restock: ${why}`, true); return false; }
+    this.wood -= TOWER.restockWood;
+    b.ammo = Math.min(this.towerCap(b), (b.ammo ?? 0) + TOWER.restockArrows); b.dryWarned = false;
+    const c = this.towerCenter(b);
+    this.fx.push({ kind: 'deposit', x: c.x, y: c.y - TILE, text: `+${TOWER.restockArrows} arrows`, colour: '#ffe066' });
+    this.event('wood', `Stocked the tower chest · ${b.ammo} / ${this.towerCap(b)} arrows.`);
+    return true;
+  }
+  /** Arrows across every barracks chest, for the HUD. */
+  towerAmmo(): { ammo: number; cap: number } {
+    let ammo = 0, cap = 0;
+    for (const b of this.world.barracks) { ammo += b.ammo ?? 0; cap += this.towerCap(b); }
+    return { ammo, cap };
+  }
   equipSoldier(v: Villager, weapon: 'sword' | 'bow'): void {
     if (v.role !== 'soldier' || v.dead) return;
     v.weapon = weapon; v.attack = null; v.clearGoal();
@@ -1236,7 +1302,7 @@ export class VillageScene extends SimScene {
       case 'tavern':
       case 'barracks': {
         const why = this.buildProblem(this.buildAnchor(pl.tool), pl.tool);
-        return `E: build ${pl.tool} ${this.cursorPlacing ? 'where you point' : 'ahead'} (${this.buildCost(pl.tool)} wood)${why ? ' — ' + why : ''}`;
+        return `E: build ${pl.tool} ${this.cursorPlacing ? 'where you point' : 'ahead'} (${this.buildCost(pl.tool)} wood)${pl.tool === 'barracks' ? ' · the ring is its arrow range' : ''}${why ? ' — ' + why : ''}`;
       }
       case 'hammer': {
         if (t?.defense) return `E: repair ${t.kind} (${Math.ceil(t.defense.hp)}/${t.defense.maxHp} HP · 1 wood repairs 80)`;

@@ -4,7 +4,7 @@ import { ensureCharacter, frameSize } from './characters';
 import { lookFor } from './render';
 import type { Mover } from './agents';
 
-type Furnishing = { x: number; y: number; w: number; h: number; kind: 'bed' | 'table' | 'hearth' | 'rack' | 'bar' | 'shelf'; label: string };
+type Furnishing = { x: number; y: number; w: number; h: number; kind: 'bed' | 'table' | 'hearth' | 'rack' | 'bar' | 'shelf' | 'chest'; label: string };
 
 /** Walkable rooms use their own coordinates; the outdoor simulation keeps running. */
 export class Interior {
@@ -37,6 +37,7 @@ export class Interior {
     } else if (b.kind === 'barracks') {
       for (let i = 0; i < 3 + b.level; i++) this.furniture.push({ x: 30 + i % 3 * 28, y: 76 + Math.floor(i / 3) * 46, w: 21, h: 32, kind: 'bed', label: 'Soldiers’ bunks' });
       this.furniture.push({ x: 220, y: 42, w: 59, h: 29, kind: 'rack', label: 'Fletch 10 arrows · 2 wood' }, { x: 208, y: 112, w: 62, h: 27, kind: 'table', label: 'Command table · inspect soldiers to equip bows and set posts' });
+      this.furniture.push({ x: 226, y: 162, w: 36, h: 24, kind: 'chest', label: 'Armor chest' }); // label is filled in live by hint()
     } else {
       this.furniture.push({ x: 212, y: 52, w: 67, h: 24, kind: 'bar', label: 'Hot stew · 2 food' });
       for (const [x, y] of [[42, 92], [216, 105], [55, 146], [208, 153]]) this.furniture.push({ x, y, w: 43, h: 22, kind: 'table', label: 'Gather around the table' });
@@ -99,6 +100,7 @@ export class Interior {
   hint(): string {
     if (this.y > 175 && Math.abs(this.x - 160) < 30) return 'E: exit to the village';
     const f = this.nearby();
+    if (f?.kind === 'chest' && this.building) f.label = `Armor chest · tower arrows ${this.building.ammo ?? 0} / ${this.s.towerCap(this.building)} · restock 10 for 2 wood · forge armor`;
     return f ? `E: ${f.label}` : 'Walk around · approach the hearth, beds or equipment · door below to leave';
   }
   act(): void {
@@ -106,6 +108,7 @@ export class Interior {
     if (this.y > 175 && Math.abs(this.x - 160) < 30) { this.leave(); return; }
     const f = this.nearby(); if (!f) return;
     if (f.kind === 'rack') { this.s.craftArrows(); return; }
+    if (f.kind === 'chest') { this.s.openArmory(this.s.player, this.building); return; }
     if (f.kind === 'hearth' || f.kind === 'bar' || f.kind === 'bed') {
       if (this.time - this.mealAt < 8) { this.s.event('info', 'Enjoy the warmth a little longer before resting again.'); return; }
       const cost = this.building.kind === 'tavern' ? 2 : 1;
@@ -151,6 +154,14 @@ export class Interior {
       } else if (kind === 'rack') {
         rect(x, y, w, h, '#3e2c23'); rect(x + 2, y + 3, w - 4, 3, '#b17c49');
         for (let i = 0; i < 6; i++) { rect(x + 6 + i * 8, y + 7, 2, 20, '#d3ab6d'); rect(x + 5 + i * 8, y + 7, 4, 3, '#d2d8d8'); }
+      } else if (kind === 'chest') {
+        // an iron-banded chest; arrow fletchings stick out of the lid while the tower has any
+        rect(x, y + 6, w, h - 6, '#3e2c23'); rect(x + 2, y + 8, w - 4, h - 10, '#7a5236');
+        rect(x, y + 2, w, 6, '#4b3328'); rect(x + 1, y + 3, w - 2, 3, '#8a5d3d');
+        for (const u of [4, w - 8]) { rect(x + u, y + 2, 4, h - 2, '#6d7378'); rect(x + u + 1, y + 2, 2, h - 2, '#9aa1a6'); }
+        rect(x + w / 2 - 3, y + 6, 6, 6, '#d9b25a'); rect(x + w / 2 - 1, y + 8, 2, 3, '#3e2c23');
+        const stock = Math.min(4, Math.ceil((b.ammo ?? 0) / (this.s.towerCap(b) / 4)));
+        for (let i = 0; i < stock; i++) { rect(x + 8 + i * 5, y - 6, 1, 9, '#d3ab6d'); rect(x + 7 + i * 5, y - 7, 3, 3, i % 2 ? '#d2d8d8' : '#c9564a'); }
       } else if (kind === 'shelf') {
         rect(x, y, w, h, '#b78453');
         for (let i = 0; i < 7; i++) rect(x + 3 + i * 4, y + 3, 3, 11, ['#818f69', '#b45f53', '#e0b57a'][i % 3]);

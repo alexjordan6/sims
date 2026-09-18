@@ -550,6 +550,19 @@ body.touch .ctrl-tab { font-size: 7px; }
 .aname .tier { letter-spacing: 2px; color: #c9d3de; }
 .acur { font-size: 14px; margin: 3px 0; } .acur small { color: var(--ink-dim); font-size: 12px; margin-left: 4px; }
 .aslot .d { font-size: 12px; color: var(--ink-dim); margin-top: 2px; }
+/* the tower chest at the top of the armory: arrows for the barracks tower */
+.chest { background: #0005; border: 2px solid #5a4636; padding: 6px 8px; margin-bottom: 8px; }
+.chest.low { border-color: #a0522d; }
+.chest.dry { border-color: var(--danger); animation: chest-dry 1s ease-in-out infinite alternate; }
+@keyframes chest-dry { from { box-shadow: 0 0 0 0 transparent; } to { box-shadow: 0 0 0 2px var(--danger); } }
+.chest .d { font-size: 12px; color: var(--ink-dim); margin-top: 2px; }
+.chest .btn { margin-top: 4px; margin-right: 4px; }
+.bar.ammo { height: 6px; margin-top: 3px; }
+.bar.ammo i { background: var(--accent); }
+.bar.ammo.low i { background: var(--danger); }
+.tower-count { width: 100%; color: var(--accent); }
+.tower-count.low { color: #ff9a5c; }
+.tower-count.dry { color: var(--danger); font-weight: bold; }
 .custom { margin-top: 8px; display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: center; }
 .swatches { display: flex; gap: 4px; flex-wrap: wrap; }
 .swatch { width: 22px; height: 22px; border: 2px solid #5a4636; cursor: pointer; padding: 0; color: var(--ink); font: inherit; }

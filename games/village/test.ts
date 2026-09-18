@@ -4,7 +4,7 @@ import { World, doorstep, type BuildingKind } from './world';
 import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, waveComposition } from './enemies';
-import { COLS, ROWS, WALL_HEIGHT, TREE_YIELD, HAUL } from './config';
+import { COLS, ROWS, WALL_HEIGHT, TREE_YIELD, HAUL, TOWER, p } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
 const output = document.getElementById('test-results')!, summary = document.getElementById('test-summary')!;
@@ -75,6 +75,23 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     for (let i = 0; i < 30 && !blocked.dead; i++) blocked.update(1 / 60, s);
     assert(blocked.dead && victim.hp === before, 'ground arrows stop at stone walls');
     s.world.damageDefense(shield, 999);
+    // barracks tower: fires from its own chest at raiders in range, falls silent when dry, restocks for wood
+    s = fresh(); s.agents = [s.player]; Object.assign(s.player, { x: -500, y: -500 });
+    const keep = s.world.barracks[0], kc = s.towerCenter(keep);
+    for (let y = keep.ty - 8; y < keep.ty + 12; y++) for (let x = keep.tx - 8; x < keep.tx + 12; x++) if (s.world.get(x, y)?.kind === 'tree') s.world.set(x, y, 'grass');
+    assert(keep.ammo === TOWER.start && s.towerCap(keep) === TOWER.cap, 'a fresh barracks starts with a part-filled chest');
+    const foe = s.spawn(new Raider(kc.x + 90, kc.y)); foe.speed = 0; foe.hp = foe.maxHp = 1000;
+    const towerStep = (sec: number) => { for (let i = 0; i < Math.ceil(sec * 60); i++) { s.grid.rebuild(s.agents); for (const a of [...s.agents]) if (!a.dead) a.update(1 / 60, s); s.tickTowers(1 / 60); s.removeDead(); } };
+    towerStep(4);
+    const shots = TOWER.start - keep.ammo!;
+    assert(shots >= 2 && foe.hp <= foe.maxHp - shots * p.towerDmg + p.towerDmg, `the tower shot ${shots} arrows and they landed (raider at ${foe.hp} HP)`);
+    keep.ammo = 0; const silent = foe.hp; towerStep(3);
+    assert(foe.hp === silent, 'an empty chest fires nothing');
+    s.wood = 1; assert(!s.restockTower(keep) && keep.ammo === 0, 'restocking needs wood');
+    s.wood = 10; assert(s.restockTower(keep) && keep.ammo === TOWER.restockArrows && s.wood === 10 - TOWER.restockWood, 'restocking trades wood for tower arrows');
+    keep.ammo = s.towerCap(keep) - 3; s.restockTower(keep);
+    assert(keep.ammo === s.towerCap(keep) && !s.restockTower(keep), 'the chest fills to its cap and refuses more');
+    foe.dead = true; s.removeDead();
     s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(135, 100));
     for (const q of s.world.find(t => t.kind === 'crop')) s.world.set(q.tx, q.ty, 'tilled');
     s.world.set(120, 100, 'crop'); const rat = s.spawn(new Rat(1928, 1608, { harmlessRats: true })); s.grid.rebuild(s.agents);

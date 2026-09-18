@@ -20,7 +20,21 @@ export const p = params({
   raiderDmg: [5, 1, 30, 1],
   soldierHp: [60, 5, 100, 1],
   soldierDmg: [10, 1, 30, 1],
+  towerRange: [150, 40, 320, 8],   // px; barracks arrow range at Lv1
+  towerDmg: [8, 1, 30, 1],
+  towerCd: [1.4, 0.2, 5, 0.1],     // seconds between tower shots
 });
+
+// ---- barracks tower -------------------------------------------------------------------------
+/** Every barracks fires arrows at raiders in range from its own chest of arrows; the chest is refilled with wood. */
+export const TOWER = {
+  /** arrows a Lv1 chest holds, and what a fresh barracks starts with */
+  cap: 20, start: 10,
+  /** one restock: this much wood for this many arrows */
+  restockWood: 2, restockArrows: 10,
+  /** per barracks level above 1 */
+  capPerLevel: 10, rangePerLevel: 16,
+} as const;
 
 export const COST = { house: 20, barracks: 30, tavern: 50 } as const;
 export const DEFENSE_COST = { wall: 4, gate: 12, stairs: 10 } as const;
@@ -57,7 +71,7 @@ export const LEVEL_PERKS: Record<'house' | 'barracks' | 'granary' | 'woodyard' |
   lair: ['', 'the Ogre sleeps here by day', '', ''],
   tavern: ['', 'hearth meals restore 20 HP', 'hearth meals restore 35 HP', 'hearth meals restore 50 HP · family hall'],
   house: ['', '4 beds', '6 beds', '8 beds · births +15%'],
-  barracks: ['', 'sponsors 1 house', 'sponsors 2 houses · soldiers +15 HP', 'sponsors 3 houses · soldiers +30 HP · +20% dmg · regen'],
+  barracks: ['', 'sponsors 1 house · fires arrows at raiders', 'sponsors 2 houses · soldiers +15 HP', 'sponsors 3 houses · soldiers +30 HP · +20% dmg · regen'],
   granary: ['', 'holds 150 food', 'holds 300 food', 'holds 600 food'],
   woodyard: ['', 'holds 150 wood', 'holds 300 wood', 'holds 600 wood'],
 };
