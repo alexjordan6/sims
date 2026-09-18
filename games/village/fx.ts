@@ -64,7 +64,7 @@ export class Fx {
   /** the eerie wind around the Ogre's lair: pale wisps and dead leaves circling it, a cold cast over the screen */
   private wisps: Phaser.GameObjects.Particles.ParticleEmitter;
   private leaves: Phaser.GameObjects.Particles.ParticleEmitter;
-  private cold: Phaser.GameObjects.Rectangle;
+  private cold: Phaser.GameObjects.Image | null = null;
   private windAcc = 0;
   /** how strong the wind is where the player stands, 0..1 (smoothed) */
   windLevel = 0;
@@ -89,38 +89,49 @@ export class Fx {
     const fade = (v: number) => ({ onEmit: () => 0, onUpdate: (_p: Phaser.GameObjects.Particles.Particle, _k: string, t: number) => Math.sin(t * Math.PI) * v });
     this.wisps = scene.add.particles(0, 0, 'wisp', { emitting: false, lifespan: { min: 1400, max: 2400 }, tint: [0xd8d0f0, 0xb0b8d8, 0x9aa0c8], alpha: fade(0.85), scale: { start: 0.8, end: 1.8 } }).setDepth(46);
     this.leaves = scene.add.particles(0, 0, 'px', { emitting: false, lifespan: { min: 1600, max: 2600 }, tint: [0x4a3a50, 0x5a4a3a, 0x3a3a48], alpha: fade(0.9), rotate: { onEmit: () => Math.random() * 360, onUpdate: (_p: Phaser.GameObjects.Particles.Particle, _k: string, _t: number, v: number) => v + 6 } }).setDepth(46);
-    this.cold = scene.add.rectangle(0, 0, 4, 4, 0x8088b8, 1).setOrigin(0, 0).setScrollFactor(0).setDepth(44).setBlendMode(Phaser.BlendModes.MULTIPLY).setAlpha(0).setVisible(false);
   }
 
   /**
-   * The eerie wind around the lair: within OGRE.windRadius tiles, wisps and dead leaves stream
-   * across the view, circling the lair, thicker and louder the closer you get; the screen takes a
-   * cold cast. It blows through the fog, so it's the first sign the lair is near.
+   * The eerie wind around the lair is a place, not an effect on the player: inside OGRE.windRadius
+   * tiles of the lair, wisps and dead leaves stream clockwise around it — thickest at the cave
+   * mouth, thinning to nothing at the edge — and the ground under it has a cold cast. Whatever
+   * part of that circle the camera can see gets particles, whether or not you're standing in it.
+   * The wisps blow above the fog, so the circle shows before the lair does. Only the sound
+   * follows the player: a quiet moan that rises as you walk in.
    */
   private wind(dt: number): void {
     const s = this.scene, lair = s.world.lair;
-    let target = 0;
-    if (lair && !s.interior.active) {
-      const c = buildingCenter(lair), d = Math.hypot(s.player.x - c.tx * TILE, s.player.y - c.ty * TILE) / TILE;
-      target = Math.max(0, Math.min(1, 1 - d / OGRE.windRadius));
+    if (!lair) { this.sfx.wind(0); return; }
+    const c = buildingCenter(lair), lx = c.tx * TILE, ly = c.ty * TILE, R = OGRE.windRadius * TILE;
+    // the cold ground: a soft disc laid over the world once, centred on the lair
+    if (!this.cold) {
+      if (!s.textures.exists('coldring')) {
+        const tex = s.textures.createCanvas('coldring', 256, 256)!, g = tex.context;
+        const grad = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+        grad.addColorStop(0, 'rgba(120,130,190,0.55)'); grad.addColorStop(0.6, 'rgba(120,130,190,0.3)'); grad.addColorStop(1, 'rgba(120,130,190,0)');
+        g.fillStyle = grad; g.fillRect(0, 0, 256, 256); tex.refresh();
+      }
+      this.cold = s.add.image(lx, ly, 'coldring').setScale((R * 2) / 256).setDepth(44).setBlendMode(Phaser.BlendModes.MULTIPLY);
     }
+    // sound follows the player, softly
+    const pd = s.interior.active ? Infinity : Math.hypot(s.player.x - lx, s.player.y - ly) / TILE;
+    const target = Math.max(0, Math.min(1, 1 - pd / OGRE.windRadius));
     this.windLevel += (target - this.windLevel) * Math.min(1, dt * 2);
-    const k = this.windLevel;
-    this.sfx.wind(k * (this.sfx.muted ? 0 : 1));
-    const cam = s.cameras.main;
-    this.cold.setPosition(0, 0).setSize(cam.width / cam.zoom + 4, cam.height / cam.zoom + 4).setScale(1).setVisible(k > 0.02).setAlpha(k * 0.22);
-    this.cold.setPosition(cam.width * (1 - 1 / cam.zoom) / 2 - 2, cam.height * (1 - 1 / cam.zoom) / 2 - 2); // scrollFactor 0 objects scale about the screen centre
-    if (k < 0.03) return;
-    if (!this.windWarned) { this.windWarned = true; s.event('info', 'A cold wind rises, circling something out in the woods.', true); }
-    // spawn across the view; each streak flies along the circle around the lair, with a little inward pull
-    this.windAcc += dt * (12 + 80 * k);
-    const c = buildingCenter(lair!), lx = c.tx * TILE, ly = c.ty * TILE;
-    const v = cam.worldView;
+    this.sfx.wind(this.sfx.muted ? 0 : this.windLevel);
+    if (target > 0.03 && !this.windWarned) { this.windWarned = true; s.event('info', 'A cold wind rises, circling something out in the woods.', true); }
+    // particles: sample the part of the circle the camera can see; density falls off with distance from the lair
+    const v = s.cameras.main.worldView;
+    const x0 = Math.max(v.x - 24, lx - R), x1 = Math.min(v.right + 24, lx + R), y0 = Math.max(v.y - 24, ly - R), y1 = Math.min(v.bottom + 24, ly + R);
+    if (x1 <= x0 || y1 <= y0) return;
+    const area = (x1 - x0) * (y1 - y0) / (TILE * TILE); // tiles² in view that could hold wind
+    this.windAcc += dt * area * 0.25; // spawn attempts per second per tile²
     while (this.windAcc >= 1) {
       this.windAcc -= 1;
-      const x = v.x - 20 + Math.random() * (v.width + 40), y = v.y - 20 + Math.random() * (v.height + 40);
+      const x = x0 + Math.random() * (x1 - x0), y = y0 + Math.random() * (y1 - y0);
       const dx = x - lx, dy = y - ly, d = Math.hypot(dx, dy) || 1;
-      const spd = 35 + Math.random() * 45 + 40 * k;
+      const k = 1 - d / R; // 1 at the lair, 0 at the edge
+      if (k <= 0 || Math.random() > Math.pow(k, 1.5)) continue; // thin at the edge, thick at the centre
+      const spd = 30 + Math.random() * 40 + 50 * k;
       const tx = -dy / d, ty = dx / d; // clockwise around the lair
       const vx = (tx - dx / d * 0.25) * spd, vy = (ty - dy / d * 0.25) * spd;
       const leaf = Math.random() < 0.3;
@@ -510,7 +521,7 @@ export class Fx {
 
   /** Clear everything after a reset. */
   clear(): void {
-    this.windWarned = false; this.windLevel = 0; this.sfx.wind(0);
+    this.windWarned = false; this.windLevel = 0; this.sfx.wind(0); this.cold?.destroy(); this.cold = null;
     this.scene.tweens.killAll();
     this.anims.clear();
     this.lastBlow.clear();

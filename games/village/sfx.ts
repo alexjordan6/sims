@@ -51,9 +51,9 @@ export class Sfx {
     const c = this.ensure(); if (!c || !this.master || !this.noiseBuf) return;
     if (!this.windGain) {
       const src = c.createBufferSource(); src.buffer = this.noiseBuf; src.loop = true;
-      const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 320; f.Q.value = 4;
+      const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 260; f.Q.value = 2.5;
       const lfo = c.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 0.13;
-      const depth = c.createGain(); depth.gain.value = 180;
+      const depth = c.createGain(); depth.gain.value = 120;
       lfo.connect(depth).connect(f.frequency);
       const g = c.createGain(); g.gain.value = 0;
       src.connect(f).connect(g).connect(this.master);
@@ -62,7 +62,7 @@ export class Sfx {
     }
     if (Math.abs(level - this.windLevel) < 0.01) return;
     this.windLevel = level;
-    this.windGain.gain.setTargetAtTime(level * 0.5, c.currentTime, 0.4);
+    this.windGain.gain.setTargetAtTime(level * 0.12, c.currentTime, 0.6);
   }
 
   /** A short tone: frequency glides from f0 to f1 over `dur` seconds. */
