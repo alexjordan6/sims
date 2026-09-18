@@ -1,12 +1,12 @@
 import Phaser from 'phaser';
-import { SimScene, launch } from '@shared/index';
+import { SimScene, launch, button } from '@shared/index';
 import { World, doorstep, buildingCenter, buildingMaxHp, hasHearth, hearthCost, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos } from './world';
 import { Villager, Raider, Player, Mover, Arrow, TOOLS, type Role, type Tool } from './agents';
 import { DEFENSE_COST, WALL_HEIGHT } from './config';
 import { Interior } from './interior';
 import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, waveComposition } from './enemies';
 import { Fog } from './fog';
-import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, type LoadKind, TREE_YIELD, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, OLD_YIELD, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, CADET_AGE_BEFORE, HEARTY_RATION, CALLING_NAME, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, WEAPONS, RAID_SIZE_MUL, HEARTH_NIGHTS, COLD, PLAYER_TREE_YIELD, type Calling, type ArmorSlot, type WeaponSlot } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, type LoadKind, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, CADET_AGE_BEFORE, HEARTY_RATION, CALLING_NAME, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
@@ -65,6 +65,7 @@ export class VillageScene extends SimScene {
   selectedBuilding: Building | null = null;
   journal: GameEvent[] = [];
   fx: FxEvent[] = [];
+  private static buttonsMade = false;
   stats = { peakPop: 0, soldiersRaised: 0, childrenRaised: 0, starsTotal: 0, raidsRepelled: 0, raidersKilled: 0, bossesSlain: 0, buildingsLost: 0 };
   /** persists across runs (localStorage) */
   meta = new Meta();
@@ -116,9 +117,12 @@ export class VillageScene extends SimScene {
 
   /** Next raid day; the warlord's day caps the schedule. */
   get nextRaidDay(): number {
-    const next = (Math.floor(this.day / this.raidEvery) + 1) * this.raidEvery;
-    return Math.min(next, RUN.bossDay);
+    const first = p.firstRaidDay, every = this.raidEvery;
+    const next = this.day < first ? first : first + (Math.floor((this.day - first) / every) + 1) * every;
+    return Math.min(next, p.bossDay);
   }
+  /** Is `day` a raid day (the warlord's day aside)? */
+  isRaidDay(day: number): boolean { return day >= p.firstRaidDay && day < p.bossDay && (day - p.firstRaidDay) % this.raidEvery === 0; }
 
   // ---- setup ----------------------------------------------------------------
 
@@ -193,6 +197,15 @@ export class VillageScene extends SimScene {
   create(): void {
     const kb = this.input.keyboard!;
     this.wasd = kb.addKeys('W,A,S,D') as typeof this.wasd;
+    // playtest buttons on the backtick panel (once: the scene is created a single time)
+    if (!VillageScene.buttonsMade) {
+      VillageScene.buttonsMade = true;
+      button('next day', () => { if (this.screen === 'playing') { this.day++; this.newDay(); } });
+      button('spawn raid', () => { if (this.screen === 'playing') this.spawnRaid(); });
+      button('+50 wood', () => { this.wood = Math.min(this.woodCap, this.wood + 50); });
+      button('+50 food', () => { this.food = Math.min(this.foodCap, this.food + 50); });
+      button('+20 scrap', () => { this.scrap += 20; });
+    }
     // Stardew-style: C / left click = use tool, X / right click = check, E / Esc = menu, 1-8 or Tab / wheel = tools
     kb.on('keydown-C', () => this.interact());
     kb.on('keydown-X', () => {
@@ -434,7 +447,7 @@ export class VillageScene extends SimScene {
     const why = this.weaponProblem(who, slot);
     if (why) { this.event('info', `Can't forge: ${why}`, true); return false; }
     const next = who.weapons[slot] + 1, tier = WEAPONS[slot].tiers[next];
-    this.wood -= tier.wood; this.scrap -= tier.scrap;
+    const paid = this.forgeCost(tier); this.wood -= paid.wood; this.scrap -= paid.scrap;
     who.weapons = { ...who.weapons, [slot]: next };
     this.fx.push({ kind: 'tool', tool: 'hammer', tx: who.tile.tx, ty: who.tile.ty });
     this.event('build', `${who instanceof Player ? 'You' : (who as Villager).name} now carr${who instanceof Player ? 'y' : 'ies'} a ${tier.name.toLowerCase()}`, true);
@@ -445,8 +458,9 @@ export class VillageScene extends SimScene {
     const need = ARMOR_BARRACKS_LEVEL[next];
     if (!this.world.barracks.length) return 'build a barracks first';
     if (this.world.barracksLevel < need) return `needs a Lv${need} barracks`;
-    if (this.wood < tier.wood) return `need ${tier.wood} wood (have ${this.wood | 0})`;
-    if (this.scrap < tier.scrap) return `need ${tier.scrap} scrap iron (have ${this.scrap})`;
+    const cost = this.forgeCost(tier);
+    if (this.wood < cost.wood) return `need ${cost.wood} wood (have ${this.wood | 0})`;
+    if (this.scrap < cost.scrap) return `need ${cost.scrap} scrap iron (have ${this.scrap})`;
     return null;
   }
   /** Forge the next tier of a slot for a wearer; pays wood and scrap. */
@@ -454,7 +468,7 @@ export class VillageScene extends SimScene {
     const why = this.craftProblem(who, slot);
     if (why) { this.event('info', `Can't forge: ${why}`, true); return false; }
     const next = who.armor[slot] + 1, tier = ARMOR[slot].tiers[next];
-    this.wood -= tier.wood; this.scrap -= tier.scrap;
+    const paid = this.forgeCost(tier); this.wood -= paid.wood; this.scrap -= paid.scrap;
     who.armor = { ...who.armor, [slot]: next };
     this.refitArmor(who);
     this.fx.push({ kind: 'tool', tool: 'hammer', tx: who.tile.tx, ty: who.tile.ty });
@@ -465,7 +479,7 @@ export class VillageScene extends SimScene {
   private refitArmor(who: Mover): void {
     if (who instanceof Villager) { const frac = who.hp / who.maxHp; who.applyRole(this.mods); who.hp = Math.round(who.maxHp * frac); }
     else if (who instanceof Player) {
-      const base = 60 + this.mods.playerHpBonus;
+      const base = p.playerHp + this.mods.playerHpBonus;
       const frac = who.hp / who.maxHp;
       who.maxHp = base + (ARMOR.helmet.tiers[who.armor.helmet].hp + ARMOR.chest.tiers[who.armor.chest].hp + ARMOR.legs.tiers[who.armor.legs].hp + ARMOR.shield.tiers[who.armor.shield].hp);
       who.hp = Math.round(who.maxHp * frac);
@@ -618,7 +632,7 @@ export class VillageScene extends SimScene {
       if (b && pt.tx >= b.tx - 1 && pt.tx <= b.tx + BUILDINGS[b.kind].w && pt.ty >= b.ty - 1 && pt.ty <= b.ty + BUILDINGS[b.kind].h) this.deposit(this.player);
     }
     this.stats.peakPop = Math.max(this.stats.peakPop, this.villagers().length);
-    if (this.player.dead) this.endRun(false);
+    if (this.player.dead) { if (p.godMode) { this.player.dead = false; this.player.hp = this.player.maxHp; } else this.endRun(false); }
   }
 
   newDay(): void {
@@ -677,7 +691,7 @@ export class VillageScene extends SimScene {
         const fed = v.hungerDays === 0;
         const parents = v.parents.filter((q) => !q.dead).length;
         const sibling = villagers.some((o) => o !== v && o.role === 'kid' && o.home === v.home && !o.dead);
-        let pts = (fed ? 1 : -1) + (wellFed ? 1 : 0) + (parents >= 2 ? 1 : 0) + (sibling ? 1 : 0) + (v.home.level >= 2 && !v.home.ruined && v.home.warm ? 1 : 0) - (v.home.ruined ? 1 : 0) + (v.home.warm ? 0 : COLD.kidCare) + (v.encouragedDay === this.day ? 1 : 0) - (v.fledDay === this.day ? 1 : 0);
+        let pts = (fed ? 1 : -1) + (wellFed ? 1 : 0) + (parents >= 2 ? 1 : 0) + (sibling ? 1 : 0) + (v.home.level >= 2 && !v.home.ruined && v.home.warm ? 1 : 0) - (v.home.ruined ? 1 : 0) + (v.home.warm ? 0 : p.coldKidCare) + (v.encouragedDay === this.day ? 1 : 0) - (v.fledDay === this.day ? 1 : 0);
         v.care += pts; v.careDays++;
         v.stars = v.starsNow();
         // yesterday's apprenticeship: only if they had somewhere to go (a cold barracks drills nobody)
@@ -711,26 +725,26 @@ export class VillageScene extends SimScene {
       if (mover) { mover.home.residents--; mover.home = h; h.residents++; this.event('info', `${mover.name} moved into a new house`); }
     }
 
-    const every = this.raidEvery, warn = 1 + this.mods.warnDaysDelta;
-    if (this.day === RUN.bossDay) this.spawnRaid(true);
-    else if (this.day % every === 0 && this.day < RUN.bossDay) this.spawnRaid();
-    else if (this.day === RUN.bossDay - RUN.warnDays) this.event('raid', `The Warlord marches — he arrives in ${RUN.warnDays} days`, true);
-    else if ((this.day + warn) % every === 0 || this.day + warn === RUN.bossDay) this.event('raid', warn > 1 ? `Scouts report raiders — they arrive in ${warn} days` : 'Raiders sighted — they arrive tomorrow', true);
+    const warn = 1 + this.mods.warnDaysDelta;
+    if (this.day === p.bossDay) this.spawnRaid(true);
+    else if (this.isRaidDay(this.day)) this.spawnRaid();
+    else if (this.day === p.bossDay - RUN.warnDays) this.event('raid', `The Warlord marches — he arrives in ${RUN.warnDays} days`, true);
+    else if (this.isRaidDay(this.day + warn) || this.day + warn === p.bossDay) this.event('raid', warn > 1 ? `Scouts report raiders — they arrive in ${warn} days` : 'Raiders sighted — they arrive tomorrow', true);
   }
 
   /** Days between raids (Long Peace stretches it). */
   get raidEvery(): number { return p.raidEvery + this.mods.raidEveryDelta; }
 
   spawnRaid(boss = false): void {
-    const wave = Math.max(1, Math.floor(this.day / this.raidEvery));
+    const wave = Math.max(1, 1 + Math.floor((this.day - p.firstRaidDay) / this.raidEvery));
     const mix = waveComposition(wave, boss);
-    // raids are big: every count grows by RAID_SIZE_MUL (the enemies themselves are unchanged)
-    for (const k of Object.keys(mix) as (keyof typeof mix)[]) if (mix[k]) mix[k] = Math.max(1, Math.round(mix[k] * RAID_SIZE_MUL));
+    // raids are big: every count grows by p.raidSizeMul (the enemies themselves are unchanged)
+    for (const k of Object.keys(mix) as (keyof typeof mix)[]) if (mix[k]) mix[k] = Math.max(1, Math.round(mix[k] * p.raidSizeMul));
     // Scouts: every wave is a raider short (never below one); Hearsay: the Warlord's escort halves
     mix.raider = Math.max(1, mix.raider - this.mods.waveShrink);
     if (boss && this.mods.bossEscortMul < 1) for (const k of Object.keys(mix) as (keyof typeof mix)[]) mix[k] = Math.max(k === 'raider' ? 1 : 0, Math.floor(mix[k] * this.mods.bossEscortMul));
     if (mix.rat > 0) mix.rat = Math.max(10, mix.rat);
-    const opts = { hpMul: (1 + 0.08 * wave) * this.mods.raiderHpMul, speedMul: this.mods.raiderSpeedMul, snatchDelayMul: this.mods.snatchDelayMul, noSnatch: this.mods.noSnatch, harmlessRats: this.mods.ratsHarmless };
+    const opts = { hpMul: (1 + p.waveHpGrowth * wave) * this.mods.raiderHpMul, speedMul: this.mods.raiderSpeedMul, snatchDelayMul: this.mods.snatchDelayMul, noSnatch: this.mods.noSnatch, harmlessRats: this.mods.ratsHarmless };
     const side = this.rng.int(0, 3);
     const spawnAt = (): { x: number; y: number } => {
       // Raids approach from the wilderness frontier, not a several-minute walk from the far map edge.
@@ -910,7 +924,7 @@ export class VillageScene extends SimScene {
   /** Beds in a house: by level, or the Big Families boon if that is higher. */
   beds(h: Building): number {
     if (h.ruined) return 0;
-    return Math.max(HOUSE_BEDS[h.level] ?? 4, this.mods.houseCap) + this.mods.bedBonus;
+    return Math.max(0, Math.max(HOUSE_BEDS[h.level] ?? 4, this.mods.houseCap) + this.mods.bedBonus + p.bedBonus);
   }
   get foodCap(): number { return Math.round(CAPS[this.world.granary?.level ?? 1] * this.mods.capMul); }
   get woodCap(): number { return Math.round(CAPS[this.world.woodyard?.level ?? 1] * this.mods.capMul); }
@@ -976,9 +990,12 @@ export class VillageScene extends SimScene {
   }
 
   /** Wood to take a building to its next level (Cheap Timber discounts it). */
-  upgradeCost(b: Building): number { return Math.round(UPGRADE_COST[b.kind][b.level] * this.mods.upgradeCostMul); }
+  upgradeCost(b: Building): number { return p.freeBuild ? 0 : Math.round(UPGRADE_COST[b.kind][b.level] * this.mods.upgradeCostMul); }
   /** Wood to raise a new house or barracks (Master Builder halves it). */
-  buildCost(kind: 'house' | 'barracks' | 'tavern'): number { return Math.round(COST[kind] * this.mods.buildCostMul); }
+  buildCost(kind: 'house' | 'barracks' | 'tavern'): number { return p.freeBuild ? 0 : Math.round(COST[kind] * this.mods.buildCostMul); }
+  defenseCost(kind: DefenseKind): number { return p.freeBuild ? 0 : DEFENSE_COST[kind]; }
+  /** What a forge tier costs after the slider (and free build). */
+  forgeCost(tier: { wood: number; scrap: number }): { wood: number; scrap: number } { return p.freeBuild ? { wood: 0, scrap: 0 } : { wood: Math.round(tier.wood * p.forgeCostMul), scrap: Math.round(tier.scrap * p.forgeCostMul) }; }
 
   private upgrade(b: Building): void {
     const cost = this.upgradeCost(b);
@@ -1016,7 +1033,7 @@ export class VillageScene extends SimScene {
   /** Wood to raise a ruin again: a share of what it cost to build. */
   rebuildCost(b: Building): number {
     const base = b.kind === 'house' || b.kind === 'barracks' || b.kind === 'tavern' ? COST[b.kind] : REPAIR.rebuildDefault / REPAIR.rebuildFraction;
-    return Math.max(1, Math.round(base * REPAIR.rebuildFraction * this.mods.buildCostMul));
+    return p.freeBuild ? 0 : Math.max(1, Math.round(base * REPAIR.rebuildFraction * this.mods.buildCostMul));
   }
   /** Why the hammer can't mend `b` right now, or null. */
   repairProblem(b: Building): string | null {
@@ -1077,7 +1094,7 @@ export class VillageScene extends SimScene {
   // Every barracks looses arrows at raiders in range from its own chest; the chest is refilled with wood inside.
 
   towerRange(b: Building): number { return p.towerRange + (b.level - 1) * TOWER.rangePerLevel; }
-  towerCap(b: Building): number { return TOWER.cap + (b.level - 1) * TOWER.capPerLevel; }
+  towerCap(b: Building): number { return p.towerCap + (b.level - 1) * TOWER.capPerLevel; }
   towerDmg(b: Building): number { return p.towerDmg + (b.level - 1) * TOWER.dmgPerLevel; }
   towerCenter(b: Building): { x: number; y: number } { const c = buildingCenter(b); return { x: c.tx * TILE, y: c.ty * TILE }; }
   /** Where a shot leaves the roof: just past the footprint along the aim, so the arrow's own sweep doesn't die on the barracks tiles. */
@@ -1088,6 +1105,7 @@ export class VillageScene extends SimScene {
     return { x: c.x + ux * (d + 2), y: c.y + uy * (d + 2) };
   }
   tickTowers(dt: number): void {
+    if (!p.towerFires) return;
     for (const b of this.world.barracks) {
       b.fireCd = Math.max(0, (b.fireCd ?? 0) - dt);
       if (b.fireCd > 0 || !(b.ammo ?? 0)) continue;
@@ -1145,6 +1163,7 @@ export class VillageScene extends SimScene {
   private burnHearths(): void {
     let burned = 0; const cold: string[] = [];
     for (const b of this.hearthBuildings()) {
+      if (!p.hearths) { b.warm = true; continue; } // debug: nothing burns, nothing is cold
       if (b.firewood > 0) { b.firewood--; b.warm = true; burned += hearthCost(b); }
       else { b.warm = false; cold.push(BUILDINGS[b.kind].name.toLowerCase()); }
       this.world.refresh(b);
@@ -1157,8 +1176,8 @@ export class VillageScene extends SimScene {
   stockProblem(b: Building): string | null {
     if (!hasHearth(b)) return 'no hearth here';
     if (b.ruined) return 'rebuild it first';
-    if (b.firewood >= HEARTH_NIGHTS) return 'the pile is full';
-    const cost = hearthCost(b);
+    if (b.firewood >= p.hearthNights) return 'the pile is full';
+    const cost = p.freeBuild ? 0 : hearthCost(b);
     if (this.wood < cost) return `need ${cost} wood (have ${this.wood | 0})`;
     return null;
   }
@@ -1166,7 +1185,7 @@ export class VillageScene extends SimScene {
   stockHearth(b: Building): boolean {
     const why = this.stockProblem(b);
     if (why) { this.event('info', `Can't stock the hearth: ${why}`, true); return false; }
-    this.wood -= hearthCost(b); b.firewood++;
+    this.wood -= p.freeBuild ? 0 : hearthCost(b); b.firewood++;
     const c = this.towerCenter(b);
     this.fx.push({ kind: 'deposit', x: c.x, y: c.y - TILE, text: '+1 night', colour: '#ffb060' });
     return true;
@@ -1175,7 +1194,7 @@ export class VillageScene extends SimScene {
   hearthNeeding(x: number, y: number, load: number): Building | null {
     let best: Building | null = null, bs = Infinity;
     for (const b of this.hearthBuildings()) {
-      if (b.firewood >= HEARTH_NIGHTS || hearthCost(b) > load) continue;
+      if (b.firewood >= p.hearthNights || hearthCost(b) > load) continue;
       const d = doorstep(b), c = World.center(d.tx, d.ty);
       const score = Math.hypot(c.x - x, c.y - y) + b.firewood * 400; // an empty pile is worth a long walk
       if (score < bs) { bs = score; best = b; }
@@ -1188,7 +1207,7 @@ export class VillageScene extends SimScene {
     if (!load || load.kind !== 'wood' || !hasHearth(b) || b.ruined) return 0;
     const cost = hearthCost(b);
     let nights = 0;
-    while (b.firewood < HEARTH_NIGHTS && load.n >= cost) { load.n -= cost; b.firewood++; nights++; }
+    while (b.firewood < p.hearthNights && load.n >= cost) { load.n -= cost; b.firewood++; nights++; }
     if (load.n <= 0) m.load = null;
     if (nights) { const c = this.towerCenter(b); this.fx.push({ kind: 'deposit', x: c.x, y: c.y - TILE, text: `+${nights} night${nights > 1 ? 's' : ''}`, colour: '#ffb060' }); }
     return nights;
@@ -1228,7 +1247,7 @@ export class VillageScene extends SimScene {
   }
   /** Why a defense can't be built at `q` right now, or null. */
   defenseProblem(kind: DefenseKind, q: TilePos): string | null {
-    const t = this.player.tile, cost = DEFENSE_COST[kind];
+    const t = this.player.tile, cost = this.defenseCost(kind);
     if (Math.max(Math.abs(q.tx - t.tx), Math.abs(q.ty - t.ty)) > VillageScene.BUILD_REACH) return `Too far — build within ${VillageScene.BUILD_REACH} tiles of you`;
     if (this.wood < cost) return `Need ${cost} wood for construction`;
     const tile = this.world.get(q.tx, q.ty);
@@ -1239,7 +1258,7 @@ export class VillageScene extends SimScene {
     return null;
   }
   buildDefense(kind: DefenseKind): void {
-    const q = this.defenseTarget(), cost = DEFENSE_COST[kind];
+    const q = this.defenseTarget(), cost = this.defenseCost(kind);
     const why = this.defenseProblem(kind, q);
     if (why) { this.event('build', why + '.'); return; }
     if (this.world.placeDefense(kind, q.tx, q.ty)) { this.wood -= cost; this.fx.push({ kind: 'tool', tool: 'hammer', ...q }); }
@@ -1343,7 +1362,7 @@ export class VillageScene extends SimScene {
   get oldGrowthDays(): number { return Math.max(1, OLD_GROWTH_DAYS + this.mods.oldGrowthDaysDelta); }
   isOldGrowth(t: Tile): boolean { return t.kind === 'tree' && t.stage >= this.oldGrowthDays; }
   /** Wood a tree pays when felled. */
-  treeYield(t: Tile): number { return (this.isOldGrowth(t) ? OLD_YIELD + this.mods.oldYieldBonus : TREE_YIELD) + this.mods.treeYieldBonus; }
+  treeYield(t: Tile): number { return (this.isOldGrowth(t) ? p.oldYield + this.mods.oldYieldBonus : p.treeYield) + this.mods.treeYieldBonus; }
 
   /** Is (tx, ty) within `pad` tiles of any building footprint (including its yard)? */
   nearBuilding(tx: number, ty: number, pad: number): boolean {
@@ -1422,7 +1441,7 @@ export class VillageScene extends SimScene {
       case 'hammer': {
         if (t?.defense) {
           if (this.wood < 1 || t.defense.hp === t.defense.maxHp) return;
-          this.wood--; t.defense.hp = Math.min(t.defense.maxHp, t.defense.hp + 80); this.fx.push({ kind: 'tool', tool: 'hammer', tx, ty }); return;
+          this.wood--; t.defense.hp = Math.min(t.defense.maxHp, t.defense.hp + p.wallRepair); this.fx.push({ kind: 'tool', tool: 'hammer', tx, ty }); return;
         }
         const b = this.facedBuilding();
         this.fx.push({ kind: 'tool', tool: 'hammer', tx, ty });
@@ -1451,7 +1470,7 @@ export class VillageScene extends SimScene {
           const why = this.loadProblem('wood');
           if (why) { this.event('wood', why + '.'); return; }
           // the head clears ground; the real wood comes in on woodcutters' backs
-          if (++t.work >= 3) { this.world.set(tx, ty, 'sapling'); this.player.pickUp('wood', PLAYER_TREE_YIELD); }
+          if (++t.work >= 3) { this.world.set(tx, ty, 'sapling'); this.player.pickUp('wood', p.playerTreeYield); }
           else this.world.dirty.add(ty * COLS + tx);
         } else if (t?.kind === 'sapling') this.world.set(tx, ty, 'grass'); // clear the stump
         this.fx.push({ kind: 'tool', tool: 'axe', tx, ty });
@@ -1489,7 +1508,7 @@ export class VillageScene extends SimScene {
       case 'wall': case 'gate': case 'stairs': {
         const why = this.defenseProblem(pl.tool, this.defenseTarget());
         if (why) return `${pl.tool}: ${why}`;
-        return `E: build ${pl.tool} (${DEFENSE_COST[pl.tool]} wood construction) · ${pl.tool === 'stairs' ? 'connect to a wall; hands to climb' : pl.tool === 'gate' ? 'allies pass; X opens to everyone' : 'point where it goes — walls stand behind walls too'}`;
+        return `E: build ${pl.tool} (${this.defenseCost(pl.tool)} wood construction) · ${pl.tool === 'stairs' ? 'connect to a wall; hands to climb' : pl.tool === 'gate' ? 'allies pass; X opens to everyone' : 'point where it goes — walls stand behind walls too'}`;
       }
       case 'sword': {
         const near = this.nearestRaider(pl.x, pl.y, 40);
@@ -1502,7 +1521,7 @@ export class VillageScene extends SimScene {
         return `E: build ${pl.tool} ${this.cursorPlacing ? 'where you point' : 'ahead'} (${this.buildCost(pl.tool)} wood)${pl.tool === 'barracks' ? ' · the ring is its arrow range' : ''}${why ? ' — ' + why : ''}`;
       }
       case 'hammer': {
-        if (t?.defense) return `E: repair ${t.kind} (${Math.ceil(t.defense.hp)}/${t.defense.maxHp} HP · 1 wood repairs 80)`;
+        if (t?.defense) return `E: repair ${t.kind} (${Math.ceil(t.defense.hp)}/${t.defense.maxHp} HP · 1 wood repairs ${p.wallRepair})`;
         if (!b) return 'hammer: face a building to upgrade it';
         if (b.kind !== 'lair' && b.ruined) { const why = this.repairProblem(b); return why ? `${this.buildingTitle(b)} — ${why}` : `E: rebuild ${BUILDINGS[b.kind].name} (${this.rebuildCost(b)} wood)`; }
         if (b.kind !== 'lair' && b.hp < b.maxHp) return `E: repair ${BUILDINGS[b.kind].name} (${Math.ceil(b.hp)}/${b.maxHp} HP · 1 wood repairs ${REPAIR.perWood})`;
@@ -1523,7 +1542,7 @@ export class VillageScene extends SimScene {
         if (kind === 'crop') return t!.stage >= this.cropDays ? `ripe — ${need('hands')}` : `growing (${t!.stage}/${this.cropDays} days)`;
         return 'seeds: crops on soil, trees on grass';
       case 'axe':
-        if (kind === 'tree') { const why = this.loadProblem('wood'); return why ?? `E: clear ${this.isOldGrowth(t!) ? 'old growth' : 'young tree'} (${t!.work}/3 · ${PLAYER_TREE_YIELD} wood for you; a woodcutter gets ${this.treeYield(t!)})${pl.load ? ` · carrying ${pl.load.n}/${HAUL.player.wood} wood` : ''}`; }
+        if (kind === 'tree') { const why = this.loadProblem('wood'); return why ?? `E: clear ${this.isOldGrowth(t!) ? 'old growth' : 'young tree'} (${t!.work}/3 · ${p.playerTreeYield} wood for you; a woodcutter gets ${this.treeYield(t!)})${pl.load ? ` · carrying ${pl.load.n}/${HAUL.player.wood} wood` : ''}`; }
         if (kind === 'sapling') return t!.stage < 2 ? 'E: clear the stump' : 'E: cut down the sapling';
         return 'axe: face a tree';
       case 'hands':

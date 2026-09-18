@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { COLS, ROWS, TILE } from './config';
+import { COLS, ROWS, TILE, p } from './config';
 import { Villager, Player, type Mover } from './agents';
 import type { VillageScene } from './main';
 import { buildingCenter } from './world';
@@ -23,7 +23,7 @@ export class Fog {
   private lastScroll = { x: -1e9, y: -1e9 };
   /** tiles ever explored, for the minimap's "% explored" */
   seen = 0;
-  readonly enabled: boolean;
+  enabled: boolean;
 
   constructor(private scene: VillageScene, depth: number) {
     this.enabled = !new URLSearchParams(location.search).has('nofog');
@@ -58,6 +58,12 @@ export class Fog {
   isExplored(tx: number, ty: number): boolean { return this.explored[ty * COLS + tx] === 1; }
 
   update(dt: number): void {
+    // the debug panel's fog switch: off lifts the fog (everything seen), on drops it back over what's unexplored
+    if (p.fog !== this.enabled) {
+      this.enabled = p.fog;
+      this.layer.setVisible(this.enabled);
+      if (!this.enabled) this.vis.fill(1); else { this.vis.fill(0); this.t = 99; this.lastScroll = { x: -1e9, y: -1e9 }; } // a repaint follows below
+    }
     if (!this.enabled) return;
     this.t += dt;
     const cam = this.scene.cameras.main;

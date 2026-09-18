@@ -163,7 +163,7 @@ h3 { font-size: 9px; color: var(--ink-dim); margin-bottom: 6px; }
 #stage.raid::after { content: ''; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 90px #ff000066; animation: pulse 1s infinite alternate; }
 
 /* the kernel's lil-gui debug panel lives in the corner, hidden until backtick */
-.lil-gui.root { top: 64px !important; right: calc(var(--side-w) + 8px) !important; }
+.lil-gui.lil-root { top: 64px !important; right: calc(var(--side-w) + 8px) !important; max-height: calc(100vh - 80px) !important; overflow-y: auto !important; }
 
 /* ---- roguelike loop: legacy panel, boons, boss ------------------------------ */
 .title-wrap { display: flex; gap: 12px; align-items: flex-start; justify-content: center; flex-wrap: wrap; max-width: 96vw; }

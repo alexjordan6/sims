@@ -1,4 +1,4 @@
-import { LEGACY_TEST_MODE } from './config';
+import { LEGACY_TEST_MODE, p } from './config';
 
 // Meta-progression: renown banked across runs, spent on a tree of boons.
 // Eight branches; each is root -> fork (A|B) -> capstone. A whole path occupies one loadout slot.
@@ -306,7 +306,8 @@ export class Meta {
 
   /** Run modifiers for the current loadout: every equipped node plus its ancestors. */
   mods(): Mods {
-    const m: Mods = { ...DEFAULT_MODS };
+    // the economy sliders set the baseline the boons build on
+    const m: Mods = { ...DEFAULT_MODS, cropYield: p.cropYield, startFood: p.startFood, startWood: p.startWood };
     for (const id of this.state.loadout) for (const n of pathOf(id)) n.apply(m);
     return m;
   }

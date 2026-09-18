@@ -1,6 +1,6 @@
 import type { VillageScene } from './main';
 import { BUILDINGS, World, doorstep, hearthCost, type Building } from './world';
-import { HEARTH_NIGHTS } from './config';
+import { p } from './config';
 import { ensureCharacter, frameSize } from './characters';
 import { lookFor } from './render';
 import type { Mover } from './agents';
@@ -104,7 +104,7 @@ export class Interior {
     const f = this.nearby();
     if (f?.kind === 'chest' && this.building) f.label = `Armor chest · tower arrows ${this.building.ammo ?? 0} / ${this.s.towerCap(this.building)} · restock 10 for 2 wood · forge armor`;
     if (f?.kind === 'hearth' && this.building) {
-      const b = this.building, pile = `${b.firewood} / ${HEARTH_NIGHTS} nights of wood · burns ${hearthCost(b)} a night`;
+      const b = this.building, pile = `${b.firewood} / ${p.hearthNights} nights of wood · burns ${hearthCost(b)} a night`;
       f.label = b.warm ? `${b.kind === 'tavern' ? 'Share a hot meal · 2 food' : 'Warm yourself by the hearth'} · ${pile}` : `Cold hearth · ${pile} · woodcutters bring firewood`;
     }
     return f ? `E: ${f.label}` : 'Walk around · approach the hearth, beds or equipment · door below to leave';

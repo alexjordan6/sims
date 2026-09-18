@@ -4,7 +4,7 @@ import { World, doorstep, hearthCost, type BuildingKind } from './world';
 import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, Wrecker, waveComposition } from './enemies';
-import { COLS, ROWS, WALL_HEIGHT, TREE_YIELD, HAUL, TOWER, p, BUILDING_HP, WRECKER, RAID_SIZE_MUL, HEARTH_NIGHTS, PLAYER_TREE_YIELD } from './config';
+import { COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, p, BUILDING_HP, WRECKER } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
 const output = document.getElementById('test-results')!, summary = document.getElementById('test-summary')!;
@@ -79,11 +79,11 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     s = fresh(); s.agents = [s.player]; Object.assign(s.player, { x: -500, y: -500 });
     const keep = s.world.barracks[0], kc = s.towerCenter(keep);
     for (let y = keep.ty - 8; y < keep.ty + 12; y++) for (let x = keep.tx - 8; x < keep.tx + 12; x++) if (s.world.get(x, y)?.kind === 'tree') s.world.set(x, y, 'grass');
-    assert(keep.ammo === TOWER.start && s.towerCap(keep) === TOWER.cap, 'a fresh barracks starts with a part-filled chest');
+    assert(keep.ammo === p.towerStart && s.towerCap(keep) === p.towerCap, 'a fresh barracks starts with a part-filled chest');
     const foe = s.spawn(new Raider(kc.x + 90, kc.y)); foe.speed = 0; foe.hp = foe.maxHp = 1000;
     const towerStep = (sec: number) => { for (let i = 0; i < Math.ceil(sec * 60); i++) { s.grid.rebuild(s.agents); for (const a of [...s.agents]) if (!a.dead) a.update(1 / 60, s); s.tickTowers(1 / 60); s.removeDead(); } };
     towerStep(4);
-    const shots = TOWER.start - keep.ammo!;
+    const shots = p.towerStart - keep.ammo!;
     assert(shots >= 2 && foe.hp <= foe.maxHp - shots * s.towerDmg(keep) + s.towerDmg(keep), `the tower shot ${shots} arrows and they landed (raider at ${foe.hp} HP)`);
     keep.ammo = 0; const silent = foe.hp; towerStep(3);
     assert(foe.hp === silent, 'an empty chest fires nothing');
@@ -151,7 +151,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     step(s, 6);
     const chipped = [...s.world.defenses.values()].find(d => d.hp < d.maxHp);
     assert(inner.hp === inner.maxHp && !!chipped && outside.task === 'battering the wall', `walled in, the house is untouched while the wrecker chips at the wall (${chipped?.hp}/${chipped?.maxHp})`);
-    assert(chipped!.maxHp - chipped!.hp <= WRECKER.wallDmg * 6, 'a wrecker is far slower at walls than a brute');
+    assert(chipped!.maxHp - chipped!.hp <= p.wreckerWallDmg * 6, 'a wrecker is far slower at walls than a brute');
     // weapons: everyone starts crude and forges up at the chest; raids come in big bands
     s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(121, 100)); s.player.facing = { x: 1, y: 0 }; s.player.tool = 'sword';
     const dummy = s.spawn(new Raider(s.player.x + 16, s.player.y)); dummy.speed = 0; dummy.hp = dummy.maxHp = 1000; dummy.update = () => {};
@@ -167,11 +167,11 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(s.towerDmg(s.world.barracks[0]) === p.towerDmg && p.towerDmg === 5, 'a Lv1 tower fires light arrows');
     s = fresh(); s.agents = [s.player]; s.day = 3; s.spawnRaid();
     const wave1 = s.agents.filter(a => a instanceof Raider && !a.lairBound);
-    assert(wave1.length === Math.round(2 * RAID_SIZE_MUL), `the first raid brings ${wave1.length} raiders`);
+    assert(wave1.length === Math.round(2 * p.raidSizeMul), `the first raid brings ${wave1.length} raiders`);
     s = fresh(); s.agents = [s.player]; s.day = 6; s.spawnRaid();
     const kinds = s.agents.filter((a): a is Raider => a instanceof Raider).map(a => a.kind);
     const rats = kinds.filter(k => k === 'rat').length, wreckers = kinds.filter(k => k === 'wrecker').length;
-    assert(rats === Math.round(10 * RAID_SIZE_MUL) && wreckers === Math.round(1 * RAID_SIZE_MUL), `the second raid brings ${rats} rats and ${wreckers} wreckers`);
+    assert(rats === Math.round(10 * p.raidSizeMul) && wreckers === Math.round(1 * p.raidSizeMul), `the second raid brings ${rats} rats and ${wreckers} wreckers`);
     // the Ogre: asleep and hidden by day, out at night, home at dawn with a quarter of his health back; never counts as a raid
     s = fresh(); s.agents = [s.player, s.ogre!]; const ogre = s.ogre!;
     assert(ogre instanceof Ogre && ogre.hidden && ogre.state === 'sleeping' && ogre.lairBound && ogre.huge, 'the Ogre starts asleep and hidden in his lair');
@@ -184,18 +184,18 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(ogre.state === 'hunting' && s.player.hp <= s.player.maxHp - 25, 'the Ogre hunts a player near his lair at night and hits for 25');
     // hauling: nothing counts until it's carried to the woodyard / granary
     s = fresh(); clearing(s); s.agents = [s.player, s.ogre!]; s.wood = 0; s.food = 0;
-    for (const b of s.hearthBuildings()) b.firewood = HEARTH_NIGHTS; // full piles, so this armful is for the woodyard
+    for (const b of s.hearthBuildings()) b.firewood = p.hearthNights; // full piles, so this armful is for the woodyard
     const yard = s.world.woodyard!, yd = doorstep(yard);
     s.world.set(yd.tx, yd.ty + 3, 'tree'); s.world.set(yd.tx, yd.ty + 4, 'tree');
     const cutter = s.spawn(new Villager(...Object.values(World.center(yd.tx + 1, yd.ty + 3)) as [number, number], s.world.houses[0], 'woodcutter', 22, 'Haul tester', s.mods));
     step(s, 6);
-    assert(cutter.load?.kind === 'wood' && cutter.load.n >= TREE_YIELD && s.wood === 0, 'a chopped tree goes into the woodcutter\'s arms, not the stockpile');
+    assert(cutter.load?.kind === 'wood' && cutter.load.n >= p.treeYield && s.wood === 0, 'a chopped tree goes into the woodcutter\'s arms, not the stockpile');
     step(s, 20);
-    assert(s.wood >= TREE_YIELD, 'the woodcutter carries the wood to the woodyard and the stockpile takes it');
+    assert(s.wood >= p.treeYield, 'the woodcutter carries the wood to the woodyard and the stockpile takes it');
     Object.assign(s.player, World.center(yd.tx + 3, yd.ty + 8)); s.player.tool = 'axe'; s.player.facing = { x: 0, y: -1 }; s.hoverTile = null;
     s.world.set(yd.tx + 3, yd.ty + 7, 'tree'); const w0 = s.wood;
     for (let i = 0; i < 3; i++) s.interact();
-    assert(s.player.load?.kind === 'wood' && s.player.load.n === PLAYER_TREE_YIELD && s.wood === w0, 'the head\'s chop clears the tree for a token of wood');
+    assert(s.player.load?.kind === 'wood' && s.player.load.n === p.playerTreeYield && s.wood === w0, 'the head\'s chop clears the tree for a token of wood');
     s.player.load = { kind: 'wood', n: HAUL.player.wood }; s.world.set(yd.tx + 3, yd.ty + 7, 'tree'); s.interact();
     assert(s.world.get(yd.tx + 3, yd.ty + 7)!.kind === 'tree' && s.hint().includes('full'), 'full arms refuse another tree and say so');
     Object.assign(s.player, World.center(yd.tx, yd.ty)); s.tick(1 / 60);
@@ -220,22 +220,22 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(born === 0, 'no children are born in a cold house');
     s.wood = 1; assert(!s.stockHearth(home2) && home2.firewood === 0, 'stocking a hearth needs the wood');
     s.wood = 50; assert(s.stockHearth(home2) && home2.firewood === 1 && s.wood === 50 - cost0, `a night of wood costs ${cost0} from the village pile`);
-    s.stockHearth(home2); s.stockHearth(home2); assert(home2.firewood === HEARTH_NIGHTS && !s.stockHearth(home2), 'the pile holds three nights and no more');
+    s.stockHearth(home2); s.stockHearth(home2); assert(home2.firewood === p.hearthNights && !s.stockHearth(home2), 'the pile holds three nights and no more');
     s.newDay(); assert(home2.warm && !keep2.warm, 'a stocked house is warm again while the barracks stays cold');
     const soldier2 = s.spawn(new Villager(World.center(125, 100).x, World.center(125, 100).y, home2, 'soldier', 20, 'Guard', s.mods)); soldier2.hp = 10; soldier2.trained = 3;
     s.mods.soldierRegen = 5; step(s, 2); assert(soldier2.hp === 10, 'soldiers do not mend while the barracks is cold');
     keep2.firewood = 1; s.newDay(); step(s, 2); assert(soldier2.hp > 10, 'a warm barracks mends them again');
-    for (const b of s.hearthBuildings()) b.firewood = HEARTH_NIGHTS;
+    for (const b of s.hearthBuildings()) b.firewood = p.hearthNights;
     const cabin = s.world.place('house', 122, 96); cabin.firewood = 0; // the one empty pile in the village, in the clearing
     const carrier = s.spawn(new Villager(World.center(124, 104).x, World.center(124, 104).y, home2, 'woodcutter', 22, 'Carrier', s.mods));
     carrier.load = { kind: 'wood', n: HAUL.villager.wood }; const woodBefore = s.wood;
     step(s, 1); assert(carrier.task === 'bringing firewood to the house', `a loaded woodcutter heads for the empty pile first (${carrier.task})`);
     step(s, 30);
     // (the cutter goes straight back to the grove afterwards, so the pile may have grown further by now)
-    assert(cabin.firewood === Math.min(HEARTH_NIGHTS, Math.floor(HAUL.villager.wood / hearthCost(cabin))) && s.wood >= woodBefore + HAUL.villager.wood - cabin.firewood * hearthCost(cabin), `the pile takes ${cabin.firewood} nights and the rest reaches the woodyard`);
+    assert(cabin.firewood === Math.min(p.hearthNights, Math.floor(HAUL.villager.wood / hearthCost(cabin))) && s.wood >= woodBefore + HAUL.villager.wood - cabin.firewood * hearthCost(cabin), `the pile takes ${cabin.firewood} nights and the rest reaches the woodyard`);
     // Baby Fever: births surge while the larder holds a surplus; more mouths eat the surplus away
     s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, { x: -400, y: -400 });
-    const nest = s.world.houses[0]; nest.firewood = HEARTH_NIGHTS; nest.warm = true;
+    const nest = s.world.houses[0]; nest.firewood = p.hearthNights; nest.warm = true;
     const ma = s.spawn(new Villager(0, 0, nest, 'farmer', 20, 'Ma', s.mods)), pa = s.spawn(new Villager(0, 0, nest, 'farmer', 20, 'Pa', s.mods));
     ma.update = pa.update = () => {}; nest.residents = 2;
     s.mods.babyFever = false; s.food = 40;

@@ -1,6 +1,6 @@
 import type { Agent } from '@shared/index';
 import { World, doorstep, buildingCenter, yardOf, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
-import { p, TREE_RESERVE, CADET_AGE_BEFORE, CADET_DAYS, STAR_BONUS, FLEE_RANGE, BEDTIME, TRAITS, HAUL, TILE, HEARTH_NIGHTS, type Calling, type Trait, type LoadKind } from './config';
+import { p, TREE_RESERVE, CADET_AGE_BEFORE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, type Calling, type Trait, type LoadKind } from './config';
 import type { Mods } from './meta';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle } from './characters';
 import type { VillageScene } from './main';
@@ -268,7 +268,7 @@ export class Villager extends Mover {
   /** kept for the soldier path: a soldier cadet is just an apprentice with a soldier calling */
   cadetAt(s: VillageScene): boolean { return this.apprenticeAt(s) && this.calling === 'soldier'; }
   /** Apprenticeship days needed to come of age skilled (War Drums lowers it). */
-  static drillNeeded(s: VillageScene): number { return Math.max(1, CADET_DAYS + s.mods.cadetDaysDelta); }
+  static drillNeeded(s: VillageScene): number { return Math.max(1, p.cadetDays + s.mods.cadetDaysDelta); }
   /** What this child will become as things stand — shown in the UI so nothing is a surprise. */
   outlook(s: VillageScene): { role: Calling; skilled: boolean } {
     const startAge = s.adultAge - CADET_AGE_BEFORE;
@@ -355,7 +355,7 @@ export class Villager extends Mover {
 
   private kidUpdate(dt: number, s: VillageScene): void {
     // danger: run for the nearest door (home or the barracks) and stay in until the raid is over
-    const danger = s.nearestRaider(this.x, this.y, FLEE_RANGE);
+    const danger = s.nearestRaider(this.x, this.y, p.fleeRange);
     if (danger || (this.sentHome && s.raidActive)) {
       if (danger && this.fledDay !== s.day) this.fledDay = s.day;
       this.task = 'running for cover';
@@ -425,7 +425,7 @@ export class Villager extends Mover {
       this.thinkTimer = 1;
       const w = s.world;
       // arms full: take it in before looking for more work
-      if (this.load && this.load.n >= HAUL.villager[this.load.kind]) { this.delivering = true; this.deliver(dt, s); return; }
+      if (this.load && this.load.n >= Math.round(HAUL.villager[this.load.kind] * p.haulMul)) { this.delivering = true; this.deliver(dt, s); return; }
       const job = farmer
         ? w.nearest(this.x, this.y, (t) => t.kind === 'crop' && t.stage >= s.cropDays) ??
           w.nearest(this.x, this.y, (t) => t.kind === 'tilled')
@@ -440,7 +440,7 @@ export class Villager extends Mover {
       const t = s.world.get(this.goal.tx, this.goal.ty);
       const isJob = farmer ? t?.kind === 'crop' || t?.kind === 'tilled' : t?.kind === 'tree';
       if (isJob && this.adjacentTo(this.goal)) {
-        this.workTimer = (farmer ? 1.2 : 2.5) / (farmer ? s.mods.farmerSpeedMul : s.mods.cutterSpeedMul) / this.workMul;
+        this.workTimer = (farmer ? p.farmerWork : p.cutterWork) / (farmer ? s.mods.farmerSpeedMul : s.mods.cutterSpeedMul) / this.workMul;
         this.task = farmer ? (t!.kind === 'crop' ? 'harvesting' : 'planting') : 'chopping';
       } else this.clearGoal();
     }
@@ -464,7 +464,7 @@ export class Villager extends Mover {
     const load = this.load;
     if (!load) { this.delivering = false; this.clearGoal(); return; }
     // wood goes to a hearth that needs it before the woodyard: the village stays warm on woodcutters' backs
-    const hearth = load.kind === 'wood' ? (this.firewoodFor && !this.firewoodFor.ruined && this.firewoodFor.firewood < HEARTH_NIGHTS ? this.firewoodFor : s.hearthNeeding(this.x, this.y, load.n)) : null;
+    const hearth = load.kind === 'wood' ? (this.firewoodFor && !this.firewoodFor.ruined && this.firewoodFor.firewood < p.hearthNights ? this.firewoodFor : s.hearthNeeding(this.x, this.y, load.n)) : null;
     this.firewoodFor = hearth;
     const b = hearth ?? (load.kind === 'wood' ? s.world.woodyard : s.world.granary);
     if (!b) { this.delivering = false; this.clearGoal(); return; }
@@ -666,7 +666,7 @@ export class Raider extends Mover {
     if (!a.struck && a.t >= 0.3) {
       a.struck = true;
       s.fx.push({ kind: 'melee', who: this, x: c.x, y: c.y });
-      if (a.defense.hp > 0 && s.world.damageDefense(a.defense, this.dmg * (this.kind === 'brute' ? 3 : 1))) {
+      if (a.defense.hp > 0 && s.world.damageDefense(a.defense, this.dmg * (this.kind === 'brute' ? p.bruteWallMul : 1))) {
         s.event('raid', 'The defenses have been breached!', true); s.rescueFallenGuards();
       }
     }
@@ -807,7 +807,7 @@ export class Player extends Mover {
 
   constructor(x: number, y: number) {
     super(x, y);
-    this.hp = this.maxHp = 60;
+    this.hp = this.maxHp = p.playerHp;
     this.speed = 60;
     this.radius = 3.5;
     this.color = 0xffe066;
@@ -888,7 +888,7 @@ export class Player extends Mover {
       if (this.fits(nx, ny, s.world)) { this.x = nx; this.y = ny; }
     }
     if (active || wasActive) {
-      const dmg = Math.round(12 * weaponMul(this.weapons, 'melee') * s.mods.playerDmgMul * c.dmgMul);
+      const dmg = Math.round(p.playerDmg * weaponMul(this.weapons, 'melee') * s.mods.playerDmgMul * c.dmgMul);
       s.grid.forEachInRadius(this.x, this.y, SWING.reach + (c.spin ? 4 : 0), (o, d2) => {
         if (!(o instanceof Raider) || o.dead || sw.hit.has(o.id)) return;
         if (o.elevated !== this.elevated || !s.world.lineClear(this, o, this.elevated)) return;

@@ -5,34 +5,95 @@ export const COLS = 240;
 export const ROWS = 160;
 export const ZOOM = 2; // 16 px tiles shown at 32 px
 
-/** One run: survive escalating raids until the warlord arrives, then beat him. */
-export const RUN = { days: 21, raidEvery: 3, bossDay: 21, warnDays: 3 } as const;
+/** One run: survive escalating raids until the warlord arrives, then beat him. (`bossDay` is a slider: p.bossDay.) */
+export const RUN = { raidEvery: 3, warnDays: 3 } as const;
 
-export const p = params({
-  dayLength: [120, 10, 300, 1],    // real seconds per day
-  raidEvery: [RUN.raidEvery, 1, 20, 1],
-  birthChance: [0.5, 0, 1],        // per couple per day, if fed and housed
-  adultAge: [8, 1, 40, 1],         // days
-  oldAge: [70, 20, 200, 1],        // days
-  cropDays: [2, 1, 10, 1],         // days from seed to harvest
-  foodPerDay: [1, 0, 3],           // per villager
-  raiderHp: [30, 5, 100, 1],
-  raiderDmg: [5, 1, 30, 1],
-  soldierHp: [60, 5, 100, 1],
-  soldierDmg: [10, 1, 30, 1],
-  towerRange: [150, 40, 320, 8],   // px; barracks arrow range at Lv1
-  towerDmg: [5, 1, 30, 1],         // per arrow at Lv1; +TOWER.dmgPerLevel each barracks level
-  towerCd: [1.4, 0.2, 5, 0.1],     // seconds between tower shots
-  wreckerDmg: [15, 1, 60, 1],      // building damage per wrecker swing
-  feverDays: [5, 1, 15, 1],        // Baby Fever: days of food in store that count as a surplus
-  feverBonus: [0.4, 0, 0.9, 0.05], // Baby Fever: birth chance added while the surplus holds
-});
+/**
+ * Every tuning knob, one live object: reading `p.x` sees the slider. The backtick panel groups them in folders.
+ * Anything a playtest might want to bend lives here rather than in a constant.
+ */
+function live<T extends object[]>(...groups: T): UnionToIntersection<T[number]> {
+  const out: Record<string, unknown> = {};
+  for (const g of groups) for (const k of Object.keys(g)) Object.defineProperty(out, k, { enumerable: true, get: () => (g as Record<string, unknown>)[k], set: (v) => { (g as Record<string, unknown>)[k] = v; } });
+  return out as UnionToIntersection<T[number]>;
+}
+type UnionToIntersection<U> = (U extends unknown ? (k: U) => void : never) extends (k: infer I) => void ? I : never;
+
+export const p = live(
+  params({
+    dayLength: [120, 10, 300, 1],    // real seconds per day
+    bossDay: [21, 5, 40, 1],         // the run's length: the Warlord comes on this day
+    raidEvery: [RUN.raidEvery, 1, 20, 1],
+    firstRaidDay: [3, 1, 10, 1],     // raids come on this day and every raidEvery after
+    raidSizeMul: [1.75, 0.5, 4, 0.05], // every count in a raid's mix is scaled by this
+    waveHpGrowth: [0.08, 0, 0.3, 0.01], // raider HP multiplier grows this much per wave
+  }, 'pacing'),
+  params({
+    treeYield: [8, 1, 30, 1],        // wood a woodcutter gets from a young tree
+    oldYield: [12, 1, 40, 1],        // ...and from old growth
+    playerTreeYield: [2, 0, 12, 1],  // what the head's own axe brings in
+    cutterWork: [2.5, 0.5, 8, 0.1],  // seconds per chop
+    farmerWork: [1.2, 0.3, 5, 0.1],  // seconds per field action
+    haulMul: [1, 0.25, 3, 0.25],     // villagers' armfuls (16 wood / 12 food) scale by this
+    cropYield: [6, 1, 20, 1],        // food per harvested crop (boons add to it)
+    cropDays: [2, 1, 10, 1],         // days from seed to harvest
+    foodPerDay: [1, 0, 3],           // per villager
+    startWood: [25, 0, 200, 1],
+    startFood: [40, 0, 200, 1],
+  }, 'economy'),
+  params({
+    hearthMul: [1, 0, 3, 0.25],      // scales every building's nightly wood
+    hearthNights: [3, 1, 7, 1],      // nights a woodpile holds
+    hearthStart: [1, 0, 3, 1],       // nights a new building comes with
+  }, 'hearths'),
+  params({
+    birthChance: [0.5, 0, 1, 0.05],  // base: per couple per dawn, if fed, warm and housed
+    feverDays: [5, 1, 15, 1],        // Baby Fever: days of food in store that count as a surplus
+    feverBonus: [0.4, 0, 0.9, 0.05], // Baby Fever: birth chance added while the surplus holds
+    adultAge: [8, 1, 40, 1],         // days
+    oldAge: [70, 20, 200, 1],        // days
+    cadetDays: [3, 1, 8, 1],         // drill days to come of age a soldier
+    bedBonus: [0, -2, 6, 1],         // beds added to every house
+    coldKidCare: [-1, -3, 0, 1],     // care a child loses after a cold night
+    fleeRange: [120, 20, 300, 5],    // px: children run from raiders this close
+  }, 'growth'),
+  params({
+    playerHp: [60, 10, 200, 5],
+    playerDmg: [12, 1, 40, 1],       // per sword swing at ×1 weapon
+    soldierHp: [60, 5, 100, 1],
+    soldierDmg: [10, 1, 30, 1],
+    weaponTier0Mul: [0.5, 0.1, 1, 0.05], // the club / hunting bow everyone starts with
+    forgeCostMul: [1, 0, 3, 0.25],   // wood and scrap for armor and weapons
+    wallHp: [400, 50, 1500, 10],
+    gateHp: [240, 50, 1000, 10],
+    wallRepair: [80, 10, 400, 10],   // HP one wood mends on a wall or gate
+    buildingHpMul: [1, 0.25, 4, 0.25],
+    towerRange: [150, 40, 320, 8],   // px; barracks arrow range at Lv1
+    towerDmg: [5, 1, 30, 1],         // per arrow at Lv1; +TOWER.dmgPerLevel each barracks level
+    towerCd: [1.4, 0.2, 5, 0.1],     // seconds between tower shots
+    towerStart: [10, 0, 60, 1],      // arrows a fresh barracks comes with
+    towerCap: [20, 5, 100, 1],       // arrows a Lv1 chest holds
+  }, 'defenders'),
+  params({
+    raiderHp: [30, 5, 100, 1],
+    raiderDmg: [5, 1, 30, 1],
+    wreckerDmg: [15, 1, 60, 1],      // building damage per wrecker swing
+    wreckerWallDmg: [6, 1, 30, 1],   // what it does to a wall instead
+    bruteWallMul: [3, 1, 6, 0.5],    // a brute's wall damage as a multiple of its blow
+  }, 'enemies'),
+  params({
+    fog: true,
+    hearths: true,                   // off: nothing burns and nothing is ever cold
+    towerFires: true,
+    godMode: false,                  // the head cannot die
+    freeBuild: false,                // building, upgrading, forging and fortifying cost nothing
+  }, 'debug'),
+);
 
 // ---- barracks tower -------------------------------------------------------------------------
 /** Every barracks fires arrows at raiders in range from its own chest of arrows; the chest is refilled with wood. */
 export const TOWER = {
-  /** arrows a Lv1 chest holds, and what a fresh barracks starts with */
-  cap: 20, start: 10,
+  /** the chest's size and starting stock are sliders: p.towerCap, p.towerStart */
   /** one restock: this much wood for this many arrows */
   restockWood: 2, restockArrows: 10,
   /** per barracks level above 1 */
@@ -42,7 +103,6 @@ export const TOWER = {
 export const COST = { house: 20, barracks: 30, tavern: 50 } as const;
 export const DEFENSE_COST = { wall: 4, gate: 12, stairs: 10 } as const;
 export const WALL_HEIGHT = 64;
-export const TREE_YIELD = 8;
 
 // ---- trees, storage, upgrades --------------------------------------------------------------
 /** days for a stump/sapling to become a tree */
@@ -53,9 +113,8 @@ export const SEED_BASE = 0.01;
 export const SEED_PER_NEIGHBOUR = 0.025;
 /** a sapling with at least two tree neighbours grows this fast instead of SAPLING_DAYS */
 export const SHELTERED_SAPLING_DAYS = 3;
-/** days after which a tree is old growth: taller, and worth OLD_YIELD */
+/** days after which a tree is old growth: taller, and worth p.oldYield */
 export const OLD_GROWTH_DAYS = 6;
-export const OLD_YIELD = 12;
 /** woodcutters leave at least this many trees standing */
 export const TREE_RESERVE = 8;
 /** food / wood the granary / woodyard can hold, by level (index = level) */
@@ -88,15 +147,12 @@ export const LEVEL_LOOKS: Record<'house' | 'barracks' | 'granary' | 'woodyard' |
   woodyard: ['', 'cabin', 'chimney', 'lantern and loft window'],
 };
 // ---- children ------------------------------------------------------------------------------
-/** a child starts apprenticing this many days before coming of age, and needs CADET_DAYS at it to come of age skilled */
+/** a child starts apprenticing this many days before coming of age, and needs p.cadetDays at it to come of age skilled */
 export const CADET_AGE_BEFORE = 3;
-export const CADET_DAYS = 3;
 /** care stars: +6% HP and work speed per star for life */
 export const STAR_BONUS = 0.06;
 /** a child on hearty rations eats this much a day (and is "well fed") */
 export const HEARTY_RATION = 2;
-/** children run for the nearest door when a raider is this close */
-export const FLEE_RANGE = 120;
 /** children are asleep indoors between these times of day */
 export const BEDTIME = { start: 0.8, end: 0.28 } as const;
 export type Calling = 'farmer' | 'woodcutter' | 'soldier';
@@ -187,8 +243,6 @@ export const WEAPONS: Record<WeaponSlot, { name: string; tiers: readonly WeaponT
 };
 export const WEAPON_SLOTS: readonly WeaponSlot[] = ['melee', 'bow'];
 
-/** every count in a raid's mix is scaled by this (per-enemy stats are never touched) */
-export const RAID_SIZE_MUL = 1.75;
 
 // ---- hearths --------------------------------------------------------------------------------
 /** Wood a building's hearth burns each night, by level (index = level); 0 means it has no hearth. Woodcutters keep the piles stocked. */
@@ -200,12 +254,6 @@ export const HEARTH_WOOD: Record<'house' | 'barracks' | 'granary' | 'woodyard' |
   woodyard: [0, 0, 0, 0],
   lair: [0, 0, 0, 0],
 };
-/** nights of firewood a pile can hold */
-export const HEARTH_NIGHTS = 3;
-/** a child who slept in a cold house: care points that day */
-export const COLD = { kidCare: -1 } as const;
-/** the head's own felling is for clearing ground; woodcutters bring in the real wood */
-export const PLAYER_TREE_YIELD = 2;
 /** scrap iron looted from slain raiders */
 export const SCRAP_DROP = { raider: 2, brute: 4, warlord: 10, snatcher: 1, shaman: 2, rat: 0, ogre: 30, wrecker: 3 } as const;
 

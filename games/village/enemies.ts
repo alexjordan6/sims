@@ -513,7 +513,7 @@ export class Wrecker extends Raider {
       this.setGoal(s, victim.tile.tx, victim.tile.ty); this.followPath(dt); this.task = 'lashing out'; return;
     }
     this.clearGoal();
-    const dmg = this.dmg; this.dmg = WRECKER.wallDmg;
+    const dmg = this.dmg; this.dmg = p.wreckerWallDmg;
     const battering = this.breach(dt, s);
     this.dmg = dmg;
     if (battering) return;
