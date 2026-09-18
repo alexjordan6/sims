@@ -791,6 +791,8 @@ export class Player extends Mover {
     const slow = this.swing ? 0.25 : this.recover > 0 ? 0.6 : 1;
     this.vx = mx * this.speed * slow; this.vy = my * this.speed * slow;
     this.moveWithCollision(dt, s.world);
+    // pushing up into a doorway walks you inside
+    s.pushDoor(dt, my < -0.5 && Math.abs(mx) < 0.5);
     this.updateSwing(dt, s);
     if (s.mods.playerRegen && this.hp < this.maxHp && !s.nearestRaider(this.x, this.y, 40)) this.hp = Math.min(this.maxHp, this.hp + s.mods.playerRegen * dt);
   }

@@ -7,7 +7,7 @@ import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
 import { skyAt } from '../night';
 import { frameDataUrl, BUILDING_TEXTURE } from '../pixelart';
-import { BUILDINGS, MAX_LEVEL, doorstep, World, type BuildingKind } from '../world';
+import { BUILDINGS, MAX_LEVEL, type BuildingKind } from '../world';
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -480,8 +480,8 @@ export class UI {
       if (b.kind === 'barracks') html += `<b>Sponsors</b><span>${s.world.swornHouses.length} / ${s.world.sponsorship(s.mods.sponsorBonus)} houses sworn</span>`;
       html += `<b>Next</b><span>${b.level < MAX_LEVEL ? `Lv${b.level + 1}: ${LEVEL_PERKS[b.kind][b.level + 1]} <em>· ${cost} wood with the hammer</em>` : 'max level'}</span></div>`;
       if (['house', 'barracks', 'tavern'].includes(b.kind)) {
-        const d = doorstep(b), near = s.player.dist(World.center(d.tx, d.ty)) < 25;
-        html += `<button class="btn small enter-room" ${!near || s.interior.active ? 'disabled' : ''}>ENTER${near ? '' : ' · WALK TO DOOR'}</button>`;
+        const onStep = s.doorAt() === b;
+        html += `<p class="d">${onStep ? '<b>Walk up into the door</b> to go inside.' : 'To go inside, stand on the doorstep and walk up into the door.'}</p>`;
       }
       if (b.kind === 'barracks') html += `<p>Equip soldiers with bows in their cards. SET WALL POST, then tap a connected battlement. Stairs are required.</p><button class="btn small craft-arrows">FLETCH 10 ARROWS · 2 WOOD</button>`;
       if (b.kind === 'house') {
@@ -496,7 +496,6 @@ export class UI {
       if (force || html !== this.lastInspector) {
         this.inspector.innerHTML = html; this.lastInspector = html;
         this.inspector.querySelector('.close')?.addEventListener('click', () => s.selectBuilding(null));
-        this.inspector.querySelector('.enter-room')?.addEventListener('click', () => { s.interior.enter(b); this.side.classList.remove('open'); });
         this.inspector.querySelector('.craft-arrows')?.addEventListener('click', () => s.craftArrows());
         this.inspector.querySelectorAll<HTMLButtonElement>('[data-raise]').forEach((el) => el.addEventListener('click', () => { s.setCalling(b, el.dataset.raise as Calling); this.renderInspector(true); }));
         this.inspector.querySelectorAll<HTMLButtonElement>('[data-rations]').forEach((el) => el.addEventListener('click', () => { s.setRations(b, el.dataset.rations === 'hearty'); this.renderInspector(true); }));

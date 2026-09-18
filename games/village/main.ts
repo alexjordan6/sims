@@ -429,7 +429,7 @@ export class VillageScene extends SimScene {
   nearestShelter(x: number, y: number): Building | null {
     let best: Building | null = null, bd = Infinity;
     for (const b of this.world.buildings) {
-      if (b.kind !== 'house' && b.kind !== 'barracks') continue;
+      if (b.kind !== 'house' && b.kind !== 'barracks' && b.kind !== 'tavern') continue;
       const d = doorstep(b), c = World.center(d.tx, d.ty), dd = (c.x - x) ** 2 + (c.y - y) ** 2;
       if (dd < bd) { bd = dd; best = b; }
     }
@@ -871,11 +871,30 @@ export class VillageScene extends SimScene {
       if (d.kind === 'stairs') { Object.assign(pl, World.center(d.tx, d.ty)); pl.elevated = !pl.elevated; pl.clearGoal(); return true; }
       if (d.kind === 'gate' && !pl.elevated) { d.open = !d.open; this.world.revision++; this.world.markDirty(d.tx, d.ty); this.event('build', d.open ? 'Gate open to everyone — enemies can enter.' : 'Gate guarded — allies can pass, enemies must break it.'); return true; }
     }
-    if (pl.elevated) return false;
-    const b = point ? this.world.get(point.tx, point.ty)?.building : null;
-    const nearby = (b ? [b] : this.world.buildings).find(b => ['house', 'barracks', 'tavern'].includes(b.kind) && pl.dist(World.center(doorstep(b).tx, doorstep(b).ty)) < 25);
-    if (nearby) { this.interior.enter(nearby); return true; }
     return false;
+  }
+
+  /** The building whose doorstep the player is standing on, if any (entered by walking up into the door). */
+  doorAt(): Building | null {
+    const pt = this.player.tile;
+    return this.world.buildings.find((b) => {
+      if (!['house', 'barracks', 'tavern'].includes(b.kind)) return false;
+      const d = doorstep(b);
+      return d.tx === pt.tx && d.ty === pt.ty;
+    }) ?? null;
+  }
+  /** seconds the player has been pushing up into a door */
+  doorT = 0;
+  /**
+   * Walking up into a door enters the building: you have to be on its doorstep, facing the
+   * door, and hold up for a beat (so brushing past a house never drops you inside).
+   */
+  pushDoor(dt: number, pushingUp: boolean): void {
+    if (this.player.elevated) { this.doorT = 0; return; }
+    const b = pushingUp ? this.doorAt() : null;
+    if (!b) { this.doorT = 0; return; }
+    this.doorT += dt;
+    if (this.doorT >= 0.15) { this.doorT = 0; this.interior.enter(b); }
   }
 
   /** How far from the player the mouse can place a building, in tiles. */
@@ -1057,6 +1076,8 @@ export class VillageScene extends SimScene {
   /** What the tool would do right now, as "E: verb" (or a reason it won't). */
   hint(): string {
     if (this.interior.active) return this.interior.hint();
+    const door = this.doorAt();
+    if (door && !this.player.elevated) return `▲ walk up into the door to enter ${BUILDINGS[door.kind].name}`;
     if (this.posting) return `Pick a connected battlement for ${this.posting.name} (or cancel in their card)`;
     const pl = this.player;
     const tg = this.target;
