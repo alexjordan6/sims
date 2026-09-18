@@ -84,11 +84,11 @@ export class Fx {
     this.gold = mk([0xffcf5a, 0xfff2b0], { speed: { min: 30, max: 90 }, gravityY: -20, lifespan: 700 });
     this.magic = mk([0xb46bff, 0xe0b0ff, 0x7a3fd6], { speed: { min: 10, max: 40 }, gravityY: -30, lifespan: 380 });
     this.puff = mk([0xffffff, 0xe8e8e8, 0xc9c9c9], { speed: { min: 15, max: 45 }, gravityY: -25, lifespan: 500, scale: { start: 2.5, end: 0 } });
-    // the wind: streaks that fade in and out as they circle the lair, drawn above the fog so it's a warning you can see
+    // the wind: streaks that fade in and out as they circle the lair; the fog hides it like everything else
     if (!scene.textures.exists('wisp')) scene.make.graphics({ x: 0, y: 0 }, false).fillStyle(0xffffff).fillRect(0, 0, 16, 2).generateTexture('wisp', 16, 2);
     const fade = (v: number) => ({ onEmit: () => 0, onUpdate: (_p: Phaser.GameObjects.Particles.Particle, _k: string, t: number) => Math.sin(t * Math.PI) * v });
-    this.wisps = scene.add.particles(0, 0, 'wisp', { emitting: false, lifespan: { min: 1400, max: 2400 }, tint: [0xd8d0f0, 0xb0b8d8, 0x9aa0c8], alpha: fade(0.85), scale: { start: 0.8, end: 1.8 } }).setDepth(46);
-    this.leaves = scene.add.particles(0, 0, 'px', { emitting: false, lifespan: { min: 1600, max: 2600 }, tint: [0x4a3a50, 0x5a4a3a, 0x3a3a48], alpha: fade(0.9), rotate: { onEmit: () => Math.random() * 360, onUpdate: (_p: Phaser.GameObjects.Particles.Particle, _k: string, _t: number, v: number) => v + 6 } }).setDepth(46);
+    this.wisps = scene.add.particles(0, 0, 'wisp', { emitting: false, lifespan: { min: 1400, max: 2400 }, tint: [0xd8d0f0, 0xb0b8d8, 0x9aa0c8], alpha: fade(0.85), scale: { start: 0.8, end: 1.8 } }).setDepth(43); // under the fog (45): the wind is only seen where the ground is
+    this.leaves = scene.add.particles(0, 0, 'px', { emitting: false, lifespan: { min: 1600, max: 2600 }, tint: [0x4a3a50, 0x5a4a3a, 0x3a3a48], alpha: fade(0.9), rotate: { onEmit: () => Math.random() * 360, onUpdate: (_p: Phaser.GameObjects.Particles.Particle, _k: string, _t: number, v: number) => v + 6 } }).setDepth(43);
   }
 
   /**
@@ -96,7 +96,7 @@ export class Fx {
    * tiles of the lair, wisps and dead leaves stream clockwise around it — thickest at the cave
    * mouth, thinning to nothing at the edge — and the ground under it has a cold cast. Whatever
    * part of that circle the camera can see gets particles, whether or not you're standing in it.
-   * The wisps blow above the fog, so the circle shows before the lair does. Only the sound
+   * Fog hides the wind like anything else, so you find it by walking into it. Only the sound
    * follows the player: a quiet moan that rises as you walk in.
    */
   private wind(dt: number): void {
