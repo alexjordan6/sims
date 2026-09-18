@@ -30,6 +30,7 @@ export class Minimap {
   private t = 0;
   /** explored tiles painted last pass; the terrain repaints when more come into view */
   private seenPainted = -1;
+  private fogT = 0;
 
   constructor(private scene: VillageScene, scale: number) {
     this.el = document.createElement('canvas');
@@ -49,8 +50,8 @@ export class Minimap {
 
   render(dt: number, tilesChanged: boolean): void {
     const s = this.scene;
-    if (!this.painted || tilesChanged || (s.fog && s.fog.seen !== this.seenPainted)) this.paintTerrain();
-    this.t += dt;
+    this.t += dt; this.fogT += dt;
+    if (!this.painted || tilesChanged || (s.fog && s.fog.seen !== this.seenPainted && this.fogT > 0.6)) { this.paintTerrain(); this.fogT = 0; }
     if (this.t < 0.12) return;
     this.t = 0;
     const c = this.ctx;

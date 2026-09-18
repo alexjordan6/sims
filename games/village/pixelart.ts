@@ -507,14 +507,20 @@ export function ensureBuildingArt(scene: Phaser.Scene): void {
 }
 
 /** PNG data URL of one frame of a generated texture, for the DOM help screen. */
+const frameUrlCache = new Map<string, string>();
 export function frameDataUrl(scene: Phaser.Scene, key: string, frame: number): string {
+  const ck = `${key}:${frame}`;
+  const hit = frameUrlCache.get(ck);
+  if (hit) return hit;
   const tex = scene.textures.get(key);
   const f = tex.get(frame);
   const src = tex.getSourceImage() as HTMLCanvasElement;
   const c = document.createElement('canvas');
   c.width = f.width; c.height = f.height;
   c.getContext('2d')!.drawImage(src, f.cutX, f.cutY, f.width, f.height, 0, 0, f.width, f.height);
-  return c.toDataURL();
+  const url = c.toDataURL();
+  frameUrlCache.set(ck, url);
+  return url;
 }
 
 // ---- flora: trees, saplings and crops, one 16x16 tilesheet ------------------------------------

@@ -70,6 +70,7 @@ export class UI {
 
   private lastTop = '';
   private lastRoster = '';
+  private inspT = 0;
   private lastInspector = '';
   private rosterT = 0;
   private topT = 0;
@@ -400,7 +401,8 @@ export class UI {
     this.minimap.render(dt, s.tilesChanged);
     if (this.topT > 0.1) {
       if (s.fog) { const pct = `${Math.round(s.fog.exploredShare * 100)}% explored`; if (this.exploredEl.textContent !== pct) this.exploredEl.textContent = pct; }
-      this.topT = 0; this.renderTop(); this.renderHotbar(); this.renderInspector();
+      this.topT = 0; this.renderTop(); this.renderHotbar();
+      this.inspT += 0.1; if (this.inspT >= 0.25) { this.inspT = 0; this.renderInspector(); } // cards rebuild their DOM: a few times a second is plenty
     }
     if (this.rosterT > 0.5) { this.rosterT = 0; this.renderRoster(); }
     this.renderFeed();
@@ -606,7 +608,20 @@ export class UI {
       }
     }
     if (!vs.length) html = '<p class="empty">Nobody lives here yet.</p>';
-    if (html !== this.lastRoster) { this.roster.querySelector('.list')!.innerHTML = html; this.lastRoster = html; }
+    // health changes every tick in a fight: patch the bars in place rather than rebuilding the list
+    const structure = html.replace(/width:[\d.]+%/g, 'width:%').replace(/ low"/g, '"');
+    const list = this.roster.querySelector('.list')!;
+    if (structure !== this.lastRoster) { list.innerHTML = html; this.lastRoster = structure; return; }
+    for (const row of list.querySelectorAll<HTMLElement>('.row[data-id]')) {
+      const v = vs.find((x) => String(x.id) === row.dataset.id);
+      const bar = row.querySelector<HTMLElement>('.bar.hp');
+      if (!v || !bar) continue;
+      const pct = Math.max(0, v.hp / v.maxHp * 100);
+      const fill = bar.firstElementChild as HTMLElement;
+      const w = `${pct}%`;
+      if (fill.style.width !== w) fill.style.width = w;
+      bar.classList.toggle('low', pct < 40);
+    }
   }
 
   private renderFeed(): void {

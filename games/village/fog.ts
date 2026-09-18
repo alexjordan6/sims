@@ -80,8 +80,10 @@ export class Fog {
       const i = ty * COLS + tx;
       this.vis[i] = vis;
       if (vis > 0.5 && !this.explored[i]) { this.explored[i] = 1; this.seen++; }
-      if (vis >= 1) { this.layer.removeTileAt(tx, ty); continue; }
-      const tile = this.layer.putTileAt(this.explored[i] ? 2 : 1, tx, ty);
+      const tile = this.layer.getTileAt(tx, ty, true)!;
+      if (vis >= 1) { if (tile.index !== -1) tile.index = -1; continue; }
+      const want = this.explored[i] ? 2 : 1;
+      if (tile.index !== want) tile.index = want;
       tile.alpha = this.explored[i] ? 1 - vis : 1 - vis * 0.8;
     }
   }

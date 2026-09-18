@@ -239,11 +239,17 @@ export function ensureCharacter(scene: Phaser.Scene, l: Look): string {
 }
 
 /** PNG data URL of a look at 1x, for the DOM (cards, roster, the armory). */
+const imgCache = new Map<string, string>();
 export function charImg(l: Look): string {
+  const key = charKey(l);
+  let url = imgCache.get(key);
+  if (url) return url;
   const c = document.createElement('canvas');
-  c.width = 16; c.height = 20;
+  const { w, h } = frameSize(l.body); c.width = w; c.height = h;
   drawCharacter(c.getContext('2d')!, 0, 0, l, false);
-  return c.toDataURL();
+  url = c.toDataURL();
+  imgCache.set(key, url);
+  return url;
 }
 
 /** Stats a set of armor gives: extra HP, damage taken multiplier, speed multiplier, block chance. */
