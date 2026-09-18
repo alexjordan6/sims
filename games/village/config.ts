@@ -24,6 +24,8 @@ export const p = params({
   towerDmg: [5, 1, 30, 1],         // per arrow at Lv1; +TOWER.dmgPerLevel each barracks level
   towerCd: [1.4, 0.2, 5, 0.1],     // seconds between tower shots
   wreckerDmg: [15, 1, 60, 1],      // building damage per wrecker swing
+  feverDays: [5, 1, 15, 1],        // Baby Fever: days of food in store that count as a surplus
+  feverBonus: [0.4, 0, 0.9, 0.05], // Baby Fever: birth chance added while the surplus holds
 });
 
 // ---- barracks tower -------------------------------------------------------------------------

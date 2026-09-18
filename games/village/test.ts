@@ -233,6 +233,19 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     step(s, 30);
     // (the cutter goes straight back to the grove afterwards, so the pile may have grown further by now)
     assert(cabin.firewood === Math.min(HEARTH_NIGHTS, Math.floor(HAUL.villager.wood / hearthCost(cabin))) && s.wood >= woodBefore + HAUL.villager.wood - cabin.firewood * hearthCost(cabin), `the pile takes ${cabin.firewood} nights and the rest reaches the woodyard`);
+    // Baby Fever: births surge while the larder holds a surplus; more mouths eat the surplus away
+    s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, { x: -400, y: -400 });
+    const nest = s.world.houses[0]; nest.firewood = HEARTH_NIGHTS; nest.warm = true;
+    const ma = s.spawn(new Villager(0, 0, nest, 'farmer', 20, 'Ma', s.mods)), pa = s.spawn(new Villager(0, 0, nest, 'farmer', 20, 'Pa', s.mods));
+    ma.update = pa.update = () => {}; nest.residents = 2;
+    s.mods.babyFever = false; s.food = 40;
+    assert(Math.abs(s.surplusDays() - 20) < 0.01 && !s.feverActive() && s.birthChance(nest) === p.birthChance, 'without the boon the larder is just a number and births stay at the base chance');
+    s.mods.babyFever = true;
+    assert(s.feverActive() && Math.abs(s.birthChance(nest) - (p.birthChance + p.feverBonus)) < 1e-9, `with Baby Fever and ${s.surplusDays()} days of food, births run at ${Math.round(100 * s.birthChance(nest))}%`);
+    s.food = 2 * p.feverDays - 1; assert(!s.feverActive() && s.birthChance(nest) === p.birthChance, 'below the surplus line the fever breaks and births fall back to normal');
+    const dawns = 30, tally = (fever: boolean) => { s.reset(7); s.screen = 'playing'; s.paused = true; s.agents = [s.player]; Object.assign(s.player, { x: -400, y: -400 }); const h = s.world.houses[0]; h.firewood = 99; const a = s.spawn(new Villager(0, 0, h, 'farmer', 20, 'A', s.mods)), b = s.spawn(new Villager(0, 0, h, 'farmer', 20, 'B', s.mods)); a.update = b.update = () => {}; h.residents = 2; s.mods.babyFever = fever; let born = 0; for (let i = 0; i < dawns; i++) { s.food = 1000; h.firewood = 99; h.residents = 2; const n = s.villagers().length; s.newDay(); born += s.villagers().length - n; for (const k of s.villagers()) if (k.role === 'kid') k.dead = true; s.removeDead(); } return born; };
+    const plain = tally(false), fevered = tally(true);
+    assert(fevered > plain, `over ${dawns} well-fed dawns the fever brought ${fevered} births against ${plain} without it`);
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;
   } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); }

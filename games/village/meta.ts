@@ -15,6 +15,8 @@ export interface Mods {
   fieldWide: boolean;
   foodPerDayMul: number;
   birthBonus: number;
+  /** Baby Fever: births get p.feverBonus while food in store covers p.feverDays of rations */
+  babyFever: boolean;
   twinChance: number;
   houseCap: number;
   adultAgeDelta: number;
@@ -78,7 +80,7 @@ export interface Mods {
 export const DEFAULT_MODS: Mods = {
   startFood: 40, startWood: 25, extraAdults: 0, startSoldiers: 0,
   cropYield: 6, cropDaysDelta: 0, farmerSpeedMul: 1, fieldWide: false, foodPerDayMul: 1,
-  birthBonus: 0, twinChance: 0, houseCap: 4, adultAgeDelta: 0,
+  birthBonus: 0, babyFever: false, twinChance: 0, houseCap: 4, adultAgeDelta: 0,
   hpMul: 1, soldierHpBonus: 0, soldierDmgMul: 1, soldierRegen: 0, cadetDaysDelta: 0, sponsorBonus: 0,
   raiderSpeedMul: 1, raiderHpMul: 1, playerDmgMul: 1, playerHpBonus: 0, playerRegen: 0,
   treeYieldBonus: 0, seedMul: 1, shelteredDaysDelta: 0, oldGrowthDaysDelta: 0, oldYieldBonus: 0, startWoodyardLevel: 1, cutterSpeedMul: 1, ignoreReserve: false,
@@ -122,7 +124,7 @@ export const NODES: Node[] = [
   { id: 'harvest2b', branch: 'harvest', tier: 2, side: 'b', requires: 'harvest1', name: 'Deep Larder', cost: 100, blurb: '+50 starting food and a wider starting field', icon: { key: 'farm', frame: 44 }, apply: (m) => { m.startFood += 50; m.fieldWide = true; } },
   { id: 'harvest3b', branch: 'harvest', tier: 3, side: 'b', requires: 'harvest2b', name: 'Granary', cost: 200, blurb: 'Villagers eat half as much', icon: { key: 'farm', frame: 96 }, apply: (m) => (m.foodPerDayMul *= 0.5) },
   // ---- Hearth
-  { id: 'hearth1', branch: 'hearth', tier: 1, name: 'Warm Hearths', cost: 50, blurb: 'Births 15% more likely', icon: { key: 'town', frame: 85 }, apply: (m) => (m.birthBonus += 0.15) },
+  { id: 'hearth1', branch: 'hearth', tier: 1, name: 'Baby Fever', cost: 50, blurb: 'While the granary holds 5+ days of food, births are far more likely — the bigger the village, the more it takes to keep the surplus', icon: { key: 'town', frame: 85 }, apply: (m) => (m.babyFever = true) },
   { id: 'hearth2a', branch: 'hearth', tier: 2, side: 'a', requires: 'hearth1', name: 'Big Families', cost: 100, blurb: 'Houses hold 6 instead of 4', icon: { key: 'town', frame: 53 }, apply: (m) => (m.houseCap = 6) },
   { id: 'hearth3a', branch: 'hearth', tier: 3, side: 'a', requires: 'hearth2a', name: 'Twins', cost: 200, blurb: 'A quarter of births are twins', icon: { key: 'dungeon', frame: 88 }, apply: (m) => (m.twinChance += 0.25) },
   { id: 'hearth2b', branch: 'hearth', tier: 2, side: 'b', requires: 'hearth1', name: 'Second Couple', cost: 100, blurb: 'Start with a second family and house', icon: { key: 'dungeon', frame: 99 }, apply: (m) => (m.extraAdults += 2) },

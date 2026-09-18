@@ -90,7 +90,7 @@ export class UI {
     this.top = h(`<div class="topbar panel">
       ${tile('t-day', 'DAY', `<span class="sun"></span><span class="day"></span><span class="hour"></span>`, 'Survive to day 21 and beat the Warlord')}
       ${tile('t-wood', 'WOOD', `${spr('town', TOWN.iconWood, 24)}<span class="num wood"></span>`, 'Woodcutters bring it in (your own axe only clears ground). Houses cost 20, barracks 30, and every hearth burns wood each night. The woodyard sets the cap')}
-      ${tile('t-food', 'FOOD', `${spr('farm', FARM.iconTomato, 24)}<span class="num food"></span>`, 'Each villager eats 1 a day. Harvest ripe crops. The granary sets the cap')}
+      ${tile('t-food', 'FOOD', `${spr('farm', FARM.iconTomato, 24)}<span class="num food"></span>`, 'Each villager eats 1 a day; the small number is how many days the larder would last. Harvest ripe crops. The granary sets the cap')}
       <div class="stat t-scrap" title="Scrap iron looted from slain raiders — forges iron and steel armor at the barracks"><span class="cap">SCRAP</span><span class="val"><span class="scrap-ico"></span><span class="num scrap"></span></span></div>
       <div class="stat t-pop" title="Your villagers by role"><span class="cap">VILLAGERS</span><span class="val pop"></span></div>
       <div class="spacer"></div>
@@ -425,7 +425,7 @@ export class UI {
     const night = s.dayTime < 0.22 || s.dayTime > 0.8;
     const raidIn = s.nextRaidDay - s.day;
     const held = s.player.load ? `${s.player.load.kind}${s.player.load.n}` : '';
-    const key = `${s.day}|${hour}|${held}|${s.food | 0}/${s.foodCap}|${s.wood | 0}/${s.woodCap}|${s.scrap}|${count('farmer')}|${count('woodcutter')}|${count('kid')}|${count('soldier')}|${s.player.hp}|${s.raidActive}|${s.boss?.hp ?? ''}|${raidIn}|${s.speed}|${s.paused}|${night}`;
+    const key = `${s.day}|${hour}|${held}|${s.food | 0}/${s.foodCap}|${s.surplusDays().toFixed(1)}|${s.feverActive()}|${s.wood | 0}/${s.woodCap}|${s.scrap}|${count('farmer')}|${count('woodcutter')}|${count('kid')}|${count('soldier')}|${s.player.hp}|${s.raidActive}|${s.boss?.hp ?? ''}|${raidIn}|${s.speed}|${s.paused}|${night}`;
     if (key === this.lastTop) return;
     this.lastTop = key;
 
@@ -438,7 +438,9 @@ export class UI {
     q('.hour').textContent = `${String(hour).padStart(2, '0')}:00`;
     const inHand = (kind: string) => s.player.load?.kind === kind ? `<em class="hand">+${s.player.load.n} in hand</em>` : '';
     q('.wood').innerHTML = `${s.wood | 0}<small>/${s.woodCap}</small>${inHand('wood')}`;
-    q('.food').innerHTML = `${s.food | 0}<small>/${s.foodCap}</small>${inHand('food')}`;
+    const days = s.surplusDays(), fever = s.feverActive();
+    const feverBadge = s.mods.babyFever ? `<span class="badge fever ${fever ? 'on' : ''}" title="${fever ? `Baby fever: births ${Math.round(100 * p.feverBonus)}% more likely while the larder holds ${p.feverDays}+ days of food` : `Baby fever needs ${p.feverDays} days of food in store — ${Math.ceil(p.feverDays * s.dailyRation() - s.food)} more`}">FEVER</span>` : '';
+    q('.food').innerHTML = `${s.food | 0}<small>/${s.foodCap} · ${Number.isFinite(days) ? `${days.toFixed(days < 10 ? 1 : 0)} days` : '∞'}</small>${feverBadge}${inHand('food')}`;
     q('.scrap').textContent = String(s.scrap);
     q('.pop').innerHTML = ([
       ['farmer', CHAR.farmer, 'FARM'], ['woodcutter', CHAR.woodcutter, 'WOOD'], ['kid', CHAR.kid, 'KIDS'], ['soldier', CHAR.soldier, 'ARMY'],
@@ -515,7 +517,7 @@ export class UI {
         const why = s.stockProblem(b);
         html += `<b>Hearth</b><span>${b.warm ? 'warm' : '<em class="warn">COLD</em>'} · ${b.firewood} / ${HEARTH_NIGHTS} night${b.firewood === 1 ? '' : 's'} stocked · burns ${hearthCost(b)} wood a night <button class="btn small ${why ? '' : 'ok'} stock-hearth" ${why ? 'disabled' : ''} title="${why ? esc(why) : 'from the village pile; woodcutters stock it on their own'}">STOCK +1 NIGHT · ${hearthCost(b)} WOOD</button>${!b.warm ? `<em class="d"> ${b.firewood ? 'lit again at dawn' : 'empty — no births, drill, regen or meals until it burns'}</em>` : ''}</span>`;
       }
-      if (b.kind === 'house') html += `<b>Beds</b><span>${b.residents} / ${s.beds(b)}</span>`;
+      if (b.kind === 'house') html += `<b>Beds</b><span>${b.residents} / ${s.beds(b)}${b.ruined ? '' : ` · births ${Math.round(100 * s.birthChance(b))}% a day${s.feverActive() ? ' <em class="fever-txt">· baby fever</em>' : ''}`}</span>`;
       if (b.kind === 'barracks') {
         const ammo = b.ammo ?? 0, cap = s.towerCap(b);
         html += `<b>Sponsors</b><span>${s.world.swornHouses.length} / ${s.world.sponsorship(s.mods.sponsorBonus)} houses sworn</span>`;
@@ -888,6 +890,7 @@ export class UI {
           ${building('granary', 'Granary', 'Holds your food; the harvest is carried here. The crate stack beside it climbs as the store fills.')}
           ${building('woodyard', 'Woodyard', 'Holds your wood; chopped logs are carried here. The log stack beside the cabin climbs as it fills.')}
           <h3>RAISING CHILDREN</h3>
+          <p><b>Births.</b> A couple in a warm house with a free bed has a ${Math.round(100 * p.birthChance)}% chance of a child each dawn (needs food to spare). The <b>Baby Fever</b> legacy boon adds ${Math.round(100 * p.feverBonus)}% while the larder holds <b>${p.feverDays}+ days of food</b> for everyone — the FOOD tile shows the days, and a FEVER badge glows while it holds. More mouths shrink the surplus, so it only lasts if the fields keep up.</p>
           <p><b>Callings.</b> Pick a house (right click / X, or tap it) and set RAISE CHILDREN AS: <b>FARMERS</b>, <b>CUTTERS</b> or <b>SOLDIERS</b>. From age ${s.adultAge - CADET_AGE_BEFORE} its children apprentice every working day — at the field, the woodyard or the barracks yard — and after ${Villager.drillNeeded(s)} days come of age <b>skilled</b>: faster work, bigger harvests and loads, tougher soldiers. Unfinished apprentices grow up plain.</p>
           <p><b>Care.</b> Each dawn a child earns care for the day before: fed · <b>well fed</b> (the house on HEARTY rations, ${HEARTY_RATION} food a day) · both parents alive · another child at home · a Lv2+ house · your <b>encouragement</b>. Running from raiders, going hungry or losing a parent costs care. It averages into <b>stars</b> (★ to ★★★★★) that are fixed at coming of age and last for life: each star is +6% HP and work speed; five stars make a <b>gifted</b> adult with a trait (Hardy, Quick, Brave, Green Thumb, Tireless); a neglected child grows up frail.</p>
           <p><b>Encourage.</b> Walk up to a child and press X (or tap them, or the button on their card): a moment together, once a day, worth a care point and a day of apprenticeship. During a raid it also sends them inside.</p>

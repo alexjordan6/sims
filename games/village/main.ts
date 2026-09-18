@@ -129,7 +129,7 @@ export class VillageScene extends SimScene {
   setup(): void {
     this.interior.leave();
     this.posting = null;
-    this.arrows = 30;
+    this.arrows = 30; this.feverWas = null;
     this.scrap = 0;
     this.armoryFor = null;
     this.mods = this.meta.mods();
@@ -657,12 +657,16 @@ export class VillageScene extends SimScene {
     }
 
     this.burnHearths();
+    // Baby Fever is judged on the larder as the day breaks, before anyone eats
+    const fever = this.feverActive();
+    if (this.mods.babyFever && this.feverWas !== null && fever !== this.feverWas) this.event('birth', fever ? 'Baby fever: full larders, and the village knows it.' : 'The surplus is gone — births return to normal.', true);
+    this.feverWas = fever;
 
     // villagers: eat, age, grow up, grow old
     const villagers = this.villagers();
     for (const v of villagers) {
       const hearty = v.role === 'kid' && !!v.home.hearty && !v.home.ruined;
-      const ration = p.foodPerDay * this.mods.foodPerDayMul * (hearty ? HEARTY_RATION : 1);
+      const ration = this.rationOf(v);
       let wellFed = false;
       if (this.food >= ration) { this.food -= ration; v.hungerDays = 0; wellFed = hearty; }
       else if (hearty && this.food >= ration / HEARTY_RATION) { this.food -= ration / HEARTY_RATION; v.hungerDays = 0; } // enough for a plain meal at least
@@ -689,7 +693,7 @@ export class VillageScene extends SimScene {
     // births: a couple sharing a house with room and food to spare
     for (const h of this.world.houses) {
       const adults = villagers.filter((v) => v.home === h && v.isAdult && !v.dead);
-      if (adults.length >= 2 && h.warm && h.residents < this.beds(h) && this.food > 10 && this.rng.chance(p.birthChance + this.mods.birthBonus + (h.level >= 3 ? 0.15 : 0))) {
+      if (adults.length >= 2 && h.warm && h.residents < this.beds(h) && this.food > 10 && this.rng.chance(this.birthChance(h, fever))) {
         const kid = this.addVillager(h, 'kid', 0);
         kid.parents = [adults[0], adults[1]];
         if (h.residents < this.beds(h) && this.rng.chance(this.mods.twinChance)) {
@@ -883,6 +887,25 @@ export class VillageScene extends SimScene {
   }
 
   // ---- buildings: beds, caps, upgrades ----------------------------------------------
+
+  // ---- food and births --------------------------------------------------------
+
+  /** What one villager eats at dawn (hearty children eat double while their house stands). */
+  rationOf(v: Villager): number {
+    const hearty = v.role === 'kid' && !!v.home.hearty && !v.home.ruined;
+    return p.foodPerDay * this.mods.foodPerDayMul * (hearty ? HEARTY_RATION : 1);
+  }
+  /** Everyone's rations for one dawn. */
+  dailyRation(): number { return this.villagers().reduce((n, v) => n + this.rationOf(v), 0); }
+  /** Days the larder would last at today's population. */
+  surplusDays(): number { const r = this.dailyRation(); return r > 0 ? this.food / r : Infinity; }
+  /** Baby Fever: equipped, and the larder holds a real surplus. A bigger village needs a bigger larder to keep it. */
+  feverActive(): boolean { return this.mods.babyFever && this.surplusDays() >= p.feverDays; }
+  private feverWas: boolean | null = null; // null until the first dawn: only changes are announced
+  /** Chance a couple in `h` has a child at dawn. */
+  birthChance(h: Building, fever = this.feverActive()): number {
+    return Math.min(0.95, p.birthChance + this.mods.birthBonus + (h.level >= 3 ? 0.15 : 0) + (fever ? p.feverBonus : 0));
+  }
 
   /** Beds in a house: by level, or the Big Families boon if that is higher. */
   beds(h: Building): number {
