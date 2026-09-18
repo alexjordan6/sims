@@ -5,7 +5,7 @@ import { Villager, Raider, Player, Mover, Arrow, TOOLS, type Role, type Tool } f
 import { DEFENSE_COST, WALL_HEIGHT } from './config';
 import { Interior } from './interior';
 import { Rat, Snatcher, Brute, Shaman, waveComposition } from './enemies';
-import { p, TILE, COLS, ROWS, ZOOM, COST, TREE_YIELD, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, OLD_YIELD, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, CADET_AGE_BEFORE, HEARTY_RATION, CALLING_NAME, type Calling } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, TREE_YIELD, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, OLD_YIELD, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, CADET_AGE_BEFORE, HEARTY_RATION, CALLING_NAME, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, type Calling, type ArmorSlot } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
@@ -41,6 +41,10 @@ export class VillageScene extends SimScene {
   food = 0;
   wood = 0;
   arrows = 30;
+  /** scrap iron looted from raiders; forges iron and steel armor */
+  scrap = 0;
+  /** the ARMORY panel's current wearer, or null when closed */
+  armoryFor: Mover | null = null;
   interior = new Interior(this);
   posting: Villager | null = null;
   day = 1;
@@ -113,6 +117,8 @@ export class VillageScene extends SimScene {
     this.interior.leave();
     this.posting = null;
     this.arrows = 30;
+    this.scrap = 0;
+    this.armoryFor = null;
     this.mods = this.meta.mods();
     this.world = new World();
     this.world.generate(this.rng, this.mods.fieldWide ? 5 : 3);
@@ -180,8 +186,9 @@ export class VillageScene extends SimScene {
       const b = this.facedBuilding() ?? this.world.get(this.player.tile.tx, this.player.tile.ty)?.building ?? null;
       if (b) this.selectBuilding(b); else this.select(null);
     });
-    kb.on('keydown-E', () => this.togglePause());
-    kb.on('keydown-ESC', () => this.togglePause());
+    kb.on('keydown-E', () => { if (this.armoryFor) this.openArmory(null); else this.togglePause(); });
+    kb.on('keydown-ESC', () => { if (this.armoryFor) this.openArmory(null); else this.togglePause(); });
+    kb.on('keydown-V', () => this.openArmory(this.armoryFor ? null : this.player));
     kb.on('keydown-TAB', (e: KeyboardEvent) => { e.preventDefault?.(); this.player.cycleTool(e.shiftKey ? -1 : 1); });
     kb.on('keydown-Q', () => this.player.cycleTool());
     kb.on('keydown-M', () => this.toggleMute());
@@ -382,6 +389,57 @@ export class VillageScene extends SimScene {
   setRations(h: Building, hearty: boolean): void {
     h.hearty = hearty;
     this.event('food', hearty ? `Hearty rations for the children of this house (${HEARTY_RATION} food a day each)` : 'Back to plain rations', true);
+  }
+
+  // ---- armory ---------------------------------------------------------------------------------
+
+  /** Everyone who can wear armor: you and your soldiers. */
+  wearers(): Mover[] {
+    return [this.player as Mover, ...this.villagers().filter((v) => v.role === 'soldier' && !v.dead)];
+  }
+  /** Why `who` can't have the next tier in `slot` right now, or null. */
+  craftProblem(who: Mover, slot: ArmorSlot): string | null {
+    const next = who.armor[slot] + 1;
+    const tier = ARMOR[slot].tiers[next];
+    if (!tier) return 'already the best there is';
+    if (slot === 'shield' && ((who instanceof Villager && who.weapon === 'bow') || (who instanceof Player && who.tool === 'bow'))) return 'a bow needs both hands';
+    const need = ARMOR_BARRACKS_LEVEL[next];
+    if (!this.world.barracks.length) return 'build a barracks first';
+    if (this.world.barracksLevel < need) return `needs a Lv${need} barracks`;
+    if (this.wood < tier.wood) return `need ${tier.wood} wood (have ${this.wood | 0})`;
+    if (this.scrap < tier.scrap) return `need ${tier.scrap} scrap iron (have ${this.scrap})`;
+    return null;
+  }
+  /** Forge the next tier of a slot for a wearer; pays wood and scrap. */
+  craftArmor(who: Mover, slot: ArmorSlot): boolean {
+    const why = this.craftProblem(who, slot);
+    if (why) { this.event('info', `Can't forge: ${why}`, true); return false; }
+    const next = who.armor[slot] + 1, tier = ARMOR[slot].tiers[next];
+    this.wood -= tier.wood; this.scrap -= tier.scrap;
+    who.armor = { ...who.armor, [slot]: next };
+    this.refitArmor(who);
+    this.fx.push({ kind: 'tool', tool: 'hammer', tx: who.tile.tx, ty: who.tile.ty });
+    this.event('build', `${who instanceof Player ? 'You' : (who as Villager).name} now wear${who instanceof Player ? '' : 's'} ${tier.name.toLowerCase()}`, true);
+    return true;
+  }
+  /** Re-derive max HP after armor changes (soldiers via applyRole; the head keeps a base + bonus). */
+  private refitArmor(who: Mover): void {
+    if (who instanceof Villager) { const frac = who.hp / who.maxHp; who.applyRole(this.mods); who.hp = Math.round(who.maxHp * frac); }
+    else if (who instanceof Player) {
+      const base = 60 + this.mods.playerHpBonus;
+      const frac = who.hp / who.maxHp;
+      who.maxHp = base + (ARMOR.helmet.tiers[who.armor.helmet].hp + ARMOR.chest.tiers[who.armor.chest].hp + ARMOR.legs.tiers[who.armor.legs].hp + ARMOR.shield.tiers[who.armor.shield].hp);
+      who.hp = Math.round(who.maxHp * frac);
+    }
+  }
+  setDye(who: Mover, dye: number): void { who.dye = ((dye % DYES.length) + DYES.length) % DYES.length; }
+  setHelmetStyle(who: Mover, style: number): void { who.helmetStyle = (Math.max(0, Math.min(2, style)) as 0 | 1 | 2); }
+  setPlume(who: Mover, plume: number): void { who.plume = ((plume % PLUMES.length) + PLUMES.length) % PLUMES.length; }
+  /** Open the armory (needs a barracks) for a wearer, or close it. */
+  openArmory(who: Mover | null): void {
+    if (who && !this.world.barracks.length) { this.event('info', 'Build a barracks to open an armory', true); return; }
+    this.armoryFor = who;
+    this.ui?.renderArmory();
   }
 
   // ---- child rearing ----------------------------------------------------------------------
@@ -676,6 +734,7 @@ export class VillageScene extends SimScene {
       if (a.carrying && !a.carrying.dead) { const kid = a.carrying; kid.carriedBy = null; a.carrying = null; this.event('grow', `${kid.name} was rescued!`, true); }
       if (a.hp <= 0) {
         this.stats.raidersKilled++;
+        this.scrap += (SCRAP_DROP as Record<string, number>)[a.kind] ?? 2;
         // Bounty: spoils and a second wind for the village head
         if (this.mods.killWood) this.addWood(this.mods.killWood);
         if (this.mods.killFood) this.addFood(this.mods.killFood);

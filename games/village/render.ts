@@ -3,6 +3,7 @@ import { World, BUILDINGS, doorstep, type Tile, type Building, type BuildingKind
 import { Mover, Villager, Raider, Player, Arrow } from './agents';
 import { Bolt } from './enemies';
 import { TOWN, CHAR } from './atlas';
+import { ensureCharacter, seedLook, type Look } from './characters';
 import { TILE, COLS, ROWS, CAPS, WALL_HEIGHT } from './config';
 import type { VillageScene } from './main';
 import { Fx } from './fx';
@@ -243,14 +244,15 @@ export class Renderer {
         sp.on('pointerout', () => this.scene.hoverAgent(null));
         this.sprites.set(m.id, sp);
       }
-      // role can change (kid -> adult), so re-check the frame cheaply
-      const c = charFor(m);
-      if (sp.texture.key !== c.key || (c.key !== 'px' && sp.frame.name !== String(c.frame))) sp.setTexture(c.key, c.frame);
+      // looks change (kid -> adult, armor, dye), so re-check the texture cheaply; people get a two-frame gait
       const moving = Math.abs(m.vx) + Math.abs(m.vy) > 1;
+      const look = lookFor(m);
+      const c = look ? { key: ensureCharacter(this.scene, look), frame: moving && Math.floor(this.t / 0.18 + m.id) % 2 === 1 ? 1 : 0 } : charFor(m);
+      if (sp.texture.key !== c.key || (c.key !== 'px' && sp.frame.name !== String(c.frame))) sp.setTexture(c.key, c.frame);
       const hurt = m.hp < m.maxHp * 0.4;
       const bob = moving ? Math.abs(Math.sin(this.t * (hurt ? 9 : 14) + m.id)) * 1.5 : 0;
       const a = this.fx.anims.get(m.id);
-      const base = m instanceof Villager && m.role === 'kid' ? 0.7 : m instanceof Raider ? ENEMY_SCALE[m.kind] : m instanceof Bolt ? 3 : 1;
+      const base = m instanceof Villager && m.role === 'kid' ? 0.85 : m instanceof Raider ? ENEMY_SCALE[m.kind] : m instanceof Bolt ? 3 : 1;
       const height = m instanceof Arrow ? (m.elevated ? WALL_HEIGHT * Math.max(0, 1 - m.travelled / m.dropDistance) : 0) : m.elevated ? WALL_HEIGHT : 0;
       sp.setPosition(Math.round(m.x + (a?.ox ?? 0)), Math.round(m.y - height - bob + (a?.oy ?? 0)));
       sp.setFlipX(m.dir < 0);
@@ -264,7 +266,7 @@ export class Renderer {
       let bow = this.bows.get(m.id);
       if (armed && !bow) { bow = this.scene.add.image(0, 0, 'bow'); this.bows.set(m.id, bow); }
       bow?.setPosition(sp.x + m.aim.x * 7, sp.y - 3 + m.aim.y * 7).setRotation(Math.atan2(m.aim.y, m.aim.x)).setScale(1, m.attackCd > 0.45 ? 0.8 : 1).setDepth(sp.depth + 0.01).setVisible(armed && !m.hidden).setTint(this.tint);
-      if (m.hurtT < 0.15) sp.setTintFill(0xffffff);
+      if (m.hurtT < 0.15 && !m.blocked) sp.setTintFill(0xffffff);
       else if (m instanceof Raider) sp.setTint(mulColor(m.boss ? 0xff6a6a : m.kind === 'brute' ? 0xb07070 : 0xffd0d0, this.tint));
       else if (m instanceof Bolt) sp.setTint(0xb46bff);
       else if (hurt) sp.setTint(mulColor(0xffb0a0, this.tint));
@@ -433,6 +435,23 @@ function tileFrames(t: Tile, cropDays: number, dayTime: number, oldDays: number)
 }
 
 const ENEMY_SCALE: Record<string, number> = { raider: 1, warlord: 1.5, rat: 0.8, snatcher: 0.9, brute: 1.3, shaman: 1 };
+
+/** The layered look for an agent — role outfit, held tool, worn armor, dye — or null for things that aren't people. */
+export function lookFor(m: Mover): Look | null {
+  const seed = seedLook(m.id);
+  const base = { ...seed, armor: m.armor, dye: m.dye, helmetStyle: m.helmetStyle, plume: m.plume };
+  if (m instanceof Player) return { ...base, skin: 1, hair: 0, hairStyle: 0, body: 'adult', outfit: 'head', held: m.tool === 'sword' ? 'sword' : m.tool === 'bow' ? 'bow' : m.tool === 'axe' ? 'axe' : m.tool === 'hoe' ? 'hoe' : 'none' };
+  if (m instanceof Villager) {
+    if (m.role === 'kid') return { ...base, body: 'kid', outfit: 'kid', held: 'none' };
+    const held = m.role === 'farmer' ? 'hoe' : m.role === 'woodcutter' ? 'axe' : m.weapon === 'bow' ? 'bow' : 'sword';
+    return { ...base, body: 'adult', outfit: m.role, held };
+  }
+  if (m instanceof Raider) {
+    const body = m.boss ? 'boss' : m.kind === 'brute' ? 'brute' : m.kind === 'rat' ? 'rat' : m.kind === 'snatcher' ? 'imp' : m.kind === 'shaman' ? 'shaman' : 'orc';
+    return { ...base, body, outfit: 'none', held: body === 'orc' || body === 'boss' ? 'sword' : body === 'brute' ? 'axe' : 'none', armor: { helmet: 0, chest: 0, legs: 0, shield: 0 } };
+  }
+  return null;
+}
 
 function charFor(m: Mover): { key: string; frame: number } {
   if (m instanceof Arrow) return { key: 'arrow', frame: 0 };

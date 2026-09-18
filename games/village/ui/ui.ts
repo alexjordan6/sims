@@ -1,12 +1,14 @@
 import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type Tool } from '../agents';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
-import { COST, p, RUN, LEGACY_TEST_MODE, LEVEL_PERKS, CALLING_NAME, TRAITS, HEARTY_RATION, type Calling, UPGRADE_COST, CADET_AGE_BEFORE, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS, TREE_YIELD, OLD_YIELD } from '../config';
+import { COST, p, RUN, LEGACY_TEST_MODE, LEVEL_PERKS, CALLING_NAME, TRAITS, HEARTY_RATION, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, CADET_AGE_BEFORE, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS, TREE_YIELD, OLD_YIELD } from '../config';
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
 import { skyAt } from '../night';
 import { frameDataUrl, BUILDING_TEXTURE } from '../pixelart';
+import { charImg, armorStats } from '../characters';
+import { lookFor } from '../render';
 import { BUILDINGS, MAX_LEVEL, type BuildingKind } from '../world';
 
 // ---------------------------------------------------------------------------
@@ -87,6 +89,7 @@ export class UI {
       ${tile('t-day', 'DAY', `<span class="sun"></span><span class="day"></span><span class="hour"></span>`, 'Survive to day 21 and beat the Warlord')}
       ${tile('t-wood', 'WOOD', `${spr('town', TOWN.iconWood, 24)}<span class="num wood"></span>`, 'Chop trees. Houses cost 20, barracks 30. The woodyard sets the cap')}
       ${tile('t-food', 'FOOD', `${spr('farm', FARM.iconTomato, 24)}<span class="num food"></span>`, 'Each villager eats 1 a day. Harvest ripe crops. The granary sets the cap')}
+      <div class="stat t-scrap" title="Scrap iron looted from slain raiders — forges iron and steel armor at the barracks"><span class="cap">SCRAP</span><span class="val"><span class="scrap-ico"></span><span class="num scrap"></span></span></div>
       <div class="stat t-pop" title="Your villagers by role"><span class="cap">VILLAGERS</span><span class="val pop"></span></div>
       <div class="spacer"></div>
       <div class="stat t-raid" title="Raiders attack every few days; the Warlord comes on day 21"><span class="cap">NEXT RAID</span><span class="val raid"></span></div>
@@ -248,6 +251,7 @@ export class UI {
       <div class="mid">
         <button class="mbtn small zoombtn">⌕<span class="mlbl">ZOOM</span></button>
         <button class="mbtn small helpbtn">?<span class="mlbl">HELP</span></button>
+        <button class="mbtn small armorybtn">⛨<span class="mlbl">ARMOR</span></button>
       </div>
       <div class="cluster">
         <button class="mbtn small drawerbtn">${spr('dungeon', DUNGEON.villager, 24)}<span class="mlbl">FOLK</span></button>
@@ -273,6 +277,7 @@ export class UI {
     press('.drawerbtn', () => { this.showTab('roster'); this.side.classList.toggle('open'); });
     press('.zoombtn', () => s.cycleZoom());
     press('.helpbtn', () => this.showHelp());
+    press('.armorybtn', () => s.openArmory(s.armoryFor ? null : s.player));
 
     const stick = ctl.querySelector<HTMLElement>('.stick')!;
     const knob = ctl.querySelector<HTMLElement>('.knob')!;
@@ -407,7 +412,7 @@ export class UI {
     const hour = Math.floor(s.dayTime * 24);
     const night = s.dayTime < 0.22 || s.dayTime > 0.8;
     const raidIn = s.nextRaidDay - s.day;
-    const key = `${s.day}|${hour}|${s.food | 0}/${s.foodCap}|${s.wood | 0}/${s.woodCap}|${count('farmer')}|${count('woodcutter')}|${count('kid')}|${count('soldier')}|${s.player.hp}|${s.raidActive}|${s.boss?.hp ?? ''}|${raidIn}|${s.speed}|${s.paused}|${night}`;
+    const key = `${s.day}|${hour}|${s.food | 0}/${s.foodCap}|${s.wood | 0}/${s.woodCap}|${s.scrap}|${count('farmer')}|${count('woodcutter')}|${count('kid')}|${count('soldier')}|${s.player.hp}|${s.raidActive}|${s.boss?.hp ?? ''}|${raidIn}|${s.speed}|${s.paused}|${night}`;
     if (key === this.lastTop) return;
     this.lastTop = key;
 
@@ -420,6 +425,7 @@ export class UI {
     q('.hour').textContent = `${String(hour).padStart(2, '0')}:00`;
     q('.wood').innerHTML = `${s.wood | 0}<small>/${s.woodCap}</small>`;
     q('.food').innerHTML = `${s.food | 0}<small>/${s.foodCap}</small>`;
+    q('.scrap').textContent = String(s.scrap);
     q('.pop').innerHTML = ([
       ['farmer', CHAR.farmer, 'FARM'], ['woodcutter', CHAR.woodcutter, 'WOOD'], ['kid', CHAR.kid, 'KIDS'], ['soldier', CHAR.soldier, 'ARMY'],
     ] as [string, { key: string; frame: number }, string][]).map(([r, c, lbl]) => `<span class="chip ${r}" title="${ROLE_LABEL[r]}s">${spr(c.key, c.frame, 24)}<b>${count(r)}</b><i>${lbl}</i></span>`).join('');
@@ -483,7 +489,7 @@ export class UI {
         const onStep = s.doorAt() === b;
         html += `<p class="d">${onStep ? '<b>Walk up into the door</b> to go inside.' : 'To go inside, stand on the doorstep and walk up into the door.'}</p>`;
       }
-      if (b.kind === 'barracks') html += `<p>Equip soldiers with bows in their cards. SET WALL POST, then tap a connected battlement. Stairs are required.</p><button class="btn small craft-arrows">FLETCH 10 ARROWS · 2 WOOD</button>`;
+      if (b.kind === 'barracks') html += `<p>Equip soldiers with bows in their cards. SET WALL POST, then tap a connected battlement. Stairs are required.</p><button class="btn small craft-arrows">FLETCH 10 ARROWS · 2 WOOD</button> <button class="btn small ok open-armory">ARMORY</button><p class="d">Forges leather now, iron at Lv2, steel at Lv3. Scrap iron comes from slain raiders.</p>`;
       if (b.kind === 'house') {
         const calling = b.calling ?? 'farmer';
         const why = calling === 'soldier' ? null : s.swearProblem(b);
@@ -497,6 +503,7 @@ export class UI {
         this.inspector.innerHTML = html; this.lastInspector = html;
         this.inspector.querySelector('.close')?.addEventListener('click', () => s.selectBuilding(null));
         this.inspector.querySelector('.craft-arrows')?.addEventListener('click', () => s.craftArrows());
+        this.inspector.querySelector('.open-armory')?.addEventListener('click', () => { s.openArmory(s.player); this.side.classList.remove('open'); });
         this.inspector.querySelectorAll<HTMLButtonElement>('[data-raise]').forEach((el) => el.addEventListener('click', () => { s.setCalling(b, el.dataset.raise as Calling); this.renderInspector(true); }));
         this.inspector.querySelectorAll<HTMLButtonElement>('[data-rations]').forEach((el) => el.addEventListener('click', () => { s.setRations(b, el.dataset.rations === 'hearty'); this.renderInspector(true); }));
       }
@@ -510,7 +517,9 @@ export class UI {
     const c = charOf(m);
     const roleKey = m instanceof Villager ? m.role : m instanceof Player ? 'player' : 'raider';
     const roleText = m instanceof Villager ? ROLE_LABEL[m.role] : m instanceof Player ? 'Village head (you)' : ENEMY_LABEL[(m as Raider).kind] ?? 'Raider';
-    let html = `${head}<div class="head">${spr(c.key, c.frame, 48)}<div><div class="name">${m instanceof Villager ? esc(m.name) : m instanceof Player ? 'You' : (m as Raider).name}</div><span class="badge ${roleKey}">${roleText}</span></div><button class="btn small close">x</button></div>`;
+    const look = lookFor(m);
+    const portrait = look ? `<img class="art portrait" src="${charImg(look)}" alt="">` : spr(c.key, c.frame, 48);
+    let html = `${head}<div class="head">${portrait}<div><div class="name">${m instanceof Villager ? esc(m.name) : m instanceof Player ? 'You' : (m as Raider).name}</div><span class="badge ${roleKey}">${roleText}</span></div><button class="btn small close">x</button></div>`;
     const hpPct = Math.max(0, m.hp / m.maxHp * 100);
     html += `<div class="rows">`;
     html += `<b>Health</b><div class="bar hp ${hpPct < 40 ? 'low' : ''}"><i style="width:${hpPct}%"></i><span class="bar-txt">${Math.max(0, m.hp | 0)} / ${m.maxHp}</span></div>`;
@@ -535,12 +544,18 @@ export class UI {
     } else if (m instanceof Villager) {
       html += `<div class="upbring"><div class="cap">RAISED</div><div class="stars">${'★'.repeat(m.stars)}<span class="dim">${'☆'.repeat(5 - m.stars)}</span> <small>${m.skilled ? 'skilled' : 'plain'}${m.trait ? ` · ${TRAITS[m.trait].name} — ${TRAITS[m.trait].blurb}` : ''}</small></div></div>`;
     }
+    if (m instanceof Player || (m instanceof Villager && m.role === 'soldier')) {
+      const st = armorStats(m.armor);
+      const pips = ARMOR_SLOTS.map((slot) => `<span class="pip t${m.armor[slot]}" title="${ARMOR[slot].tiers[m.armor[slot]].name}">${ARMOR[slot].name[0]}${m.armor[slot] ? '·'.repeat(m.armor[slot]) : ''}</span>`).join('');
+      html += `<div class="raise"><div class="cap">ARMOR</div><div class="pips">${pips}</div><div class="d">${st.hp ? `+${st.hp} HP · ` : ''}${Math.round((1 - st.dmgMul) * 100)}% less damage · ${Math.round(st.block * 100)}% block${st.speedMul > 1 ? ` · +${Math.round((st.speedMul - 1) * 100)}% speed` : ''}</div><button class="btn small open-armory">ARMORY</button></div>`;
+    }
     if (m instanceof Villager && m.role === 'soldier') html += `<div class="raise"><div class="cap">EQUIPMENT & ORDERS</div><div class="seg"><button class="btn small ${m.weapon === 'sword' ? 'on' : ''}" data-weapon="sword">SWORD</button><button class="btn small ${m.weapon === 'bow' ? 'on' : ''}" data-weapon="bow">BOW</button></div><p>Arrows in shared quiver: ${s.arrows}. ${m.post ? `Post: ${m.post.tx}, ${m.post.ty}.` : 'Patrolling on the ground.'}</p><button class="btn small post-soldier">${s.posting === m ? 'CANCEL PLACEMENT' : 'SET WALL POST'}</button><button class="btn small recall-soldier">RETURN TO PATROL</button></div>`;
     if (html !== this.lastInspector) {
       this.inspector.innerHTML = html;
       this.lastInspector = html;
       this.inspector.querySelector('.close')?.addEventListener('click', () => s.select(null));
       this.inspector.querySelector('.encourage')?.addEventListener('click', () => { if (m instanceof Villager) s.encourage(m); this.renderInspector(true); });
+      this.inspector.querySelector('.open-armory')?.addEventListener('click', () => { s.openArmory(m); this.side.classList.remove('open'); });
       this.inspector.querySelectorAll<HTMLElement>('[data-weapon]').forEach(el => el.addEventListener('click', () => { if (m instanceof Villager) s.equipSoldier(m, el.dataset.weapon as 'bow' | 'sword'); this.renderInspector(true); }));
       this.inspector.querySelector('.post-soldier')?.addEventListener('click', () => { if (m instanceof Villager) s.posting = s.posting === m ? null : m; this.side.classList.remove('open'); this.renderInspector(true); });
       this.inspector.querySelector('.recall-soldier')?.addEventListener('click', () => { if (m instanceof Villager) { m.post = null; m.clearGoal(); s.posting = null; } this.renderInspector(true); });
@@ -570,7 +585,8 @@ export class UI {
           const pct = Math.max(0, v.hp / v.maxHp * 100);
           bar = `<div class="bar hp ${pct < 40 ? 'low' : ''}"><i style="width:${pct}%"></i></div>`;
         }
-        html += `<div class="row ${s.selected === v ? 'sel' : ''}" data-id="${v.id}">${spr(c.key, c.frame, 24)}<span class="n">${esc(v.name)}</span><span class="a">${v.age}d</span>${bar}</div>`;
+        const lk = lookFor(v);
+        html += `<div class="row ${s.selected === v ? 'sel' : ''}" data-id="${v.id}">${lk ? `<img class="art row-portrait" src="${charImg(lk)}" alt="">` : spr(c.key, c.frame, 24)}<span class="n">${esc(v.name)}</span><span class="a">${v.age}d</span>${bar}</div>`;
       }
     }
     if (!vs.length) html = '<p class="empty">Nobody lives here yet.</p>';
@@ -612,6 +628,55 @@ export class UI {
     this.tooltipEl.hidden = false;
     this.tooltipEl.style.top = `${this.top.offsetTop + this.top.offsetHeight + 8}px`; // the top bar wraps on narrow screens
     if (this.tooltipEl.innerHTML !== html) this.tooltipEl.innerHTML = html;
+  }
+
+  // ---- armory ----------------------------------------------------------------
+
+  private armoryEl: HTMLElement | null = null;
+  /** The ARMORY: pick a wearer, forge the next tier per slot, dye the tabard, pick a helmet and plume. */
+  renderArmory(): void {
+    const s = this.scene;
+    const who = s.armoryFor;
+    if (!who) { this.armoryEl?.remove(); this.armoryEl = null; return; }
+    const wearers = s.wearers();
+    const name = (m: Mover) => (m instanceof Player ? 'You' : (m as Villager).name);
+    const look = lookFor(who)!;
+    const st = armorStats(who.armor);
+    const list = wearers.map((m) => `<button class="wearer ${m === who ? 'on' : ''}" data-wearer="${m.id}"><img class="art" src="${charImg(lookFor(m)!)}" alt=""><span>${esc(name(m))}</span></button>`).join('');
+    const slots = ARMOR_SLOTS.map((slot) => {
+      const tier = who.armor[slot], cur = ARMOR[slot].tiers[tier], next = ARMOR[slot].tiers[tier + 1];
+      const why = s.craftProblem(who, slot);
+      const stat = (t: typeof cur) => [t.hp ? `+${t.hp} HP` : '', t.reduce ? `-${Math.round(t.reduce * 100)}% damage` : '', t.speed ? `+${Math.round(t.speed * 100)}% speed` : '', t.block ? `${Math.round(t.block * 100)}% block` : ''].filter(Boolean).join(' · ') || '—';
+      return `<div class="aslot"><div class="aname">${ARMOR[slot].name} <span class="tier">${'●'.repeat(tier)}${'○'.repeat(3 - tier)}</span></div>
+        <div class="acur">${cur.name} <small>${stat(cur)}</small></div>
+        ${next ? `<button class="btn small ${why ? '' : 'ok'} forge" data-slot="${slot}" ${why ? 'disabled' : ''}>FORGE ${next.name.toUpperCase()} · ${next.wood} wood${next.scrap ? ` + ${next.scrap} scrap` : ''}</button><div class="d">${why ? `<em class="warn">${esc(why)}</em>` : stat(next)}</div>` : '<div class="d">the best there is</div>'}</div>`;
+    }).join('');
+    const dyes = DYES.map((c, i) => `<button class="swatch ${who.dye === i ? 'on' : ''}" data-dye="${i}" style="background:${c}" title="${DYE_NAMES[i]}"></button>`).join('');
+    const helms = ['CAP', 'KETTLE', 'GREAT HELM'].map((n, i) => `<button class="btn small ${who.helmetStyle === i ? 'on' : ''}" data-helm="${i}">${n}</button>`).join('');
+    const plumes = PLUMES.map((c, i) => `<button class="swatch ${who.plume === i ? 'on' : ''}" data-plume="${i}" style="background:${c === 'none' ? 'transparent' : c}" title="${c === 'none' ? 'no plume' : 'plume'}">${c === 'none' ? '×' : ''}</button>`).join('');
+    const html = `<div class="armory panel">
+      <div class="ph"><h2>Armory</h2><span class="cap">${s.wood | 0} wood · ${s.scrap} scrap · barracks Lv${s.world.barracksLevel}</span><button class="btn small close">CLOSE</button></div>
+      <div class="acols">
+        <div class="wearers">${list}</div>
+        <div class="afit">
+          <div class="portrait-big"><img class="art" src="${charImg(look)}" alt=""><div class="d">${esc(name(who))} · ${st.hp ? `+${st.hp} HP · ` : ''}${Math.round((1 - st.dmgMul) * 100)}% less damage · ${Math.round(st.block * 100)}% block</div></div>
+          <div class="aslots">${slots}</div>
+          <div class="custom"><div class="cap">TABARD DYE</div><div class="swatches">${dyes}</div>
+            <div class="cap">HELMET</div><div class="seg">${helms}</div>
+            <div class="cap">PLUME</div><div class="swatches">${plumes}</div></div>
+        </div>
+      </div>
+      <p class="sub small">Leather costs wood. Iron and steel need scrap iron from slain raiders and a Lv2 / Lv3 barracks. A bow needs both hands, so archers can't carry a shield.</p>
+    </div>`;
+    if (!this.armoryEl) { this.armoryEl = h('<div class="screen armory-screen"></div>'); this.screens.append(this.armoryEl); }
+    this.armoryEl.innerHTML = html;
+    const el = this.armoryEl;
+    el.querySelector('.close')!.addEventListener('click', () => s.openArmory(null));
+    el.querySelectorAll<HTMLElement>('[data-wearer]').forEach((b) => b.addEventListener('click', () => { const m = wearers.find((w) => w.id === Number(b.dataset.wearer)); if (m) s.openArmory(m); }));
+    el.querySelectorAll<HTMLElement>('[data-slot]').forEach((b) => b.addEventListener('click', () => { s.craftArmor(who, b.dataset.slot as ArmorSlot); this.renderArmory(); }));
+    el.querySelectorAll<HTMLElement>('[data-dye]').forEach((b) => b.addEventListener('click', () => { s.setDye(who, Number(b.dataset.dye)); this.renderArmory(); }));
+    el.querySelectorAll<HTMLElement>('[data-helm]').forEach((b) => b.addEventListener('click', () => { s.setHelmetStyle(who, Number(b.dataset.helm)); this.renderArmory(); }));
+    el.querySelectorAll<HTMLElement>('[data-plume]').forEach((b) => b.addEventListener('click', () => { s.setPlume(who, Number(b.dataset.plume)); this.renderArmory(); }));
   }
 
   // ---- screens ---------------------------------------------------------------
@@ -736,6 +801,8 @@ export class UI {
           <p><b>Encourage.</b> Walk up to a child and press X (or tap them, or the button on their card): a moment together, once a day, worth a care point and a day of apprenticeship. During a raid it also sends them inside.</p>
           <p><b>Children go to bed at dusk</b> and sleep indoors until dawn, and they <b>run for the nearest door</b> when raiders are near. Snatchers take children caught in the open.</p>
           <p><b>Renown</b> comes from children raised: 20 each, plus 8 per star.</p>
+          <h3>ARMOR</h3>
+          <p>You and your soldiers have four armor slots — <b>helmet</b> (HP), <b>chest</b> (less damage taken), <b>legs</b> (speed) and <b>shield</b> (a chance to block melee hits outright; archers can't carry one). Each has three tiers: <b>leather</b> for wood, <b>iron</b> and <b>steel</b> for wood plus <b>scrap iron</b> looted from slain raiders (needs a Lv2 / Lv3 barracks). Open the ARMORY with <kbd>V</kbd>, from the barracks card, or from a soldier's card; dye tabards and pick helmets and plumes there too — what they wear is what you see.</p>
           <h3>SOLDIERS</h3>
           <p>Pick a house (right click / X, or tap it) and set <b>RAISE CHILDREN AS: SOLDIERS</b> to <b>swear</b> it to the barracks — it flies a banner. A barracks sponsors <b>one sworn house per level</b> (two barracks Lv2 = 4 houses). Children of a sworn house become <b>cadets</b> ${CADET_AGE_BEFORE} days before coming of age: each day they walk to the barracks yard and drill. ${Villager.drillNeeded(s)} days of drill make a soldier at age ${s.adultAge}; a child sworn too late comes of age a worker. Every child's outlook is shown in the inspector and the villagers list — no surprises.</p>
           <h3>GROVES</h3>

@@ -295,7 +295,7 @@ export class Bolt extends Mover {
       if (m instanceof Player || (m instanceof Villager && !m.carriedBy)) hit = m;
     });
     if (hit) {
-      (hit as Mover).hit(this.dmg);
+      (hit as Mover).hit(this.dmg, false);
       s.fx.push({ kind: 'hit', attacker: this, target: hit, dmg: this.dmg, crit: false, killed: !!(hit as Mover).dead });
       this.dead = true;
     }

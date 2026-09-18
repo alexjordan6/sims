@@ -2,6 +2,7 @@ import type { Agent } from '@shared/index';
 import { World, doorstep, buildingCenter, yardOf, type House, type TilePos, type Defense, type BuildingKind } from './world';
 import { p, TREE_RESERVE, CADET_AGE_BEFORE, CADET_DAYS, STAR_BONUS, FLEE_RANGE, BEDTIME, TRAITS, type Calling, type Trait } from './config';
 import type { Mods } from './meta';
+import { NO_ARMOR, armorStats, type Armor, type HelmetStyle } from './characters';
 import type { VillageScene } from './main';
 
 // All distances are in world pixels: 16 px per tile.
@@ -30,6 +31,16 @@ export abstract class Mover implements Agent {
   dir = 1;
   /** seconds since last hit, for the hurt flash */
   hurtT = 99;
+  /** worn armor (the head and soldiers); raiders wear none */
+  armor: Armor = { ...NO_ARMOR };
+  /** look customisation: tabard dye, helmet style, plume */
+  dye = 0;
+  helmetStyle: HelmetStyle = 0;
+  plume = 0;
+  /** set when the last hit was blocked by a shield (the renderer pops BLOCK) */
+  blocked = false;
+  /** speed multiplier from armor (legs) */
+  get armorSpeed(): number { return armorStats(this.armor).speedMul; }
   /** what this agent is doing, for the inspector */
   task = '';
 
@@ -96,8 +107,12 @@ export abstract class Mover implements Agent {
   /** telegraphed melee attack in progress (raiders, soldiers) */
   attack: { target: Mover; t: number; windup: number; recover: number; dmg: number; reach: number; struck: boolean } | null = null;
 
-  hit(dmg: number): void {
-    this.hp -= dmg;
+  /** Take a blow. Chest armor shaves it; a shield can turn a melee hit away entirely (`melee` = not an arrow/bolt). */
+  hit(dmg: number, melee = true): void {
+    const st = armorStats(this.armor);
+    this.blocked = false;
+    if (melee && st.block > 0 && Math.random() < st.block) { this.blocked = true; this.hurtT = 0.2; return; }
+    this.hp -= Math.max(1, Math.round(dmg * st.dmgMul));
     this.hurtT = 0;
     if (this.hp <= 0) this.dead = true;
   }
@@ -270,7 +285,7 @@ export class Villager extends Mover {
       case 'kid': this.radius = 2; this.color = 0xf5d8a8; this.maxHp = 10; this.speed = 30; break;
       case 'farmer': this.radius = 3; this.color = 0x7fd37f; this.maxHp = 20; this.speed = 35; break;
       case 'woodcutter': this.radius = 3; this.color = 0xc9a26b; this.maxHp = 20; this.speed = 35; break;
-      case 'soldier': this.radius = 3; this.color = 0x6f9bff; this.maxHp = p.soldierHp + mods.soldierHpBonus + this.barracksHp + (this.skilled ? 15 : 0); this.speed = 45; break;
+      case 'soldier': this.radius = 3; this.color = 0x6f9bff; this.maxHp = p.soldierHp + mods.soldierHpBonus + this.barracksHp + (this.skilled ? 15 : 0) + armorStats(this.armor).hp; this.speed = 45 * armorStats(this.armor).speedMul; break;
     }
     // how they were raised follows them for life
     if (this.isAdult) {
@@ -789,7 +804,8 @@ export class Player extends Mover {
     if (mx) this.dir = mx < 0 ? -1 : 1;
     // swinging plants your feet; the swing itself steps you forward
     const slow = this.swing ? 0.25 : this.recover > 0 ? 0.6 : 1;
-    this.vx = mx * this.speed * slow; this.vy = my * this.speed * slow;
+    const sp = this.speed * slow * this.armorSpeed;
+    this.vx = mx * sp; this.vy = my * sp;
     this.moveWithCollision(dt, s.world);
     // pushing up into a doorway walks you inside
     s.pushDoor(dt, my < -0.5 && Math.abs(mx) < 0.5);

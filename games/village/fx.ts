@@ -226,6 +226,13 @@ export class Fx {
 
   private hit(ev: Extract<FxEvent, { kind: 'hit' }>, sprites: Map<number, Phaser.GameObjects.Sprite>): void {
     const { attacker, target, dmg, crit, killed } = ev;
+    if (target.blocked) { // the shield took it
+      this.word('BLOCK', target.x, target.y - 14, '#c9d3de', 7, 0.6);
+      this.sparks.explode(6, target.x, target.y - 6);
+      this.sfx.hit(false);
+      void sprites;
+      return;
+    }
     const dx = target.x - attacker.x, dy = target.y - attacker.y;
     const d = Math.hypot(dx, dy) || 1;
     const ux = ev.ux ?? dx / d, uy = ev.uy ?? dy / d;
