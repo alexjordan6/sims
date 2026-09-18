@@ -1,5 +1,5 @@
 import type { Rng } from '@shared/index';
-import { TILE, COLS, ROWS, TOWER, type Calling } from './config';
+import { TILE, COLS, ROWS, TOWER, BUILDING_HP, type Calling } from './config';
 
 export type DefenseKind = 'wall' | 'gate' | 'stairs';
 export interface Defense extends TilePos { kind: DefenseKind; hp: number; maxHp: number; open: boolean }
@@ -36,7 +36,15 @@ export interface Building {
   fireCd?: number;
   /** barracks: the "out of arrows" warning has been posted since the last restock */
   dryWarned?: boolean;
+  /** structure left; 0 is a ruin. The lair has none and can't be hurt. */
+  hp: number;
+  maxHp: number;
+  /** wrecked: the footprint stays, but the building does nothing until the hammer rebuilds it */
+  ruined?: boolean;
+  /** an "under attack" alarm has been raised for it this raid */
+  alarmed?: boolean;
 }
+export function buildingMaxHp(b: { kind: BuildingKind; level: number }): number { return BUILDING_HP[b.kind][b.level] ?? 0; }
 /** Houses are buildings; kept as a named type because half the sim talks about "home". */
 export type House = Building;
 
@@ -99,7 +107,9 @@ export class World {
   get houses(): Building[] { return this.buildings.filter((b) => b.kind === 'house'); }
   /** buildings the village can use (everything but the Ogre's lair) */
   get villageBuildings(): Building[] { return this.buildings.filter((b) => b.kind !== 'lair'); }
-  get barracks(): Building[] { return this.buildings.filter((b) => b.kind === 'barracks'); }
+  /** standing barracks: a ruined one sponsors nothing, fires nothing and forges nothing */
+  get barracks(): Building[] { return this.buildings.filter((b) => b.kind === 'barracks' && !b.ruined); }
+  get allBarracks(): Building[] { return this.buildings.filter((b) => b.kind === 'barracks'); }
   get granary(): Building | undefined { return this.buildings.find((b) => b.kind === 'granary'); }
   get woodyard(): Building | undefined { return this.buildings.find((b) => b.kind === 'woodyard'); }
   /** The best barracks level in the village (0 if none). */
@@ -114,7 +124,7 @@ export class World {
   get(tx: number, ty: number): Tile | undefined {
     return this.inBounds(tx, ty) ? this.tiles[ty * this.cols + tx] : undefined;
   }
-  /** Change a tile. Refuses to touch building tiles: buildings are never destroyed. */
+  /** Change a tile. Refuses to touch building tiles: a wrecked building keeps its footprint (see `Building.ruined`). */
   set(tx: number, ty: number, kind: TileKind): Tile {
     const i = ty * this.cols + tx;
     const t = this.tiles[i];
@@ -195,7 +205,7 @@ export class World {
   }
 
   place(kind: BuildingKind, tx: number, ty: number): Building {
-    const b: Building = { kind, tx, ty, level: 1, residents: 0 };
+    const b: Building = { kind, tx, ty, level: 1, residents: 0, hp: BUILDING_HP[kind][1], maxHp: BUILDING_HP[kind][1] };
     if (kind === 'barracks') { b.ammo = TOWER.start; b.fireCd = 0; }
     const f = BUILDINGS[kind];
     this.stamping = true;

@@ -24,6 +24,7 @@ export class Interior {
 
   enter(b: Building): void {
     if (!['house', 'barracks', 'tavern'].includes(b.kind)) return;
+    if (b.ruined) { this.s.event('build', `Only ashes and rubble in the ${BUILDINGS[b.kind].name.toLowerCase()} — rebuild it with the hammer first.`, true); return; }
     this.building = b; this.x = 160; this.y = 191; this.destination = null;
     this.s.player.hidden = true; this.s.player.swing = null; this.s.player.vx = this.s.player.vy = 0;
     this.s.selectedBuilding = b; this.s.selected = null;

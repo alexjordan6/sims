@@ -97,6 +97,7 @@ export const CHAR = {
   brute: { key: 'dungeon', frame: DUNGEON.orc },
   ogre: { key: 'dungeon', frame: DUNGEON.orc },
   shaman: { key: 'dungeon', frame: DUNGEON.wizard },
+  wrecker: { key: 'dungeon', frame: DUNGEON.orc },
 } as const;
 
 /** CSS background-position for a frame in a 12-col sheet, at a given scale. */

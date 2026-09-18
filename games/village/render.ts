@@ -155,11 +155,12 @@ export class Renderer {
         }
         this.buildings.set(b, e);
       }
-      e.body.setFrame(Math.min(2, b.level - 1)).setTint(this.tint);
+      // a ruin is the same shape, charred: no lit windows, no stock, no banner
+      e.body.setFrame(Math.min(2, b.level - 1)).setTint(b.ruined ? mulColor(0x5a4f48, this.tint) : this.tint);
       // the windows come on as night falls; they are never tinted
-      e.lit.setFrame(Math.min(2, b.level - 1)).setAlpha(this.night.sky.night);
-      e.stock?.setTint(this.tint);
-      e.banner?.setTint(this.tint);
+      e.lit.setFrame(Math.min(2, b.level - 1)).setAlpha(b.ruined ? 0 : this.night.sky.night);
+      e.stock?.setTint(this.tint).setVisible(!b.ruined);
+      e.banner?.setTint(this.tint).setVisible(!b.ruined);
       // a house flies a banner for its calling: blue for the barracks, tan for the woodyard (farmers, the default, fly none)
       if (b.kind === 'house') {
         const calling = b.calling ?? 'farmer';
@@ -420,6 +421,17 @@ export class Renderer {
       b.fillStyle(0x1a1a25); b.fillRect(d.tx * TILE, d.ty * TILE - WALL_HEIGHT - 3, 16, 3);
       b.fillStyle(0xeab765); b.fillRect(d.tx * TILE, d.ty * TILE - WALL_HEIGHT - 3, 16 * d.hp / d.maxHp, 2);
     }
+    // a hurt building shows what's left of it above the roof; a ruin, a red cross
+    for (const t of s.world.buildings) {
+      if (t.kind === 'lair' || !t.maxHp || (t.hp >= t.maxHp && !t.ruined)) continue;
+      const bw = 24, x = Math.round((t.tx + BUILDINGS[t.kind].w / 2) * TILE - bw / 2), y = t.ty * TILE - (t.kind === 'barracks' ? 12 : 7);
+      if (t.ruined) {
+        b.lineStyle(1, 0xff4040, 0.9); b.lineBetween(x + 8, y - 2, x + 16, y + 6); b.lineBetween(x + 16, y - 2, x + 8, y + 6);
+        continue;
+      }
+      b.fillStyle(0x000000, 0.7); b.fillRect(x - 1, y - 1, bw + 2, 5);
+      b.fillStyle(t.hp / t.maxHp > 0.4 ? 0x5fdc5f : 0xff4040, 1); b.fillRect(x, y, Math.max(1, Math.round(bw * t.hp / t.maxHp)), 3);
+    }
     // every barracks wears its arrow stock above the roof: gold, red when low, a pulsing empty frame when dry
     for (const t of s.world.barracks) {
       const ammo = t.ammo ?? 0, cap = s.towerCap(t), bw = 24, x = Math.round((t.tx + BUILDINGS.barracks.w / 2) * TILE - bw / 2), y = t.ty * TILE - 7;
@@ -472,16 +484,18 @@ function tileFrames(t: Tile, cropDays: number, dayTime: number, oldDays: number)
   }
 }
 
-const ENEMY_SCALE: Record<string, number> = { raider: 1, warlord: 1.5, rat: 0.8, snatcher: 0.9, brute: 1.3, shaman: 1, ogre: OGRE.scale };
+const ENEMY_SCALE: Record<string, number> = { raider: 1, warlord: 1.5, rat: 0.8, snatcher: 0.9, brute: 1.3, shaman: 1, ogre: OGRE.scale, wrecker: 1.1 };
 
 /** The layered look for an agent — role outfit, held tool, worn armor, dye — or null for things that aren't people. */
 export function lookFor(m: Mover): Look | null {
   const seed = seedLook(m.id);
   const base = { ...seed, armor: m.armor, dye: m.dye, helmetStyle: m.helmetStyle, plume: m.plume };
-  if (m instanceof Player) return { ...base, skin: 1, hair: 0, hairStyle: 0, body: 'adult', outfit: 'head', held: m.tool === 'sword' ? 'sword' : m.tool === 'bow' ? 'bow' : m.tool === 'axe' ? 'axe' : m.tool === 'hoe' ? 'hoe' : 'none' };
+  // a crude blade shows as a club until the chest forges a real sword
+  const blade = m.weapons.melee > 0 ? 'sword' : 'club';
+  if (m instanceof Player) return { ...base, skin: 1, hair: 0, hairStyle: 0, body: 'adult', outfit: 'head', held: m.tool === 'sword' ? blade : m.tool === 'bow' ? 'bow' : m.tool === 'axe' ? 'axe' : m.tool === 'hoe' ? 'hoe' : 'none' };
   if (m instanceof Villager) {
     if (m.role === 'kid') return { ...base, body: 'kid', outfit: 'kid', held: 'none' };
-    const held = m.role === 'farmer' ? 'hoe' : m.role === 'woodcutter' ? 'axe' : m.weapon === 'bow' ? 'bow' : 'sword';
+    const held = m.role === 'farmer' ? 'hoe' : m.role === 'woodcutter' ? 'axe' : m.weapon === 'bow' ? 'bow' : blade;
     return { ...base, body: 'adult', outfit: m.role, held };
   }
   if (m instanceof Raider) {

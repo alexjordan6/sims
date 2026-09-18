@@ -1,13 +1,13 @@
 import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type Tool } from '../agents';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
-import { OGRE, HAUL, COST, p, RUN, TOWER, LEGACY_TEST_MODE, LEVEL_PERKS, CALLING_NAME, TRAITS, HEARTY_RATION, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, CADET_AGE_BEFORE, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS, TREE_YIELD, OLD_YIELD } from '../config';
+import { OGRE, HAUL, COST, p, RUN, TOWER, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, CALLING_NAME, TRAITS, HEARTY_RATION, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, CADET_AGE_BEFORE, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS, TREE_YIELD, OLD_YIELD } from '../config';
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
 import { skyAt } from '../night';
 import { frameDataUrl, BUILDING_TEXTURE } from '../pixelart';
-import { charImg, armorStats } from '../characters';
+import { charImg, armorStats, weaponMul } from '../characters';
 import { lookFor } from '../render';
 import { BUILDINGS, MAX_LEVEL, type BuildingKind } from '../world';
 
@@ -29,7 +29,7 @@ export function spr(key: string, frame: number, size = 32, extra = ''): string {
 }
 
 const ROLE_LABEL: Record<string, string> = { kid: 'Child', farmer: 'Farmer', woodcutter: 'Woodcutter', soldier: 'Soldier' };
-const ENEMY_LABEL: Record<string, string> = { raider: 'Raider', warlord: 'Warlord', rat: 'Rat — eats crops', snatcher: 'Snatcher — steals children', brute: 'Brute — heavy', shaman: 'Shaman — ranged' };
+const ENEMY_LABEL: Record<string, string> = { raider: 'Raider', warlord: 'Warlord', rat: 'Rat — eats crops', snatcher: 'Snatcher — steals children', brute: 'Brute — heavy', shaman: 'Shaman — ranged', wrecker: 'Wrecker — tears down buildings' };
 
 const EVENT_ICON: Record<EventKind, { key: string; frame: number }> = {
   birth: { key: 'dungeon', frame: DUNGEON.villager },
@@ -116,11 +116,11 @@ export class UI {
         ${slot('hoe', 'town', TOWN.iconHoe, 'HOE', 'Till grass into soil; clears stumps; three hits on soil flatten it back to grass')}
         ${slot('seeds', 'farm', FARM.grassTuft, 'SEEDS', 'Crops on tilled soil, trees on grass')}
         ${slot('axe', 'town', TOWN.iconAxe, 'AXE', 'Chop trees for wood (3 hits); clears stumps and saplings')}
-        ${slot('sword', 'dungeon', DUNGEON.sword, 'SWORD', 'Swing at raiders in front of you')}
+        ${slot('sword', 'dungeon', DUNGEON.sword, 'SWORD', 'Swing at raiders in front of you. You start with a club — forge a real blade at the barracks chest')}
         ${slot('house', 'town', TOWN.wallWoodDoor, 'HOUSE', 'A family of 4 lives here and has children', COST.house)}
         ${slot('barracks', 'town', TOWN.wallStoneDoor, 'BARRACKS', 'Sponsors sworn houses: their children drill here and become soldiers. Its tower shoots arrows at raiders in range; restock the chest inside with wood', COST.barracks)}
         ${slot('hammer', 'town', TOWN.iconHammer, 'HAMMER', 'Upgrade the building in front of you (3 hits)')}
-        ${slot('bow', 'dungeon', DUNGEON.sword, 'BOW', 'Fire physical arrows. Shared ammunition is made at the barracks')}
+        ${slot('bow', 'dungeon', DUNGEON.sword, 'BOW', 'Fire physical arrows. Shared ammunition is made at the barracks; a better bow is forged at its chest')}
         ${slot('wall', 'town', TOWN.wallStoneDoor, 'WALL', 'Build a connected stone perimeter. 4 wood per segment', 4)}
         ${slot('gate', 'town', TOWN.wallWoodDoor, 'GATE', 'Friendly villagers pass; X toggles opening to everyone', 12)}
         ${slot('stairs', 'town', TOWN.iconHammer, 'STAIRS', 'Connect stairs to your walls. Use hands or X to climb and descend', 10)}
@@ -504,6 +504,11 @@ export class UI {
       const cost = b.level < MAX_LEVEL ? UPGRADE_COST[b.kind][b.level] : 0;
       let html = `${head}<div class="head"><img class="art" src="${frameDataUrl(s, BUILDING_TEXTURE[b.kind], b.level - 1)}" alt=""><div><div class="name">${BUILDINGS[b.kind].name} <small>Lv${b.level}</small></div><span class="badge ${b.kind === 'barracks' ? 'soldier' : 'farmer'}">${LEVEL_PERKS[b.kind][b.level]}</span></div><button class="btn small close">x</button></div>`;
       html += `<div class="rows">`;
+      if (b.kind !== 'lair') {
+        html += b.ruined
+          ? `<b>Walls</b><span><em class="warn">RUINED</em> · nothing works until it's rebuilt · <b>hammer · ${s.rebuildCost(b)} wood</b></span>`
+          : `<b>Walls</b><span>${Math.ceil(b.hp)} / ${b.maxHp} HP${b.hp < b.maxHp ? ' <em>· hammer repairs 60 per wood</em>' : ''}<div class="bar hp ${b.hp / b.maxHp <= 0.4 ? 'low' : ''}"><i style="width:${Math.round(100 * b.hp / b.maxHp)}%"></i></div></span>`;
+      }
       if (b.kind === 'house') html += `<b>Beds</b><span>${b.residents} / ${s.beds(b)}</span>`;
       if (b.kind === 'barracks') {
         const ammo = b.ammo ?? 0, cap = s.towerCap(b);
@@ -537,6 +542,8 @@ export class UI {
         this.inspector.querySelector('.open-armory')?.addEventListener('click', () => { s.openArmory(s.player, b); this.side.classList.remove('open'); });
         this.inspector.querySelectorAll<HTMLButtonElement>('[data-raise]').forEach((el) => el.addEventListener('click', () => { s.setCalling(b, el.dataset.raise as Calling); this.renderInspector(true); }));
         this.inspector.querySelectorAll<HTMLButtonElement>('[data-rations]').forEach((el) => el.addEventListener('click', () => { s.setRations(b, el.dataset.rations === 'hearty'); this.renderInspector(true); }));
+        // a ruin does nothing: every control but CLOSE waits for the hammer
+        if (b.ruined) this.inspector.querySelectorAll<HTMLButtonElement>('button:not(.close)').forEach((el) => { el.disabled = true; });
       }
       return;
     }
@@ -581,7 +588,7 @@ export class UI {
       const pips = ARMOR_SLOTS.map((slot) => `<span class="pip t${m.armor[slot]}" title="${ARMOR[slot].tiers[m.armor[slot]].name}">${ARMOR[slot].name[0]}${m.armor[slot] ? '·'.repeat(m.armor[slot]) : ''}</span>`).join('');
       html += `<div class="raise"><div class="cap">ARMOR</div><div class="pips">${pips}</div><div class="d">${st.hp ? `+${st.hp} HP · ` : ''}${Math.round((1 - st.dmgMul) * 100)}% less damage · ${Math.round(st.block * 100)}% block${st.speedMul > 1 ? ` · +${Math.round((st.speedMul - 1) * 100)}% speed` : ''}</div><button class="btn small open-armory">ARMORY</button></div>`;
     }
-    if (m instanceof Villager && m.role === 'soldier') html += `<div class="raise"><div class="cap">EQUIPMENT & ORDERS</div><div class="seg"><button class="btn small ${m.weapon === 'sword' ? 'on' : ''}" data-weapon="sword">SWORD</button><button class="btn small ${m.weapon === 'bow' ? 'on' : ''}" data-weapon="bow">BOW</button></div><p>Arrows in shared quiver: ${s.arrows}. ${m.post ? `Post: ${m.post.tx}, ${m.post.ty}.` : 'Patrolling on the ground.'}</p><button class="btn small post-soldier">${s.posting === m ? 'CANCEL PLACEMENT' : 'SET WALL POST'}</button><button class="btn small recall-soldier">RETURN TO PATROL</button></div>`;
+    if (m instanceof Villager && m.role === 'soldier') html += `<div class="raise"><div class="cap">EQUIPMENT & ORDERS</div><div class="seg"><button class="btn small ${m.weapon === 'sword' ? 'on' : ''}" data-weapon="sword">SWORD</button><button class="btn small ${m.weapon === 'bow' ? 'on' : ''}" data-weapon="bow">BOW</button></div><p>Carries a ${WEAPONS.melee.tiers[m.weapons.melee].name.toLowerCase()} and a ${WEAPONS.bow.tiers[m.weapons.bow].name.toLowerCase()} — forge better in the ARMORY. Arrows in shared quiver: ${s.arrows}. ${m.post ? `Post: ${m.post.tx}, ${m.post.ty}.` : 'Patrolling on the ground.'}</p><button class="btn small post-soldier">${s.posting === m ? 'CANCEL PLACEMENT' : 'SET WALL POST'}</button><button class="btn small recall-soldier">RETURN TO PATROL</button></div>`;
     if (html !== this.lastInspector) {
       this.inspector.innerHTML = html;
       this.lastInspector = html;
@@ -696,6 +703,14 @@ export class UI {
         <div class="acur">${cur.name} <small>${stat(cur)}</small></div>
         ${next ? `<button class="btn small ${why ? '' : 'ok'} forge" data-slot="${slot}" ${why ? 'disabled' : ''}>FORGE ${next.name.toUpperCase()} · ${next.wood} wood${next.scrap ? ` + ${next.scrap} scrap` : ''}</button><div class="d">${why ? `<em class="warn">${esc(why)}</em>` : stat(next)}</div>` : '<div class="d">the best there is</div>'}</div>`;
     }).join('');
+    // weapons: the crude club and hunting bow everyone starts with, forged up like armor
+    const weapons = WEAPON_SLOTS.map((slot) => {
+      const tier = who.weapons[slot], cur = WEAPONS[slot].tiers[tier], next = WEAPONS[slot].tiers[tier + 1];
+      const why = s.weaponProblem(who, slot);
+      return `<div class="aslot"><div class="aname">${WEAPONS[slot].name} <span class="tier">${'●'.repeat(tier)}${'○'.repeat(3 - tier)}</span></div>
+        <div class="acur">${cur.name} <small>×${cur.mul} damage</small></div>
+        ${next ? `<button class="btn small ${why ? '' : 'ok'} forge" data-weapon-slot="${slot}" ${why ? 'disabled' : ''}>FORGE ${next.name.toUpperCase()} · ${next.wood} wood${next.scrap ? ` + ${next.scrap} scrap` : ''}</button><div class="d">${why ? `<em class="warn">${esc(why)}</em>` : `×${next.mul} damage`}</div>` : '<div class="d">the best there is</div>'}</div>`;
+    }).join('');
     const dyes = DYES.map((c, i) => `<button class="swatch ${who.dye === i ? 'on' : ''}" data-dye="${i}" style="background:${c}" title="${DYE_NAMES[i]}"></button>`).join('');
     const helms = ['CAP', 'KETTLE', 'GREAT HELM'].map((n, i) => `<button class="btn small ${who.helmetStyle === i ? 'on' : ''}" data-helm="${i}">${n}</button>`).join('');
     const plumes = PLUMES.map((c, i) => `<button class="swatch ${who.plume === i ? 'on' : ''}" data-plume="${i}" style="background:${c === 'none' ? 'transparent' : c}" title="${c === 'none' ? 'no plume' : 'plume'}">${c === 'none' ? '×' : ''}</button>`).join('');
@@ -718,14 +733,17 @@ export class UI {
       <div class="acols">
         <div class="wearers">${list}</div>
         <div class="afit">
-          <div class="portrait-big"><img class="art" src="${charImg(look)}" alt=""><div class="d">${esc(name(who))} · ${st.hp ? `+${st.hp} HP · ` : ''}${Math.round((1 - st.dmgMul) * 100)}% less damage · ${Math.round(st.block * 100)}% block</div></div>
+          <div class="portrait-big"><img class="art" src="${charImg(look)}" alt=""><div class="d">${esc(name(who))} · ${WEAPONS.melee.tiers[who.weapons.melee].name.toLowerCase()} ×${weaponMul(who.weapons, 'melee')} · ${WEAPONS.bow.tiers[who.weapons.bow].name.toLowerCase()} ×${weaponMul(who.weapons, 'bow')} · ${st.hp ? `+${st.hp} HP · ` : ''}${Math.round((1 - st.dmgMul) * 100)}% less damage · ${Math.round(st.block * 100)}% block</div></div>
+          <div class="cap">WEAPONS</div>
+          <div class="aslots">${weapons}</div>
+          <div class="cap">ARMOR</div>
           <div class="aslots">${slots}</div>
           <div class="custom"><div class="cap">TABARD DYE</div><div class="swatches">${dyes}</div>
             <div class="cap">HELMET</div><div class="seg">${helms}</div>
             <div class="cap">PLUME</div><div class="swatches">${plumes}</div></div>
         </div>
       </div>
-      <p class="sub small">Leather costs wood. Iron and steel need scrap iron from slain raiders and a Lv2 / Lv3 barracks. A bow needs both hands, so archers can't carry a shield.</p>
+      <p class="sub small">Everyone starts with a wooden club and a hunting bow that hit for half. Bronze and leather cost wood; iron and steel need scrap iron from slain raiders and a Lv2 / Lv3 barracks. A bow needs both hands, so archers can't carry a shield.</p>
     </div>`;
     if (!this.armoryEl) { this.armoryEl = h('<div class="screen armory-screen"></div>'); this.screens.append(this.armoryEl); }
     this.armoryEl.innerHTML = html;
@@ -735,6 +753,7 @@ export class UI {
     el.querySelector('.chest .fletch')?.addEventListener('click', () => { s.craftArrows(); this.renderArmory(); });
     el.querySelectorAll<HTMLElement>('[data-wearer]').forEach((b) => b.addEventListener('click', () => { const m = wearers.find((w) => w.id === Number(b.dataset.wearer)); if (m) s.openArmory(m); }));
     el.querySelectorAll<HTMLElement>('[data-slot]').forEach((b) => b.addEventListener('click', () => { s.craftArmor(who, b.dataset.slot as ArmorSlot); this.renderArmory(); }));
+    el.querySelectorAll<HTMLElement>('[data-weapon-slot]').forEach((b) => b.addEventListener('click', () => { s.craftWeapon(who, b.dataset.weaponSlot as WeaponSlot); this.renderArmory(); }));
     el.querySelectorAll<HTMLElement>('[data-dye]').forEach((b) => b.addEventListener('click', () => { s.setDye(who, Number(b.dataset.dye)); this.renderArmory(); }));
     el.querySelectorAll<HTMLElement>('[data-helm]').forEach((b) => b.addEventListener('click', () => { s.setHelmetStyle(who, Number(b.dataset.helm)); this.renderArmory(); }));
     el.querySelectorAll<HTMLElement>('[data-plume]').forEach((b) => b.addEventListener('click', () => { s.setPlume(who, Number(b.dataset.plume)); this.renderArmory(); }));
@@ -793,7 +812,7 @@ export class UI {
         <p>${won ? `Your village stands. Day ${s.day}, and the raiders are broken.` : `You died on day ${s.day}.`}</p>
         <div class="stats">
           <div><b>${s.day}</b>days</div><div><b>${st.peakPop}</b>peak population</div>
-          <div><b>${st.childrenRaised}</b>children raised</div><div><b>${st.childrenRaised ? (st.starsTotal / st.childrenRaised).toFixed(1) : '—'}</b>avg stars</div><div><b>${st.raidersKilled}</b>raiders slain</div>${st.bossesSlain ? `<div><b>${st.bossesSlain}</b>bosses slain</div>` : ''}
+          <div><b>${st.childrenRaised}</b>children raised</div><div><b>${st.childrenRaised ? (st.starsTotal / st.childrenRaised).toFixed(1) : '—'}</b>avg stars</div><div><b>${st.raidersKilled}</b>raiders slain</div>${st.bossesSlain ? `<div><b>${st.bossesSlain}</b>bosses slain</div>` : ''}${st.buildingsLost ? `<div><b>${st.buildingsLost}</b>buildings lost</div>` : ''}
         </div>
         ${r ? `<div class="renown"><div class="lbl">RENOWN EARNED</div>
           <div class="parts"><span>days ${r.days}</span><span>kills ${r.kills}</span><span>children ${r.children}</span>${r.bosses ? `<span>bosses ${r.bosses}</span>` : ''}${r.victory ? `<span>victory ${r.victory}</span>` : ''}</div>
@@ -829,11 +848,11 @@ export class UI {
         <section>
           <h3>THE GOAL</h3>
           <p><b>Wilderness:</b> the world is 240 × 160 tiles. Most seeds have dense forest regions; others are open meadow and scattered groves. Follow the woodland trails.</p>
-          <p><b>Fortify:</b> scroll the tool belt for WALL, GATE and STAIRS. Each takes one ground tile and wood for construction. Join walls into a perimeter and connect stairs. With hands equipped, use stairs to climb or descend. Walk along connected wall tops. Gates admit allies automatically; X opens them to enemies too. Hammer repairs damage. Brutes can breach walls; homes and supply buildings remain indestructible.</p>
+          <p><b>Fortify:</b> scroll the tool belt for WALL, GATE and STAIRS. Each takes one ground tile and wood for construction. Join walls into a perimeter and connect stairs. With hands equipped, use stairs to climb or descend. Walk along connected wall tops. Gates admit allies automatically; X opens them to enemies too. Hammer repairs damage. Brutes breach walls fast; Wreckers hammer them slowly — a closed perimeter is how your buildings stay standing.</p>
           <p><b>Archers:</b> select a soldier, equip BOW, then SET WALL POST and click a battlement top connected to stairs. RETURN TO PATROL recalls them. Player bow is key 9. Everyone uses the shared quiver; craft 10 arrows for 2 wood at the barracks or its supply button. Arrows hit bodies and cover; wall archers shoot over ramparts.</p>
           <p><b>Towers:</b> every barracks shoots raiders inside its ring (shown while placing it or when it's selected) from its own chest of arrows — the bar over its roof is the stock. When it runs dry the bar flashes red and the tower falls silent: restock 10 arrows for 2 wood at the chest inside (which also holds the armor), or from the barracks card.</p>
           <p><b>Come inside:</b> walk to a house, barracks or tavern door and use hands or X. WASD / joystick moves indoors; tapping the floor also walks there. Use nearby furnishings. The barracks rack makes quiver arrows and its chest restocks the tower and forges armor; tavern meals heal more with upgrades. Walk through the bottom doorway or choose EXIT. Raids continue outside.</p>
-          <p>Survive <b>${RUN.days} days</b>. Raiders attack every ${p.raidEvery} days and get stronger. On day ${RUN.bossDay} the <b>Warlord</b> comes — beat him to win. If <b>you</b> die, the run ends (you keep the renown).</p>
+          <p>Survive <b>${RUN.days} days</b>. Raiders attack every ${p.raidEvery} days in big bands — four on the first raid — and every wave brings more of them and new kinds. On day ${RUN.bossDay} the <b>Warlord</b> comes — beat him to win. If <b>you</b> die, the run ends (you keep the renown).</p>
           <h3>THE TRICK</h3>
           <p>You can't recruit anyone. <b>Every adult was a child you raised.</b> See RAISING CHILDREN below.</p>
           <h3>EACH DAY</h3>
@@ -851,9 +870,10 @@ export class UI {
           ${who('dungeon', 123, 'raider', 'Rat swarm', 'At least 10 arrive together and spread across the field. Foragers doubles their eating time, but crops are never immune. Scare them with equipped weapons or stop them with gates.')}
           ${who('dungeon', DUNGEON.imp, 'raider', 'Snatcher', 'Grabs a child and runs for the map edge. Kill it to free them; kids indoors are safe.')}
           ${who('dungeon', DUNGEON.orc, 'raider', 'Brute', '180 base HP, 24 damage, twice the speed, reach and attack rate, half the knockback. The axe winds up and swings even when you dodge. Devastates fortifications.')}
+          ${who('dungeon', DUNGEON.orc, 'raider', 'Wrecker', 'Ignores people and goes for the nearest house it can reach, then any other building. A Lv1 house falls in about 16 seconds. Walled off, it batters the wall — slowly. A ruin keeps its footprint but does nothing until the hammer rebuilds it.')}
           ${who('dungeon', DUNGEON.wizard, 'raider', 'Shaman', 'Keeps its distance and casts bolts. Close in on it.')}
           <h3>BUILDINGS</h3>
-          <p>Buildings can't be damaged. Use the <b>HAMMER</b> on one (3 hits) to upgrade it for wood. Every building has three levels — the brass studs on the sign by the door count them, and each level changes the building itself:</p>
+          <p>Every building can be wrecked. The <b>HAMMER</b> mends a damaged one (1 wood = 60 HP) and raises a ruin again for half its build cost; on a sound building, 3 hits upgrade it for wood. Every building has three levels — the brass studs on the sign by the door count them, and each level changes the building itself:</p>
           ${building('house', 'House · ' + COST.house + ' wood', 'A couple here has children.')}
           ${building('barracks', 'Barracks · ' + COST.barracks + ' wood', 'Sponsors sworn houses; cadets drill in its yard.')}
           ${building('granary', 'Granary', 'Holds your food; the harvest is carried here. The crate stack beside it climbs as the store fills.')}
@@ -864,6 +884,8 @@ export class UI {
           <p><b>Encourage.</b> Walk up to a child and press X (or tap them, or the button on their card): a moment together, once a day, worth a care point and a day of apprenticeship. During a raid it also sends them inside.</p>
           <p><b>Children go to bed at dusk</b> and sleep indoors until dawn, and they <b>run for the nearest door</b> when raiders are near. Snatchers take children caught in the open.</p>
           <p><b>Renown</b> comes from children raised: 20 each, plus 8 per star.</p>
+          <h3>WEAPONS</h3>
+          <p>Everyone starts with a <b>wooden club</b> and a <b>hunting bow</b> that hit for half damage. At the barracks chest forge a <b>bronze</b> sword or yew bow for wood, then <b>iron</b> and <b>steel</b> for wood plus scrap iron (Lv2 / Lv3 barracks) — steel hits for ×1.3. Each fighter carries their own; forge for your soldiers too.</p>
           <h3>ARMOR</h3>
           <p>You and your soldiers have four armor slots — <b>helmet</b> (HP), <b>chest</b> (less damage taken), <b>legs</b> (speed) and <b>shield</b> (a chance to block melee hits outright; archers can't carry one). Each has three tiers: <b>leather</b> for wood, <b>iron</b> and <b>steel</b> for wood plus <b>scrap iron</b> looted from slain raiders (needs a Lv2 / Lv3 barracks). Open the ARMORY with <kbd>V</kbd>, from the barracks card, or from a soldier's card; dye tabards and pick helmets and plumes there too — what they wear is what you see.</p>
           <h3>SOLDIERS</h3>

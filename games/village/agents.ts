@@ -2,7 +2,7 @@ import type { Agent } from '@shared/index';
 import { World, doorstep, buildingCenter, yardOf, type House, type TilePos, type Defense, type BuildingKind } from './world';
 import { p, TREE_RESERVE, CADET_AGE_BEFORE, CADET_DAYS, STAR_BONUS, FLEE_RANGE, BEDTIME, TRAITS, HAUL, TILE, type Calling, type Trait, type LoadKind } from './config';
 import type { Mods } from './meta';
-import { NO_ARMOR, armorStats, type Armor, type HelmetStyle } from './characters';
+import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle } from './characters';
 import type { VillageScene } from './main';
 
 // All distances are in world pixels: 16 px per tile.
@@ -40,6 +40,8 @@ export abstract class Mover implements Agent {
   hurtT = 99;
   /** worn armor (the head and soldiers); raiders wear none */
   armor: Armor = { ...NO_ARMOR };
+  /** forged weapon tiers; a crude club and hunting bow until the chest forges better */
+  weapons: Weapons = { ...NO_WEAPONS };
   /** look customisation: tabard dye, helmet style, plume */
   dye = 0;
   helmetStyle: HelmetStyle = 0;
@@ -514,7 +516,7 @@ export class Villager extends Mover {
     if (this.target && !this.target.dead) {
       this.task = 'fighting';
       if (this.attackTick(dt, s)) return;
-      const dmg = p.soldierDmg * s.mods.soldierDmgMul * (s.world.barracksLevel >= 3 ? 1.2 : 1) * (this.skilled ? 1.15 : 1) * (this.trait === 'brave' ? 1.2 : 1);
+      const dmg = p.soldierDmg * weaponMul(this.weapons, this.weapon === 'bow' ? 'bow' : 'melee') * s.mods.soldierDmgMul * (s.world.barracksLevel >= 3 ? 1.2 : 1) * (this.skilled ? 1.15 : 1) * (this.trait === 'brave' ? 1.2 : 1);
       if (this.weapon === 'bow') {
         const range = this.elevated ? 210 : 160;
         if (this.dist(this.target) <= range && s.world.lineClear(this, this.target, this.elevated)) {
@@ -572,7 +574,8 @@ export class Villager extends Mover {
     const door = doorstep(b);
     this.setGoal(s, door.tx, door.ty);
     const arrived = this.followPath(dt);
-    if (arrived && this.adjacentTo(door)) {
+    // a ruin has no door to hide behind: they huddle on its step, exposed
+    if (arrived && this.adjacentTo(door) && !b.ruined) {
       this.hidden = true;
       this.indoors = b;
       const c = buildingCenter(b);
@@ -590,19 +593,12 @@ export class Villager extends Mover {
 
   /** Run to the home's doorstep; once there, duck inside. */
   private goHome(s: VillageScene, dt: number): void {
-    const door = doorstep(this.home);
-    this.setGoal(s, door.tx, door.ty);
-    const arrived = this.followPath(dt);
-    if (arrived && this.adjacentTo(door)) {
-      this.hidden = true;
-      this.indoors = this.home;
-      const c = buildingCenter(this.home);
-      this.x = c.tx * 16; this.y = c.ty * 16;
-      this.clearGoal();
-    }
+    // home in ruins: take shelter wherever still stands (or wait at the ruin's step)
+    this.goInside(s, dt, this.home.ruined ? s.nearestShelter(this.x, this.y) ?? this.home : this.home);
   }
 
-  private unhide(s: VillageScene): void {
+  /** Step back outside (the raid is over, or the roof just came down). */
+  unhide(s: VillageScene): void {
     this.hidden = false;
     this.indoors = null;
     const door = doorstep(s.nearestShelter(this.x, this.y) ?? this.home);
@@ -617,7 +613,7 @@ export class Villager extends Mover {
 // ---------------------------------------------------------------------------
 // raiders
 
-export type EnemyKind = 'raider' | 'warlord' | 'rat' | 'snatcher' | 'brute' | 'shaman' | 'ogre';
+export type EnemyKind = 'raider' | 'warlord' | 'rat' | 'snatcher' | 'brute' | 'shaman' | 'ogre' | 'wrecker';
 
 export interface RaiderOpts {
   /** the warlord: big, tough, and the run ends when he falls */
@@ -880,7 +876,7 @@ export class Player extends Mover {
       if (this.fits(nx, ny, s.world)) { this.x = nx; this.y = ny; }
     }
     if (active || wasActive) {
-      const dmg = Math.round(12 * s.mods.playerDmgMul * c.dmgMul);
+      const dmg = Math.round(12 * weaponMul(this.weapons, 'melee') * s.mods.playerDmgMul * c.dmgMul);
       s.grid.forEachInRadius(this.x, this.y, SWING.reach + (c.spin ? 4 : 0), (o, d2) => {
         if (!(o instanceof Raider) || o.dead || sw.hit.has(o.id)) return;
         if (o.elevated !== this.elevated || !s.world.lineClear(this, o, this.elevated)) return;

@@ -3,8 +3,8 @@ import type { VillageScene } from './main';
 import { World, doorstep, type BuildingKind } from './world';
 import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
-import { Brute, Rat, Ogre, waveComposition } from './enemies';
-import { COLS, ROWS, WALL_HEIGHT, TREE_YIELD, HAUL, TOWER, p } from './config';
+import { Brute, Rat, Ogre, Wrecker, waveComposition } from './enemies';
+import { COLS, ROWS, WALL_HEIGHT, TREE_YIELD, HAUL, TOWER, p, BUILDING_HP, WRECKER, RAID_SIZE_MUL } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
 const output = document.getElementById('test-results')!, summary = document.getElementById('test-summary')!;
@@ -84,7 +84,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     const towerStep = (sec: number) => { for (let i = 0; i < Math.ceil(sec * 60); i++) { s.grid.rebuild(s.agents); for (const a of [...s.agents]) if (!a.dead) a.update(1 / 60, s); s.tickTowers(1 / 60); s.removeDead(); } };
     towerStep(4);
     const shots = TOWER.start - keep.ammo!;
-    assert(shots >= 2 && foe.hp <= foe.maxHp - shots * p.towerDmg + p.towerDmg, `the tower shot ${shots} arrows and they landed (raider at ${foe.hp} HP)`);
+    assert(shots >= 2 && foe.hp <= foe.maxHp - shots * s.towerDmg(keep) + s.towerDmg(keep), `the tower shot ${shots} arrows and they landed (raider at ${foe.hp} HP)`);
     keep.ammo = 0; const silent = foe.hp; towerStep(3);
     assert(foe.hp === silent, 'an empty chest fires nothing');
     s.wood = 1; assert(!s.restockTower(keep) && keep.ammo === 0, 'restocking needs wood');
@@ -112,8 +112,66 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       s.interior.enter(building); assert(s.interior.active && s.player.hidden, `${kind}: enter interior and leave outdoor targeting`);
       s.interior.x = 160; s.interior.y = 192; s.interior.act();
       assert(!s.interior.active && !s.player.hidden && s.player.tile.tx === door.tx && s.player.tile.ty === door.ty, `${kind}: exit at the correct door`);
-      s.world.set(building.tx, building.ty, 'grass'); assert(s.world.get(building.tx, building.ty)!.building === building, `${kind}: building remains indestructible`);
+      s.world.set(building.tx, building.ty, 'grass'); assert(s.world.get(building.tx, building.ty)!.building === building, `${kind}: building tiles never change`);
     }
+    // buildings take damage; a ruin keeps its footprint and does nothing until the hammer rebuilds it
+    s = fresh(); clearing(s);
+    for (const kind of ['house', 'barracks', 'granary', 'woodyard', 'tavern'] as BuildingKind[]) {
+      const b = s.world.buildings.find(q => q.kind === kind) ?? s.world.place(kind, 135, 95);
+      assert(b.hp === BUILDING_HP[kind][1] && b.maxHp === b.hp && b.hp > 0, `${kind}: starts at its Lv1 hit points`);
+    }
+    assert(s.world.lair && !s.damageBuilding(s.world.lair, 999) && !s.world.lair.ruined, 'the lair cannot be hurt');
+    const home = s.world.houses[0], tenant = s.spawn(new Villager(0, 0, home, 'farmer', 20, 'Tenant', s.mods));
+    tenant.hidden = true; tenant.indoors = home; Object.assign(tenant, World.center(home.tx + 1, home.ty + 1));
+    assert(!s.damageBuilding(home, 100) && home.hp === BUILDING_HP.house[1] - 100 && !home.ruined, 'a blow takes hit points without wrecking');
+    assert(s.damageBuilding(home, 999) && home.ruined && home.hp === 0, 'enough blows reduce a house to a ruin');
+    assert(!tenant.hidden && !tenant.indoors && !s.world.isBlocked(tenant.tile.tx, tenant.tile.ty), 'a ruined roof puts whoever was inside back on the street');
+    assert(s.beds(home) === 0 && s.nearestShelter(home.tx * 16, home.ty * 16) !== home, 'a ruined house has no beds and shelters nobody');
+    s.interior.enter(home); assert(!s.interior.active, 'you cannot walk into a ruin');
+    const keepB = s.world.barracks[0]; s.damageBuilding(keepB, 9999);
+    assert(keepB.ruined && s.world.barracks.length === 0 && s.world.allBarracks.length === 1, 'a ruined barracks sponsors, fires and forges nothing');
+    s.wood = 1; assert(!s.repairBuilding(home) && home.ruined, 'rebuilding needs the wood');
+    s.wood = 20; assert(s.repairBuilding(home) && !home.ruined && home.hp === home.maxHp && s.wood === 20 - s.rebuildCost(home), 'the hammer raises a ruin for half its build cost');
+    home.hp = home.maxHp - 100; s.wood = 5; assert(s.repairBuilding(home) && home.hp === home.maxHp - 40 && s.wood === 4, 'a wood mends 60 HP');
+    s.repairBuilding(keepB);
+    // the Wrecker: walks past people to the nearest reachable house; walled off, it batters the wall slowly
+    assert(waveComposition(1).wrecker === 0 && waveComposition(4).wrecker === 2, 'wreckers join from the second wave');
+    s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, { x: -400, y: -400 });
+    const target = s.world.place('house', 122, 100), bystander = s.spawn(new Villager(0, 0, target, 'farmer', 20, 'Bystander', s.mods));
+    Object.assign(bystander, World.center(129, 100)); bystander.speed = 0; bystander.update = () => {};
+    const wrecker = s.spawn(new Wrecker(World.center(132, 100).x, World.center(132, 100).y));
+    assert(wrecker.maxHp === WRECKER.hp && wrecker.kind === 'wrecker', 'wrecker stats');
+    step(s, 3); assert(wrecker.prey === target && wrecker.task.startsWith('wrecking') && target.hp < target.maxHp, `the wrecker heads for the house and starts pounding it (${target.hp}/${target.maxHp})`);
+    assert(bystander.hp === bystander.maxHp, 'it walks straight past the villager in its way');
+    step(s, 20); assert(target.ruined, 'a lone wrecker levels a Lv1 house in about 16 seconds');
+    s = fresh(); fort(s); s.agents = [s.player]; Object.assign(s.player, { x: -400, y: -400 });
+    for (const q of s.world.villageBuildings) s.damageBuilding(q, 99999); // nothing standing outside the fort to go for instead
+    const inner = s.world.place('house', 121, 98);
+    const outside = s.spawn(new Wrecker(World.center(125, 109).x, World.center(125, 109).y));
+    step(s, 6);
+    const chipped = [...s.world.defenses.values()].find(d => d.hp < d.maxHp);
+    assert(inner.hp === inner.maxHp && !!chipped && outside.task === 'battering the wall', `walled in, the house is untouched while the wrecker chips at the wall (${chipped?.hp}/${chipped?.maxHp})`);
+    assert(chipped!.maxHp - chipped!.hp <= WRECKER.wallDmg * 6, 'a wrecker is far slower at walls than a brute');
+    // weapons: everyone starts crude and forges up at the chest; raids come in big bands
+    s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(121, 100)); s.player.facing = { x: 1, y: 0 }; s.player.tool = 'sword';
+    const dummy = s.spawn(new Raider(s.player.x + 16, s.player.y)); dummy.speed = 0; dummy.hp = dummy.maxHp = 1000; dummy.update = () => {};
+    const swingAt = () => { s.player.pressAttack(); step(s, 0.6); return dummy.maxHp - dummy.hp; };
+    assert(s.player.weapons.melee === 0 && s.player.weapons.bow === 0, 'the head starts with a club and a hunting bow');
+    const clubHit = swingAt(); assert(clubHit === 6, `a club hits for half (${clubHit})`);
+    s.wood = 7; assert(!s.craftWeapon(s.player, 'melee') && s.player.weapons.melee === 0, 'forging needs the wood');
+    s.wood = 8; assert(s.craftWeapon(s.player, 'melee') && s.player.weapons.melee === 1 && s.wood === 0, 'a bronze sword costs 8 wood');
+    dummy.hp = dummy.maxHp; const bronzeHit = swingAt(); assert(bronzeHit === 9, `bronze hits for three quarters (${bronzeHit})`);
+    s.wood = 100; s.scrap = 100; assert(s.weaponProblem(s.player, 'melee') === 'needs a Lv2 barracks', 'iron waits on a Lv2 barracks');
+    const sworn = s.spawn(new Villager(0, 0, s.world.houses[0], 'soldier', 20, 'Sworn', s.mods));
+    assert(sworn.weapons.melee === 0 && s.craftWeapon(sworn, 'bow') && sworn.weapons.bow === 1, 'soldiers start crude and can be forged for too');
+    assert(s.towerDmg(s.world.barracks[0]) === p.towerDmg && p.towerDmg === 5, 'a Lv1 tower fires light arrows');
+    s = fresh(); s.agents = [s.player]; s.day = 3; s.spawnRaid();
+    const wave1 = s.agents.filter(a => a instanceof Raider && !a.lairBound);
+    assert(wave1.length === Math.round(2 * RAID_SIZE_MUL), `the first raid brings ${wave1.length} raiders`);
+    s = fresh(); s.agents = [s.player]; s.day = 6; s.spawnRaid();
+    const kinds = s.agents.filter((a): a is Raider => a instanceof Raider).map(a => a.kind);
+    const rats = kinds.filter(k => k === 'rat').length, wreckers = kinds.filter(k => k === 'wrecker').length;
+    assert(rats === Math.round(10 * RAID_SIZE_MUL) && wreckers === Math.round(1 * RAID_SIZE_MUL), `the second raid brings ${rats} rats and ${wreckers} wreckers`);
     // the Ogre: asleep and hidden by day, out at night, home at dawn with a quarter of his health back; never counts as a raid
     s = fresh(); s.agents = [s.player, s.ogre!]; const ogre = s.ogre!;
     assert(ogre instanceof Ogre && ogre.hidden && ogre.state === 'sleeping' && ogre.lairBound && ogre.huge, 'the Ogre starts asleep and hidden in his lair');

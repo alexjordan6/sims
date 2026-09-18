@@ -3,7 +3,7 @@ import { Mover, Villager, Raider, Player, Arrow, COMBO } from './agents';
 import { Bolt } from './enemies';
 import { DUNGEON, TOWN } from './atlas';
 import { TILE, OGRE } from './config';
-import { buildingCenter } from './world';
+import { buildingCenter, BUILDINGS } from './world';
 import { Sfx } from './sfx';
 import type { VillageScene, FxEvent } from './main';
 
@@ -218,6 +218,15 @@ export class Fx {
       case 'slowmo': this.zoomBump(0.08, 120, 420); break;
       case 'death': break; // handled by die() when the renderer hands over the sprite
       case 'deposit': this.dust.explode(6, ev.x, ev.y); this.word(ev.text, ev.x, ev.y - 10, ev.colour, 7, 0.9); this.sfx.dig(); break;
+      case 'ruin': {
+        // the roof comes down: a shudder, a thud, dust and smoke across the whole footprint
+        const b = ev.building, f = BUILDINGS[b.kind], x0 = b.tx * TILE, y0 = b.ty * TILE, w = f.w * TILE, h = f.h * TILE;
+        this.shake(250, 0.006);
+        this.sfx.thud(1);
+        for (let i = 0; i < 12; i++) { const x = x0 + Math.random() * w, y = y0 + Math.random() * h; this.dust.explode(4, x, y); this.puff.explode(2, x, y - 8); }
+        this.word('RUINED', x0 + w / 2, y0 - 12, '#ff6a5a', 9, 1.6);
+        break;
+      }
       case 'snore': if (this.scene.fog.visibleAt(ev.x, ev.y) > 0.35) this.word('z', ev.x + 6, ev.y, '#d8d0f0', 6, 1.6); break;
       case 'thud': {
         // the Ogre's footsteps: felt within 30 tiles, louder and heavier the closer he is
@@ -235,7 +244,7 @@ export class Fx {
   // ---- attacks ---------------------------------------------------------------
 
   private weaponFor(m: Mover): WeaponKind {
-    if (m instanceof Raider) return m.boss || m.huge || m.kind === 'brute' ? 'bigAxe' : m.kind === 'snatcher' ? 'dagger' : 'axe';
+    if (m instanceof Raider) return m.boss || m.huge || m.kind === 'brute' ? 'bigAxe' : m.kind === 'snatcher' ? 'dagger' : 'axe'; // wreckers swing the plain axe too
     return 'sword';
   }
 

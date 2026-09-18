@@ -21,8 +21,9 @@ export const p = params({
   soldierHp: [60, 5, 100, 1],
   soldierDmg: [10, 1, 30, 1],
   towerRange: [150, 40, 320, 8],   // px; barracks arrow range at Lv1
-  towerDmg: [8, 1, 30, 1],
+  towerDmg: [5, 1, 30, 1],         // per arrow at Lv1; +TOWER.dmgPerLevel each barracks level
   towerCd: [1.4, 0.2, 5, 0.1],     // seconds between tower shots
+  wreckerDmg: [15, 1, 60, 1],      // building damage per wrecker swing
 });
 
 // ---- barracks tower -------------------------------------------------------------------------
@@ -33,7 +34,7 @@ export const TOWER = {
   /** one restock: this much wood for this many arrows */
   restockWood: 2, restockArrows: 10,
   /** per barracks level above 1 */
-  capPerLevel: 10, rangePerLevel: 16,
+  capPerLevel: 10, rangePerLevel: 16, dmgPerLevel: 1.5,
 } as const;
 
 export const COST = { house: 20, barracks: 30, tavern: 50 } as const;
@@ -71,7 +72,7 @@ export const LEVEL_PERKS: Record<'house' | 'barracks' | 'granary' | 'woodyard' |
   lair: ['', 'the Ogre sleeps here by day', '', ''],
   tavern: ['', 'hearth meals restore 20 HP', 'hearth meals restore 35 HP', 'hearth meals restore 50 HP · family hall'],
   house: ['', '4 beds', '6 beds', '8 beds · births +15%'],
-  barracks: ['', 'sponsors 1 house · fires arrows at raiders', 'sponsors 2 houses · soldiers +15 HP', 'sponsors 3 houses · soldiers +30 HP · +20% dmg · regen'],
+  barracks: ['', 'sponsors 1 house · fires arrows at raiders', 'sponsors 2 houses · soldiers +15 HP · iron forge · tower +1.5 dmg', 'sponsors 3 houses · soldiers +30 HP · +20% dmg · regen · steel forge · tower +3 dmg'],
   granary: ['', 'holds 150 food', 'holds 300 food', 'holds 600 food'],
   woodyard: ['', 'holds 150 wood', 'holds 300 wood', 'holds 600 wood'],
 };
@@ -161,10 +162,56 @@ export const ARMOR: Record<ArmorSlot, { name: string; tiers: readonly ArmorTier[
   ] },
 };
 export const ARMOR_SLOTS: readonly ArmorSlot[] = ['helmet', 'chest', 'legs', 'shield'];
-/** barracks level needed to forge each tier */
+/** barracks level needed to forge each tier (armor and weapons alike) */
 export const ARMOR_BARRACKS_LEVEL = [0, 1, 2, 3] as const;
+
+// ---- weapons --------------------------------------------------------------------------------
+/** Everyone starts with a crude weapon (tier 0) and forges better ones at the barracks chest; tier 2 is the old baseline. */
+export type WeaponSlot = 'melee' | 'bow';
+export interface WeaponTier { name: string; wood: number; scrap: number; mul: number }
+export const WEAPONS: Record<WeaponSlot, { name: string; tiers: readonly WeaponTier[] }> = {
+  melee: { name: 'Blade', tiers: [
+    { name: 'Wooden club', wood: 0, scrap: 0, mul: 0.5 },
+    { name: 'Bronze sword', wood: 8, scrap: 0, mul: 0.75 },
+    { name: 'Iron sword', wood: 10, scrap: 3, mul: 1 },
+    { name: 'Steel sword', wood: 14, scrap: 8, mul: 1.3 },
+  ] },
+  bow: { name: 'Bow', tiers: [
+    { name: 'Hunting bow', wood: 0, scrap: 0, mul: 0.5 },
+    { name: 'Yew bow', wood: 8, scrap: 0, mul: 0.75 },
+    { name: 'Composite bow', wood: 10, scrap: 3, mul: 1 },
+    { name: 'War bow', wood: 14, scrap: 8, mul: 1.3 },
+  ] },
+};
+export const WEAPON_SLOTS: readonly WeaponSlot[] = ['melee', 'bow'];
+
+/** every count in a raid's mix is scaled by this (per-enemy stats are never touched) */
+export const RAID_SIZE_MUL = 1.75;
 /** scrap iron looted from slain raiders */
-export const SCRAP_DROP = { raider: 2, brute: 4, warlord: 10, snatcher: 1, shaman: 2, rat: 0, ogre: 30 } as const;
+export const SCRAP_DROP = { raider: 2, brute: 4, warlord: 10, snatcher: 1, shaman: 2, rat: 0, ogre: 30, wrecker: 3 } as const;
+
+// ---- building damage ------------------------------------------------------------------------
+/** Hit points per building level (index = level). Every kind must appear here, so new buildings are destructible by default; 0 means it can't be hurt (the Ogre's lair). */
+export const BUILDING_HP: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern' | 'lair', readonly [number, number, number, number]> = {
+  house: [0, 240, 360, 480],
+  tavern: [0, 300, 420, 540],
+  granary: [0, 300, 420, 540],
+  woodyard: [0, 300, 420, 540],
+  barracks: [0, 400, 560, 720],
+  lair: [0, 0, 0, 0],
+};
+/** hammer on a damaged building: HP per wood; rebuilding a ruin costs this share of the build cost (buildings without a shop price use `rebuildDefault`) */
+export const REPAIR = { perWood: 60, rebuildFraction: 0.5, rebuildDefault: 15 } as const;
+
+// ---- the Wrecker ----------------------------------------------------------------------------
+/** A raider that ignores people and tears down buildings, houses first. Walled off, it batters walls slowly. */
+export const WRECKER = {
+  hp: 45, dmg: 5, wallDmg: 6, speed: 42,
+  /** seconds per swing at a building, and how close to its footprint it stands */
+  swing: 1.0, reach: 14,
+  /** seconds without anything reachable before it gives up and leaves */
+  patience: 15,
+} as const;
 /** cloth dyes for soldiers' tabards, and plume colours */
 export const DYES = ['#3f6fd1', '#c23b3b', '#2f7d4e', '#e0b04a', '#8c4ab0', '#e8e0d0', '#2a2a2e', '#d8722c'] as const;
 export const DYE_NAMES = ['blue', 'red', 'green', 'gold', 'purple', 'white', 'black', 'orange'] as const;

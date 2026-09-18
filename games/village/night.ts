@@ -108,6 +108,7 @@ export class Night {
       };
       // windows, lanterns and torches come on as the night deepens; they flicker a little
       for (const [b, e] of buildings) {
+        if (b.ruined) continue; // no lamps in a ruin
         const lights = LIGHTS[b.kind][Math.min(3, b.level)] ?? [];
         lights.forEach((l, i) => {
           const flicker = 0.85 + 0.15 * Math.sin(this.t * 7 + i * 1.7 + b.tx);
@@ -129,7 +130,7 @@ export class Night {
     this.smokeT += dt;
     if (smoky && this.smokeT > 0.45) {
       this.smokeT = 0;
-      for (const [b, e] of buildings) for (const c of CHIMNEYS[b.kind][Math.min(3, b.level)] ?? []) this.smoke.emitParticleAt(e.body.x + c.x, e.body.y + c.y, 1);
+      for (const [b, e] of buildings) if (!b.ruined) for (const c of CHIMNEYS[b.kind][Math.min(3, b.level)] ?? []) this.smoke.emitParticleAt(e.body.x + c.x, e.body.y + c.y, 1);
     }
 
     // fireflies drift up from the trees in view once it's properly dark

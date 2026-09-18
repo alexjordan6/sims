@@ -1,15 +1,16 @@
 import Phaser from 'phaser';
 import { SimScene, launch } from '@shared/index';
-import { World, doorstep, buildingCenter, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos } from './world';
+import { World, doorstep, buildingCenter, buildingMaxHp, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos } from './world';
 import { Villager, Raider, Player, Mover, Arrow, TOOLS, type Role, type Tool } from './agents';
 import { DEFENSE_COST, WALL_HEIGHT } from './config';
 import { Interior } from './interior';
-import { Rat, Snatcher, Brute, Shaman, Ogre, waveComposition } from './enemies';
+import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, waveComposition } from './enemies';
 import { Fog } from './fog';
-import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, type LoadKind, TREE_YIELD, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, OLD_YIELD, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, CADET_AGE_BEFORE, HEARTY_RATION, CALLING_NAME, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, type Calling, type ArmorSlot } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, type LoadKind, TREE_YIELD, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, OLD_YIELD, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, CADET_AGE_BEFORE, HEARTY_RATION, CALLING_NAME, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, WEAPONS, RAID_SIZE_MUL, type Calling, type ArmorSlot, type WeaponSlot } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
+import { weaponMul } from './characters';
 
 const NAMES = ['Ada', 'Bram', 'Cass', 'Dov', 'Eli', 'Fen', 'Gil', 'Hana', 'Ivo', 'Juno', 'Kai', 'Lior', 'Mara', 'Nils', 'Orla', 'Pim', 'Quin', 'Rue', 'Sol', 'Tova', 'Uli', 'Vera', 'Wren', 'Xan', 'Yael', 'Zed'];
 
@@ -33,7 +34,8 @@ export type FxEvent =
   | { kind: 'arrow'; who: Mover }
   | { kind: 'thud'; who: Mover }
   | { kind: 'snore'; x: number; y: number }
-  | { kind: 'deposit'; x: number; y: number; text: string; colour: string };
+  | { kind: 'deposit'; x: number; y: number; text: string; colour: string }
+  | { kind: 'ruin'; building: Building };
 
 export type Screen = 'title' | 'playing' | 'paused' | 'over' | 'won';
 
@@ -63,7 +65,7 @@ export class VillageScene extends SimScene {
   selectedBuilding: Building | null = null;
   journal: GameEvent[] = [];
   fx: FxEvent[] = [];
-  stats = { peakPop: 0, soldiersRaised: 0, childrenRaised: 0, starsTotal: 0, raidsRepelled: 0, raidersKilled: 0, bossesSlain: 0 };
+  stats = { peakPop: 0, soldiersRaised: 0, childrenRaised: 0, starsTotal: 0, raidsRepelled: 0, raidersKilled: 0, bossesSlain: 0, buildingsLost: 0 };
   /** persists across runs (localStorage) */
   meta = new Meta();
   /** this run's modifiers, compiled from the equipped boons */
@@ -146,7 +148,7 @@ export class VillageScene extends SimScene {
     this.fx = [];
     if (this.slowUntil) { clearTimeout(this.slowUntil); this.slowUntil = 0; }
     if (this.speed < 1) this.speed = 1;
-    this.stats = { peakPop: 0, soldiersRaised: 0, childrenRaised: 0, starsTotal: 0, raidsRepelled: 0, raidersKilled: 0, bossesSlain: 0 };
+    this.stats = { peakPop: 0, soldiersRaised: 0, childrenRaised: 0, starsTotal: 0, raidsRepelled: 0, raidersKilled: 0, bossesSlain: 0, buildingsLost: 0 };
     this.boss = null;
     this.ogre = this.world.lair ? this.spawn(new Ogre(this.world.lair)) : null;
     this.lairFound = false;
@@ -418,6 +420,28 @@ export class VillageScene extends SimScene {
     const tier = ARMOR[slot].tiers[next];
     if (!tier) return 'already the best there is';
     if (slot === 'shield' && ((who instanceof Villager && who.weapon === 'bow') || (who instanceof Player && who.tool === 'bow'))) return 'a bow needs both hands';
+    return this.forgeProblem(next, tier);
+  }
+  /** Why `who` can't have the next weapon tier in `slot` right now, or null. */
+  weaponProblem(who: Mover, slot: WeaponSlot): string | null {
+    const next = who.weapons[slot] + 1;
+    const tier = WEAPONS[slot].tiers[next];
+    if (!tier) return 'already the best there is';
+    return this.forgeProblem(next, tier);
+  }
+  /** Forge a better weapon for a wearer; pays wood and scrap. */
+  craftWeapon(who: Mover, slot: WeaponSlot): boolean {
+    const why = this.weaponProblem(who, slot);
+    if (why) { this.event('info', `Can't forge: ${why}`, true); return false; }
+    const next = who.weapons[slot] + 1, tier = WEAPONS[slot].tiers[next];
+    this.wood -= tier.wood; this.scrap -= tier.scrap;
+    who.weapons = { ...who.weapons, [slot]: next };
+    this.fx.push({ kind: 'tool', tool: 'hammer', tx: who.tile.tx, ty: who.tile.ty });
+    this.event('build', `${who instanceof Player ? 'You' : (who as Villager).name} now carr${who instanceof Player ? 'y' : 'ies'} a ${tier.name.toLowerCase()}`, true);
+    return true;
+  }
+  /** The forge rules armor and weapons share: a standing barracks of the tier's level, and the wood and scrap. */
+  private forgeProblem(next: number, tier: { wood: number; scrap: number }): string | null {
     const need = ARMOR_BARRACKS_LEVEL[next];
     if (!this.world.barracks.length) return 'build a barracks first';
     if (this.world.barracksLevel < need) return `needs a Lv${need} barracks`;
@@ -492,10 +516,10 @@ export class VillageScene extends SimScene {
     const parents = kid.parents.filter((q) => !q.dead).length;
     return [
       { label: 'Fed', ok: kid.hungerDays === 0 },
-      { label: 'Well fed', ok: !!kid.home.hearty && kid.hungerDays === 0, note: 'hearty rations' },
+      { label: 'Well fed', ok: !!kid.home.hearty && !kid.home.ruined && kid.hungerDays === 0, note: 'hearty rations' },
       { label: 'Family', ok: parents >= 2, note: parents === 1 ? 'one parent' : parents === 0 ? 'no parents' : undefined },
       { label: 'Company', ok: sibling, note: 'another child at home' },
-      { label: 'Home', ok: kid.home.level >= 2, note: 'house Lv2+' },
+      { label: 'Home', ok: kid.home.level >= 2 && !kid.home.ruined, note: kid.home.ruined ? 'their house is in ruins' : 'house Lv2+' },
       { label: 'Attention', ok: kid.encouragedDay === this.day, note: 'encourage them' },
       { label: 'Safe', ok: kid.fledDay !== this.day, note: 'ran from raiders' },
     ];
@@ -504,7 +528,7 @@ export class VillageScene extends SimScene {
   nearestShelter(x: number, y: number): Building | null {
     let best: Building | null = null, bd = Infinity;
     for (const b of this.world.buildings) {
-      if (b.kind !== 'house' && b.kind !== 'barracks' && b.kind !== 'tavern') continue;
+      if ((b.kind !== 'house' && b.kind !== 'barracks' && b.kind !== 'tavern') || b.ruined) continue;
       const d = doorstep(b), c = World.center(d.tx, d.ty), dd = (c.x - x) ** 2 + (c.y - y) ** 2;
       if (dd < bd) { bd = dd; best = b; }
     }
@@ -634,7 +658,7 @@ export class VillageScene extends SimScene {
     // villagers: eat, age, grow up, grow old
     const villagers = this.villagers();
     for (const v of villagers) {
-      const hearty = v.role === 'kid' && !!v.home.hearty;
+      const hearty = v.role === 'kid' && !!v.home.hearty && !v.home.ruined;
       const ration = p.foodPerDay * this.mods.foodPerDayMul * (hearty ? HEARTY_RATION : 1);
       let wellFed = false;
       if (this.food >= ration) { this.food -= ration; v.hungerDays = 0; wellFed = hearty; }
@@ -646,7 +670,7 @@ export class VillageScene extends SimScene {
         const fed = v.hungerDays === 0;
         const parents = v.parents.filter((q) => !q.dead).length;
         const sibling = villagers.some((o) => o !== v && o.role === 'kid' && o.home === v.home && !o.dead);
-        let pts = (fed ? 1 : -1) + (wellFed ? 1 : 0) + (parents >= 2 ? 1 : 0) + (sibling ? 1 : 0) + (v.home.level >= 2 ? 1 : 0) + (v.encouragedDay === this.day ? 1 : 0) - (v.fledDay === this.day ? 1 : 0);
+        let pts = (fed ? 1 : -1) + (wellFed ? 1 : 0) + (parents >= 2 ? 1 : 0) + (sibling ? 1 : 0) + (v.home.level >= 2 && !v.home.ruined ? 1 : 0) - (v.home.ruined ? 1 : 0) + (v.encouragedDay === this.day ? 1 : 0) - (v.fledDay === this.day ? 1 : 0);
         v.care += pts; v.careDays++;
         v.stars = v.starsNow();
         // yesterday's apprenticeship: only if they had somewhere to go
@@ -693,6 +717,8 @@ export class VillageScene extends SimScene {
   spawnRaid(boss = false): void {
     const wave = Math.max(1, Math.floor(this.day / this.raidEvery));
     const mix = waveComposition(wave, boss);
+    // raids are big: every count grows by RAID_SIZE_MUL (the enemies themselves are unchanged)
+    for (const k of Object.keys(mix) as (keyof typeof mix)[]) if (mix[k]) mix[k] = Math.max(1, Math.round(mix[k] * RAID_SIZE_MUL));
     // Scouts: every wave is a raider short (never below one); Hearsay: the Warlord's escort halves
     mix.raider = Math.max(1, mix.raider - this.mods.waveShrink);
     if (boss && this.mods.bossEscortMul < 1) for (const k of Object.keys(mix) as (keyof typeof mix)[]) mix[k] = Math.max(k === 'raider' ? 1 : 0, Math.floor(mix[k] * this.mods.bossEscortMul));
@@ -716,7 +742,9 @@ export class VillageScene extends SimScene {
       snatcher: (x, y) => new Snatcher(x, y, opts),
       brute: (x, y) => new Brute(x, y, opts),
       shaman: (x, y) => new Shaman(x, y, opts),
+      wrecker: (x, y) => new Wrecker(x, y, opts),
     };
+    for (const b of this.world.buildings) b.alarmed = false;
     const parts: string[] = [];
     for (const kind of Object.keys(mix) as (keyof typeof mix)[]) {
       const n = mix[kind];
@@ -855,11 +883,13 @@ export class VillageScene extends SimScene {
 
   /** Beds in a house: by level, or the Big Families boon if that is higher. */
   beds(h: Building): number {
+    if (h.ruined) return 0;
     return Math.max(HOUSE_BEDS[h.level] ?? 4, this.mods.houseCap) + this.mods.bedBonus;
   }
   get foodCap(): number { return Math.round(CAPS[this.world.granary?.level ?? 1] * this.mods.capMul); }
   get woodCap(): number { return Math.round(CAPS[this.world.woodyard?.level ?? 1] * this.mods.capMul); }
   private warnedFull = false;
+  private warnedRuin = false;
 
   /** Add to the stockpile, respecting storage; says so (once a day) when the store is full. */
   /** Hand a carried load in at its building: the stockpile takes it (up to the cap) and the arms are free. */
@@ -868,6 +898,7 @@ export class VillageScene extends SimScene {
     if (!load) return;
     const b = load.kind === 'wood' ? this.world.woodyard : this.world.granary;
     if (!b) return;
+    if (b.ruined) { if (m === this.player && !this.warnedRuin) { this.warnedRuin = true; this.event('build', `The ${BUILDINGS[b.kind].name.toLowerCase()} is in ruins — rebuild it with the hammer before anything can be stored.`, true); } return; }
     if (load.kind === 'wood') this.addWood(load.n); else this.addFood(load.n);
     m.load = null;
     const c = buildingCenter(b);
@@ -893,21 +924,24 @@ export class VillageScene extends SimScene {
   }
 
   buildingTitle(b: Building): string {
-    return `${BUILDINGS[b.kind].name} Lv${b.level}`;
+    return `${BUILDINGS[b.kind].name} Lv${b.level}${b.ruined ? ' · RUINED' : ''}`;
   }
   /** What the building does now, and what the next level adds. */
   buildingBlurb(b: Building): string {
+    if (b.ruined) return `in ruins · nothing works until the hammer rebuilds it (${this.rebuildCost(b)} wood)`;
     const now = b.kind === 'house' ? `${b.residents}/${this.beds(b)} beds${b.level >= 3 ? ' · births +15%' : ''}${' · raises ' + CALLING_NAME[b.calling ?? 'farmer']}${b.hearty ? ' · hearty rations' : ''}`
       : b.kind === 'granary' ? `${this.food | 0}/${CAPS[b.level]} food · the harvest is carried here`
       : b.kind === 'woodyard' ? `${this.wood | 0}/${CAPS[b.level]} wood · chopped logs are carried here`
       : LEVEL_PERKS[b.kind][b.level];
     const next = b.level < MAX_LEVEL ? ` · next Lv${b.level + 1}: ${LEVEL_PERKS[b.kind][b.level + 1]} (${this.upgradeCost(b)} wood, hammer)` : ' · max level';
-    return now + next;
+    const hurt = b.maxHp && b.hp < b.maxHp ? ` · ${Math.ceil(b.hp)}/${b.maxHp} HP (hammer repairs)` : '';
+    return now + next + hurt;
   }
 
   /** Why the hammer can't upgrade `b` right now, or null. */
   upgradeProblem(b: Building): string | null {
     if (b.kind === 'lair') return "The lair is not yours to improve";
+    if (b.ruined) return `rebuild it first (${this.rebuildCost(b)} wood)`;
     if (b.level >= MAX_LEVEL) return `${BUILDINGS[b.kind].name} is already max level`;
     const cost = this.upgradeCost(b);
     if (this.wood < cost) return `need ${cost} wood (have ${this.wood | 0})`;
@@ -923,9 +957,77 @@ export class VillageScene extends SimScene {
     const cost = this.upgradeCost(b);
     this.wood -= cost;
     b.level++;
+    // sturdier with each level: the new structure is added on top of what's standing
+    const max = buildingMaxHp(b); b.hp += max - b.maxHp; b.maxHp = max;
     this.world.refresh(b);
     this.fx.push({ kind: 'upgrade', building: b });
     this.event('build', `${BUILDINGS[b.kind].name} is now Lv${b.level} — ${LEVEL_PERKS[b.kind][b.level]}`, true);
+  }
+
+  // ---- building damage ------------------------------------------------------
+  // Every building but the lair can be wrecked. A ruin keeps its footprint and does nothing until rebuilt.
+
+  /** Hurt a building; true when this blow reduced it to a ruin. */
+  damageBuilding(b: Building, dmg: number, by?: Raider): boolean {
+    if (b.kind === 'lair' || b.ruined || !b.maxHp) return false;
+    b.hp = Math.max(0, b.hp - dmg);
+    this.world.refresh(b);
+    if (!b.alarmed) { b.alarmed = true; this.event('raid', `${by ? `A ${by.name.toLowerCase()} is` : 'Raiders are'} tearing at the ${BUILDINGS[b.kind].name.toLowerCase()}!`, true); }
+    if (b.hp > 0) return false;
+    this.ruinBuilding(b);
+    return true;
+  }
+  private ruinBuilding(b: Building): void {
+    b.ruined = true; b.hp = 0;
+    for (const v of this.villagers()) if (v.indoors === b) v.unhide(this);
+    if (this.interior.building === b) this.interior.leave();
+    this.stats.buildingsLost++;
+    this.world.refresh(b);
+    this.fx.push({ kind: 'ruin', building: b });
+    this.event('raid', `The ${BUILDINGS[b.kind].name.toLowerCase()} has fallen to ruin — rebuild it with the hammer (${this.rebuildCost(b)} wood).`, true);
+  }
+  /** Wood to raise a ruin again: a share of what it cost to build. */
+  rebuildCost(b: Building): number {
+    const base = b.kind === 'house' || b.kind === 'barracks' || b.kind === 'tavern' ? COST[b.kind] : REPAIR.rebuildDefault / REPAIR.rebuildFraction;
+    return Math.max(1, Math.round(base * REPAIR.rebuildFraction * this.mods.buildCostMul));
+  }
+  /** Why the hammer can't mend `b` right now, or null. */
+  repairProblem(b: Building): string | null {
+    if (b.kind === 'lair') return 'The lair is not yours to mend';
+    if (b.ruined) { const cost = this.rebuildCost(b); return this.wood < cost ? `need ${cost} wood to rebuild (have ${this.wood | 0})` : null; }
+    if (b.hp >= b.maxHp) return 'nothing to repair';
+    if (this.wood < 1) return 'need 1 wood';
+    return null;
+  }
+  /** Hammer blow on a hurt building: rebuild a ruin for its rebuild cost, or trade 1 wood for `REPAIR.perWood` HP. */
+  repairBuilding(b: Building): boolean {
+    const why = this.repairProblem(b);
+    if (why) { this.event('build', why); return false; }
+    if (b.ruined) {
+      this.wood -= this.rebuildCost(b);
+      b.ruined = false; b.hp = b.maxHp; b.alarmed = false;
+      this.world.refresh(b);
+      this.fx.push({ kind: 'upgrade', building: b });
+      this.event('build', `The ${BUILDINGS[b.kind].name.toLowerCase()} stands again.`, true);
+      return true;
+    }
+    this.wood--; b.hp = Math.min(b.maxHp, b.hp + REPAIR.perWood);
+    this.world.refresh(b);
+    return true;
+  }
+  /** Standing buildings (never the lair) an enemy at `from` can walk to, nearest first; `kinds` narrows it. */
+  reachableBuildings(from: TilePos, kinds?: readonly BuildingKind[]): Building[] {
+    const fx = (from.tx + 0.5) * TILE, fy = (from.ty + 0.5) * TILE;
+    const out: { b: Building; d: number }[] = [];
+    for (const b of this.world.buildings) {
+      if (b.kind === 'lair' || b.ruined || (kinds && !kinds.includes(b.kind))) continue;
+      const f = BUILDINGS[b.kind];
+      const adjacent = from.tx >= b.tx - 1 && from.tx <= b.tx + f.w && from.ty >= b.ty - 1 && from.ty <= b.ty + f.h;
+      if (!adjacent && !this.world.bfs(from, doorstep(b), true).length) continue;
+      const c = buildingCenter(b);
+      out.push({ b, d: (c.tx * TILE - fx) ** 2 + (c.ty * TILE - fy) ** 2 });
+    }
+    return out.sort((a, z) => a.d - z.d).map((o) => o.b);
   }
 
   // ---- player actions -------------------------------------------------------
@@ -949,6 +1051,7 @@ export class VillageScene extends SimScene {
 
   towerRange(b: Building): number { return p.towerRange + (b.level - 1) * TOWER.rangePerLevel; }
   towerCap(b: Building): number { return TOWER.cap + (b.level - 1) * TOWER.capPerLevel; }
+  towerDmg(b: Building): number { return p.towerDmg + (b.level - 1) * TOWER.dmgPerLevel; }
   towerCenter(b: Building): { x: number; y: number } { const c = buildingCenter(b); return { x: c.tx * TILE, y: c.ty * TILE }; }
   /** Where a shot leaves the roof: just past the footprint along the aim, so the arrow's own sweep doesn't die on the barracks tiles. */
   private towerMuzzle(b: Building, ux: number, uy: number): { x: number; y: number } {
@@ -975,7 +1078,7 @@ export class VillageScene extends SimScene {
       }
       if (!shot) continue;
       const { m, ux, uy } = shot;
-      const arrow = this.spawn(new Arrow(m.x, m.y, ux, uy, p.towerDmg, null, range + 24));
+      const arrow = this.spawn(new Arrow(m.x, m.y, ux, uy, this.towerDmg(b), null, range + 24));
       this.fx.push({ kind: 'arrow', who: arrow });
       b.ammo!--; b.fireCd = p.towerCd;
       if (!b.ammo && !b.dryWarned) { b.dryWarned = true; this.event('raid', 'The barracks tower is out of arrows — restock at its chest.', true); }
@@ -1068,7 +1171,7 @@ export class VillageScene extends SimScene {
   doorAt(): Building | null {
     const pt = this.player.tile;
     return this.world.buildings.find((b) => {
-      if (!['house', 'barracks', 'tavern'].includes(b.kind)) return false;
+      if (!['house', 'barracks', 'tavern'].includes(b.kind) || b.ruined) return false; // a ruin has no door to push
       const d = doorstep(b);
       return d.tx === pt.tx && d.ty === pt.ty;
     }) ?? null;
@@ -1203,7 +1306,7 @@ export class VillageScene extends SimScene {
         if (pl.attackCd > 0) return;
         const hv = this.hoverTile, aim = hv ? World.center(hv.tx, hv.ty) : null;
         const auto = !aim ? this.bestTarget(pl.x, pl.y, 165) : null;
-        this.shoot(pl, aim ? aim.x - pl.x : auto ? auto.x - pl.x : pl.facing.x, aim ? aim.y - pl.y : auto ? auto.y - pl.y : pl.facing.y, Math.round(14 * this.mods.playerDmgMul));
+        this.shoot(pl, aim ? aim.x - pl.x : auto ? auto.x - pl.x : pl.facing.x, aim ? aim.y - pl.y : auto ? auto.y - pl.y : pl.facing.y, Math.round(14 * weaponMul(pl.weapons, 'bow') * this.mods.playerDmgMul));
         return;
       }
       case 'wall': case 'gate': case 'stairs': this.buildDefense(pl.tool); return;
@@ -1233,6 +1336,8 @@ export class VillageScene extends SimScene {
         const b = this.facedBuilding();
         this.fx.push({ kind: 'tool', tool: 'hammer', tx, ty });
         if (!b || !t) return;
+        // a hurt building is mended before it is improved
+        if (b.kind !== 'lair' && (b.ruined || b.hp < b.maxHp)) { this.repairBuilding(b); return; }
         const why = this.upgradeProblem(b);
         if (why) { this.event('build', why); return; }
         if (++t.work >= this.mods.hammerHits) { t.work = 0; this.upgrade(b); }
@@ -1307,6 +1412,8 @@ export class VillageScene extends SimScene {
       case 'hammer': {
         if (t?.defense) return `E: repair ${t.kind} (${Math.ceil(t.defense.hp)}/${t.defense.maxHp} HP · 1 wood repairs 80)`;
         if (!b) return 'hammer: face a building to upgrade it';
+        if (b.kind !== 'lair' && b.ruined) { const why = this.repairProblem(b); return why ? `${this.buildingTitle(b)} — ${why}` : `E: rebuild ${BUILDINGS[b.kind].name} (${this.rebuildCost(b)} wood)`; }
+        if (b.kind !== 'lair' && b.hp < b.maxHp) return `E: repair ${BUILDINGS[b.kind].name} (${Math.ceil(b.hp)}/${b.maxHp} HP · 1 wood repairs ${REPAIR.perWood})`;
         const why = this.upgradeProblem(b);
         return why ? `${this.buildingTitle(b)} — ${why}` : `E: upgrade ${BUILDINGS[b.kind].name} → Lv${b.level + 1}: ${LEVEL_PERKS[b.kind][b.level + 1]} (${this.upgradeCost(b)} wood, ${this.mods.hammerHits - (t?.work ?? 0)} hits)`;
       }

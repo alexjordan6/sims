@@ -1,6 +1,6 @@
 import { Mover, Raider, Villager, Player, type RaiderOpts } from './agents';
 import { World, BUILDINGS, type TilePos, type Building } from './world';
-import { COLS, ROWS, TILE, OGRE, BEDTIME } from './config';
+import { COLS, ROWS, TILE, OGRE, BEDTIME, WRECKER, p } from './config';
 import type { VillageScene } from './main';
 
 // Enemy kinds beyond the plain raider. Each has a different job so raids need different answers.
@@ -439,15 +439,98 @@ function nearestEdge(t: TilePos): TilePos {
   return opts[0][1];
 }
 
+/**
+ * Ignores people and tears down buildings, houses first. It only goes for buildings it can walk to:
+ * walled off, it batters the nearest wall — slowly, so a closed perimeter buys the tower and soldiers time.
+ */
+export class Wrecker extends Raider {
+  /** the building it is heading for or pounding on */
+  prey: Building | null = null;
+  private swing: { t: number; struck: boolean } | null = null;
+  constructor(x: number, y: number, opts: RaiderOpts = {}) {
+    super(x, y, opts);
+    this.kind = 'wrecker';
+    this.name = 'Wrecker';
+    this.hp = this.maxHp = Math.round(WRECKER.hp * (opts.hpMul ?? 1));
+    this.dmg = WRECKER.dmg;
+    this.speed = WRECKER.speed * (opts.speedMul ?? 1);
+    this.radius = 3.5;
+    this.color = 0xb8602c;
+    this.task = 'looking for something to wreck';
+  }
+
+  /** Nearest point of the building's footprint to us, in pixels. */
+  private edgeOf(b: Building): { x: number; y: number } {
+    const f = BUILDINGS[b.kind];
+    return { x: Math.max(b.tx * TILE, Math.min(this.x, (b.tx + f.w) * TILE)), y: Math.max(b.ty * TILE, Math.min(this.y, (b.ty + f.h) * TILE)) };
+  }
+
+  update(dt: number, s: VillageScene): void {
+    this.tickTimers(dt);
+    if (this.frozen(dt)) return;
+    if (this.siege && this.breach(dt, s)) return;
+    if (this.attackTick(dt, s)) return;
+    this.retarget -= dt;
+    if (this.prey?.ruined) { this.prey = null; this.swing = null; }
+    if (this.retarget <= 0 || !this.prey) {
+      this.retarget = 1;
+      const from = this.tile;
+      this.prey = s.reachableBuildings(from, ['house'])[0] ?? s.reachableBuildings(from)[0] ?? null;
+      if (this.prey) this.clearGoal();
+    }
+    const t = this.tile;
+    if (s.world.get(t.tx, t.ty)?.kind === 'crop') s.world.set(t.tx, t.ty, 'tilled');
+    if (this.prey) {
+      this.bored = 0;
+      const b = this.prey, e = this.edgeOf(b), name = BUILDINGS[b.kind].name.toLowerCase();
+      if (this.dist(e) > WRECKER.reach) {
+        // walk up to the footprint: the search stops on the tile beside a blocked goal
+        this.swing = null;
+        const f = BUILDINGS[b.kind];
+        this.setGoal(s, Math.max(b.tx, Math.min(t.tx, b.tx + f.w - 1)), Math.max(b.ty, Math.min(t.ty, b.ty + f.h - 1)));
+        this.followPath(dt);
+        this.task = `heading for the ${name}`;
+        return;
+      }
+      // pounding on it: the same wind-up / strike / recover cycle as battering a wall
+      this.vx = this.vy = 0; this.dir = e.x < this.x ? -1 : 1;
+      if (!this.swing) { this.swing = { t: 0, struck: false }; s.fx.push({ kind: 'telegraph', who: this, ms: 300 }); }
+      const a = this.swing; a.t += dt; this.task = `wrecking the ${name}`;
+      if (!a.struck && a.t >= 0.3) {
+        a.struck = true;
+        s.fx.push({ kind: 'melee', who: this, x: e.x, y: e.y });
+        s.damageBuilding(b, p.wreckerDmg, this);
+      }
+      if (a.t >= WRECKER.swing) this.swing = null;
+      return;
+    }
+    this.swing = null;
+    // nothing to reach: hit back at anyone in arm's reach, else batter the wall in the way, else lose interest
+    const victim = s.nearestVictim(this.x, this.y);
+    if (victim && this.dist(victim) < 40) {
+      this.bored = 0;
+      if (this.startAttack(s, victim, this.dmg, 13, 0.25, 0.55)) return;
+      this.setGoal(s, victim.tile.tx, victim.tile.ty); this.followPath(dt); this.task = 'lashing out'; return;
+    }
+    this.clearGoal();
+    const dmg = this.dmg; this.dmg = WRECKER.wallDmg;
+    const battering = this.breach(dt, s);
+    this.dmg = dmg;
+    if (battering) return;
+    this.bored += dt; this.vx = this.vy = 0; this.task = 'finding nothing to wreck';
+    if (this.bored > WRECKER.patience) this.dead = true;
+  }
+}
+
 /** What a raid on wave `w` (1..6) is made of; the warlord's wave passes boss = true. */
-export function waveComposition(w: number, boss = false): Record<'raider' | 'rat' | 'snatcher' | 'brute' | 'shaman', number> {
-  if (boss) return { raider: 3, rat: 0, snatcher: 2, brute: 1, shaman: 1 };
+export function waveComposition(w: number, boss = false): Record<'raider' | 'rat' | 'snatcher' | 'brute' | 'shaman' | 'wrecker', number> {
+  if (boss) return { raider: 3, rat: 0, snatcher: 2, brute: 1, shaman: 1, wrecker: 2 };
   switch (Math.max(1, Math.min(6, w))) {
-    case 1: return { raider: 2, rat: 0, snatcher: 0, brute: 0, shaman: 0 };
-    case 2: return { raider: 2, rat: 10, snatcher: 0, brute: 0, shaman: 0 };
-    case 3: return { raider: 2, rat: 12, snatcher: 1, brute: 0, shaman: 0 };
-    case 4: return { raider: 3, rat: 0, snatcher: 1, brute: 1, shaman: 0 };
-    case 5: return { raider: 3, rat: 16, snatcher: 1, brute: 0, shaman: 1 };
-    default: return { raider: 3, rat: 0, snatcher: 2, brute: 1, shaman: 1 };
+    case 1: return { raider: 2, rat: 0, snatcher: 0, brute: 0, shaman: 0, wrecker: 0 };
+    case 2: return { raider: 2, rat: 10, snatcher: 0, brute: 0, shaman: 0, wrecker: 1 };
+    case 3: return { raider: 2, rat: 12, snatcher: 1, brute: 0, shaman: 0, wrecker: 1 };
+    case 4: return { raider: 3, rat: 0, snatcher: 1, brute: 1, shaman: 0, wrecker: 2 };
+    case 5: return { raider: 3, rat: 16, snatcher: 1, brute: 0, shaman: 1, wrecker: 2 };
+    default: return { raider: 3, rat: 0, snatcher: 2, brute: 1, shaman: 1, wrecker: 3 };
   }
 }
