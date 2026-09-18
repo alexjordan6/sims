@@ -133,6 +133,9 @@ export class UI {
     this.feed = h('<div class="feed"></div>');
     this.toasts = h('<div class="toasts"></div>');
     this.overlay.append(this.top, this.hotbar, this.feed, this.toasts);
+    // the feed sits above the belt, whatever height the belt turns out to be (its hint line wraps)
+    const belt = () => this.overlay.style.setProperty('--hotbar-h', this.hotbar.offsetHeight + 'px');
+    new ResizeObserver(belt).observe(this.hotbar); belt();
 
     // --- side
     this.inspector = h('<div class="inspector panel"></div>');
@@ -632,7 +635,7 @@ export class UI {
       this.feed.prepend(h(`<div class="ev ${ev.kind}">${spr(ic.key, ic.frame, 24)}<span>${esc(ev.text)}</span></div>`));
       if (ev.toast) this.toast(ev.text, ev.kind);
     }
-    while (this.feed.children.length > 8) this.feed.lastElementChild!.remove();
+    while (this.feed.children.length > 6) this.feed.lastElementChild!.remove();
     Array.from(this.feed.children).forEach((el, i) => el.classList.toggle('old', i >= 4));
   }
 
