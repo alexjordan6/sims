@@ -4,7 +4,8 @@ import { World, doorstep, buildingCenter, BUILDINGS, MAX_LEVEL, BUILDABLE, type 
 import { Villager, Raider, Player, Mover, Arrow, TOOLS, type Role, type Tool } from './agents';
 import { DEFENSE_COST, WALL_HEIGHT } from './config';
 import { Interior } from './interior';
-import { Rat, Snatcher, Brute, Shaman, waveComposition } from './enemies';
+import { Rat, Snatcher, Brute, Shaman, Ogre, waveComposition } from './enemies';
+import { Fog } from './fog';
 import { p, TILE, COLS, ROWS, ZOOM, COST, TREE_YIELD, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, OLD_YIELD, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, CADET_AGE_BEFORE, HEARTY_RATION, CALLING_NAME, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, type Calling, type ArmorSlot } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
@@ -29,7 +30,9 @@ export type FxEvent =
   | { kind: 'upgrade'; building: Building }
   | { kind: 'hearts'; who: Mover }
   | { kind: 'melee'; who: Mover; x: number; y: number }
-  | { kind: 'arrow'; who: Mover };
+  | { kind: 'arrow'; who: Mover }
+  | { kind: 'thud'; who: Mover }
+  | { kind: 'snore'; x: number; y: number };
 
 export type Screen = 'title' | 'playing' | 'paused' | 'over' | 'won';
 
@@ -57,12 +60,17 @@ export class VillageScene extends SimScene {
   selectedBuilding: Building | null = null;
   journal: GameEvent[] = [];
   fx: FxEvent[] = [];
-  stats = { peakPop: 0, soldiersRaised: 0, childrenRaised: 0, starsTotal: 0, raidsRepelled: 0, raidersKilled: 0 };
+  stats = { peakPop: 0, soldiersRaised: 0, childrenRaised: 0, starsTotal: 0, raidsRepelled: 0, raidersKilled: 0, bossesSlain: 0 };
   /** persists across runs (localStorage) */
   meta = new Meta();
   /** this run's modifiers, compiled from the equipped boons */
   mods: Mods = this.meta.mods();
   boss: Raider | null = null;
+  /** the Ogre, asleep in his lair until night */
+  ogre: Ogre | null = null;
+  /** the fog of war: what has been seen */
+  fog!: Fog;
+  lairFound = false;
   /** set when the run ends */
   result: { won: boolean; renown: RenownBreakdown } | null = null;
 
@@ -135,8 +143,11 @@ export class VillageScene extends SimScene {
     this.fx = [];
     if (this.slowUntil) { clearTimeout(this.slowUntil); this.slowUntil = 0; }
     if (this.speed < 1) this.speed = 1;
-    this.stats = { peakPop: 0, soldiersRaised: 0, childrenRaised: 0, starsTotal: 0, raidsRepelled: 0, raidersKilled: 0 };
+    this.stats = { peakPop: 0, soldiersRaised: 0, childrenRaised: 0, starsTotal: 0, raidsRepelled: 0, raidersKilled: 0, bossesSlain: 0 };
     this.boss = null;
+    this.ogre = this.world.lair ? this.spawn(new Ogre(this.world.lair)) : null;
+    this.lairFound = false;
+    this.fog?.reset();
     this.result = null;
     this.nameIdx = this.rng.int(0, NAMES.length - 1);
 
@@ -209,6 +220,7 @@ export class VillageScene extends SimScene {
     this.hud.setVisible(false);
 
     this.view = new Renderer(this);
+    this.fog = new Fog(this, 45);
     this.view.rebuild();
     this.ui = new UI(this);
     this.ui.mount();
@@ -313,7 +325,7 @@ export class VillageScene extends SimScene {
   /** The run is over: bank renown and show the result. */
   private endRun(won: boolean): void {
     if (this.result) return;
-    const renown = this.meta.bankRun({ won, day: this.day, raidersKilled: this.stats.raidersKilled, childrenRaised: this.stats.childrenRaised, stars: this.stats.starsTotal });
+    const renown = this.meta.bankRun({ won, day: this.day, raidersKilled: this.stats.raidersKilled, childrenRaised: this.stats.childrenRaised, stars: this.stats.starsTotal, bossesSlain: this.stats.bossesSlain });
     this.result = { won, renown };
     this.screen = won ? 'won' : 'over';
     this.paused = true;
@@ -556,7 +568,12 @@ export class VillageScene extends SimScene {
     for (const a of this.agents) if (a.dead) this.onDeath(a as Mover);
     this.removeDead();
 
-    if (this.raidActive && !this.agents.some((a) => a instanceof Raider)) {
+    // finding the lair: the first time it comes into sight
+    if (!this.lairFound && this.world.lair && this.fog) {
+      const c = buildingCenter(this.world.lair);
+      if (this.fog.visibleAt(c.tx * TILE, c.ty * TILE) > 0.5) { this.lairFound = true; this.event('raid', "You found the Ogre's lair. He sleeps by day.", true); }
+    }
+    if (this.raidActive && !this.agents.some((a) => a instanceof Raider && !a.lairBound)) {
       this.raidActive = false;
       this.stats.raidsRepelled++;
       this.slowMo();
@@ -595,6 +612,12 @@ export class VillageScene extends SimScene {
       trees++;
     }
     this.warnedFull = false;
+    // the rumour: a direction to explore
+    if (this.day === 2 && this.world.lair && !this.lairFound) {
+      const l = this.world.lair, dx = l.tx + 2 - COLS / 2, dy = l.ty + 2 - ROWS / 2;
+      const ns = Math.abs(dy) > Math.abs(dx) * 0.4 ? (dy < 0 ? 'north' : 'south') : '', ew = Math.abs(dx) > Math.abs(dy) * 0.4 ? (dx < 0 ? 'west' : 'east') : '';
+      this.event('info', `The woodcutters whisper of a giant in the forest to the ${ns}${ns && ew ? '-' : ''}${ew}. He only walks at night.`, true);
+    }
 
     // villagers: eat, age, grow up, grow old
     const villagers = this.villagers();
@@ -739,7 +762,12 @@ export class VillageScene extends SimScene {
         if (this.mods.killWood) this.addWood(this.mods.killWood);
         if (this.mods.killFood) this.addFood(this.mods.killFood);
         if (this.mods.killHeal) this.player.hp = Math.min(this.player.maxHp, this.player.hp + this.mods.killHeal);
-        this.event('raid', a.boss ? 'The Warlord has fallen!' : `${a.name} slain`, a.boss);
+        if (a instanceof Ogre) {
+          this.stats.bossesSlain++;
+          a.lair.level = 3; this.world.refresh(a.lair); // the fire goes out
+          this.slowMo();
+          this.event('raid', 'The Ogre is slain! His lair falls silent.', true);
+        } else this.event('raid', a.boss ? 'The Warlord has fallen!' : `${a.name} slain`, a.boss);
       }
     }
   }
@@ -848,6 +876,7 @@ export class VillageScene extends SimScene {
 
   /** Why the hammer can't upgrade `b` right now, or null. */
   upgradeProblem(b: Building): string | null {
+    if (b.kind === 'lair') return "The lair is not yours to improve";
     if (b.level >= MAX_LEVEL) return `${BUILDINGS[b.kind].name} is already max level`;
     const cost = this.upgradeCost(b);
     if (this.wood < cost) return `need ${cost} wood (have ${this.wood | 0})`;

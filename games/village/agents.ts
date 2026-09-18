@@ -586,7 +586,7 @@ export class Villager extends Mover {
 // ---------------------------------------------------------------------------
 // raiders
 
-export type EnemyKind = 'raider' | 'warlord' | 'rat' | 'snatcher' | 'brute' | 'shaman';
+export type EnemyKind = 'raider' | 'warlord' | 'rat' | 'snatcher' | 'brute' | 'shaman' | 'ogre';
 
 export interface RaiderOpts {
   /** the warlord: big, tough, and the run ends when he falls */
@@ -645,6 +645,10 @@ export class Raider extends Mover {
   heavy = false;
   /** villagers don't flee from it (rats) */
   harmless = false;
+  /** a boss-sized body: the big HP bar, footstep thuds */
+  huge = false;
+  /** lives out in the world rather than arriving with a raid: doesn't start or end one */
+  lairBound = false;
   /** a child being carried off (snatchers) */
   carrying: Villager | null = null;
 

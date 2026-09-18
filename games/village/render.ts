@@ -4,7 +4,7 @@ import { Mover, Villager, Raider, Player, Arrow } from './agents';
 import { Bolt } from './enemies';
 import { TOWN, CHAR } from './atlas';
 import { ensureCharacter, seedLook, type Look } from './characters';
-import { TILE, COLS, ROWS, CAPS, WALL_HEIGHT } from './config';
+import { TILE, COLS, ROWS, CAPS, WALL_HEIGHT, OGRE } from './config';
 import type { VillageScene } from './main';
 import { Fx } from './fx';
 import { ensureBuildingArt, ensureFlora, FLORA, BUILDING_TEXTURE, LIT_TEXTURE, STACK_ROWS } from './pixelart';
@@ -107,6 +107,7 @@ export class Renderer {
     this.fx.update(dt, this.sprites);
     this.drawOverlays();
     this.night.update(dt, this.buildings);
+    this.scene.fog?.update(dt);
     this.drawRaidArrows();
   }
 
@@ -256,7 +257,8 @@ export class Renderer {
       const height = m instanceof Arrow ? (m.elevated ? WALL_HEIGHT * Math.max(0, 1 - m.travelled / m.dropDistance) : 0) : m.elevated ? WALL_HEIGHT : 0;
       sp.setPosition(Math.round(m.x + (a?.ox ?? 0)), Math.round(m.y - height - bob + (a?.oy ?? 0)));
       sp.setFlipX(m.dir < 0);
-      sp.setVisible(!m.hidden);
+      // the fog hides hostiles (and their bolts) until someone can see them
+      sp.setVisible(!m.hidden && (!m.hostile || !this.scene.fog || this.scene.fog.visibleAt(m.x, m.y) > 0.35));
       sp.setScale(base * (a?.sx ?? 1), base * (a?.sy ?? 1));
       sp.setRotation(a?.rot ?? 0);
       sp.setDepth(DEPTH.agents + m.y / 1000);
@@ -307,7 +309,7 @@ export class Renderer {
     const sw = cam.width, sh = cam.height;
     const pad = 14;
     for (const a of s.agents) {
-      if (!(a instanceof Raider) || a.dead) continue;
+      if (!(a instanceof Raider) || a.dead || a.lairBound) continue;
       const inside = a.x > view.x - 4 && a.x < view.right + 4 && a.y > view.y - 4 && a.y < view.bottom + 4;
       if (inside) continue;
       const dx = a.x - cx, dy = a.y - cy;
@@ -386,8 +388,9 @@ export class Renderer {
     for (const a of s.agents) {
       const m = a as Mover;
       if (m.hidden || m.hp >= m.maxHp) continue;
-      const big = m instanceof Raider && m.boss;
-      const bw = big ? 20 : 10, x = Math.round(m.x - bw / 2), y = Math.round(m.y - (m.elevated ? WALL_HEIGHT : 0) - (big ? 20 : 14));
+      if (m.hostile && this.scene.fog && this.scene.fog.visibleAt(m.x, m.y) <= 0.35) continue;
+      const huge = m instanceof Raider && m.huge, big = huge || (m instanceof Raider && m.boss);
+      const bw = huge ? 32 : big ? 20 : 10, x = Math.round(m.x - bw / 2), y = Math.round(m.y - (m.elevated ? WALL_HEIGHT : 0) - (huge ? 64 : big ? 20 : 14));
       b.fillStyle(0x000000, 0.7); b.fillRect(x - 1, y - 1, bw + 2, 3);
       b.fillStyle(m.hp / m.maxHp > 0.4 ? 0x5fdc5f : 0xff4040, 1); b.fillRect(x, y, Math.max(1, Math.round(bw * m.hp / m.maxHp)), 1);
     }
@@ -430,11 +433,11 @@ function tileFrames(t: Tile, cropDays: number, dayTime: number, oldDays: number)
     case 'house':
     case 'barracks':
     case 'granary':
-    case 'woodyard': case 'tavern': case 'wall': case 'gate': case 'stairs': return { ground: grass, object: EMPTY }; // the building sprite sits on top
+    case 'woodyard': case 'tavern': case 'lair': case 'wall': case 'gate': case 'stairs': return { ground: grass, object: EMPTY }; // the building sprite sits on top
   }
 }
 
-const ENEMY_SCALE: Record<string, number> = { raider: 1, warlord: 1.5, rat: 0.8, snatcher: 0.9, brute: 1.3, shaman: 1 };
+const ENEMY_SCALE: Record<string, number> = { raider: 1, warlord: 1.5, rat: 0.8, snatcher: 0.9, brute: 1.3, shaman: 1, ogre: OGRE.scale };
 
 /** The layered look for an agent — role outfit, held tool, worn armor, dye — or null for things that aren't people. */
 export function lookFor(m: Mover): Look | null {
@@ -447,7 +450,7 @@ export function lookFor(m: Mover): Look | null {
     return { ...base, body: 'adult', outfit: m.role, held };
   }
   if (m instanceof Raider) {
-    const body = m.boss ? 'boss' : m.kind === 'brute' ? 'brute' : m.kind === 'rat' ? 'rat' : m.kind === 'snatcher' ? 'imp' : m.kind === 'shaman' ? 'shaman' : 'orc';
+    const body = m.boss ? 'boss' : m.kind === 'ogre' ? 'ogre' : m.kind === 'brute' ? 'brute' : m.kind === 'rat' ? 'rat' : m.kind === 'snatcher' ? 'imp' : m.kind === 'shaman' ? 'shaman' : 'orc';
     return { ...base, body, outfit: 'none', held: body === 'orc' || body === 'boss' ? 'sword' : body === 'brute' ? 'axe' : 'none', armor: { helmet: 0, chest: 0, legs: 0, shield: 0 } };
   }
   return null;

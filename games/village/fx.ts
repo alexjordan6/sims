@@ -151,13 +151,24 @@ export class Fx {
       case 'boss': this.bossArrive(ev.who, sprites); this.sfx.horn(); break;
       case 'slowmo': this.zoomBump(0.08, 120, 420); break;
       case 'death': break; // handled by die() when the renderer hands over the sprite
+      case 'snore': if (this.scene.fog.visibleAt(ev.x, ev.y) > 0.35) this.word('z', ev.x + 6, ev.y, '#d8d0f0', 6, 1.6); break;
+      case 'thud': {
+        // the Ogre's footsteps: felt within 30 tiles, louder and heavier the closer he is
+        const d = Math.hypot(ev.who.x - this.scene.player.x, ev.who.y - this.scene.player.y) / TILE;
+        if (d > 30) break;
+        const near = 1 - d / 30;
+        this.sfx.thud(0.25 + 0.75 * near);
+        this.shake(70, 0.001 + 0.003 * near);
+        this.dust.explode(3, ev.who.x + ev.who.dir * -8, ev.who.y + 6);
+        break;
+      }
     }
   }
 
   // ---- attacks ---------------------------------------------------------------
 
   private weaponFor(m: Mover): WeaponKind {
-    if (m instanceof Raider) return m.boss || m.kind === 'brute' ? 'bigAxe' : m.kind === 'snatcher' ? 'dagger' : 'axe';
+    if (m instanceof Raider) return m.boss || m.huge || m.kind === 'brute' ? 'bigAxe' : m.kind === 'snatcher' ? 'dagger' : 'axe';
     return 'sword';
   }
 
@@ -206,7 +217,7 @@ export class Fx {
     if (old) old.swoosh.destroy();
     const swoosh = this.scene.add.graphics().setDepth(DEPTH.swoosh);
     this.swings.set(who.id, { sprite: w, ux, uy, t: 0, ttl: ms / 1000 + 0.05, a0, sweep, spin, swoosh, lastGhost: 0 });
-    if (who instanceof Raider && (who.boss || who.kind === 'brute')) this.shake(who.boss ? 120 : 80, who.boss ? 0.006 : 0.004);
+    if (who instanceof Raider && (who.boss || who.huge || who.kind === 'brute')) this.shake(who.huge ? 180 : who.boss ? 120 : 80, who.huge ? 0.009 : who.boss ? 0.006 : 0.004);
     if (spin) this.shake(120, 0.004);
   }
 

@@ -95,6 +95,7 @@ export const CHAR = {
   rat: { key: 'dungeon', frame: 123 },
   snatcher: { key: 'dungeon', frame: DUNGEON.imp },
   brute: { key: 'dungeon', frame: DUNGEON.orc },
+  ogre: { key: 'dungeon', frame: DUNGEON.orc },
   shaman: { key: 'dungeon', frame: DUNGEON.wizard },
 } as const;
 

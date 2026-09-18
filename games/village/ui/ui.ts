@@ -1,7 +1,7 @@
 import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type Tool } from '../agents';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
-import { COST, p, RUN, LEGACY_TEST_MODE, LEVEL_PERKS, CALLING_NAME, TRAITS, HEARTY_RATION, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, CADET_AGE_BEFORE, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS, TREE_YIELD, OLD_YIELD } from '../config';
+import { OGRE, COST, p, RUN, LEGACY_TEST_MODE, LEVEL_PERKS, CALLING_NAME, TRAITS, HEARTY_RATION, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, CADET_AGE_BEFORE, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS, TREE_YIELD, OLD_YIELD } from '../config';
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
@@ -65,6 +65,7 @@ export class UI {
   private inspector!: HTMLElement;
   private roster!: HTMLElement;
   private minimap!: Minimap;
+  private exploredEl!: HTMLElement;
   private tooltipEl!: HTMLElement;
 
   private lastTop = '';
@@ -139,8 +140,9 @@ export class UI {
     </div><div class="list"></div></div>`);
     // --- minimap: top of the side panel (the drawer on phones) so it never covers the world
     this.minimap = new Minimap(s, 2);
-    const box = h('<div class="minimap-panel panel"><span class="cap">MAP</span></div>');
+    const box = h('<div class="minimap-panel panel"><span class="cap">MAP</span><span class="cap explored" style="float:right"></span></div>');
     box.append(this.minimap.el);
+    this.exploredEl = box.querySelector('.explored')!;
     this.side.append(box);
     this.side.append(this.inspector, this.roster);
     const supply = h('<div class="quiver panel"><span class="quiver-count"></span><button class="btn small fletch">+10 ARROWS · 2 WOOD</button><button class="btn small leave-room" hidden>EXIT BUILDING</button></div>');
@@ -397,6 +399,7 @@ export class UI {
     this.topT += dt; this.rosterT += dt;
     this.minimap.render(dt, s.tilesChanged);
     if (this.topT > 0.1) {
+      if (s.fog) { const pct = `${Math.round(s.fog.exploredShare * 100)}% explored`; if (this.exploredEl.textContent !== pct) this.exploredEl.textContent = pct; }
       this.topT = 0; this.renderTop(); this.renderHotbar(); this.renderInspector();
     }
     if (this.rosterT > 0.5) { this.rosterT = 0; this.renderRoster(); }
@@ -477,6 +480,14 @@ export class UI {
     const m = s.selected;
     const head = `<div class="ph">${spr('town', TOWN.sign, 24)}<h2>Inspector</h2></div>`;
     const b = s.selectedBuilding;
+    if (!m && b && b.kind === 'lair') {
+      const dead = b.level >= 3;
+      const html = `${head}<div class="head"><img class="art" src="${frameDataUrl(s, BUILDING_TEXTURE.lair, dead ? 2 : 0)}" alt=""><div><div class="name">${BUILDINGS.lair.name}</div><span class="badge ${dead ? 'farmer' : 'soldier'}">${dead ? 'silent — the fire is out' : 'the Ogre sleeps here by day'}</span></div><button class="btn small close">x</button></div>
+        <p>${dead ? 'The Ogre is slain. Bones and cold ashes are all that remain.' : `A cave mouth banked with earth and bones. The Ogre sleeps inside from dawn to dusk and prowls the woods around it at night — he hunts anyone within ${OGRE.hunt} tiles. He hits for ${OGRE.dmg} with a slow, obvious swing: step back when he raises his club. He has ${OGRE.hp} HP and heals a quarter of it each day he sleeps.`}</p>`;
+      this.inspector.innerHTML = html;
+      this.inspector.querySelector('.close')?.addEventListener('click', () => s.selectBuilding(null));
+      return;
+    }
     if (!m && b) {
       // a building: what it does, what the next level adds, and for houses the RAISE toggle
       const cost = b.level < MAX_LEVEL ? UPGRADE_COST[b.kind][b.level] : 0;
@@ -732,10 +743,10 @@ export class UI {
         <p>${won ? `Your village stands. Day ${s.day}, and the raiders are broken.` : `You died on day ${s.day}.`}</p>
         <div class="stats">
           <div><b>${s.day}</b>days</div><div><b>${st.peakPop}</b>peak population</div>
-          <div><b>${st.childrenRaised}</b>children raised</div><div><b>${st.childrenRaised ? (st.starsTotal / st.childrenRaised).toFixed(1) : '—'}</b>avg stars</div><div><b>${st.raidersKilled}</b>raiders slain</div>
+          <div><b>${st.childrenRaised}</b>children raised</div><div><b>${st.childrenRaised ? (st.starsTotal / st.childrenRaised).toFixed(1) : '—'}</b>avg stars</div><div><b>${st.raidersKilled}</b>raiders slain</div>${st.bossesSlain ? `<div><b>${st.bossesSlain}</b>bosses slain</div>` : ''}
         </div>
         ${r ? `<div class="renown"><div class="lbl">RENOWN EARNED</div>
-          <div class="parts"><span>days ${r.days}</span><span>kills ${r.kills}</span><span>children ${r.children}</span>${r.victory ? `<span>victory ${r.victory}</span>` : ''}</div>
+          <div class="parts"><span>days ${r.days}</span><span>kills ${r.kills}</span><span>children ${r.children}</span>${r.bosses ? `<span>bosses ${r.bosses}</span>` : ''}${r.victory ? `<span>victory ${r.victory}</span>` : ''}</div>
           <div class="total">+${r.total} <small>· ${meta.renown} banked</small></div>
           ${won && meta.wins === 1 ? '<div class="unlock">First victory: a third boon slot is yours.</div>' : ''}
         </div>` : ''}
@@ -805,6 +816,9 @@ export class UI {
           <p>You and your soldiers have four armor slots — <b>helmet</b> (HP), <b>chest</b> (less damage taken), <b>legs</b> (speed) and <b>shield</b> (a chance to block melee hits outright; archers can't carry one). Each has three tiers: <b>leather</b> for wood, <b>iron</b> and <b>steel</b> for wood plus <b>scrap iron</b> looted from slain raiders (needs a Lv2 / Lv3 barracks). Open the ARMORY with <kbd>V</kbd>, from the barracks card, or from a soldier's card; dye tabards and pick helmets and plumes there too — what they wear is what you see.</p>
           <h3>SOLDIERS</h3>
           <p>Pick a house (right click / X, or tap it) and set <b>RAISE CHILDREN AS: SOLDIERS</b> to <b>swear</b> it to the barracks — it flies a banner. A barracks sponsors <b>one sworn house per level</b> (two barracks Lv2 = 4 houses). Children of a sworn house become <b>cadets</b> ${CADET_AGE_BEFORE} days before coming of age: each day they walk to the barracks yard and drill. ${Villager.drillNeeded(s)} days of drill make a soldier at age ${s.adultAge}; a child sworn too late comes of age a worker. Every child's outlook is shown in the inspector and the villagers list — no surprises.</p>
+          <h3>FOG & THE OGRE</h3>
+          <p>The world is dark until someone sees it. You see 10 tiles, buildings light 8, soldiers 6 and other villagers 4; what you've seen stays on the map, dimmed, but raiders in the dark are invisible until they step into sight — walls with people on them are your eyes. The minimap shows how much you've explored.</p>
+          <p>Somewhere 50–85 tiles out in the woods is <b>the Ogre's lair</b>. On day 2 the woodcutters give you a direction. The Ogre is huge — far bigger than any raider — sleeps in his lair by day and prowls the woods around it at night, hunting anyone within ${OGRE.hunt} tiles. He hits for ${OGRE.dmg} after a slow, obvious wind-up (step back!), shrugs off knockback and heals a quarter of his ${OGRE.hp} HP each day he sleeps. He never joins a raid, so fight him on your terms: iron mail, a shield, a few archers, and the daylight to walk home. Slaying him is worth ${OGRE.scrap} scrap and ${OGRE.renown} renown.</p>
           <h3>GROVES</h3>
           <p>Trees spread onto neighbouring grass — but a lone tree barely does (about 1% a day) while a tree inside a grove seeds fast (up to 11%). A sapling with two or more trees beside it grows in ${SHELTERED_SAPLING_DAYS} days instead of ${SAPLING_DAYS}. So plant trees <b>together</b>, near the woodyard, and let the grove do the work.</p>
           <p>Trees age: after ${OLD_GROWTH_DAYS} days they become <b>old growth</b> — taller, and worth ${OLD_YIELD} wood instead of ${TREE_YIELD}. Woodcutters take old growth first and thin a grove from its edge.</p>

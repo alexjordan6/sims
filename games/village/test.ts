@@ -3,7 +3,7 @@ import type { VillageScene } from './main';
 import { World, doorstep, type BuildingKind } from './world';
 import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
-import { Brute, Rat, waveComposition } from './enemies';
+import { Brute, Rat, Ogre, waveComposition } from './enemies';
 import { COLS, ROWS, WALL_HEIGHT } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
@@ -38,6 +38,8 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       const w = new World(); w.generate(new Rng(seed)); if (w.denseForests) dense++;
       assert(w.bfs({ tx: COLS / 2, ty: ROWS / 2 }, { tx: COLS / 2, ty: 0 }).length > 0, `seed ${seed}: north trail reachable`);
       assert(w.treeCount === w.count(t => t.kind === 'tree'), `seed ${seed}: tree accounting`);
+      const lairDist = w.lair ? Math.hypot(w.lair.tx + 2 - COLS / 2, w.lair.ty + 2 - ROWS / 2) : 0;
+      assert(w.lair && lairDist >= 40 && lairDist <= 90 && w.bfs({ tx: w.lair.tx + 2, ty: w.lair.ty + 4 }, { tx: COLS / 2, ty: ROWS / 2 }).length > 0, `seed ${seed}: the Ogre's lair is placed far out and reachable (${lairDist.toFixed(0)} tiles)`);
     }
     assert(dense > 7 && dense < 20, `dense forests vary by seed (${dense}/20)`);
     const a = new World(), b = new World(); a.generate(new Rng(88)); b.generate(new Rng(88));
@@ -94,6 +96,16 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(!s.interior.active && !s.player.hidden && s.player.tile.tx === door.tx && s.player.tile.ty === door.ty, `${kind}: exit at the correct door`);
       s.world.set(building.tx, building.ty, 'grass'); assert(s.world.get(building.tx, building.ty)!.building === building, `${kind}: building remains indestructible`);
     }
+    // the Ogre: asleep and hidden by day, out at night, home at dawn with a quarter of his health back; never counts as a raid
+    s = fresh(); s.agents = [s.player, s.ogre!]; const ogre = s.ogre!;
+    assert(ogre instanceof Ogre && ogre.hidden && ogre.state === 'sleeping' && ogre.lairBound && ogre.huge, 'the Ogre starts asleep and hidden in his lair');
+    Object.assign(s.player, World.center(COLS / 2, ROWS / 2)); s.dayTime = 0.86; step(s, 2);
+    assert(!ogre.hidden && ogre.state === 'roaming', 'the Ogre comes out at night');
+    ogre.hp = 300; s.dayTime = 0.3; step(s, 20);
+    assert(ogre.hidden && ogre.state === 'sleeping' && ogre.hp === 450, 'the Ogre goes home at dawn and heals a quarter');
+    assert(!s.agents.some(a => a instanceof Raider && !a.lairBound), 'the Ogre does not count toward an active raid');
+    Object.assign(s.player, { x: ogre.x, y: ogre.y + 40 }); s.dayTime = 0.86; step(s, 3);
+    assert(ogre.state === 'hunting' && s.player.hp <= s.player.maxHp - 25, 'the Ogre hunts a player near his lair at night and hits for 25');
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;
   } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); }

@@ -198,9 +198,11 @@ export interface RunResult {
   /** children who came of age this run, and the care stars they were raised with (summed) */
   childrenRaised: number;
   stars: number;
+  /** bosses found and slain out in the world (the Ogre) */
+  bossesSlain: number;
 }
 
-export interface RenownBreakdown { days: number; kills: number; children: number; victory: number; total: number }
+export interface RenownBreakdown { days: number; kills: number; children: number; bosses: number; victory: number; total: number }
 
 const KEY = 'village.meta';
 
@@ -308,8 +310,8 @@ export class Meta {
   }
 
   static renownFor(r: RunResult): RenownBreakdown {
-    const days = r.day * 10, kills = r.raidersKilled * 5, children = r.childrenRaised * 20 + r.stars * 8, victory = r.won ? 500 : 0;
-    return { days, kills, children, victory, total: days + kills + children + victory };
+    const days = r.day * 10, kills = r.raidersKilled * 5, children = r.childrenRaised * 20 + r.stars * 8, bosses = r.bossesSlain * 300, victory = r.won ? 500 : 0;
+    return { days, kills, children, bosses, victory, total: days + kills + children + bosses + victory };
   }
 
   /** Bank a finished run. */

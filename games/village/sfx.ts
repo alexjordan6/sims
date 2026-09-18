@@ -83,4 +83,6 @@ export class Sfx {
   horn(): void { this.tone('sawtooth', 110, 165, 0.5, 0.2); this.tone('sawtooth', 165, 220, 0.5, 0.15, 0.25); }
   chop(): void { this.noise(0.06, 500, 150, 0.3, 0.7); this.tone('square', 200, 120, 0.06, 0.15); }
   dig(): void { this.noise(0.12, 300, 90, 0.2, 0.6); }
+  /** a giant's footstep; `vol` fades with distance */
+  thud(vol = 1): void { this.tone('sine', 70, 40, 0.18, 0.35 * vol); this.noise(0.08, 160, 60, 0.15 * vol, 0.8); }
 }

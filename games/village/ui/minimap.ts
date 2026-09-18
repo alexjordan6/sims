@@ -1,5 +1,6 @@
 import { Villager, Raider, Player, type Mover } from '../agents';
 import { COLS, ROWS, TILE } from '../config';
+import { buildingCenter } from '../world';
 import type { TileKind } from '../world';
 import type { VillageScene } from '../main';
 
@@ -16,7 +17,7 @@ const TERRAIN: Record<TileKind, [number, number, number]> = {
   barracks: [104, 122, 156],
   granary: [214, 110, 60],
   woodyard: [160, 116, 66],
-  tavern: [210, 164, 88], wall: [163, 169, 178], gate: [209, 177, 113], stairs: [128, 194, 218],
+  tavern: [210, 164, 88], lair: [70, 50, 40], wall: [163, 169, 178], gate: [209, 177, 113], stairs: [128, 194, 218],
 };
 
 const ROLE = { kid: '#f5d8a8', farmer: '#7fd37f', woodcutter: '#c9a26b', soldier: '#6f9bff' } as const;
@@ -27,6 +28,8 @@ export class Minimap {
   private terrain: ImageData;
   private painted = false;
   private t = 0;
+  /** explored tiles painted last pass; the terrain repaints when more come into view */
+  private seenPainted = -1;
 
   constructor(private scene: VillageScene, scale: number) {
     this.el = document.createElement('canvas');
@@ -45,18 +48,26 @@ export class Minimap {
   invalidate(): void { this.painted = false; }
 
   render(dt: number, tilesChanged: boolean): void {
-    if (!this.painted || tilesChanged) this.paintTerrain();
+    const s = this.scene;
+    if (!this.painted || tilesChanged || (s.fog && s.fog.seen !== this.seenPainted)) this.paintTerrain();
     this.t += dt;
     if (this.t < 0.12) return;
     this.t = 0;
     const c = this.ctx;
     c.putImageData(this.terrain, 0, 0);
-    const s = this.scene;
+    // the lair, once found: a skull mark (grey once the Ogre is dead)
+    if (s.lairFound && s.world.lair) {
+      const lc = buildingCenter(s.world.lair), lx = Math.round(lc.tx), ly = Math.round(lc.ty);
+      c.fillStyle = s.world.lair.level >= 3 ? '#8a8a8a' : '#f4f0e0';
+      c.fillRect(lx - 2, ly - 2, 5, 4); c.fillRect(lx - 1, ly + 2, 3, 1);
+      c.fillStyle = '#1a1014'; c.fillRect(lx - 1, ly - 1, 1, 1); c.fillRect(lx + 1, ly - 1, 1, 1);
+    }
     for (const a of s.agents as Mover[]) {
       if (a.dead || a.hidden) continue;
+      if (a.hostile && s.fog && s.fog.visibleAt(a.x, a.y) <= 0.35) continue; // unseen threats stay unseen
       let colour: string | null = null, size = 1;
       if (a instanceof Player) { colour = '#ffffff'; size = 2; }
-      else if (a instanceof Raider) { colour = a.boss ? '#ffcc33' : '#ff4a3d'; size = a.boss ? 2 : 1; }
+      else if (a instanceof Raider) { colour = a.boss || a.huge ? '#ffcc33' : '#ff4a3d'; size = a.boss || a.huge ? 2 : 1; }
       else if (a instanceof Villager) colour = ROLE[a.role];
       if (!colour) continue;
       c.fillStyle = colour;
@@ -72,11 +83,14 @@ export class Minimap {
   private paintTerrain(): void {
     const tiles = this.scene.world.tiles;
     const d = this.terrain.data;
+    const fog = this.scene.fog;
     for (let i = 0; i < tiles.length; i++) {
-      const [r, g, b] = TERRAIN[tiles[i].kind];
       const o = i * 4;
+      if (fog && !fog.explored[i]) { d[o] = 6; d[o + 1] = 5; d[o + 2] = 10; d[o + 3] = 255; continue; } // unseen: black
+      const [r, g, b] = TERRAIN[tiles[i].kind];
       d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
     }
     this.painted = true;
+    this.seenPainted = fog ? fog.seen : -1;
   }
 }

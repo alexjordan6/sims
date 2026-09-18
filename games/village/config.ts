@@ -47,12 +47,14 @@ export const CAPS = [0, 150, 300, 600] as const;
 /** Playtest switch: every Legacy node unlocked and a slot per branch. Flip to false to restore progression (saved progress is untouched either way). */
 export const LEGACY_TEST_MODE = true;
 /** wood to upgrade a building to level 2 / 3 (index = current level) */
-export const UPGRADE_COST: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern', readonly number[]> = {
+export const UPGRADE_COST: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern' | 'lair', readonly number[]> = {
+  lair: [0, 0, 0],
   tavern: [0, 40, 80],
   house: [0, 30, 60], barracks: [0, 40, 80], granary: [0, 30, 60], woodyard: [0, 30, 60],
 };
 /** what each level of a building gives, in a few words (index = level); shown in tooltips, hints and help */
-export const LEVEL_PERKS: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern', readonly [string, string, string, string]> = {
+export const LEVEL_PERKS: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern' | 'lair', readonly [string, string, string, string]> = {
+  lair: ['', 'the Ogre sleeps here by day', '', ''],
   tavern: ['', 'hearth meals restore 20 HP', 'hearth meals restore 35 HP', 'hearth meals restore 50 HP · family hall'],
   house: ['', '4 beds', '6 beds', '8 beds · births +15%'],
   barracks: ['', 'sponsors 1 house', 'sponsors 2 houses · soldiers +15 HP', 'sponsors 3 houses · soldiers +30 HP · +20% dmg · regen'],
@@ -60,7 +62,8 @@ export const LEVEL_PERKS: Record<'house' | 'barracks' | 'granary' | 'woodyard' |
   woodyard: ['', 'holds 150 wood', 'holds 300 wood', 'holds 600 wood'],
 };
 /** what changes on the building itself at each level, for the help screen */
-export const LEVEL_LOOKS: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern', readonly [string, string, string, string]> = {
+export const LEVEL_LOOKS: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern' | 'lair', readonly [string, string, string, string]> = {
+  lair: ['', 'a cave mouth, bones, a fire', '', ''],
   tavern: ['', 'green roof, hanging mug sign', 'flower boxes and second chimney', 'guest loft and lanterns'],
   house: ['', 'cottage', 'chimney, flower boxes, porch', 'second storey'],
   barracks: ['', 'stone keep', 'shields and stakes', 'tower and torches'],
@@ -92,6 +95,19 @@ export const TRAITS: Record<Trait, { name: string; blurb: string }> = {
 };
 /** beds per house level (index = level); overridden upward by the Big Families boon */
 export const HOUSE_BEDS = [0, 4, 6, 8] as const;
+
+// ---- the Ogre -------------------------------------------------------------------------------
+/** The first boss: a giant who sleeps in his lair by day and prowls around it at night. */
+export const OGRE = {
+  hp: 600, dmg: 25, speed: 34, reach: 30, windup: 0.6, recover: 1.1,
+  /** how far from the lair he wanders, and how close you must come for him to hunt you */
+  roam: 22, hunt: 14,
+  /** fraction of max HP healed each day he sleeps */
+  regen: 0.25,
+  scrap: 30, renown: 300,
+  /** sprite scale: he's drawn at 48x64 already, so this is on top of that (a person is 16x20) */
+  scale: 1.25,
+} as const;
 
 // ---- armor ----------------------------------------------------------------------------------
 export type ArmorSlot = 'helmet' | 'chest' | 'legs' | 'shield';
@@ -127,7 +143,7 @@ export const ARMOR_SLOTS: readonly ArmorSlot[] = ['helmet', 'chest', 'legs', 'sh
 /** barracks level needed to forge each tier */
 export const ARMOR_BARRACKS_LEVEL = [0, 1, 2, 3] as const;
 /** scrap iron looted from slain raiders */
-export const SCRAP_DROP = { raider: 2, brute: 4, warlord: 10, snatcher: 1, shaman: 2, rat: 0 } as const;
+export const SCRAP_DROP = { raider: 2, brute: 4, warlord: 10, snatcher: 1, shaman: 2, rat: 0, ogre: 30 } as const;
 /** cloth dyes for soldiers' tabards, and plume colours */
 export const DYES = ['#3f6fd1', '#c23b3b', '#2f7d4e', '#e0b04a', '#8c4ab0', '#e8e0d0', '#2a2a2e', '#d8722c'] as const;
 export const DYE_NAMES = ['blue', 'red', 'green', 'gold', 'purple', 'white', 'black', 'orange'] as const;

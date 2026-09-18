@@ -297,6 +297,42 @@ function drawCabin(ctx: Ctx, ox: number, level: number): void {
   plaque(ctx, ox + 17, 27, level, p);
 }
 
+/** The Ogre's lair, 80x80 (5x4 footprint + roof row): an earthen mound with a cave mouth, bones, a fire pit. Level 0 = fire out. */
+function drawLair(ctx: Ctx, ox: number, level: number): void {
+  const EARTH = '#5a4a3e', EARTH_DARK = '#3e3128', EARTH_LIGHT = '#7a6a58', MOSS = '#4f6b2e', MOSS_DARK = '#3a5222', BONE = '#e8e0d0', BONE_DARK = '#b8ae9a', ROCK = '#6e6a66', ROCK_LIGHT = '#8c8884', ROCK_DARK = '#4a4744';
+  const hash = (x: number, y: number) => ((x * 73856093) ^ (y * 19349663)) >>> 0;
+  // the mound: a rounded hill of packed earth and rock, mossy on top, no straight lines anywhere
+  for (let r = 0; r < 62; r++) {
+    const wobble = Math.sin(r * 0.9) * 1.5 + Math.sin(r * 2.3) * 0.8;
+    const half = Math.min(39, 5 + r * 0.95 + wobble);
+    const x0 = Math.round(40 - half), x1 = Math.round(40 + half);
+    px(ctx, ox + x0, r + 8, INK, x1 - x0, 1);
+    for (let x = x0 + 1; x < x1 - 1; x++) {
+      const h = hash(x, r) % 17;
+      const top = r < 14 + Math.abs(x - 40) * 0.3;
+      px(ctx, ox + x, r + 8, top ? (h < 3 ? MOSS_DARK : MOSS) : h < 2 ? ROCK : h < 3 ? EARTH_DARK : h === 5 ? EARTH_LIGHT : EARTH, 1, 1);
+    }
+  }
+  // boulders set into the slope
+  for (const [x, y, w, hh] of [[8, 30, 7, 5], [64, 34, 8, 6], [16, 52, 6, 5], [58, 54, 7, 5], [12, 42, 5, 4], [66, 46, 5, 4]] as const) {
+    px(ctx, ox + x, y, INK, w, hh); px(ctx, ox + x + 1, y + 1, ROCK, w - 2, hh - 2); px(ctx, ox + x + 1, y + 1, ROCK_LIGHT, w - 3, 1); px(ctx, ox + x + 1, y + hh - 2, ROCK_DARK, w - 2, 1);
+  }
+  // the cave mouth: a ring of stones around a black arch, and a little light deep inside
+  px(ctx, ox + 24, 34, INK, 32, 46); px(ctx, ox + 28, 30, INK, 24, 4); px(ctx, ox + 32, 28, INK, 16, 2);
+  for (const [x, y] of [[25, 40], [25, 50], [25, 60], [25, 70], [52, 40], [52, 50], [52, 60], [52, 70], [29, 33], [36, 30], [42, 30], [48, 33]] as const) { px(ctx, ox + x, y, ROCK, 3, 3); px(ctx, ox + x, y, ROCK_LIGHT, 2, 1); px(ctx, ox + x + 1, y + 2, ROCK_DARK, 2, 1); }
+  px(ctx, ox + 29, 40, '#141014', 22, 40); px(ctx, ox + 33, 36, '#141014', 14, 4); px(ctx, ox + 36, 34, '#141014', 8, 2);
+  // bones and skulls about the entrance
+  px(ctx, ox + 10, 70, BONE, 9, 2); px(ctx, ox + 9, 69, BONE, 2, 4); px(ctx, ox + 18, 69, BONE, 2, 4);
+  px(ctx, ox + 60, 72, INK, 7, 6); px(ctx, ox + 61, 73, BONE, 5, 4); px(ctx, ox + 62, 74, INK, 1, 1); px(ctx, ox + 64, 74, INK, 1, 1); px(ctx, ox + 62, 76, BONE_DARK, 3, 1);
+  px(ctx, ox + 4, 60, INK, 3, 8); px(ctx, ox + 5, 61, BONE, 1, 6); px(ctx, ox + 3, 59, INK, 5, 2); px(ctx, ox + 4, 60, BONE_DARK, 3, 1);
+  // stakes with skulls flanking the mouth
+  for (const x of [20, 56]) { px(ctx, ox + x, 50, BARK_DARK, 2, 30); px(ctx, ox + x - 2, 46, INK, 6, 6); px(ctx, ox + x - 1, 47, BONE, 4, 4); px(ctx, ox + x - 1, 48, INK, 1, 1); px(ctx, ox + x + 2, 48, INK, 1, 1); }
+  // the fire pit (out at level 0)
+  px(ctx, ox + 60, 64, INK, 13, 6); px(ctx, ox + 61, 65, ROCK, 11, 4); px(ctx, ox + 63, 66, '#2a1a16', 7, 2);
+  if (level > 0) { litPx(ctx, ox + 64, 62, FLAME, 5, 4); litPx(ctx, ox + 65, 60, PANE, 3, 2); litPx(ctx, ox + 66, 59, PANE_HOT, 1, 1); px(ctx, ox + 63, 66, BARK_DARK, 7, 2); }
+  else px(ctx, ox + 63, 66, '#3a3a3e', 7, 2);
+}
+
 function drawTavern(ctx: Ctx, ox: number, level: number): void {
   const p: Palette = { ...PALETTES.house, roof: '#567454', roofDark: '#334b3d', roofLight: '#809767' };
   wall(ctx, ox + 4, 27, 56, 53, p);
@@ -371,8 +407,10 @@ function buildingTexture(scene: Phaser.Scene, key: string, w: number, h: number,
  * Where each building gives off light at night (window centres, lanterns, torches), in texture
  * pixels from the sprite's top-left, per level (index = level). `warm` = firelight (torches).
  */
-export const LIGHTS: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern', readonly (readonly { x: number; y: number; r: number; warm?: boolean }[])[]> = {
+export const LIGHTS: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern' | 'lair', readonly (readonly { x: number; y: number; r: number; warm?: boolean }[])[]> = {
   tavern: [[], [{ x: 14, y: 48, r: 22 }, { x: 45, y: 48, r: 22 }], [{ x: 14, y: 48, r: 24 }, { x: 45, y: 48, r: 24 }], [{ x: 14, y: 48, r: 24 }, { x: 45, y: 48, r: 24 }, { x: 31, y: 19, r: 16 }, { x: 7, y: 65, r: 20, warm: true }]],
+  // the lair's fire pit (level 0 = the Ogre is dead and the fire is out)
+  lair: [[], [{ x: 66, y: 66, r: 26, warm: true }], [{ x: 66, y: 66, r: 26, warm: true }], []],
   house: [
     [],
     [{ x: 13, y: 50, r: 16 }, { x: 26, y: 50, r: 16 }],
@@ -394,8 +432,9 @@ export const LIGHTS: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tav
   ],
 };
 /** Chimney tops (smoke rises from here), per level. */
-export const CHIMNEYS: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern', readonly (readonly { x: number; y: number }[])[]> = {
+export const CHIMNEYS: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern' | 'lair', readonly (readonly { x: number; y: number }[])[]> = {
   tavern: [[], [{ x: 50, y: 7 }], [{ x: 50, y: 7 }, { x: 11, y: 15 }], [{ x: 50, y: 7 }, { x: 11, y: 15 }]],
+  lair: [[], [{ x: 66, y: 60 }], [{ x: 66, y: 60 }], []],
   house: [[], [], [{ x: 48, y: 9 }], [{ x: 48, y: 5 }]],
   barracks: [[], [], [], []],
   granary: [[], [], [], []],
@@ -425,14 +464,17 @@ export function ensureGlowTexture(scene: Phaser.Scene): void {
 }
 
 /** Texture key for a building kind; frame = level - 1. */
-export const BUILDING_TEXTURE = { house: 'bld-house', barracks: 'bld-barracks', granary: 'bld-granary', woodyard: 'cabin', tavern: 'bld-tavern' } as const;
+export const BUILDING_TEXTURE = { house: 'bld-house', barracks: 'bld-barracks', granary: 'bld-granary', woodyard: 'cabin', tavern: 'bld-tavern', lair: 'bld-lair' } as const;
 /** The same buildings' windows, lanterns and torches alone — laid over the body at night. */
-export const LIT_TEXTURE = { house: 'bld-house-lit', barracks: 'bld-barracks-lit', granary: 'bld-granary-lit', woodyard: 'cabin-lit', tavern: 'bld-tavern-lit' } as const;
+export const LIT_TEXTURE = { house: 'bld-house-lit', barracks: 'bld-barracks-lit', granary: 'bld-granary-lit', woodyard: 'cabin-lit', tavern: 'bld-tavern-lit', lair: 'bld-lair-lit' } as const;
 
 /** Create every building and stock texture (safe to call more than once). */
 export function ensureBuildingArt(scene: Phaser.Scene): void {
   ensureFortArt(scene);
   buildingTexture(scene, 'bld-tavern', BIG_W, BIG_H, drawTavern);
+  // lair frames: level 1-2 = the fire burns (the Ogre lives), level 3 = the fire is out (he's dead)
+  buildingTexture(scene, 'bld-lair', 80, 80, (ctx, ox, level) => drawLair(ctx, ox, level < 3 ? 1 : 0));
+  buildingTexture(scene, 'bld-lair-lit', 80, 80, (ctx, ox, level) => drawLair(ctx, ox, level < 3 ? 1 : 0), true);
   buildingTexture(scene, 'bld-tavern-lit', BIG_W, BIG_H, drawTavern, true);
   buildingTexture(scene, 'bld-house', BIG_W, BIG_H, drawHouse);
   buildingTexture(scene, 'bld-barracks', BIG_W, BIG_H, drawBarracks);

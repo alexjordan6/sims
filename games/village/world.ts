@@ -4,7 +4,7 @@ import { TILE, COLS, ROWS, type Calling } from './config';
 export type DefenseKind = 'wall' | 'gate' | 'stairs';
 export interface Defense extends TilePos { kind: DefenseKind; hp: number; maxHp: number; open: boolean }
 export type TileKind = 'grass' | 'tree' | 'sapling' | 'tilled' | 'crop' | BuildingKind | DefenseKind;
-export type BuildingKind = 'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern';
+export type BuildingKind = 'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern' | 'lair';
 
 /** Footprint per building kind; (tx, ty) is the top-left, the door sits on the bottom row at `door`. */
 export const BUILDINGS: Record<BuildingKind, { w: number; h: number; door: number; name: string }> = {
@@ -13,6 +13,7 @@ export const BUILDINGS: Record<BuildingKind, { w: number; h: number; door: numbe
   granary: { w: 3, h: 2, door: 1, name: 'Granary' },
   woodyard: { w: 3, h: 2, door: 1, name: 'Woodyard' },
   tavern: { w: 4, h: 4, door: 1, name: 'The Copper Acorn' },
+  lair: { w: 5, h: 4, door: 2, name: "The Ogre's Lair" },
 };
 export const MAX_LEVEL = 3;
 /** ground a building can go on (flattened when it goes up) */
@@ -70,13 +71,15 @@ export interface TilePos { tx: number; ty: number }
 
 export const BLOCKING: Record<TileKind, boolean> = {
   grass: false, tilled: false, crop: false, sapling: false, tree: true, house: true, barracks: true, granary: true, woodyard: true,
-  tavern: true, wall: true, gate: false, stairs: false,
+  tavern: true, lair: true, wall: true, gate: false, stairs: false,
 };
 
 export class World {
   tiles: Tile[] = [];
   buildings: Building[] = [];
   defenses = new Map<number, Defense>();
+  /** the Ogre's home, far out in the woods; found through the fog */
+  lair: Building | null = null;
   denseForests = false;
   revision = 0;
   treeCount = 0;
@@ -88,6 +91,8 @@ export class World {
   }
 
   get houses(): Building[] { return this.buildings.filter((b) => b.kind === 'house'); }
+  /** buildings the village can use (everything but the Ogre's lair) */
+  get villageBuildings(): Building[] { return this.buildings.filter((b) => b.kind !== 'lair'); }
   get barracks(): Building[] { return this.buildings.filter((b) => b.kind === 'barracks'); }
   get granary(): Building | undefined { return this.buildings.find((b) => b.kind === 'granary'); }
   get woodyard(): Building | undefined { return this.buildings.find((b) => b.kind === 'woodyard'); }
@@ -360,6 +365,17 @@ export class World {
     // A small reliable starter grove; the wider seed still determines the wilderness.
     for (let y = hy + 8; y < hy + 12; y++) for (let x = hx - 8; x < hx - 3; x++) {
       if (!this.get(x, y)?.trail && rng.chance(0.65)) this.set(x, y, 'tree').stage = rng.int(0, 10);
+    }
+    // The Ogre's lair: 55-85 tiles out, on a cleared patch in the woods, reachable on foot.
+    const f = BUILDINGS.lair;
+    for (let attempt = 0; attempt < 400 && !this.lair; attempt++) {
+      const ang = rng.range(0, Math.PI * 2), dist = rng.range(55, 85);
+      const tx = Math.round(hx + Math.cos(ang) * dist), ty = Math.round(hy + Math.sin(ang) * dist * 0.75);
+      if (tx < 4 || ty < 4 || tx + f.w > this.cols - 4 || ty + f.h + 2 > this.rows - 4) continue;
+      if ((this.get(tx + 2, ty + 1)?.biome ?? 'meadow') === 'meadow' && attempt < 300) continue; // prefer the woods
+      for (let dy = -1; dy <= f.h + 1; dy++) for (let dx = -1; dx <= f.w; dx++) this.set(tx + dx, ty + dy, 'grass');
+      if (!this.bfs({ tx: tx + f.door, ty: ty + f.h }, { tx: hx, ty: hy }).length) continue;
+      this.lair = this.place('lair', tx, ty);
     }
   }
 }
