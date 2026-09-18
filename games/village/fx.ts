@@ -2,7 +2,8 @@ import Phaser from 'phaser';
 import { Mover, Villager, Raider, Player, Arrow, COMBO } from './agents';
 import { Bolt } from './enemies';
 import { DUNGEON, TOWN } from './atlas';
-import { TILE } from './config';
+import { TILE, OGRE } from './config';
+import { buildingCenter } from './world';
 import { Sfx } from './sfx';
 import type { VillageScene, FxEvent } from './main';
 
@@ -60,6 +61,14 @@ export class Fx {
   private wasPaused = false;
   /** sprites of the dead, kept alive until their tween ends */
   dying = new Set<Phaser.GameObjects.Sprite>();
+  /** the eerie wind around the Ogre's lair: pale wisps and dead leaves circling it, a cold cast over the screen */
+  private wisps: Phaser.GameObjects.Particles.ParticleEmitter;
+  private leaves: Phaser.GameObjects.Particles.ParticleEmitter;
+  private cold: Phaser.GameObjects.Rectangle;
+  private windAcc = 0;
+  /** how strong the wind is where the player stands, 0..1 (smoothed) */
+  windLevel = 0;
+  private windWarned = false;
   /** how the player's last hit on each target went, so the death can launch them that way */
   private lastBlow = new Map<number, { ux: number; uy: number; push: number; crit: boolean }>();
 
@@ -75,6 +84,51 @@ export class Fx {
     this.gold = mk([0xffcf5a, 0xfff2b0], { speed: { min: 30, max: 90 }, gravityY: -20, lifespan: 700 });
     this.magic = mk([0xb46bff, 0xe0b0ff, 0x7a3fd6], { speed: { min: 10, max: 40 }, gravityY: -30, lifespan: 380 });
     this.puff = mk([0xffffff, 0xe8e8e8, 0xc9c9c9], { speed: { min: 15, max: 45 }, gravityY: -25, lifespan: 500, scale: { start: 2.5, end: 0 } });
+    // the wind: streaks that fade in and out as they circle the lair, drawn above the fog so it's a warning you can see
+    if (!scene.textures.exists('wisp')) scene.make.graphics({ x: 0, y: 0 }, false).fillStyle(0xffffff).fillRect(0, 0, 16, 2).generateTexture('wisp', 16, 2);
+    const fade = (v: number) => ({ onEmit: () => 0, onUpdate: (_p: Phaser.GameObjects.Particles.Particle, _k: string, t: number) => Math.sin(t * Math.PI) * v });
+    this.wisps = scene.add.particles(0, 0, 'wisp', { emitting: false, lifespan: { min: 1400, max: 2400 }, tint: [0xd8d0f0, 0xb0b8d8, 0x9aa0c8], alpha: fade(0.85), scale: { start: 0.8, end: 1.8 } }).setDepth(46);
+    this.leaves = scene.add.particles(0, 0, 'px', { emitting: false, lifespan: { min: 1600, max: 2600 }, tint: [0x4a3a50, 0x5a4a3a, 0x3a3a48], alpha: fade(0.9), rotate: { onEmit: () => Math.random() * 360, onUpdate: (_p: Phaser.GameObjects.Particles.Particle, _k: string, _t: number, v: number) => v + 6 } }).setDepth(46);
+    this.cold = scene.add.rectangle(0, 0, 4, 4, 0x8088b8, 1).setOrigin(0, 0).setScrollFactor(0).setDepth(44).setBlendMode(Phaser.BlendModes.MULTIPLY).setAlpha(0).setVisible(false);
+  }
+
+  /**
+   * The eerie wind around the lair: within OGRE.windRadius tiles, wisps and dead leaves stream
+   * across the view, circling the lair, thicker and louder the closer you get; the screen takes a
+   * cold cast. It blows through the fog, so it's the first sign the lair is near.
+   */
+  private wind(dt: number): void {
+    const s = this.scene, lair = s.world.lair;
+    let target = 0;
+    if (lair && !s.interior.active) {
+      const c = buildingCenter(lair), d = Math.hypot(s.player.x - c.tx * TILE, s.player.y - c.ty * TILE) / TILE;
+      target = Math.max(0, Math.min(1, 1 - d / OGRE.windRadius));
+    }
+    this.windLevel += (target - this.windLevel) * Math.min(1, dt * 2);
+    const k = this.windLevel;
+    this.sfx.wind(k * (this.sfx.muted ? 0 : 1));
+    const cam = s.cameras.main;
+    this.cold.setPosition(0, 0).setSize(cam.width / cam.zoom + 4, cam.height / cam.zoom + 4).setScale(1).setVisible(k > 0.02).setAlpha(k * 0.22);
+    this.cold.setPosition(cam.width * (1 - 1 / cam.zoom) / 2 - 2, cam.height * (1 - 1 / cam.zoom) / 2 - 2); // scrollFactor 0 objects scale about the screen centre
+    if (k < 0.03) return;
+    if (!this.windWarned) { this.windWarned = true; s.event('info', 'A cold wind rises, circling something out in the woods.', true); }
+    // spawn across the view; each streak flies along the circle around the lair, with a little inward pull
+    this.windAcc += dt * (12 + 80 * k);
+    const c = buildingCenter(lair!), lx = c.tx * TILE, ly = c.ty * TILE;
+    const v = cam.worldView;
+    while (this.windAcc >= 1) {
+      this.windAcc -= 1;
+      const x = v.x - 20 + Math.random() * (v.width + 40), y = v.y - 20 + Math.random() * (v.height + 40);
+      const dx = x - lx, dy = y - ly, d = Math.hypot(dx, dy) || 1;
+      const spd = 35 + Math.random() * 45 + 40 * k;
+      const tx = -dy / d, ty = dx / d; // clockwise around the lair
+      const vx = (tx - dx / d * 0.25) * spd, vy = (ty - dy / d * 0.25) * spd;
+      const leaf = Math.random() < 0.3;
+      const em = leaf ? this.leaves : this.wisps;
+      em.setParticleSpeed(vx, vy);
+      if (!leaf) em.particleRotate = Phaser.Math.RadToDeg(Math.atan2(vy, vx));
+      em.emitParticleAt(x, y, 1);
+    }
   }
 
   anim(id: number): AnimState {
@@ -89,7 +143,8 @@ export class Fx {
       this.wasPaused = this.scene.paused;
       if (this.wasPaused) this.scene.tweens.pauseAll(); else this.scene.tweens.resumeAll();
     }
-    if (this.wasPaused) return;
+    if (this.wasPaused) { this.sfx.wind(0); return; }
+    this.wind(dt);
     for (const [id, sw] of this.swings) {
       const owner = sprites.get(id);
       sw.t += dt;
@@ -455,6 +510,7 @@ export class Fx {
 
   /** Clear everything after a reset. */
   clear(): void {
+    this.windWarned = false; this.windLevel = 0; this.sfx.wind(0);
     this.scene.tweens.killAll();
     this.anims.clear();
     this.lastBlow.clear();

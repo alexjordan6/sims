@@ -6,6 +6,9 @@ export class Sfx {
   private ctx: Ctx | null = null;
   private master: GainNode | null = null;
   private noiseBuf: AudioBuffer | null = null;
+  /** the looping wind around the lair: a low moaning noise whose level follows how close you are */
+  private windGain: GainNode | null = null;
+  private windLevel = 0;
   muted = false;
 
   constructor() {
@@ -36,6 +39,30 @@ export class Sfx {
     const d = this.noiseBuf.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
     return this.ctx;
+  }
+
+  /**
+   * Set the eerie wind's level (0 = silent, 1 = right at the lair). The loop is built on first use:
+   * looped noise through a low-pass that an LFO slowly sweeps, so it moans rather than hisses.
+   */
+  wind(level: number): void {
+    level = Math.max(0, Math.min(1, level));
+    if (level === 0 && !this.windGain) return;
+    const c = this.ensure(); if (!c || !this.master || !this.noiseBuf) return;
+    if (!this.windGain) {
+      const src = c.createBufferSource(); src.buffer = this.noiseBuf; src.loop = true;
+      const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 320; f.Q.value = 4;
+      const lfo = c.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 0.13;
+      const depth = c.createGain(); depth.gain.value = 180;
+      lfo.connect(depth).connect(f.frequency);
+      const g = c.createGain(); g.gain.value = 0;
+      src.connect(f).connect(g).connect(this.master);
+      src.start(); lfo.start();
+      this.windGain = g;
+    }
+    if (Math.abs(level - this.windLevel) < 0.01) return;
+    this.windLevel = level;
+    this.windGain.gain.setTargetAtTime(level * 0.5, c.currentTime, 0.4);
   }
 
   /** A short tone: frequency glides from f0 to f1 over `dur` seconds. */

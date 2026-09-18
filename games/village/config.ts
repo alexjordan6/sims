@@ -110,6 +110,8 @@ export const OGRE = {
   /** fraction of max HP healed each day he sleeps */
   regen: 0.25,
   scrap: 30, renown: 300,
+  /** tiles from the lair within which the eerie wind blows (it strengthens as you close in) */
+  windRadius: 30,
   /** sprite scale: he's drawn at 48x64 already, so this is on top of that (a person is 16x20) */
   scale: 1.25,
 } as const;
