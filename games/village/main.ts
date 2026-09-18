@@ -967,7 +967,7 @@ export class VillageScene extends SimScene {
     const d = this.world.get(q.tx, q.ty)?.defense ?? this.world.get(pl.tile.tx, pl.tile.ty)?.defense;
     if (d && pl.dist(World.center(d.tx, d.ty)) < 28) {
       if (d.kind === 'stairs') { Object.assign(pl, World.center(d.tx, d.ty)); pl.elevated = !pl.elevated; pl.clearGoal(); return true; }
-      if (d.kind === 'gate' && !pl.elevated) { d.open = !d.open; this.world.revision++; this.world.markDirty(d.tx, d.ty); this.event('build', d.open ? 'Gate open to everyone — enemies can enter.' : 'Gate guarded — allies can pass, enemies must break it.'); return true; }
+      if (d.kind === 'gate' && !pl.elevated) { this.world.setGateOpen(d, !d.open); this.event('build', d.open ? 'Gate open to everyone — enemies can enter.' : 'Gate guarded — allies can pass, enemies must break it.'); return true; }
     }
     return false;
   }

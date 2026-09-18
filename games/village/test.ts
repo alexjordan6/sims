@@ -49,8 +49,9 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     for (let y = 4; y < 10; y++) { w.placeDefense('wall', 3, y); w.placeDefense('wall', 10, y); }
     assert(w.bfs({ tx: 6, ty: 12 }, { tx: 6, ty: 6 }).length > 0, 'friendly path crosses a guarded gate');
     assert(w.bfs({ tx: 6, ty: 12 }, { tx: 6, ty: 6 }, true).length === 0, 'closed perimeter blocks enemies');
-    const gate = w.get(6, 10)!.defense!; gate.open = true;
-    assert(w.bfs({ tx: 6, ty: 12 }, { tx: 6, ty: 6 }, true).length > 0, 'open gate lets enemies through'); gate.open = false;
+    const gate = w.get(6, 10)!.defense!; w.setGateOpen(gate, true);
+    assert(w.bfs({ tx: 6, ty: 12 }, { tx: 6, ty: 6 }, true).length > 0, 'open gate lets enemies through'); w.setGateOpen(gate, false);
+    assert(w.bfs({ tx: 6, ty: 12 }, { tx: 6, ty: 6 }, true).length === 0 && w.bfs({ tx: 6, ty: 12 }, { tx: 7, ty: 6 }, true).length === 0, 'a failed search is remembered for the region until walkability changes');
     assert(w.bfs({ tx: 3, ty: 3 }, { tx: 10, ty: 10 }, false, true).length > 0, 'battlements connect around corners and over gates');
     assert(w.isBlocked(5, 5, false, true), 'elevated actors cannot walk off walls');
     assert(!w.lineClear(World.center(6, 12), World.center(6, 6)), 'ground arrows blocked by closed gate');

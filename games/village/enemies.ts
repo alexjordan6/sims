@@ -53,7 +53,11 @@ export class Rat extends Raider {
       // Spread a swarm across the field instead of sending every rat to the same plant.
       const crops = [...w.find(t => t.kind === 'crop')].sort((a, b) => this.dist(World.center(a.tx, a.ty)) - this.dist(World.center(b.tx, b.ty)));
       this.crop = crops.length ? crops[this.id % Math.min(crops.length, 20)] : null;
-      if (this.crop) this.setGoal(s, this.crop.tx, this.crop.ty, true);
+      if (this.crop) {
+        this.setGoal(s, this.crop.tx, this.crop.ty);
+        // a field it can't get into (walled off) is no field at all: give up on it and, in time, leave
+        if (!this.path.length && !(this.tile.tx === this.crop.tx && this.tile.ty === this.crop.ty)) { this.crop = null; this.retarget = 3; }
+      }
     }
     if (!this.crop) {
       this.bored += dt;

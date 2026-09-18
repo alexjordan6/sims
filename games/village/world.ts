@@ -115,7 +115,10 @@ export class World {
     if ((t.building || t.defense) && !this.stamping) return t;
     if (t.kind === 'tree') this.treeCount--;
     if (kind === 'tree') this.treeCount++;
-    this.revision++;
+    // paths only go stale when walkability changes: tilling, planting and harvesting don't re-path anyone
+    // (fortifications always count: a closed gate blocks enemies even though the tile kind doesn't)
+    const fort = (k: TileKind) => k === 'wall' || k === 'gate' || k === 'stairs';
+    if (BLOCKING[t.kind] !== BLOCKING[kind] || fort(t.kind) || fort(kind)) this.revision++;
     t.kind = kind; t.stage = 0; t.work = 0; t.building = undefined; t.part = undefined; t.v = (t.v + 31) % 97;
     this.dirty.add(i);
     return t;
@@ -139,6 +142,11 @@ export class World {
     t.defense = d;
     this.defenses.set(ty * this.cols + tx, d);
     return d;
+  }
+  /** Open or bar a gate. Goes through here so cached paths know walkability changed. */
+  setGateOpen(d: Defense, open: boolean): void {
+    if (d.open === open) return;
+    d.open = open; this.revision++; this.markDirty(d.tx, d.ty);
   }
   damageDefense(d: Defense, damage: number): boolean {
     d.hp = Math.max(0, d.hp - damage);
@@ -260,6 +268,13 @@ export class World {
    * BFS path on the 4-grid from `from` to `to`. If `to` is blocked, the path ends on a
    * passable tile adjacent to it. Returns tile positions excluding `from`; [] if unreachable/already there.
    */
+  /**
+   * The last search that failed: the whole region it could reach. While nothing walkable has
+   * changed, any search from inside that region to a tile outside it fails too — answered at once
+   * instead of flooding the map again (a dozen rats outside a wall used to flood it every second).
+   */
+  private lastFlood: { revision: number; enemy: boolean; elevated: boolean; reached: Int32Array } | null = null;
+
   bfs(from: TilePos, to: TilePos, enemy = false, elevated = false): TilePos[] {
     if (!this.inBounds(from.tx, from.ty) || !this.inBounds(to.tx, to.ty)) return [];
     const n = this.cols * this.rows;
@@ -267,6 +282,12 @@ export class World {
     const goal = to.ty * this.cols + to.tx;
     const goalBlocked = this.isBlocked(to.tx, to.ty, enemy, elevated);
     if (start === goal) return [];
+    const f = this.lastFlood;
+    if (f && f.revision === this.revision && f.enemy === enemy && f.elevated === elevated && f.reached[start] !== -1) {
+      const near = (i: number) => i >= 0 && i < n && f.reached[i] !== -1;
+      const reachable = near(goal) || (goalBlocked && (near(goal - 1) || near(goal + 1) || near(goal - this.cols) || near(goal + this.cols)));
+      if (!reachable) return [];
+    }
     const prev = new Int32Array(n).fill(-1);
     prev[start] = start;
     // A* keeps long journeys cheap: only expand promising tiles, using a binary heap.
@@ -312,6 +333,7 @@ export class World {
         push(ni, cost + Math.abs(nx - to.tx) + Math.abs(ny - to.ty));
       }
     }
+    this.lastFlood = { revision: this.revision, enemy, elevated, reached: prev };
     return [];
   }
 
