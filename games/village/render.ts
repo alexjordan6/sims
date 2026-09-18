@@ -397,17 +397,31 @@ export class Renderer {
         }
       }
     }
-    // selection ring
-    if (s.selected && !s.selected.dead) {
-      u.lineStyle(1, 0xffe066, 1);
-      u.strokeEllipse(s.selected.x, s.selected.y + 1, 12, 6);
-    }
-    // a selected barracks keeps showing its arrow range (dimmer than the build preview)
-    const sb = s.selectedBuilding;
-    if (sb?.kind === 'barracks' && !s.interior.active) { const c = s.towerCenter(sb); this.rangeRing(c.x, c.y, s.towerRange(sb), 0xffe066, 0.5); }
     // hp bars
     const b = this.bars;
     b.clear();
+    // whatever the inspector shows is marked in the world: a breathing ring and a bobbing marker over a person,
+    // a bracketed footprint over a building, so the card and the thing it describes read as one
+    const pulse = 0.5 + 0.5 * Math.sin(s.time.now / 220), bob = Math.round(2 * Math.sin(s.time.now / 180));
+    if (s.selected && !s.selected.dead && !s.selected.hidden) {
+      const m = s.selected, top = m.y - (m.elevated ? WALL_HEIGHT : 0) - 22 + bob;
+      u.fillStyle(0xffe066, 0.12 + 0.1 * pulse); u.fillEllipse(m.x, m.y + 1, 22 + 4 * pulse, 11 + 2 * pulse);
+      u.lineStyle(1, 0xffe066, 0.9); u.strokeEllipse(m.x, m.y + 1, 16 + 4 * pulse, 8 + 2 * pulse);
+      this.marker(m.x, top);
+    }
+    const sb = s.selectedBuilding;
+    if (sb && !s.interior.active) {
+      const f = BUILDINGS[sb.kind], x0 = sb.tx * TILE, y0 = sb.ty * TILE, w = f.w * TILE, h = f.h * TILE, arm = 6;
+      b.lineStyle(1, 0xffe066, 0.25 + 0.2 * pulse); b.strokeRect(x0 + 0.5, y0 - TILE + 0.5, w - 1, h + TILE - 1);
+      // corner brackets, drawn a touch outside the footprint (the roof art rises one tile above it)
+      b.lineStyle(2, 0xffe066, 0.95);
+      for (const [cx, cy, sx, sy] of [[x0 - 2, y0 - TILE - 2, 1, 1], [x0 + w + 2, y0 - TILE - 2, -1, 1], [x0 - 2, y0 + h + 2, 1, -1], [x0 + w + 2, y0 + h + 2, -1, -1]] as const) {
+        b.lineBetween(cx, cy, cx + sx * arm, cy); b.lineBetween(cx, cy, cx, cy + sy * arm);
+      }
+      this.marker(x0 + w / 2, y0 - TILE - 10 + bob);
+      // a selected barracks keeps showing its arrow range (dimmer than the build preview)
+      if (sb.kind === 'barracks') { const c = s.towerCenter(sb); this.rangeRing(c.x, c.y, s.towerRange(sb), 0xffe066, 0.5); }
+    }
     for (const a of s.agents) {
       const m = a as Mover;
       if (m.hidden || m.hp >= m.maxHp) continue;
@@ -439,6 +453,12 @@ export class Renderer {
       if (ammo > 0) { b.fillStyle(ammo / cap > 0.25 ? 0xffd578 : 0xff5a3c, 1); b.fillRect(x, y, Math.max(1, Math.round(bw * ammo / cap)), 3); }
       else { b.lineStyle(1, 0xff4040, 0.55 + 0.45 * Math.sin(s.time.now / 150)); b.strokeRect(x + 0.5, y + 0.5, bw - 1, 2); }
     }
+  }
+  /** A small gold arrowhead pointing down at whatever is selected, with a dark edge so it reads over any ground. */
+  private marker(x: number, y: number): void {
+    const g = this.bars; // above the sprites, so it never hides behind a roof
+    g.fillStyle(0x000000, 0.6); g.fillTriangle(x - 5, y - 7, x + 5, y - 7, x, y + 1);
+    g.fillStyle(0xffe066, 1); g.fillTriangle(x - 4, y - 6, x + 4, y - 6, x, y);
   }
   /** A translucent disc with a rim, used for the barracks' arrow reach. */
   private rangeRing(x: number, y: number, r: number, colour: number, strength: number): void {
