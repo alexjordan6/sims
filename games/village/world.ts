@@ -1,5 +1,5 @@
 import type { Rng } from '@shared/index';
-import { TILE, COLS, ROWS, TOWER, BUILDING_HP, type Calling } from './config';
+import { TILE, COLS, ROWS, TOWER, BUILDING_HP, HEARTH_WOOD, type Calling } from './config';
 
 export type DefenseKind = 'wall' | 'gate' | 'stairs';
 export interface Defense extends TilePos { kind: DefenseKind; hp: number; maxHp: number; open: boolean }
@@ -43,8 +43,15 @@ export interface Building {
   ruined?: boolean;
   /** an "under attack" alarm has been raised for it this raid */
   alarmed?: boolean;
+  /** nights of firewood stacked by the hearth (buildings without a hearth keep 0) */
+  firewood: number;
+  /** the hearth burned last night; a cold building stalls births, drill, regen and meals */
+  warm: boolean;
 }
 export function buildingMaxHp(b: { kind: BuildingKind; level: number }): number { return BUILDING_HP[b.kind][b.level] ?? 0; }
+export function hasHearth(b: { kind: BuildingKind }): boolean { return HEARTH_WOOD[b.kind][1] > 0; }
+/** wood one night costs this building */
+export function hearthCost(b: { kind: BuildingKind; level: number }): number { return HEARTH_WOOD[b.kind][b.level] ?? 0; }
 /** Houses are buildings; kept as a named type because half the sim talks about "home". */
 export type House = Building;
 
@@ -205,7 +212,8 @@ export class World {
   }
 
   place(kind: BuildingKind, tx: number, ty: number): Building {
-    const b: Building = { kind, tx, ty, level: 1, residents: 0, hp: BUILDING_HP[kind][1], maxHp: BUILDING_HP[kind][1] };
+    // the builders leave one night's wood by the hearth
+    const b: Building = { kind, tx, ty, level: 1, residents: 0, hp: BUILDING_HP[kind][1], maxHp: BUILDING_HP[kind][1], firewood: HEARTH_WOOD[kind][1] > 0 ? 1 : 0, warm: true };
     if (kind === 'barracks') { b.ammo = TOWER.start; b.fireCd = 0; }
     const f = BUILDINGS[kind];
     this.stamping = true;

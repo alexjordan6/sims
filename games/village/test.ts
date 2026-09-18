@@ -1,10 +1,10 @@
 import './main';
 import type { VillageScene } from './main';
-import { World, doorstep, type BuildingKind } from './world';
+import { World, doorstep, hearthCost, type BuildingKind } from './world';
 import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, Wrecker, waveComposition } from './enemies';
-import { COLS, ROWS, WALL_HEIGHT, TREE_YIELD, HAUL, TOWER, p, BUILDING_HP, WRECKER, RAID_SIZE_MUL } from './config';
+import { COLS, ROWS, WALL_HEIGHT, TREE_YIELD, HAUL, TOWER, p, BUILDING_HP, WRECKER, RAID_SIZE_MUL, HEARTH_NIGHTS, PLAYER_TREE_YIELD } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
 const output = document.getElementById('test-results')!, summary = document.getElementById('test-summary')!;
@@ -184,6 +184,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(ogre.state === 'hunting' && s.player.hp <= s.player.maxHp - 25, 'the Ogre hunts a player near his lair at night and hits for 25');
     // hauling: nothing counts until it's carried to the woodyard / granary
     s = fresh(); clearing(s); s.agents = [s.player, s.ogre!]; s.wood = 0; s.food = 0;
+    for (const b of s.hearthBuildings()) b.firewood = HEARTH_NIGHTS; // full piles, so this armful is for the woodyard
     const yard = s.world.woodyard!, yd = doorstep(yard);
     s.world.set(yd.tx, yd.ty + 3, 'tree'); s.world.set(yd.tx, yd.ty + 4, 'tree');
     const cutter = s.spawn(new Villager(...Object.values(World.center(yd.tx + 1, yd.ty + 3)) as [number, number], s.world.houses[0], 'woodcutter', 22, 'Haul tester', s.mods));
@@ -194,11 +195,44 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     Object.assign(s.player, World.center(yd.tx + 3, yd.ty + 8)); s.player.tool = 'axe'; s.player.facing = { x: 0, y: -1 }; s.hoverTile = null;
     s.world.set(yd.tx + 3, yd.ty + 7, 'tree'); const w0 = s.wood;
     for (let i = 0; i < 3; i++) s.interact();
-    assert(s.player.load?.kind === 'wood' && s.player.load.n === TREE_YIELD && s.wood === w0, 'the head\'s chop fills their arms');
+    assert(s.player.load?.kind === 'wood' && s.player.load.n === PLAYER_TREE_YIELD && s.wood === w0, 'the head\'s chop clears the tree for a token of wood');
     s.player.load = { kind: 'wood', n: HAUL.player.wood }; s.world.set(yd.tx + 3, yd.ty + 7, 'tree'); s.interact();
     assert(s.world.get(yd.tx + 3, yd.ty + 7)!.kind === 'tree' && s.hint().includes('full'), 'full arms refuse another tree and say so');
     Object.assign(s.player, World.center(yd.tx, yd.ty)); s.tick(1 / 60);
     assert(!s.player.load && s.wood === w0 + HAUL.player.wood, 'walking up to the woodyard unloads the head\'s arms');
+    // hearths: piles burn a night at dawn, cold buildings stall, woodcutters bring firewood before logs
+    s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, { x: -400, y: -400 }); s.day = 1; s.dayTime = 0.3;
+    const home2 = s.world.houses[0], keep2 = s.world.barracks[0];
+    assert(home2.firewood === 1 && keep2.firewood === 1 && s.world.woodyard!.firewood === 0 && home2.warm, 'new buildings come with one night of wood; storage has no hearth');
+    const cost0 = hearthCost(home2); s.wood = 100;
+    s.newDay(); assert(home2.firewood === 0 && home2.warm && keep2.warm, 'dawn burns a night and the building stays warm');
+    const parent1 = s.spawn(new Villager(0, 0, home2, 'farmer', 20, 'Ma', s.mods)), parent2 = s.spawn(new Villager(0, 0, home2, 'farmer', 20, 'Pa', s.mods));
+    parent1.update = parent2.update = () => {}; home2.residents = 2;
+    const kid2 = s.spawn(new Villager(0, 0, home2, 'kid', 5, 'Sprout', s.mods)); kid2.update = () => {}; kid2.parents = [parent1, parent2]; kid2.hungerDays = 0;
+    home2.calling = 'soldier'; kid2.trained = 0; home2.residents = 3;
+    const careBefore = kid2.care, trainedBefore = kid2.trained; s.food = 200;
+    s.newDay();
+    assert(!home2.warm && !keep2.warm, 'an empty pile leaves the building cold the next dawn');
+    // fed +1 and two parents +1 would make 2; the cold night takes one back
+    assert(kid2.care - careBefore === 1, `a cold night costs the child a care point (${kid2.care - careBefore} instead of 2)`);
+    assert(kid2.trained === trainedBefore, 'a cold barracks drills nobody');
+    let born = 0; for (let i = 0; i < 25; i++) { const n = s.villagers().length; s.newDay(); born += s.villagers().length - n; }
+    assert(born === 0, 'no children are born in a cold house');
+    s.wood = 1; assert(!s.stockHearth(home2) && home2.firewood === 0, 'stocking a hearth needs the wood');
+    s.wood = 50; assert(s.stockHearth(home2) && home2.firewood === 1 && s.wood === 50 - cost0, `a night of wood costs ${cost0} from the village pile`);
+    s.stockHearth(home2); s.stockHearth(home2); assert(home2.firewood === HEARTH_NIGHTS && !s.stockHearth(home2), 'the pile holds three nights and no more');
+    s.newDay(); assert(home2.warm && !keep2.warm, 'a stocked house is warm again while the barracks stays cold');
+    const soldier2 = s.spawn(new Villager(World.center(125, 100).x, World.center(125, 100).y, home2, 'soldier', 20, 'Guard', s.mods)); soldier2.hp = 10; soldier2.trained = 3;
+    s.mods.soldierRegen = 5; step(s, 2); assert(soldier2.hp === 10, 'soldiers do not mend while the barracks is cold');
+    keep2.firewood = 1; s.newDay(); step(s, 2); assert(soldier2.hp > 10, 'a warm barracks mends them again');
+    for (const b of s.hearthBuildings()) b.firewood = HEARTH_NIGHTS;
+    const cabin = s.world.place('house', 122, 96); cabin.firewood = 0; // the one empty pile in the village, in the clearing
+    const carrier = s.spawn(new Villager(World.center(124, 104).x, World.center(124, 104).y, home2, 'woodcutter', 22, 'Carrier', s.mods));
+    carrier.load = { kind: 'wood', n: HAUL.villager.wood }; const woodBefore = s.wood;
+    step(s, 1); assert(carrier.task === 'bringing firewood to the house', `a loaded woodcutter heads for the empty pile first (${carrier.task})`);
+    step(s, 30);
+    // (the cutter goes straight back to the grove afterwards, so the pile may have grown further by now)
+    assert(cabin.firewood === Math.min(HEARTH_NIGHTS, Math.floor(HAUL.villager.wood / hearthCost(cabin))) && s.wood >= woodBefore + HAUL.villager.wood - cabin.firewood * hearthCost(cabin), `the pile takes ${cabin.firewood} nights and the rest reaches the woodyard`);
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;
   } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); }

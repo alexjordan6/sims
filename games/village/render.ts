@@ -158,7 +158,7 @@ export class Renderer {
       // a ruin is the same shape, charred: no lit windows, no stock, no banner
       e.body.setFrame(Math.min(2, b.level - 1)).setTint(b.ruined ? mulColor(0x5a4f48, this.tint) : this.tint);
       // the windows come on as night falls; they are never tinted
-      e.lit.setFrame(Math.min(2, b.level - 1)).setAlpha(b.ruined ? 0 : this.night.sky.night);
+      e.lit.setFrame(Math.min(2, b.level - 1)).setAlpha(b.ruined || !b.warm ? 0 : this.night.sky.night); // a cold house shows no lamplight
       e.stock?.setTint(this.tint).setVisible(!b.ruined);
       e.banner?.setTint(this.tint).setVisible(!b.ruined);
       // a house flies a banner for its calling: blue for the barracks, tan for the woodyard (farmers, the default, fly none)

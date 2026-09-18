@@ -1,5 +1,6 @@
 import type { VillageScene } from './main';
-import { BUILDINGS, World, doorstep, type Building } from './world';
+import { BUILDINGS, World, doorstep, hearthCost, type Building } from './world';
+import { HEARTH_NIGHTS } from './config';
 import { ensureCharacter, frameSize } from './characters';
 import { lookFor } from './render';
 import type { Mover } from './agents';
@@ -29,7 +30,7 @@ export class Interior {
     this.s.player.hidden = true; this.s.player.swing = null; this.s.player.vx = this.s.player.vy = 0;
     this.s.selectedBuilding = b; this.s.selected = null;
     this.furniture = [
-      { x: 139, y: 34, w: 42, h: 23, kind: 'hearth', label: b.kind === 'tavern' ? 'Share a hot meal · 2 food' : 'Warm yourself by the hearth' },
+      { x: 139, y: 34, w: 42, h: 23, kind: 'hearth', label: b.kind === 'tavern' ? 'Share a hot meal · 2 food' : 'Warm yourself by the hearth' }, // label is refreshed live by hint()
       { x: 26, y: 36, w: 35, h: 18, kind: 'shelf', label: 'Books, keepsakes and family stories' },
     ];
     if (b.kind === 'house') {
@@ -102,6 +103,10 @@ export class Interior {
     if (this.y > 175 && Math.abs(this.x - 160) < 30) return 'E: exit to the village';
     const f = this.nearby();
     if (f?.kind === 'chest' && this.building) f.label = `Armor chest · tower arrows ${this.building.ammo ?? 0} / ${this.s.towerCap(this.building)} · restock 10 for 2 wood · forge armor`;
+    if (f?.kind === 'hearth' && this.building) {
+      const b = this.building, pile = `${b.firewood} / ${HEARTH_NIGHTS} nights of wood · burns ${hearthCost(b)} a night`;
+      f.label = b.warm ? `${b.kind === 'tavern' ? 'Share a hot meal · 2 food' : 'Warm yourself by the hearth'} · ${pile}` : `Cold hearth · ${pile} · woodcutters bring firewood`;
+    }
     return f ? `E: ${f.label}` : 'Walk around · approach the hearth, beds or equipment · door below to leave';
   }
   act(): void {
@@ -111,6 +116,7 @@ export class Interior {
     if (f.kind === 'rack') { this.s.craftArrows(); return; }
     if (f.kind === 'chest') { this.s.openArmory(this.s.player, this.building); return; }
     if (f.kind === 'hearth' || f.kind === 'bar' || f.kind === 'bed') {
+      if (!this.building.warm) { this.s.event('info', 'The hearth is cold — there is no fire to rest by until the pile is stocked and dawn lights it.', true); return; }
       if (this.time - this.mealAt < 8) { this.s.event('info', 'Enjoy the warmth a little longer before resting again.'); return; }
       const cost = this.building.kind === 'tavern' ? 2 : 1;
       if (this.s.food < cost) { this.s.event('food', 'Bring some food for a warm meal.'); return; }
@@ -150,7 +156,10 @@ export class Interior {
         rect(x + 4, y + 14, 2, h - 19, '#d2a16e');
       } else if (kind === 'hearth') {
         rect(x, y, w, h, '#969083'); rect(x + 4, y + 4, w - 8, h - 4, '#211a1c');
-        for (let i = 0; i < 5; i++) { const flame = 5 + Math.sin(this.time * 8 + i * 2) * 3; rect(x + 7 + i * 6, y + h - flame, 5, flame, i % 2 ? '#ffc85f' : '#e8803b'); }
+        if (b.warm) for (let i = 0; i < 5; i++) { const flame = 5 + Math.sin(this.time * 8 + i * 2) * 3; rect(x + 7 + i * 6, y + h - flame, 5, flame, i % 2 ? '#ffc85f' : '#e8803b'); }
+        else for (let i = 0; i < 3; i++) rect(x + 9 + i * 9, y + h - 3, 4, 2, i % 2 ? '#4a2a22' : '#6b3a2a'); // cold: a few dead embers
+        // the woodpile beside it shows how many nights are left
+        for (let i = 0; i < b.firewood; i++) { rect(x + w + 4, y + h - 4 - i * 4, 9, 3, '#8f5c34'); rect(x + w + 4, y + h - 4 - i * 4, 2, 3, '#d3ab6d'); }
         rect(x - 3, y, w + 6, 3, '#b2a38d');
       } else if (kind === 'rack') {
         rect(x, y, w, h, '#3e2c23'); rect(x + 2, y + 3, w - 4, 3, '#b17c49');
@@ -186,7 +195,8 @@ export class Interior {
     const p = this.s.player;
     person(this.x, this.y, p, this.moving && Math.floor(this.time / 0.18) % 2 === 1);
     // Warm radial firelight, contained inside the room; the outside night keeps advancing.
-    const glow = c.createRadialGradient(160, 60, 5, 160, 90, 145); glow.addColorStop(0, '#ffc36a24'); glow.addColorStop(1, '#00000000'); c.fillStyle = glow; c.fillRect(20, 30, 280, 177);
+    if (b.warm) { const glow = c.createRadialGradient(160, 60, 5, 160, 90, 145); glow.addColorStop(0, '#ffc36a24'); glow.addColorStop(1, '#00000000'); c.fillStyle = glow; c.fillRect(20, 30, 280, 177); }
+    else { c.fillStyle = '#1a2a4018'; c.fillRect(20, 30, 280, 177); }
     c.font = '10px monospace'; c.fillStyle = '#f0d4a2'; c.fillText(`${BUILDINGS[b.kind].name} · Lv${b.level}`, 19, 17);
     c.fillStyle = '#cba984'; c.fillText('EXIT ×', 270, 17);
     if (this.s.raidActive) { c.fillStyle = '#ff7860'; c.fillText('RAID OUTSIDE', 119, 220); }

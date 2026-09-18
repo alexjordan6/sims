@@ -1,6 +1,6 @@
 import type { Agent } from '@shared/index';
-import { World, doorstep, buildingCenter, yardOf, type House, type TilePos, type Defense, type BuildingKind } from './world';
-import { p, TREE_RESERVE, CADET_AGE_BEFORE, CADET_DAYS, STAR_BONUS, FLEE_RANGE, BEDTIME, TRAITS, HAUL, TILE, type Calling, type Trait, type LoadKind } from './config';
+import { World, doorstep, buildingCenter, yardOf, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
+import { p, TREE_RESERVE, CADET_AGE_BEFORE, CADET_DAYS, STAR_BONUS, FLEE_RANGE, BEDTIME, TRAITS, HAUL, TILE, HEARTH_NIGHTS, type Calling, type Trait, type LoadKind } from './config';
 import type { Mods } from './meta';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle } from './characters';
 import type { VillageScene } from './main';
@@ -462,17 +462,28 @@ export class Villager extends Mover {
   /** Walk the load to its building and hand it in; falls back to the job loop if there is nowhere to take it. */
   private deliver(dt: number, s: VillageScene): void {
     const load = this.load;
-    const b = load?.kind === 'wood' ? s.world.woodyard : s.world.granary;
-    if (!load || !b) { this.delivering = false; this.clearGoal(); return; }
+    if (!load) { this.delivering = false; this.clearGoal(); return; }
+    // wood goes to a hearth that needs it before the woodyard: the village stays warm on woodcutters' backs
+    const hearth = load.kind === 'wood' ? (this.firewoodFor && !this.firewoodFor.ruined && this.firewoodFor.firewood < HEARTH_NIGHTS ? this.firewoodFor : s.hearthNeeding(this.x, this.y, load.n)) : null;
+    this.firewoodFor = hearth;
+    const b = hearth ?? (load.kind === 'wood' ? s.world.woodyard : s.world.granary);
+    if (!b) { this.delivering = false; this.clearGoal(); return; }
     const door = doorstep(b);
     this.setGoal(s, door.tx, door.ty);
-    this.task = load.kind === 'wood' ? 'hauling logs to the woodyard' : 'carrying the harvest to the granary';
+    this.task = hearth ? `bringing firewood to the ${BUILDINGS[hearth.kind].name.toLowerCase()}` : load.kind === 'wood' ? 'hauling logs to the woodyard' : 'carrying the harvest to the granary';
     const arrived = this.followPath(dt);
     if (arrived) {
-      if (this.adjacentTo(door) || this.dist(World.center(door.tx, door.ty)) < TILE) s.deposit(this);
+      const there = this.adjacentTo(door) || this.dist(World.center(door.tx, door.ty)) < TILE;
+      if (hearth) {
+        if (there) s.stockFromLoad(hearth, this);
+        this.firewoodFor = null; this.clearGoal();
+        if (this.load) return; // whatever is left goes on to the woodyard next tick
+      } else if (there) s.deposit(this);
       this.delivering = false; this.clearGoal(); this.thinkTimer = 0.2; // no path or arrived: back to work either way
     }
   }
+  /** the hearth this armful is promised to (so a pile another cutter just filled doesn't send us elsewhere mid-walk) */
+  private firewoodFor: Building | null = null;
 
   private finishWork(s: VillageScene, farmer: boolean): void {
     const g = this.goal!;
@@ -534,7 +545,8 @@ export class Villager extends Mover {
     this.target = null;
     if (this.post) { this.setGoal(s, this.post.tx, this.post.ty); this.followPath(dt); this.task = 'watching from the wall'; return; }
     this.task = 'on patrol';
-    const regen = s.mods.soldierRegen + (s.world.barracksLevel >= 3 ? 1 : 0);
+    // a cold barracks mends nobody
+    const regen = s.world.barracks.some((b) => b.warm) ? s.mods.soldierRegen + (s.world.barracksLevel >= 3 ? 1 : 0) : 0;
     if (regen && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + regen * dt);
     this.thinkTimer -= dt;
     if (this.followPath(dt) && this.thinkTimer <= 0) {

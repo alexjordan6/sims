@@ -1,12 +1,12 @@
 import Phaser from 'phaser';
 import { SimScene, launch } from '@shared/index';
-import { World, doorstep, buildingCenter, buildingMaxHp, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos } from './world';
+import { World, doorstep, buildingCenter, buildingMaxHp, hasHearth, hearthCost, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos } from './world';
 import { Villager, Raider, Player, Mover, Arrow, TOOLS, type Role, type Tool } from './agents';
 import { DEFENSE_COST, WALL_HEIGHT } from './config';
 import { Interior } from './interior';
 import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, waveComposition } from './enemies';
 import { Fog } from './fog';
-import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, type LoadKind, TREE_YIELD, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, OLD_YIELD, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, CADET_AGE_BEFORE, HEARTY_RATION, CALLING_NAME, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, WEAPONS, RAID_SIZE_MUL, type Calling, type ArmorSlot, type WeaponSlot } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, type LoadKind, TREE_YIELD, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, OLD_YIELD, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, CADET_AGE_BEFORE, HEARTY_RATION, CALLING_NAME, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, WEAPONS, RAID_SIZE_MUL, HEARTH_NIGHTS, COLD, PLAYER_TREE_YIELD, type Calling, type ArmorSlot, type WeaponSlot } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
@@ -519,7 +519,8 @@ export class VillageScene extends SimScene {
       { label: 'Well fed', ok: !!kid.home.hearty && !kid.home.ruined && kid.hungerDays === 0, note: 'hearty rations' },
       { label: 'Family', ok: parents >= 2, note: parents === 1 ? 'one parent' : parents === 0 ? 'no parents' : undefined },
       { label: 'Company', ok: sibling, note: 'another child at home' },
-      { label: 'Home', ok: kid.home.level >= 2 && !kid.home.ruined, note: kid.home.ruined ? 'their house is in ruins' : 'house Lv2+' },
+      { label: 'Warm', ok: kid.home.warm, note: kid.home.warm ? 'the hearth is lit' : 'their house is cold — stock its hearth' },
+      { label: 'Home', ok: kid.home.level >= 2 && !kid.home.ruined && kid.home.warm, note: kid.home.ruined ? 'their house is in ruins' : 'house Lv2+' },
       { label: 'Attention', ok: kid.encouragedDay === this.day, note: 'encourage them' },
       { label: 'Safe', ok: kid.fledDay !== this.day, note: 'ran from raiders' },
     ];
@@ -620,7 +621,7 @@ export class VillageScene extends SimScene {
     if (this.player.dead) this.endRun(false);
   }
 
-  private newDay(): void {
+  newDay(): void {
     // a night's rest
     this.player.hp = Math.min(this.player.maxHp, this.player.hp + 30);
     // crops grow
@@ -655,6 +656,8 @@ export class VillageScene extends SimScene {
       this.event('info', `The woodcutters whisper of a giant in the forest to the ${ns}${ns && ew ? '-' : ''}${ew}. He only walks at night.`, true);
     }
 
+    this.burnHearths();
+
     // villagers: eat, age, grow up, grow old
     const villagers = this.villagers();
     for (const v of villagers) {
@@ -670,11 +673,11 @@ export class VillageScene extends SimScene {
         const fed = v.hungerDays === 0;
         const parents = v.parents.filter((q) => !q.dead).length;
         const sibling = villagers.some((o) => o !== v && o.role === 'kid' && o.home === v.home && !o.dead);
-        let pts = (fed ? 1 : -1) + (wellFed ? 1 : 0) + (parents >= 2 ? 1 : 0) + (sibling ? 1 : 0) + (v.home.level >= 2 && !v.home.ruined ? 1 : 0) - (v.home.ruined ? 1 : 0) + (v.encouragedDay === this.day ? 1 : 0) - (v.fledDay === this.day ? 1 : 0);
+        let pts = (fed ? 1 : -1) + (wellFed ? 1 : 0) + (parents >= 2 ? 1 : 0) + (sibling ? 1 : 0) + (v.home.level >= 2 && !v.home.ruined && v.home.warm ? 1 : 0) - (v.home.ruined ? 1 : 0) + (v.home.warm ? 0 : COLD.kidCare) + (v.encouragedDay === this.day ? 1 : 0) - (v.fledDay === this.day ? 1 : 0);
         v.care += pts; v.careDays++;
         v.stars = v.starsNow();
-        // yesterday's apprenticeship: only if they had somewhere to go
-        const canTrain = v.calling === 'soldier' ? this.world.barracks.length > 0 : v.calling === 'woodcutter' ? !!this.world.woodyard : true;
+        // yesterday's apprenticeship: only if they had somewhere to go (a cold barracks drills nobody)
+        const canTrain = v.calling === 'soldier' ? this.world.barracks.some((b) => b.warm) : v.calling === 'woodcutter' ? !!this.world.woodyard : true;
         if (v.apprenticeAt(this) && canTrain) v.trained = Math.min(Villager.drillNeeded(this), v.trained + 1);
       }
       v.age++;
@@ -686,7 +689,7 @@ export class VillageScene extends SimScene {
     // births: a couple sharing a house with room and food to spare
     for (const h of this.world.houses) {
       const adults = villagers.filter((v) => v.home === h && v.isAdult && !v.dead);
-      if (adults.length >= 2 && h.residents < this.beds(h) && this.food > 10 && this.rng.chance(p.birthChance + this.mods.birthBonus + (h.level >= 3 ? 0.15 : 0))) {
+      if (adults.length >= 2 && h.warm && h.residents < this.beds(h) && this.food > 10 && this.rng.chance(p.birthChance + this.mods.birthBonus + (h.level >= 3 ? 0.15 : 0))) {
         const kid = this.addVillager(h, 'kid', 0);
         kid.parents = [adults[0], adults[1]];
         if (h.residents < this.beds(h) && this.rng.chance(this.mods.twinChance)) {
@@ -929,13 +932,14 @@ export class VillageScene extends SimScene {
   /** What the building does now, and what the next level adds. */
   buildingBlurb(b: Building): string {
     if (b.ruined) return `in ruins · nothing works until the hammer rebuilds it (${this.rebuildCost(b)} wood)`;
+    const hearth = hasHearth(b) ? (b.warm ? ` · hearth ${hearthCost(b)} wood/night · ${b.firewood} night${b.firewood === 1 ? '' : 's'} stocked` : ` · COLD — ${b.firewood ? 'lit again at dawn' : 'the pile is empty'}`) : '';
     const now = b.kind === 'house' ? `${b.residents}/${this.beds(b)} beds${b.level >= 3 ? ' · births +15%' : ''}${' · raises ' + CALLING_NAME[b.calling ?? 'farmer']}${b.hearty ? ' · hearty rations' : ''}`
       : b.kind === 'granary' ? `${this.food | 0}/${CAPS[b.level]} food · the harvest is carried here`
       : b.kind === 'woodyard' ? `${this.wood | 0}/${CAPS[b.level]} wood · chopped logs are carried here`
       : LEVEL_PERKS[b.kind][b.level];
     const next = b.level < MAX_LEVEL ? ` · next Lv${b.level + 1}: ${LEVEL_PERKS[b.kind][b.level + 1]} (${this.upgradeCost(b)} wood, hammer)` : ' · max level';
     const hurt = b.maxHp && b.hp < b.maxHp ? ` · ${Math.ceil(b.hp)}/${b.maxHp} HP (hammer repairs)` : '';
-    return now + next + hurt;
+    return now + hearth + next + hurt;
   }
 
   /** Why the hammer can't upgrade `b` right now, or null. */
@@ -1106,6 +1110,70 @@ export class VillageScene extends SimScene {
     let ammo = 0, cap = 0;
     for (const b of this.world.barracks) { ammo += b.ammo ?? 0; cap += this.towerCap(b); }
     return { ammo, cap };
+  }
+
+  // ---- hearths --------------------------------------------------------------
+  // Houses, barracks and taverns burn a night of firewood at dawn. Woodcutters keep the piles stocked;
+  // a pile that runs dry leaves the building cold for the day: no births, no drill, no regen, no meals.
+
+  /** standing buildings with a hearth */
+  hearthBuildings(): Building[] { return this.world.buildings.filter((b) => hasHearth(b) && !b.ruined); }
+  /** Dawn: every hearth burns one night, or goes cold. */
+  private burnHearths(): void {
+    let burned = 0; const cold: string[] = [];
+    for (const b of this.hearthBuildings()) {
+      if (b.firewood > 0) { b.firewood--; b.warm = true; burned += hearthCost(b); }
+      else { b.warm = false; cold.push(BUILDINGS[b.kind].name.toLowerCase()); }
+      this.world.refresh(b);
+    }
+    for (const b of this.world.buildings) if (b.ruined || !hasHearth(b)) b.warm = false;
+    if (cold.length) this.event('wood', `Hearths burned ${burned} wood · cold today: ${cold.join(', ')}. Woodcutters stock the piles; the card can too.`, true);
+    else if (burned) this.event('wood', `Hearths burned ${burned} wood through the night.`);
+  }
+  /** Why the village pile can't stock `b`'s hearth right now, or null. */
+  stockProblem(b: Building): string | null {
+    if (!hasHearth(b)) return 'no hearth here';
+    if (b.ruined) return 'rebuild it first';
+    if (b.firewood >= HEARTH_NIGHTS) return 'the pile is full';
+    const cost = hearthCost(b);
+    if (this.wood < cost) return `need ${cost} wood (have ${this.wood | 0})`;
+    return null;
+  }
+  /** Stack a night's wood by the hearth from the village pile. */
+  stockHearth(b: Building): boolean {
+    const why = this.stockProblem(b);
+    if (why) { this.event('info', `Can't stock the hearth: ${why}`, true); return false; }
+    this.wood -= hearthCost(b); b.firewood++;
+    const c = this.towerCenter(b);
+    this.fx.push({ kind: 'deposit', x: c.x, y: c.y - TILE, text: '+1 night', colour: '#ffb060' });
+    return true;
+  }
+  /** The hearth a woodcutter with `load` wood should serve first: an empty pile before a low one, nearest first; null when every pile is full. */
+  hearthNeeding(x: number, y: number, load: number): Building | null {
+    let best: Building | null = null, bs = Infinity;
+    for (const b of this.hearthBuildings()) {
+      if (b.firewood >= HEARTH_NIGHTS || hearthCost(b) > load) continue;
+      const d = doorstep(b), c = World.center(d.tx, d.ty);
+      const score = Math.hypot(c.x - x, c.y - y) + b.firewood * 400; // an empty pile is worth a long walk
+      if (score < bs) { bs = score; best = b; }
+    }
+    return best;
+  }
+  /** A carried load becomes nights of firewood, as many as fit; whatever is left stays in the arms for the woodyard. */
+  stockFromLoad(b: Building, m: Mover): number {
+    const load = m.load;
+    if (!load || load.kind !== 'wood' || !hasHearth(b) || b.ruined) return 0;
+    const cost = hearthCost(b);
+    let nights = 0;
+    while (b.firewood < HEARTH_NIGHTS && load.n >= cost) { load.n -= cost; b.firewood++; nights++; }
+    if (load.n <= 0) m.load = null;
+    if (nights) { const c = this.towerCenter(b); this.fx.push({ kind: 'deposit', x: c.x, y: c.y - TILE, text: `+${nights} night${nights > 1 ? 's' : ''}`, colour: '#ffb060' }); }
+    return nights;
+  }
+  /** For the HUD: how many hearths are stocked for tonight. */
+  hearthReport(): { stocked: number; total: number; nightly: number } {
+    const hs = this.hearthBuildings();
+    return { stocked: hs.filter((b) => b.firewood > 0).length, total: hs.length, nightly: hs.reduce((n, b) => n + hearthCost(b), 0) };
   }
   equipSoldier(v: Villager, weapon: 'sword' | 'bow'): void {
     if (v.role !== 'soldier' || v.dead) return;
@@ -1359,7 +1427,8 @@ export class VillageScene extends SimScene {
         if (t?.kind === 'tree') {
           const why = this.loadProblem('wood');
           if (why) { this.event('wood', why + '.'); return; }
-          if (++t.work >= 3) { const wood = this.treeYield(t); this.world.set(tx, ty, 'sapling'); this.player.pickUp('wood', wood); }
+          // the head clears ground; the real wood comes in on woodcutters' backs
+          if (++t.work >= 3) { this.world.set(tx, ty, 'sapling'); this.player.pickUp('wood', PLAYER_TREE_YIELD); }
           else this.world.dirty.add(ty * COLS + tx);
         } else if (t?.kind === 'sapling') this.world.set(tx, ty, 'grass'); // clear the stump
         this.fx.push({ kind: 'tool', tool: 'axe', tx, ty });
@@ -1431,7 +1500,7 @@ export class VillageScene extends SimScene {
         if (kind === 'crop') return t!.stage >= this.cropDays ? `ripe — ${need('hands')}` : `growing (${t!.stage}/${this.cropDays} days)`;
         return 'seeds: crops on soil, trees on grass';
       case 'axe':
-        if (kind === 'tree') { const why = this.loadProblem('wood'); return why ?? `E: chop ${this.isOldGrowth(t!) ? 'old growth' : 'young tree'} (${t!.work}/3, ${this.treeYield(t!)} wood)${pl.load ? ` · carrying ${pl.load.n}/${HAUL.player.wood} wood` : ''}`; }
+        if (kind === 'tree') { const why = this.loadProblem('wood'); return why ?? `E: clear ${this.isOldGrowth(t!) ? 'old growth' : 'young tree'} (${t!.work}/3 · ${PLAYER_TREE_YIELD} wood for you; a woodcutter gets ${this.treeYield(t!)})${pl.load ? ` · carrying ${pl.load.n}/${HAUL.player.wood} wood` : ''}`; }
         if (kind === 'sapling') return t!.stage < 2 ? 'E: clear the stump' : 'E: cut down the sapling';
         return 'axe: face a tree';
       case 'hands':

@@ -1,7 +1,7 @@
 import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type Tool } from '../agents';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
-import { OGRE, HAUL, COST, p, RUN, TOWER, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, CALLING_NAME, TRAITS, HEARTY_RATION, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, CADET_AGE_BEFORE, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS, TREE_YIELD, OLD_YIELD } from '../config';
+import { OGRE, HAUL, COST, p, RUN, TOWER, HEARTH_WOOD, HEARTH_NIGHTS, PLAYER_TREE_YIELD, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, CALLING_NAME, TRAITS, HEARTY_RATION, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, CADET_AGE_BEFORE, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS, TREE_YIELD, OLD_YIELD } from '../config';
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
@@ -9,7 +9,7 @@ import { skyAt } from '../night';
 import { frameDataUrl, BUILDING_TEXTURE } from '../pixelart';
 import { charImg, armorStats, weaponMul } from '../characters';
 import { lookFor } from '../render';
-import { BUILDINGS, MAX_LEVEL, type BuildingKind } from '../world';
+import { BUILDINGS, MAX_LEVEL, hasHearth, hearthCost, type BuildingKind } from '../world';
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -89,7 +89,7 @@ export class UI {
     const tile = (cls: string, cap: string, inner: string, title = '') => `<div class="stat ${cls}" title="${esc(title)}"><span class="cap">${cap}</span><span class="val">${inner}</span></div>`;
     this.top = h(`<div class="topbar panel">
       ${tile('t-day', 'DAY', `<span class="sun"></span><span class="day"></span><span class="hour"></span>`, 'Survive to day 21 and beat the Warlord')}
-      ${tile('t-wood', 'WOOD', `${spr('town', TOWN.iconWood, 24)}<span class="num wood"></span>`, 'Chop trees. Houses cost 20, barracks 30. The woodyard sets the cap')}
+      ${tile('t-wood', 'WOOD', `${spr('town', TOWN.iconWood, 24)}<span class="num wood"></span>`, 'Woodcutters bring it in (your own axe only clears ground). Houses cost 20, barracks 30, and every hearth burns wood each night. The woodyard sets the cap')}
       ${tile('t-food', 'FOOD', `${spr('farm', FARM.iconTomato, 24)}<span class="num food"></span>`, 'Each villager eats 1 a day. Harvest ripe crops. The granary sets the cap')}
       <div class="stat t-scrap" title="Scrap iron looted from slain raiders — forges iron and steel armor at the barracks"><span class="cap">SCRAP</span><span class="val"><span class="scrap-ico"></span><span class="num scrap"></span></span></div>
       <div class="stat t-pop" title="Your villagers by role"><span class="cap">VILLAGERS</span><span class="val pop"></span></div>
@@ -149,7 +149,7 @@ export class UI {
     this.exploredEl = box.querySelector('.explored')!;
     this.side.append(box);
     this.side.append(this.inspector, this.roster);
-    const supply = h('<div class="quiver panel"><span class="quiver-count"></span><span class="tower-count" title="Arrows in every barracks chest. Restock inside the barracks, or from its card."></span><button class="btn small fletch">+10 ARROWS · 2 WOOD</button><button class="btn small leave-room" hidden>EXIT BUILDING</button></div>');
+    const supply = h('<div class="quiver panel"><span class="quiver-count"></span><span class="tower-count" title="Arrows in every barracks chest. Restock inside the barracks, or from its card."></span><span class="hearth-count" title="Hearths with wood for tonight. Woodcutters stock the piles; a cold building stalls births, drill, regen and meals."></span><button class="btn small fletch">+10 ARROWS · 2 WOOD</button><button class="btn small leave-room" hidden>EXIT BUILDING</button></div>');
     supply.querySelector('.fletch')!.addEventListener('click', () => s.craftArrows());
     supply.querySelector('.leave-room')!.addEventListener('click', () => s.interior.leave());
     this.side.prepend(supply);
@@ -414,6 +414,8 @@ export class UI {
   private renderTop(): void {
     const s = this.scene;
     const quiver = this.side.querySelector('.quiver-count'); if (quiver) quiver.textContent = `SHARED QUIVER · ${s.arrows} arrows`;
+    const hearths = this.side.querySelector<HTMLElement>('.hearth-count');
+    if (hearths) { const r = s.hearthReport(); const cold = r.total - r.stocked; hearths.textContent = r.total ? `HEARTHS · ${r.stocked} / ${r.total} stocked · ${r.nightly} wood a night${cold ? ` · ${cold} COLD TONIGHT` : ''}` : ''; hearths.classList.toggle('dry', cold > 0); }
     const tower = this.side.querySelector<HTMLElement>('.tower-count');
     if (tower) { const t = s.towerAmmo(); tower.textContent = s.world.barracks.length ? `TOWER CHESTS · ${t.ammo} / ${t.cap} arrows${t.ammo ? '' : ' · EMPTY'}` : ''; tower.classList.toggle('dry', !t.ammo); tower.classList.toggle('low', t.ammo > 0 && t.ammo / Math.max(1, t.cap) <= 0.25); }
     const exit = this.side.querySelector<HTMLButtonElement>('.leave-room'); if (exit) exit.hidden = !s.interior.active;
@@ -509,6 +511,10 @@ export class UI {
           ? `<b>Walls</b><span><em class="warn">RUINED</em> · nothing works until it's rebuilt · <b>hammer · ${s.rebuildCost(b)} wood</b></span>`
           : `<b>Walls</b><span>${Math.ceil(b.hp)} / ${b.maxHp} HP${b.hp < b.maxHp ? ' <em>· hammer repairs 60 per wood</em>' : ''}<div class="bar hp ${b.hp / b.maxHp <= 0.4 ? 'low' : ''}"><i style="width:${Math.round(100 * b.hp / b.maxHp)}%"></i></div></span>`;
       }
+      if (hasHearth(b) && !b.ruined) {
+        const why = s.stockProblem(b);
+        html += `<b>Hearth</b><span>${b.warm ? 'warm' : '<em class="warn">COLD</em>'} · ${b.firewood} / ${HEARTH_NIGHTS} night${b.firewood === 1 ? '' : 's'} stocked · burns ${hearthCost(b)} wood a night <button class="btn small ${why ? '' : 'ok'} stock-hearth" ${why ? 'disabled' : ''} title="${why ? esc(why) : 'from the village pile; woodcutters stock it on their own'}">STOCK +1 NIGHT · ${hearthCost(b)} WOOD</button>${!b.warm ? `<em class="d"> ${b.firewood ? 'lit again at dawn' : 'empty — no births, drill, regen or meals until it burns'}</em>` : ''}</span>`;
+      }
       if (b.kind === 'house') html += `<b>Beds</b><span>${b.residents} / ${s.beds(b)}</span>`;
       if (b.kind === 'barracks') {
         const ammo = b.ammo ?? 0, cap = s.towerCap(b);
@@ -539,6 +545,7 @@ export class UI {
         this.inspector.querySelector('.close')?.addEventListener('click', () => s.selectBuilding(null));
         this.inspector.querySelector('.craft-arrows')?.addEventListener('click', () => s.craftArrows());
         this.inspector.querySelector('.restock')?.addEventListener('click', () => { s.restockTower(b); this.renderInspector(true); });
+        this.inspector.querySelector('.stock-hearth')?.addEventListener('click', () => { s.stockHearth(b); this.renderInspector(true); });
         this.inspector.querySelector('.open-armory')?.addEventListener('click', () => { s.openArmory(s.player, b); this.side.classList.remove('open'); });
         this.inspector.querySelectorAll<HTMLButtonElement>('[data-raise]').forEach((el) => el.addEventListener('click', () => { s.setCalling(b, el.dataset.raise as Calling); this.renderInspector(true); }));
         this.inspector.querySelectorAll<HTMLButtonElement>('[data-rations]').forEach((el) => el.addEventListener('click', () => { s.setRations(b, el.dataset.rations === 'hearty'); this.renderInspector(true); }));
@@ -872,6 +879,8 @@ export class UI {
           ${who('dungeon', DUNGEON.orc, 'raider', 'Brute', '180 base HP, 24 damage, twice the speed, reach and attack rate, half the knockback. The axe winds up and swings even when you dodge. Devastates fortifications.')}
           ${who('dungeon', DUNGEON.orc, 'raider', 'Wrecker', 'Ignores people and goes for the nearest house it can reach, then any other building. A Lv1 house falls in about 16 seconds. Walled off, it batters the wall — slowly. A ruin keeps its footprint but does nothing until the hammer rebuilds it.')}
           ${who('dungeon', DUNGEON.wizard, 'raider', 'Shaman', 'Keeps its distance and casts bolts. Close in on it.')}
+          <h3>HEARTHS</h3>
+          <p>Houses, the barracks and the tavern each keep a <b>woodpile</b> that burns one night's wood at dawn (a house ${HEARTH_WOOD.house[1]}, the barracks ${HEARTH_WOOD.barracks[1]}; more at higher levels). <b>Woodcutters</b> fill the piles before they haul to the woodyard, so every armful spent on warmth is one the woodyard doesn't get — and the card can stock a night from the village pile in a pinch. A building with an empty pile spends the day <b>cold</b>: no births, no drill, no soldier regen, no meals, and its children lose care. Your own axe only clears ground (${PLAYER_TREE_YIELD} wood a tree); the real wood comes in on woodcutters' backs.</p>
           <h3>BUILDINGS</h3>
           <p>Every building can be wrecked. The <b>HAMMER</b> mends a damaged one (1 wood = 60 HP) and raises a ruin again for half its build cost; on a sound building, 3 hits upgrade it for wood. Every building has three levels — the brass studs on the sign by the door count them, and each level changes the building itself:</p>
           ${building('house', 'House · ' + COST.house + ' wood', 'A couple here has children.')}

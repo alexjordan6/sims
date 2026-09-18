@@ -187,6 +187,23 @@ export const WEAPON_SLOTS: readonly WeaponSlot[] = ['melee', 'bow'];
 
 /** every count in a raid's mix is scaled by this (per-enemy stats are never touched) */
 export const RAID_SIZE_MUL = 1.75;
+
+// ---- hearths --------------------------------------------------------------------------------
+/** Wood a building's hearth burns each night, by level (index = level); 0 means it has no hearth. Woodcutters keep the piles stocked. */
+export const HEARTH_WOOD: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern' | 'lair', readonly [number, number, number, number]> = {
+  house: [0, 2, 2, 3],
+  barracks: [0, 3, 3, 4],
+  tavern: [0, 3, 3, 4],
+  granary: [0, 0, 0, 0],
+  woodyard: [0, 0, 0, 0],
+  lair: [0, 0, 0, 0],
+};
+/** nights of firewood a pile can hold */
+export const HEARTH_NIGHTS = 3;
+/** a child who slept in a cold house: care points that day */
+export const COLD = { kidCare: -1 } as const;
+/** the head's own felling is for clearing ground; woodcutters bring in the real wood */
+export const PLAYER_TREE_YIELD = 2;
 /** scrap iron looted from slain raiders */
 export const SCRAP_DROP = { raider: 2, brute: 4, warlord: 10, snatcher: 1, shaman: 2, rat: 0, ogre: 30, wrecker: 3 } as const;
 

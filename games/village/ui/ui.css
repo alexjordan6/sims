@@ -560,9 +560,9 @@ body.touch .ctrl-tab { font-size: 7px; }
 .bar.ammo { height: 6px; margin-top: 3px; }
 .bar.ammo i { background: var(--accent); }
 .bar.ammo.low i { background: var(--danger); }
-.tower-count { width: 100%; color: var(--accent); }
+.tower-count, .hearth-count { width: 100%; color: var(--accent); }
 .tower-count.low { color: #ff9a5c; }
-.tower-count.dry { color: var(--danger); font-weight: bold; }
+.tower-count.dry, .hearth-count.dry { color: var(--danger); font-weight: bold; }
 .custom { margin-top: 8px; display: grid; grid-template-columns: auto 1fr; gap: 4px 10px; align-items: center; }
 .swatches { display: flex; gap: 4px; flex-wrap: wrap; }
 .swatch { width: 22px; height: 22px; border: 2px solid #5a4636; cursor: pointer; padding: 0; color: var(--ink); font: inherit; }
