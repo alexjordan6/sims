@@ -1,7 +1,7 @@
 import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type Tool } from '../agents';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
-import { OGRE, COST, p, RUN, LEGACY_TEST_MODE, LEVEL_PERKS, CALLING_NAME, TRAITS, HEARTY_RATION, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, CADET_AGE_BEFORE, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS, TREE_YIELD, OLD_YIELD } from '../config';
+import { OGRE, HAUL, COST, p, RUN, LEGACY_TEST_MODE, LEVEL_PERKS, CALLING_NAME, TRAITS, HEARTY_RATION, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, CADET_AGE_BEFORE, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS, TREE_YIELD, OLD_YIELD } from '../config';
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
@@ -415,7 +415,8 @@ export class UI {
     const hour = Math.floor(s.dayTime * 24);
     const night = s.dayTime < 0.22 || s.dayTime > 0.8;
     const raidIn = s.nextRaidDay - s.day;
-    const key = `${s.day}|${hour}|${s.food | 0}/${s.foodCap}|${s.wood | 0}/${s.woodCap}|${s.scrap}|${count('farmer')}|${count('woodcutter')}|${count('kid')}|${count('soldier')}|${s.player.hp}|${s.raidActive}|${s.boss?.hp ?? ''}|${raidIn}|${s.speed}|${s.paused}|${night}`;
+    const held = s.player.load ? `${s.player.load.kind}${s.player.load.n}` : '';
+    const key = `${s.day}|${hour}|${held}|${s.food | 0}/${s.foodCap}|${s.wood | 0}/${s.woodCap}|${s.scrap}|${count('farmer')}|${count('woodcutter')}|${count('kid')}|${count('soldier')}|${s.player.hp}|${s.raidActive}|${s.boss?.hp ?? ''}|${raidIn}|${s.speed}|${s.paused}|${night}`;
     if (key === this.lastTop) return;
     this.lastTop = key;
 
@@ -426,8 +427,9 @@ export class UI {
     this.top.style.setProperty('--sky', `rgba(${sky.r}, ${sky.g}, ${sky.b}, ${Math.min(0.85, sky.alpha * 1.3).toFixed(2)})`);
     q('.day').textContent = `DAY ${s.day}/${RUN.days}`;
     q('.hour').textContent = `${String(hour).padStart(2, '0')}:00`;
-    q('.wood').innerHTML = `${s.wood | 0}<small>/${s.woodCap}</small>`;
-    q('.food').innerHTML = `${s.food | 0}<small>/${s.foodCap}</small>`;
+    const inHand = (kind: string) => s.player.load?.kind === kind ? `<em class="hand">+${s.player.load.n} in hand</em>` : '';
+    q('.wood').innerHTML = `${s.wood | 0}<small>/${s.woodCap}</small>${inHand('wood')}`;
+    q('.food').innerHTML = `${s.food | 0}<small>/${s.foodCap}</small>${inHand('food')}`;
     q('.scrap').textContent = String(s.scrap);
     q('.pop').innerHTML = ([
       ['farmer', CHAR.farmer, 'FARM'], ['woodcutter', CHAR.woodcutter, 'WOOD'], ['kid', CHAR.kid, 'KIDS'], ['soldier', CHAR.soldier, 'ARMY'],
@@ -457,7 +459,9 @@ export class UI {
       el.classList.toggle('off', (tool === 'house' || tool === 'barracks') && s.wood < COST[tool]);
     });
     const hint = this.hotbar.querySelector('.hint-text')!;
-    const text = s.hint().replace(/^E: /, '');
+    const carry = s.carryHint();
+    const raw = s.hint();
+    const text = (carry && !raw.startsWith('E:') && !/full|first/.test(raw) ? carry : raw).replace(/^E: /, '');
     if (hint.textContent !== text) hint.textContent = text;
     // the touch action button shows the verb it would perform
     const verb = this.stage.querySelector('.act .verb');
@@ -539,6 +543,7 @@ export class UI {
       html += `<b>Home</b><span>${m.home.residents} of ${s.beds(m.home)} beds · raises ${CALLING_NAME[m.home.calling ?? 'farmer']}${m.home.hearty ? ' · hearty' : ''}</span>`;
       html += `<b>Fed</b><span>${m.hungerDays === 0 ? 'yes' : `<em class="warn">hungry for ${m.hungerDays} days</em>`}</span>`;
     }
+    if (m.load) html += `<b>Carrying</b><span>${m.load.n} ${m.load.kind}</span>`;
     html += `<b>Doing</b><span>${esc(m.task || '—')}${m instanceof Villager && m.carriedBy ? ` <em class="warn">— kill the ${esc(m.carriedBy.name.toLowerCase())} to free them</em>` : ''}</span></div>`;
     if (m instanceof Villager && m.role === 'kid') {
       const o = m.outlook(s), need = Villager.drillNeeded(s), startAge = s.adultAge - CADET_AGE_BEFORE;
@@ -787,6 +792,7 @@ export class UI {
           <p>You can't recruit anyone. <b>Every adult was a child you raised.</b> See RAISING CHILDREN below.</p>
           <h3>EACH DAY</h3>
           <p>Every villager eats 1 food. Crops ripen in ${s.cropDays} day${s.cropDays > 1 ? 's' : ''}. Couples with a spare bed have children. Everyone heals overnight.</p>
+          <p><b>Nothing counts until it's carried in.</b> Chopped wood and picked crops ride on the arms of whoever took them: woodcutters haul ${HAUL.villager.wood} wood to the woodyard per trip, farmers ${HAUL.villager.food} food to the granary. You carry ${HAUL.player.wood} wood or ${HAUL.player.food} food and unload by walking up to the building. Long walks are wasted work — keep the woodyard by the grove and the granary by the field.</p>
         </section>
         <section>
           <h3>WHO'S WHO</h3>
@@ -804,8 +810,8 @@ export class UI {
           <p>Buildings can't be damaged. Use the <b>HAMMER</b> on one (3 hits) to upgrade it for wood. Every building has three levels — the brass studs on the sign by the door count them, and each level changes the building itself:</p>
           ${building('house', 'House · ' + COST.house + ' wood', 'A couple here has children.')}
           ${building('barracks', 'Barracks · ' + COST.barracks + ' wood', 'Sponsors sworn houses; cadets drill in its yard.')}
-          ${building('granary', 'Granary', 'Holds your food; the crate stack beside it climbs as the store fills.')}
-          ${building('woodyard', 'Woodyard', 'Holds your wood; the log stack beside the cabin climbs as it fills.')}
+          ${building('granary', 'Granary', 'Holds your food; the harvest is carried here. The crate stack beside it climbs as the store fills.')}
+          ${building('woodyard', 'Woodyard', 'Holds your wood; chopped logs are carried here. The log stack beside the cabin climbs as it fills.')}
           <h3>RAISING CHILDREN</h3>
           <p><b>Callings.</b> Pick a house (right click / X, or tap it) and set RAISE CHILDREN AS: <b>FARMERS</b>, <b>CUTTERS</b> or <b>SOLDIERS</b>. From age ${s.adultAge - CADET_AGE_BEFORE} its children apprentice every working day — at the field, the woodyard or the barracks yard — and after ${Villager.drillNeeded(s)} days come of age <b>skilled</b>: faster work, bigger harvests and loads, tougher soldiers. Unfinished apprentices grow up plain.</p>
           <p><b>Care.</b> Each dawn a child earns care for the day before: fed · <b>well fed</b> (the house on HEARTY rations, ${HEARTY_RATION} food a day) · both parents alive · another child at home · a Lv2+ house · your <b>encouragement</b>. Running from raiders, going hungry or losing a parent costs care. It averages into <b>stars</b> (★ to ★★★★★) that are fixed at coming of age and last for life: each star is +6% HP and work speed; five stars make a <b>gifted</b> adult with a trait (Hardy, Quick, Brave, Green Thumb, Tireless); a neglected child grows up frail.</p>

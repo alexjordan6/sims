@@ -1,6 +1,6 @@
 import type { Agent } from '@shared/index';
 import { World, doorstep, buildingCenter, yardOf, type House, type TilePos, type Defense, type BuildingKind } from './world';
-import { p, TREE_RESERVE, CADET_AGE_BEFORE, CADET_DAYS, STAR_BONUS, FLEE_RANGE, BEDTIME, TRAITS, type Calling, type Trait } from './config';
+import { p, TREE_RESERVE, CADET_AGE_BEFORE, CADET_DAYS, STAR_BONUS, FLEE_RANGE, BEDTIME, TRAITS, HAUL, TILE, type Calling, type Trait, type LoadKind } from './config';
 import type { Mods } from './meta';
 import { NO_ARMOR, armorStats, type Armor, type HelmetStyle } from './characters';
 import type { VillageScene } from './main';
@@ -24,6 +24,13 @@ export abstract class Mover implements Agent {
   /** true while tucked away inside a house (not drawn, not targetable). */
   hidden = false;
   elevated = false;
+  /** what this body is carrying: chopped wood or picked food, on its way to the woodyard / granary */
+  load: { kind: LoadKind; n: number } | null = null;
+  /** Put a yield in this body's arms (one kind at a time — the other kind is taken in first). */
+  pickUp(kind: LoadKind, n: number): void {
+    if (this.load && this.load.kind !== kind) return;
+    this.load = { kind, n: (this.load?.n ?? 0) + n };
+  }
   hostile = false;
   aim = { x: 1, y: 0 };
   private pathRevision = -1;
@@ -396,8 +403,11 @@ export class Villager extends Mover {
   }
   private farmHelp = false;
 
+  /** heading to the woodyard / granary with a load */
+  private delivering = false;
+
   private civilUpdate(dt: number, s: VillageScene, farmer: boolean): void {
-    if (s.nearestRaider(this.x, this.y, 90)) { this.task = 'fleeing'; this.goHome(s, dt); return; }
+    if (s.nearestRaider(this.x, this.y, 90)) { this.task = 'fleeing'; this.delivering = false; this.goHome(s, dt); return; }
 
     if (this.workTimer > 0) {
       this.workTimer -= dt;
@@ -406,15 +416,20 @@ export class Villager extends Mover {
       return;
     }
 
+    if (this.delivering) { this.deliver(dt, s); return; }
+
     this.thinkTimer -= dt;
     if (!this.goal && this.thinkTimer <= 0) {
       this.thinkTimer = 1;
       const w = s.world;
+      // arms full: take it in before looking for more work
+      if (this.load && this.load.n >= HAUL.villager[this.load.kind]) { this.delivering = true; this.deliver(dt, s); return; }
       const job = farmer
         ? w.nearest(this.x, this.y, (t) => t.kind === 'crop' && t.stage >= s.cropDays) ??
           w.nearest(this.x, this.y, (t) => t.kind === 'tilled')
         : s.mods.ignoreReserve || w.treeCount > TREE_RESERVE ? this.pickTree(s) : null;
       if (job) { this.setGoal(s, job.tx, job.ty); this.task = farmer ? (this.role === 'woodcutter' ? 'helping in the field' : 'heading to the field') : 'looking for a tree'; }
+      else if (this.load) { this.delivering = true; this.deliver(dt, s); return; } // nothing more to do: bring in what's carried
       else { this.wanderNear(s, this.home); this.task = farmer ? 'no crops to tend' : 'leaving the last trees to regrow'; }
       return;
     }
@@ -442,18 +457,34 @@ export class Villager extends Mover {
       ?? w.nearest(this.x, this.y, (t) => t.kind === 'tree');
   }
 
+  /** Walk the load to its building and hand it in; falls back to the job loop if there is nowhere to take it. */
+  private deliver(dt: number, s: VillageScene): void {
+    const load = this.load;
+    const b = load?.kind === 'wood' ? s.world.woodyard : s.world.granary;
+    if (!load || !b) { this.delivering = false; this.clearGoal(); return; }
+    const door = doorstep(b);
+    this.setGoal(s, door.tx, door.ty);
+    this.task = load.kind === 'wood' ? 'hauling logs to the woodyard' : 'carrying the harvest to the granary';
+    const arrived = this.followPath(dt);
+    if (arrived) {
+      if (this.adjacentTo(door) || this.dist(World.center(door.tx, door.ty)) < TILE) s.deposit(this);
+      this.delivering = false; this.clearGoal(); this.thinkTimer = 0.2; // no path or arrived: back to work either way
+    }
+  }
+
   private finishWork(s: VillageScene, farmer: boolean): void {
     const g = this.goal!;
     const t = s.world.get(g.tx, g.ty)!;
     if (farmer && t.kind === 'crop' && t.stage >= s.cropDays) {
-      if (s.food < s.foodCap) {
+      // leave ripe crops standing while the granary is full or the arms hold wood
+      if (s.food < s.foodCap && (!this.load || this.load.kind === 'food')) {
         s.world.set(g.tx, g.ty, 'tilled');
         const yieldNow = (s.mods.cropYield + (this.skilled && this.role === 'farmer' ? 1 : 0)) * (this.trait === 'greenthumb' && s.rng.chance(0.25) ? 2 : 1);
-        s.addFood(yieldNow);
+        this.pickUp('food', yieldNow);
       }
     }
     else if (farmer && t.kind === 'tilled') { s.world.set(g.tx, g.ty, 'crop'); }
-    else if (!farmer && t.kind === 'tree') { const wood = s.treeYield(t) + (this.skilled ? 4 : 0); s.world.set(g.tx, g.ty, 'sapling'); s.addWood(wood); }
+    else if (!farmer && t.kind === 'tree' && (!this.load || this.load.kind === 'wood')) { const wood = s.treeYield(t) + (this.skilled ? 4 : 0); s.world.set(g.tx, g.ty, 'sapling'); this.pickUp('wood', wood); }
     this.clearGoal();
   }
 

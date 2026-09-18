@@ -6,7 +6,7 @@ import { DEFENSE_COST, WALL_HEIGHT } from './config';
 import { Interior } from './interior';
 import { Rat, Snatcher, Brute, Shaman, Ogre, waveComposition } from './enemies';
 import { Fog } from './fog';
-import { p, TILE, COLS, ROWS, ZOOM, COST, TREE_YIELD, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, OLD_YIELD, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, CADET_AGE_BEFORE, HEARTY_RATION, CALLING_NAME, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, type Calling, type ArmorSlot } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, type LoadKind, TREE_YIELD, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, OLD_YIELD, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, CADET_AGE_BEFORE, HEARTY_RATION, CALLING_NAME, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, type Calling, type ArmorSlot } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
@@ -32,7 +32,8 @@ export type FxEvent =
   | { kind: 'melee'; who: Mover; x: number; y: number }
   | { kind: 'arrow'; who: Mover }
   | { kind: 'thud'; who: Mover }
-  | { kind: 'snore'; x: number; y: number };
+  | { kind: 'snore'; x: number; y: number }
+  | { kind: 'deposit'; x: number; y: number; text: string; colour: string };
 
 export type Screen = 'title' | 'playing' | 'paused' | 'over' | 'won';
 
@@ -580,6 +581,12 @@ export class VillageScene extends SimScene {
       if (this.boss?.dead) { this.endRun(true); return; }
       this.event('raid', 'Raid repelled!', true);
     }
+    // the head unloads by walking up to the woodyard / granary
+    if (this.player.load && !this.player.hidden) {
+      const b = this.player.load.kind === 'wood' ? this.world.woodyard : this.world.granary;
+      const pt = this.player.tile;
+      if (b && pt.tx >= b.tx - 1 && pt.tx <= b.tx + BUILDINGS[b.kind].w && pt.ty >= b.ty - 1 && pt.ty <= b.ty + BUILDINGS[b.kind].h) this.deposit(this.player);
+    }
     this.stats.peakPop = Math.max(this.stats.peakPop, this.villagers().length);
     if (this.player.dead) this.endRun(false);
   }
@@ -850,6 +857,25 @@ export class VillageScene extends SimScene {
   private warnedFull = false;
 
   /** Add to the stockpile, respecting storage; says so (once a day) when the store is full. */
+  /** Hand a carried load in at its building: the stockpile takes it (up to the cap) and the arms are free. */
+  deposit(m: Mover): void {
+    const load = m.load;
+    if (!load) return;
+    const b = load.kind === 'wood' ? this.world.woodyard : this.world.granary;
+    if (!b) return;
+    if (load.kind === 'wood') this.addWood(load.n); else this.addFood(load.n);
+    m.load = null;
+    const c = buildingCenter(b);
+    this.fx.push({ kind: 'deposit', x: c.tx * TILE, y: (b.ty + BUILDINGS[b.kind].h) * TILE - 6, text: `+${load.n} ${load.kind}`, colour: load.kind === 'wood' ? '#d9a566' : '#9be36b' });
+  }
+  /** Why the head can't pick up `kind` right now (arms full, or holding the other thing), or null. */
+  loadProblem(kind: LoadKind): string | null {
+    const l = this.player.load;
+    if (!l) return null;
+    if (l.kind !== kind) return `Take the ${l.kind} to the ${l.kind === 'wood' ? 'woodyard' : 'granary'} first`;
+    if (l.n >= HAUL.player[kind]) return `Your arms are full — drop the ${kind} at the ${kind === 'wood' ? 'woodyard' : 'granary'}`;
+    return null;
+  }
   addFood(n: number): void {
     const room = this.foodCap - this.food;
     if (n > room && !this.warnedFull) { this.warnedFull = true; this.event('food', 'The granary is full — upgrade it with the hammer', true); }
@@ -867,8 +893,8 @@ export class VillageScene extends SimScene {
   /** What the building does now, and what the next level adds. */
   buildingBlurb(b: Building): string {
     const now = b.kind === 'house' ? `${b.residents}/${this.beds(b)} beds${b.level >= 3 ? ' · births +15%' : ''}${' · raises ' + CALLING_NAME[b.calling ?? 'farmer']}${b.hearty ? ' · hearty rations' : ''}`
-      : b.kind === 'granary' ? `${this.food | 0}/${CAPS[b.level]} food`
-      : b.kind === 'woodyard' ? `${this.wood | 0}/${CAPS[b.level]} wood`
+      : b.kind === 'granary' ? `${this.food | 0}/${CAPS[b.level]} food · the harvest is carried here`
+      : b.kind === 'woodyard' ? `${this.wood | 0}/${CAPS[b.level]} wood · chopped logs are carried here`
       : LEVEL_PERKS[b.kind][b.level];
     const next = b.level < MAX_LEVEL ? ` · next Lv${b.level + 1}: ${LEVEL_PERKS[b.kind][b.level + 1]} (${this.upgradeCost(b)} wood, hammer)` : ' · max level';
     return now + next;
@@ -1160,18 +1186,29 @@ export class VillageScene extends SimScene {
         return;
       case 'axe':
         if (t?.kind === 'tree') {
-          if (++t.work >= 3) { const wood = this.treeYield(t); this.world.set(tx, ty, 'sapling'); this.addWood(wood); }
+          const why = this.loadProblem('wood');
+          if (why) { this.event('wood', why + '.'); return; }
+          if (++t.work >= 3) { const wood = this.treeYield(t); this.world.set(tx, ty, 'sapling'); this.player.pickUp('wood', wood); }
           else this.world.dirty.add(ty * COLS + tx);
         } else if (t?.kind === 'sapling') this.world.set(tx, ty, 'grass'); // clear the stump
         this.fx.push({ kind: 'tool', tool: 'axe', tx, ty });
         return;
       case 'hands':
-        if (t?.kind === 'crop' && t.stage >= this.cropDays) { this.world.set(tx, ty, 'tilled'); this.addFood(this.mods.cropYield); this.fx.push({ kind: 'tool', tool: 'seed', tx, ty }); }
+        if (t?.kind === 'crop' && t.stage >= this.cropDays) {
+          const why = this.loadProblem('food');
+          if (why) { this.event('food', why + '.'); return; }
+          this.world.set(tx, ty, 'tilled'); this.player.pickUp('food', this.mods.cropYield); this.fx.push({ kind: 'tool', tool: 'seed', tx, ty });
+        }
         return;
     }
   }
 
   /** What the tool would do right now, as "E: verb" (or a reason it won't). */
+  /** "carrying 8 wood — walk up to the woodyard to unload", shown while the head holds something. */
+  carryHint(): string | null {
+    const l = this.player.load;
+    return l ? `carrying ${l.n} ${l.kind} — walk up to the ${l.kind === 'wood' ? 'woodyard' : 'granary'} to unload` : null;
+  }
   hint(): string {
     if (this.interior.active) return this.interior.hint();
     const door = this.doorAt();
@@ -1221,13 +1258,13 @@ export class VillageScene extends SimScene {
         if (kind === 'crop') return t!.stage >= this.cropDays ? `ripe — ${need('hands')}` : `growing (${t!.stage}/${this.cropDays} days)`;
         return 'seeds: crops on soil, trees on grass';
       case 'axe':
-        if (kind === 'tree') return `E: chop ${this.isOldGrowth(t!) ? 'old growth' : 'young tree'} (${t!.work}/3, ${this.treeYield(t!)} wood)`;
+        if (kind === 'tree') { const why = this.loadProblem('wood'); return why ?? `E: chop ${this.isOldGrowth(t!) ? 'old growth' : 'young tree'} (${t!.work}/3, ${this.treeYield(t!)} wood)${pl.load ? ` · carrying ${pl.load.n}/${HAUL.player.wood} wood` : ''}`; }
         if (kind === 'sapling') return t!.stage < 2 ? 'E: clear the stump' : 'E: cut down the sapling';
         return 'axe: face a tree';
       case 'hands':
         if (t?.defense?.kind === 'stairs' || this.world.get(pl.tile.tx, pl.tile.ty)?.kind === 'stairs') return `E: ${pl.elevated ? 'descend' : 'climb'} stairs`;
         if (t?.defense?.kind === 'gate') return `E: ${t.defense.open ? 'close' : 'open'} gate`;
-        if (kind === 'crop') return t!.stage >= this.cropDays ? 'E: harvest' : `growing (${t!.stage}/${this.cropDays} days)`;
+        if (kind === 'crop') { const why = this.loadProblem('food'); return t!.stage >= this.cropDays ? (why ?? `E: harvest${pl.load ? ` · carrying ${pl.load.n}/${HAUL.player.food} food` : ''}`) : `growing (${t!.stage}/${this.cropDays} days)`; }
         if (kind === 'grass') return `grass — ${need('hoe')} to till`;
         if (kind === 'tilled') return `tilled — ${need('seeds')}`;
         if (kind === 'tree') return `tree — ${need('axe')}`;

@@ -40,6 +40,8 @@ export class Renderer {
   private sprites = new Map<number, Phaser.GameObjects.Sprite>();
   private forts = new Map<number, Phaser.GameObjects.Image>();
   private bows = new Map<number, Phaser.GameObjects.Image>();
+  /** the bundle of logs / basket someone is carrying */
+  private carries = new Map<number, Phaser.GameObjects.Image>();
   /** each building's sprite (frame = level - 1) and, for the supply buildings, its climbing stock column */
   private buildings = new Map<Building, { body: Phaser.GameObjects.Image; lit: Phaser.GameObjects.Image; stock?: Phaser.GameObjects.Image; banner?: Phaser.GameObjects.Image }>();
   /** the sky's tint, multiplied into tiles and sprites; tiles repaint only when it changes */
@@ -81,6 +83,7 @@ export class Renderer {
   rebuild(): void {
     for (const sp of this.forts.values()) sp.destroy(); this.forts.clear();
     for (const sp of this.bows.values()) sp.destroy(); this.bows.clear();
+    for (const sp of this.carries.values()) sp.destroy(); this.carries.clear();
     for (const s of this.sprites.values()) s.destroy();
     this.sprites.clear();
     this.fx.clear();
@@ -271,6 +274,14 @@ export class Renderer {
       let bow = this.bows.get(m.id);
       if (armed && !bow) { bow = this.scene.add.image(0, 0, 'bow'); this.bows.set(m.id, bow); }
       bow?.setPosition(sp.x + m.aim.x * 7, sp.y - 3 + m.aim.y * 7).setRotation(Math.atan2(m.aim.y, m.aim.x)).setScale(1, m.attackCd > 0.45 ? 0.8 : 1).setDepth(sp.depth + 0.01).setVisible(armed && !m.hidden).setTint(this.tint);
+      // a load rides on the shoulder, bobbing with the walk
+      let carry = this.carries.get(m.id);
+      if (m.load && !carry) { carry = this.scene.add.image(0, 0, 'carry-wood').setOrigin(0.5, 1); this.carries.set(m.id, carry); }
+      if (carry) {
+        const key = m.load?.kind === 'food' ? 'carry-food' : 'carry-wood';
+        if (m.load && carry.texture.key !== key) carry.setTexture(key);
+        carry.setPosition(sp.x - m.dir * 2, sp.y - 11 + (a?.oy ?? 0)).setFlipX(m.dir < 0).setScale(base).setDepth(sp.depth + 0.01).setVisible(!!m.load && !m.hidden && sp.visible).setTint(this.tint);
+      }
       if (m.hurtT < 0.15 && !m.blocked) sp.setTintFill(0xffffff);
       else if (m instanceof Raider) sp.setTint(mulColor(m.boss ? 0xff6a6a : m.kind === 'brute' ? 0xb07070 : 0xffd0d0, this.tint));
       else if (m instanceof Bolt) sp.setTint(0xb46bff);
@@ -279,6 +290,7 @@ export class Renderer {
     }
     for (const [id, sp] of this.sprites) if (!seen.has(id)) { this.sprites.delete(id); this.fx.die(sp, sp.getData('agent') as Mover); }
     for (const [id, sp] of this.bows) if (!seen.has(id)) { sp.destroy(); this.bows.delete(id); }
+    for (const [id, sp] of this.carries) if (!seen.has(id)) { sp.destroy(); this.carries.delete(id); }
   }
 
   /** Screen-space centre of an agent's sprite (for DOM tooltips). */

@@ -469,8 +469,24 @@ export const BUILDING_TEXTURE = { house: 'bld-house', barracks: 'bld-barracks', 
 export const LIT_TEXTURE = { house: 'bld-house-lit', barracks: 'bld-barracks-lit', granary: 'bld-granary-lit', woodyard: 'cabin-lit', tavern: 'bld-tavern-lit', lair: 'bld-lair-lit' } as const;
 
 /** Create every building and stock texture (safe to call more than once). */
+/** What people carry: a bundle of logs on the shoulder, a basket of produce. 14x8 each. */
+export function ensureCarryArt(scene: Phaser.Scene): void {
+  if (scene.textures.exists('carry-wood')) return;
+  const w = scene.textures.createCanvas('carry-wood', 14, 8)!, c = w.getContext();
+  for (const [x, y] of [[0, 2], [5, 1], [8, 2]] as const) { px(c, x, y, INK, 6, 5); px(c, x + 1, y + 1, BARK, 4, 3); px(c, x + 1, y + 1, BARK_LIGHT, 4, 1); px(c, x + 1, y + 3, BARK_DARK, 4, 1); }
+  px(c, 11, 3, FACE, 2, 2); px(c, 11, 3, RING, 1, 1); // one log end shows
+  px(c, 4, 0, '#6b4226', 1, 7); px(c, 9, 0, '#6b4226', 1, 7); // rope
+  w.refresh();
+  const f = scene.textures.createCanvas('carry-food', 14, 8)!, d = f.getContext();
+  px(d, 1, 3, INK, 12, 5); px(d, 2, 4, '#b07a3a', 10, 3); px(d, 2, 4, '#d9a566', 10, 1); px(d, 4, 6, '#8a5a2a', 2, 1); px(d, 8, 6, '#8a5a2a', 2, 1); // the basket
+  px(d, 2, 1, INK, 10, 3); px(d, 3, 2, '#d94a3a', 3, 2); px(d, 6, 1, '#f0c040', 3, 3); px(d, 9, 2, '#6fbe3a', 2, 2); px(d, 4, 2, '#ff8a7a', 1, 1); px(d, 7, 1, '#fff0a0', 1, 1); // produce
+  px(d, 0, 2, INK, 1, 3); px(d, 13, 2, INK, 1, 3); // handles
+  f.refresh();
+}
+
 export function ensureBuildingArt(scene: Phaser.Scene): void {
   ensureFortArt(scene);
+  ensureCarryArt(scene);
   buildingTexture(scene, 'bld-tavern', BIG_W, BIG_H, drawTavern);
   // lair frames: level 1-2 = the fire burns (the Ogre lives), level 3 = the fire is out (he's dead)
   buildingTexture(scene, 'bld-lair', 80, 80, (ctx, ox, level) => drawLair(ctx, ox, level < 3 ? 1 : 0));

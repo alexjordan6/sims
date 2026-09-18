@@ -4,7 +4,7 @@ import { World, doorstep, type BuildingKind } from './world';
 import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, waveComposition } from './enemies';
-import { COLS, ROWS, WALL_HEIGHT } from './config';
+import { COLS, ROWS, WALL_HEIGHT, TREE_YIELD, HAUL } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
 const output = document.getElementById('test-results')!, summary = document.getElementById('test-summary')!;
@@ -107,6 +107,23 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(!s.agents.some(a => a instanceof Raider && !a.lairBound), 'the Ogre does not count toward an active raid');
     Object.assign(s.player, { x: ogre.x, y: ogre.y + 40 }); s.dayTime = 0.86; step(s, 3);
     assert(ogre.state === 'hunting' && s.player.hp <= s.player.maxHp - 25, 'the Ogre hunts a player near his lair at night and hits for 25');
+    // hauling: nothing counts until it's carried to the woodyard / granary
+    s = fresh(); clearing(s); s.agents = [s.player, s.ogre!]; s.wood = 0; s.food = 0;
+    const yard = s.world.woodyard!, yd = doorstep(yard);
+    s.world.set(yd.tx, yd.ty + 3, 'tree'); s.world.set(yd.tx, yd.ty + 4, 'tree');
+    const cutter = s.spawn(new Villager(...Object.values(World.center(yd.tx + 1, yd.ty + 3)) as [number, number], s.world.houses[0], 'woodcutter', 22, 'Haul tester', s.mods));
+    step(s, 6);
+    assert(cutter.load?.kind === 'wood' && cutter.load.n >= TREE_YIELD && s.wood === 0, 'a chopped tree goes into the woodcutter\'s arms, not the stockpile');
+    step(s, 20);
+    assert(s.wood >= TREE_YIELD, 'the woodcutter carries the wood to the woodyard and the stockpile takes it');
+    Object.assign(s.player, World.center(yd.tx + 3, yd.ty + 8)); s.player.tool = 'axe'; s.player.facing = { x: 0, y: -1 }; s.hoverTile = null;
+    s.world.set(yd.tx + 3, yd.ty + 7, 'tree'); const w0 = s.wood;
+    for (let i = 0; i < 3; i++) s.interact();
+    assert(s.player.load?.kind === 'wood' && s.player.load.n === TREE_YIELD && s.wood === w0, 'the head\'s chop fills their arms');
+    s.player.load = { kind: 'wood', n: HAUL.player.wood }; s.world.set(yd.tx + 3, yd.ty + 7, 'tree'); s.interact();
+    assert(s.world.get(yd.tx + 3, yd.ty + 7)!.kind === 'tree' && s.hint().includes('full'), 'full arms refuse another tree and say so');
+    Object.assign(s.player, World.center(yd.tx, yd.ty)); s.tick(1 / 60);
+    assert(!s.player.load && s.wood === w0 + HAUL.player.wood, 'walking up to the woodyard unloads the head\'s arms');
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;
   } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); }

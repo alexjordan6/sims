@@ -151,6 +151,7 @@ export class Fx {
       case 'boss': this.bossArrive(ev.who, sprites); this.sfx.horn(); break;
       case 'slowmo': this.zoomBump(0.08, 120, 420); break;
       case 'death': break; // handled by die() when the renderer hands over the sprite
+      case 'deposit': this.dust.explode(6, ev.x, ev.y); this.word(ev.text, ev.x, ev.y - 10, ev.colour, 7, 0.9); this.sfx.dig(); break;
       case 'snore': if (this.scene.fog.visibleAt(ev.x, ev.y) > 0.35) this.word('z', ev.x + 6, ev.y, '#d8d0f0', 6, 1.6); break;
       case 'thud': {
         // the Ogre's footsteps: felt within 30 tiles, louder and heavier the closer he is

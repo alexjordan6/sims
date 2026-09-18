@@ -96,6 +96,11 @@ export const TRAITS: Record<Trait, { name: string; blurb: string }> = {
 /** beds per house level (index = level); overridden upward by the Big Families boon */
 export const HOUSE_BEDS = [0, 4, 6, 8] as const;
 
+// ---- hauling --------------------------------------------------------------------------------
+/** How much wood or food one pair of arms carries before a trip to the woodyard / granary. */
+export const HAUL = { villager: { wood: 16, food: 12 }, player: { wood: 24, food: 18 } } as const;
+export type LoadKind = 'wood' | 'food';
+
 // ---- the Ogre -------------------------------------------------------------------------------
 /** The first boss: a giant who sleeps in his lair by day and prowls around it at night. */
 export const OGRE = {

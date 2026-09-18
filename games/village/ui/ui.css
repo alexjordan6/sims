@@ -555,3 +555,6 @@ body.touch .ctrl-tab { font-size: 7px; }
 .swatch.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
 body.touch .acols { flex-direction: column; }
 body.touch .wearers { flex-direction: row; flex-wrap: wrap; }
+
+/* what the head is carrying, under the wood / food count */
+.topbar .stat .val .hand { font-size: 9px; font-style: normal; color: var(--accent); margin-left: 4px; white-space: nowrap; }
