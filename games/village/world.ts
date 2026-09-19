@@ -228,6 +228,16 @@ export class World {
     this.buildings.push(b);
     return b;
   }
+  /** Take a building down: its footprint goes back to grass and it leaves the roster. */
+  remove(b: Building): void {
+    const f = BUILDINGS[b.kind];
+    this.stamping = true;
+    for (let dy = 0; dy < f.h; dy++)
+      for (let dx = 0; dx < f.w; dx++) if (this.get(b.tx + dx, b.ty + dy)?.building === b) this.set(b.tx + dx, b.ty + dy, 'grass');
+    this.stamping = false;
+    this.buildings = this.buildings.filter((o) => o !== b);
+    this.refresh(b);
+  }
   placeHouse(tx: number, ty: number): Building { return this.place('house', tx, ty); }
   placeBarracks(tx: number, ty: number): Building { return this.place('barracks', tx, ty); }
 

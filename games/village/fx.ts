@@ -227,6 +227,14 @@ export class Fx {
         this.word('RUINED', x0 + w / 2, y0 - 12, '#ff6a5a', 9, 1.6);
         break;
       }
+      case 'demolish': {
+        // taken down on purpose: a lighter shudder and dust, no alarm
+        const b = ev.building, f = BUILDINGS[b.kind], x0 = b.tx * TILE, y0 = b.ty * TILE, w = f.w * TILE, h = f.h * TILE;
+        this.shake(140, 0.003);
+        this.sfx.thud(0.6);
+        for (let i = 0; i < 8; i++) { const x = x0 + Math.random() * w, y = y0 + Math.random() * h; this.dust.explode(4, x, y); this.puff.explode(1, x, y - 6); }
+        break;
+      }
       case 'snore': if (this.scene.fog.visibleAt(ev.x, ev.y) > 0.35) this.word('z', ev.x + 6, ev.y, '#d8d0f0', 6, 1.6); break;
       case 'smash': {
         // the club comes down: he squashes into the blow, the ground jumps, dust rolls out in a ring

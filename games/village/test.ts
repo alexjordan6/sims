@@ -4,7 +4,7 @@ import { World, doorstep, hearthCost, type BuildingKind } from './world';
 import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, Wrecker, waveComposition } from './enemies';
-import { COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, p, BUILDING_HP, WRECKER } from './config';
+import { COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
 const output = document.getElementById('test-results')!, summary = document.getElementById('test-summary')!;
@@ -232,6 +232,28 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(s.world.get(yd.tx + 3, yd.ty + 7)!.kind === 'tree' && s.hint().includes('full'), 'full arms refuse another tree and say so');
     Object.assign(s.player, World.center(yd.tx, yd.ty)); s.tick(1 / 60);
     assert(!s.player.load && s.wood === w0 + HAUL.player.wood, 'walking up to the woodyard unloads the head\'s arms');
+    // taking things down: a sound wall comes down after a few hammer blows for half its cost; a hurt one is mended first
+    s = fresh(); clearing(s); s.agents = [s.player]; s.wood = 50;
+    Object.assign(s.player, World.center(121, 100)); s.player.tool = 'hammer'; s.player.facing = { x: 1, y: 0 }; s.hoverTile = null;
+    const seg2 = s.world.placeDefense('wall', 122, 100)!; seg2.hp -= p.wallRepair;
+    let w1 = s.wood; s.interact();
+    assert(seg2.hp === seg2.maxHp && s.wood === w1 - 1 && s.world.get(122, 100)!.defense === seg2, 'the hammer mends a hurt wall instead of taking it down');
+    w1 = s.wood; for (let i = 0; i < DISMANTLE.hits - 1; i++) s.interact();
+    assert(s.world.get(122, 100)!.defense === seg2 && s.hint().includes('take down'), 'a sound wall stands until the last hammer blow, and the hint counts them');
+    s.interact();
+    assert(!s.world.get(122, 100)!.defense && s.world.get(122, 100)!.kind === 'grass' && s.wood === w1 + Math.round(DEFENSE_COST.wall * DISMANTLE.refund), 'the last blow takes the wall down and returns half its wood');
+    // demolishing a house: tenants move to another house, anyone inside steps out, half the wood spent comes back
+    s = fresh(); clearing(s); s.agents = [s.player]; s.wood = 50;
+    const spare = s.world.place('house', 122, 100), old = s.world.houses.find((h) => h !== spare)!;
+    const tenant2 = s.spawn(new Villager(0, 0, old, 'farmer', 20, 'Tenant', s.mods)); old.residents++; Object.assign(tenant2, World.center(125, 100));
+    tenant2.hidden = true; tenant2.indoors = old;
+    const before2 = s.wood, oldRes = old.residents;
+    assert(s.demolishProblem(old) === null && s.demolishRefund(old) === Math.round(COST.house * DISMANTLE.refund), 'a house with another house standing can be demolished for half its build cost');
+    assert(s.demolish(old), 'the house comes down');
+    assert(!s.world.buildings.includes(old) && s.world.get(old.tx, old.ty)!.kind === 'grass' && !s.world.get(old.tx, old.ty)!.building, 'its footprint is grass again');
+    assert(tenant2.home === spare && spare.residents === 1 && old.residents === oldRes - 1 && !tenant2.hidden && !tenant2.indoors, 'the tenant moves to the other house and steps outside');
+    assert(s.wood === before2 + Math.round(COST.house * DISMANTLE.refund), 'half the wood comes back');
+    assert(s.demolishProblem(spare) !== null && !s.demolish(spare), 'the last house cannot be demolished while someone lives in it');
     // hearths: piles burn a night at dawn, cold buildings stall, woodcutters bring firewood before logs
     s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, { x: -400, y: -400 }); s.day = 1; s.dayTime = 0.3;
     const home2 = s.world.houses[0], keep2 = s.world.barracks[0];

@@ -79,6 +79,8 @@ export class UI {
   readonly touch = document.body.classList.contains('touch');
   private lastSelected: Mover | null = null;
   private lastBuilding: import('../world').Building | null = null;
+  /** the building whose DEMOLISH button has been pressed once (the second press does it) */
+  private confirmDemolish: import('../world').Building | null = null;
 
   constructor(private scene: VillageScene) {}
 
@@ -395,7 +397,7 @@ export class UI {
   render(dt: number): void {
     const s = this.scene;
     this.stage.classList.toggle('raid', s.raidActive);
-    if (s.selectedBuilding !== this.lastBuilding) { this.lastBuilding = s.selectedBuilding; this.renderInspector(true); if (this.touch && s.selectedBuilding) { this.showTab('inspector'); this.side.classList.add('open'); } }
+    if (s.selectedBuilding !== this.lastBuilding) { this.lastBuilding = s.selectedBuilding; this.confirmDemolish = null; this.renderInspector(true); if (this.touch && s.selectedBuilding) { this.showTab('inspector'); this.side.classList.add('open'); } }
     if (this.touch && s.selected !== this.lastSelected) {
       this.lastSelected = s.selected;
       if (s.selected) { this.showTab('inspector'); this.side.classList.add('open'); }
@@ -542,6 +544,10 @@ export class UI {
         html += `<div class="raise"><div class="cap">CHILDREN'S RATIONS</div><div class="seg"><button class="btn small ${b.hearty ? '' : 'on'}" data-rations="plain">PLAIN</button><button class="btn small ${b.hearty ? 'on' : ''}" data-rations="hearty">HEARTY</button></div>
           <div class="d">${b.hearty ? `Each child eats ${HEARTY_RATION} food a day and grows up <b>well fed</b> — a care star's worth every day.` : 'Hearty rations cost double food per child but count toward their care.'}</div></div>`;
       }
+      if (b.kind === 'house' || b.kind === 'barracks' || b.kind === 'tavern') {
+        const why = s.demolishProblem(b), refund = s.demolishRefund(b), arming = this.confirmDemolish === b;
+        html += `<p class="d"><button class="btn small ${arming ? 'danger' : ''} demolish" ${why ? 'disabled' : ''} title="${why ? esc(why) : 'Take it down'}">${arming ? `REALLY TAKE IT DOWN? · ${refund} WOOD BACK` : `DEMOLISH · ${refund} WOOD BACK`}</button>${why ? ` ${esc(why)}` : arming ? ' <em class="warn">tenants move out, anyone inside steps out</em>' : b.ruined ? ' rubble is worth nothing' : ''}</p>`;
+      }
       if (force || html !== this.lastInspector) {
         this.inspector.innerHTML = html; this.lastInspector = html;
         this.inspector.querySelector('.close')?.addEventListener('click', () => s.selectBuilding(null));
@@ -549,10 +555,14 @@ export class UI {
         this.inspector.querySelector('.restock')?.addEventListener('click', () => { s.restockTower(b); this.renderInspector(true); });
         this.inspector.querySelector('.stock-hearth')?.addEventListener('click', () => { s.stockHearth(b); this.renderInspector(true); });
         this.inspector.querySelector('.open-armory')?.addEventListener('click', () => { s.openArmory(s.player, b); this.side.classList.remove('open'); });
+        this.inspector.querySelector('.demolish')?.addEventListener('click', () => {
+          if (this.confirmDemolish !== b) { this.confirmDemolish = b; this.renderInspector(true); return; }
+          this.confirmDemolish = null; if (s.demolish(b)) s.selectBuilding(null); else this.renderInspector(true);
+        });
         this.inspector.querySelectorAll<HTMLButtonElement>('[data-raise]').forEach((el) => el.addEventListener('click', () => { s.setCalling(b, el.dataset.raise as Calling); this.renderInspector(true); }));
         this.inspector.querySelectorAll<HTMLButtonElement>('[data-rations]').forEach((el) => el.addEventListener('click', () => { s.setRations(b, el.dataset.rations === 'hearty'); this.renderInspector(true); }));
         // a ruin does nothing: every control but CLOSE waits for the hammer
-        if (b.ruined) this.inspector.querySelectorAll<HTMLButtonElement>('button:not(.close)').forEach((el) => { el.disabled = true; });
+        if (b.ruined) this.inspector.querySelectorAll<HTMLButtonElement>('button:not(.close):not(.demolish)').forEach((el) => { el.disabled = true; });
       }
       return;
     }

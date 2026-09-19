@@ -278,6 +278,8 @@ export const BUILDING_HP: Record<'house' | 'barracks' | 'granary' | 'woodyard' |
 };
 /** hammer on a damaged building: HP per wood; rebuilding a ruin costs this share of the build cost (buildings without a shop price use `rebuildDefault`) */
 export const REPAIR = { perWood: 60, rebuildFraction: 0.5, rebuildDefault: 15 } as const;
+/** Taking things down: the share of wood spent (build + upgrades, or the wall's cost) you get back. A ruin refunds nothing. */
+export const DISMANTLE = { refund: 0.5, hits: 3 } as const;
 
 // ---- the Wrecker ----------------------------------------------------------------------------
 /** A raider that ignores people and tears down buildings, houses first. Walled off, it batters walls slowly. */

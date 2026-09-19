@@ -6,7 +6,7 @@ import { DEFENSE_COST, WALL_HEIGHT } from './config';
 import { Interior } from './interior';
 import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, waveComposition } from './enemies';
 import { Fog } from './fog';
-import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, type LoadKind, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, CADET_AGE_BEFORE, HEARTY_RATION, CALLING_NAME, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, type LoadKind, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, CADET_AGE_BEFORE, HEARTY_RATION, CALLING_NAME, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
@@ -36,6 +36,7 @@ export type FxEvent =
   | { kind: 'snore'; x: number; y: number }
   | { kind: 'deposit'; x: number; y: number; text: string; colour: string }
   | { kind: 'ruin'; building: Building }
+  | { kind: 'demolish'; building: Building }
   /** the Ogre's ground slam (also his crash into a wall): shockwave of radius r */
   | { kind: 'smash'; who: Mover; x: number; y: number; r: number }
   /** the Ogre lowers his head and rushes along (ux, uy) */
@@ -1039,6 +1040,41 @@ export class VillageScene extends SimScene {
     const base = b.kind === 'house' || b.kind === 'barracks' || b.kind === 'tavern' ? COST[b.kind] : REPAIR.rebuildDefault / REPAIR.rebuildFraction;
     return p.freeBuild ? 0 : Math.max(1, Math.round(base * REPAIR.rebuildFraction * this.mods.buildCostMul));
   }
+  /** Wood back for taking `b` down: half of what went into it. Rubble is worth nothing. */
+  demolishRefund(b: Building): number {
+    if (b.ruined || !(b.kind === 'house' || b.kind === 'barracks' || b.kind === 'tavern')) return 0;
+    let spent = COST[b.kind];
+    for (let lv = 1; lv < b.level; lv++) spent += UPGRADE_COST[b.kind][lv];
+    return Math.round(spent * DISMANTLE.refund);
+  }
+  /** Why `b` can't be demolished right now, or null. */
+  demolishProblem(b: Building): string | null {
+    if (!(b.kind === 'house' || b.kind === 'barracks' || b.kind === 'tavern')) return 'only houses, barracks and the tavern can be taken down';
+    if (b.kind === 'house' && this.villagers().some((v) => v.home === b && !v.dead) && !this.world.houses.some((h) => h !== b && !h.ruined)) return 'its tenants would have nowhere to live';
+    return null;
+  }
+  /** Take a building down: tenants move to another house, anyone inside steps out, half the wood comes back. */
+  demolish(b: Building): boolean {
+    const why = this.demolishProblem(b);
+    if (why) { this.event('build', `Can't demolish: ${why}.`); return false; }
+    const refund = this.demolishRefund(b);
+    for (const v of this.villagers()) {
+      if (v.indoors === b) v.unhide(this);
+      if (v.home !== b) continue;
+      // the evicted take the nearest house with a spare bed, else the nearest house at all
+      const houses = this.world.houses.filter((h) => h !== b && !h.ruined);
+      const c = buildingCenter(b), byDist = (h: Building) => { const hc = buildingCenter(h); return (hc.tx - c.tx) ** 2 + (hc.ty - c.ty) ** 2; };
+      const next = houses.filter((h) => h.residents < this.beds(h)).sort((x, y) => byDist(x) - byDist(y))[0] ?? houses.sort((x, y) => byDist(x) - byDist(y))[0];
+      if (next) { b.residents--; v.home = next; next.residents++; }
+    }
+    if (this.interior.building === b) this.interior.leave();
+    if (this.selectedBuilding === b) this.selectedBuilding = null;
+    this.world.remove(b);
+    this.wood += refund;
+    this.fx.push({ kind: 'demolish', building: b });
+    this.event('build', `Took down the ${BUILDINGS[b.kind].name.toLowerCase()}${refund ? ` — ${refund} wood recovered` : ''}`, true);
+    return true;
+  }
   /** Why the hammer can't mend `b` right now, or null. */
   repairProblem(b: Building): string | null {
     if (b.kind === 'lair') return 'The lair is not yours to mend';
@@ -1392,7 +1428,7 @@ export class VillageScene extends SimScene {
   private workOn(tx: number, ty: number): void {
     if (this.workTile && (this.workTile.tx !== tx || this.workTile.ty !== ty)) {
       const prev = this.world.get(this.workTile.tx, this.workTile.ty);
-      if (prev && (prev.kind === 'tilled' || prev.building)) { prev.work = 0; this.world.markDirty(this.workTile.tx, this.workTile.ty); }
+      if (prev && (prev.kind === 'tilled' || prev.building || prev.defense)) { prev.work = 0; this.world.markDirty(this.workTile.tx, this.workTile.ty); }
     }
     this.workTile = { tx, ty };
   }
@@ -1444,8 +1480,14 @@ export class VillageScene extends SimScene {
       }
       case 'hammer': {
         if (t?.defense) {
-          if (this.wood < 1 || t.defense.hp === t.defense.maxHp) return;
-          this.wood--; t.defense.hp = Math.min(t.defense.maxHp, t.defense.hp + p.wallRepair); this.fx.push({ kind: 'tool', tool: 'hammer', tx, ty }); return;
+          this.fx.push({ kind: 'tool', tool: 'hammer', tx, ty });
+          // a hurt wall is mended; a sound one is taken down after a few more blows (half its cost back)
+          if (t.defense.hp < t.defense.maxHp) { if (this.wood < 1) return; this.wood--; t.defense.hp = Math.min(t.defense.maxHp, t.defense.hp + p.wallRepair); return; }
+          if (++t.work < DISMANTLE.hits) return;
+          const refund = Math.round(this.defenseCost(t.kind as DefenseKind) * DISMANTLE.refund), name = t.kind;
+          this.world.damageDefense(t.defense, Infinity); this.rescueFallenGuards();
+          this.wood += refund; this.event('build', `Took down the ${name}${refund ? ` — ${refund} wood recovered` : ''}`);
+          return;
         }
         const b = this.facedBuilding();
         this.fx.push({ kind: 'tool', tool: 'hammer', tx, ty });
@@ -1525,7 +1567,7 @@ export class VillageScene extends SimScene {
         return `E: build ${pl.tool} ${this.cursorPlacing ? 'where you point' : 'ahead'} (${this.buildCost(pl.tool)} wood)${pl.tool === 'barracks' ? ' · the ring is its arrow range' : ''}${why ? ' — ' + why : ''}`;
       }
       case 'hammer': {
-        if (t?.defense) return `E: repair ${t.kind} (${Math.ceil(t.defense.hp)}/${t.defense.maxHp} HP · 1 wood repairs ${p.wallRepair})`;
+        if (t?.defense) return t.defense.hp < t.defense.maxHp ? `E: repair ${t.kind} (${Math.ceil(t.defense.hp)}/${t.defense.maxHp} HP · 1 wood repairs ${p.wallRepair})` : `E: take down ${t.kind} (${DISMANTLE.hits - t.work} more hits · ${Math.round(this.defenseCost(t.kind as DefenseKind) * DISMANTLE.refund)} wood back)`;
         if (!b) return 'hammer: face a building to upgrade it';
         if (b.kind !== 'lair' && b.ruined) { const why = this.repairProblem(b); return why ? `${this.buildingTitle(b)} — ${why}` : `E: rebuild ${BUILDINGS[b.kind].name} (${this.rebuildCost(b)} wood)`; }
         if (b.kind !== 'lair' && b.hp < b.maxHp) return `E: repair ${BUILDINGS[b.kind].name} (${Math.ceil(b.hp)}/${b.maxHp} HP · 1 wood repairs ${REPAIR.perWood})`;
