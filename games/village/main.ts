@@ -200,11 +200,11 @@ export class VillageScene extends SimScene {
     // playtest buttons on the backtick panel (once: the scene is created a single time)
     if (!VillageScene.buttonsMade) {
       VillageScene.buttonsMade = true;
-      button('next day', () => { if (this.screen === 'playing') { this.day++; this.newDay(); } });
-      button('spawn raid', () => { if (this.screen === 'playing') this.spawnRaid(); });
-      button('+50 wood', () => { this.wood = Math.min(this.woodCap, this.wood + 50); });
-      button('+50 food', () => { this.food = Math.min(this.foodCap, this.food + 50); });
-      button('+20 scrap', () => { this.scrap += 20; });
+      button('next day', () => { if (this.screen === 'playing') { this.day++; this.newDay(); } }, 'Jump to the next dawn: rations, hearths, births, raids on schedule.');
+      button('spawn raid', () => { if (this.screen === 'playing') this.spawnRaid(); }, 'Start a raid now, sized for the current wave.');
+      button('+50 wood', () => { this.wood = Math.min(this.woodCap, this.wood + 50); }, 'Wood into the woodyard, up to its cap.');
+      button('+50 food', () => { this.food = Math.min(this.foodCap, this.food + 50); }, 'Food into the granary, up to its cap.');
+      button('+20 scrap', () => { this.scrap += 20; }, 'Scrap iron for iron and steel forging.');
     }
     // Stardew-style: C / left click = use tool, X / right click = check, E / Esc = menu, 1-8 or Tab / wheel = tools
     kb.on('keydown-C', () => this.interact());

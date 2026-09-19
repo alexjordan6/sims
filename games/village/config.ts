@@ -21,72 +21,72 @@ type UnionToIntersection<U> = (U extends unknown ? (k: U) => void : never) exten
 
 export const p = live(
   params({
-    dayLength: [120, 10, 300, 1],    // real seconds per day
-    bossDay: [21, 5, 40, 1],         // the run's length: the Warlord comes on this day
-    raidEvery: [RUN.raidEvery, 1, 20, 1],
-    firstRaidDay: [3, 1, 10, 1],     // raids come on this day and every raidEvery after
-    raidSizeMul: [1.75, 0.5, 4, 0.05], // every count in a raid's mix is scaled by this
-    waveHpGrowth: [0.08, 0, 0.3, 0.01], // raider HP multiplier grows this much per wave
+    dayLength: [120, 10, 300, 1, 'Real seconds per in-game day. Shorter days = faster raids, less time to gather.'],
+    bossDay: [21, 5, 40, 1, 'The run\'s length: the Warlord arrives on this day. Beat him to win.'],
+    raidEvery: [RUN.raidEvery, 1, 20, 1, 'Days between raids after the first (Long Peace adds one).'],
+    firstRaidDay: [3, 1, 10, 1, 'The first raid comes on this day; the wave count starts from it.'],
+    raidSizeMul: [1.75, 0.5, 4, 0.05, 'Every count in a raid\'s mix is multiplied by this. Enemy stats are untouched.'],
+    waveHpGrowth: [0.08, 0, 0.3, 0.01, 'Raider HP multiplier grows this much per wave (0.08 = +8% each raid).'],
   }, 'pacing'),
   params({
-    treeYield: [8, 1, 30, 1],        // wood a woodcutter gets from a young tree
-    oldYield: [12, 1, 40, 1],        // ...and from old growth
-    playerTreeYield: [2, 0, 12, 1],  // what the head's own axe brings in
-    cutterWork: [2.5, 0.5, 8, 0.1],  // seconds per chop
-    farmerWork: [1.2, 0.3, 5, 0.1],  // seconds per field action
-    haulMul: [1, 0.25, 3, 0.25],     // villagers' armfuls (16 wood / 12 food) scale by this
-    cropYield: [6, 1, 20, 1],        // food per harvested crop (boons add to it)
-    cropDays: [2, 1, 10, 1],         // days from seed to harvest
-    foodPerDay: [1, 0, 3],           // per villager
-    startWood: [25, 0, 200, 1],
-    startFood: [40, 0, 200, 1],
+    treeYield: [8, 1, 30, 1, 'Wood a woodcutter gets from a young tree.'],
+    oldYield: [12, 1, 40, 1, 'Wood a woodcutter gets from old growth (trees older than 6 days).'],
+    playerTreeYield: [2, 0, 12, 1, 'What the head\'s own axe brings in per tree. 0 = the axe only clears ground.'],
+    cutterWork: [2.5, 0.5, 8, 0.1, 'Seconds a woodcutter spends per chop.'],
+    farmerWork: [1.2, 0.3, 5, 0.1, 'Seconds a farmer spends per field action (till, plant, harvest).'],
+    haulMul: [1, 0.25, 3, 0.25, 'Villagers\' armfuls (16 wood / 12 food) scale by this. Bigger arms = fewer trips.'],
+    cropYield: [6, 1, 20, 1, 'Food per harvested crop before boons. Applies at NEW VILLAGE.'],
+    cropDays: [2, 1, 10, 1, 'Days from seed to harvest.'],
+    foodPerDay: [1, 0, 3, 'Ration each villager eats at dawn (hearty children eat double).'],
+    startWood: [25, 0, 200, 1, 'Wood in the woodyard at NEW VILLAGE.'],
+    startFood: [40, 0, 200, 1, 'Food in the granary at NEW VILLAGE.'],
   }, 'economy'),
   params({
-    hearthMul: [1, 0, 3, 0.25],      // scales every building's nightly wood
-    hearthNights: [3, 1, 7, 1],      // nights a woodpile holds
-    hearthStart: [1, 0, 3, 1],       // nights a new building comes with
+    hearthMul: [1, 0, 3, 0.25, 'Scales every building\'s nightly wood (house 2, barracks/tavern 3 at ×1). 0 = warmth is free.'],
+    hearthNights: [3, 1, 7, 1, 'Nights of firewood a woodpile can hold. Smaller piles mean more cutter trips.'],
+    hearthStart: [1, 0, 3, 1, 'Nights of wood a newly built building comes with.'],
   }, 'hearths'),
   params({
-    birthChance: [0.5, 0, 1, 0.05],  // base: per couple per dawn, if fed, warm and housed
-    feverDays: [5, 1, 15, 1],        // Baby Fever: days of food in store that count as a surplus
-    feverBonus: [0.4, 0, 0.9, 0.05], // Baby Fever: birth chance added while the surplus holds
-    adultAge: [8, 1, 40, 1],         // days
-    oldAge: [70, 20, 200, 1],        // days
-    cadetDays: [3, 1, 8, 1],         // drill days to come of age a soldier
-    bedBonus: [0, -2, 6, 1],         // beds added to every house
-    coldKidCare: [-1, -3, 0, 1],     // care a child loses after a cold night
-    fleeRange: [120, 20, 300, 5],    // px: children run from raiders this close
+    birthChance: [0.5, 0, 1, 0.05, 'Base birth rate: chance per couple per dawn in a warm house with a free bed and food to spare.'],
+    feverDays: [5, 1, 15, 1, 'Baby Fever: days of food in store (at today\'s rations) that count as a surplus.'],
+    feverBonus: [0.4, 0, 0.9, 0.05, 'Baby Fever: birth chance added while the surplus holds.'],
+    adultAge: [8, 1, 40, 1, 'Age in days a child comes of age (Quick to Grow takes 2 off).'],
+    oldAge: [70, 20, 200, 1, 'Age in days from which villagers may die of old age.'],
+    cadetDays: [3, 1, 8, 1, 'Days of drill a sworn child needs to come of age a soldier.'],
+    bedBonus: [0, -2, 6, 1, 'Beds added to every house on top of its level (4 / 6 / 8).'],
+    coldKidCare: [-1, -3, 0, 1, 'Care points a child loses after a night in a cold house.'],
+    fleeRange: [120, 20, 300, 5, 'Pixels: children run for the nearest door when a raider is this close.'],
   }, 'growth'),
   params({
-    playerHp: [60, 10, 200, 5],
-    playerDmg: [12, 1, 40, 1],       // per sword swing at ×1 weapon
-    soldierHp: [60, 5, 100, 1],
-    soldierDmg: [10, 1, 30, 1],
-    weaponTier0Mul: [0.5, 0.1, 1, 0.05], // the club / hunting bow everyone starts with
-    forgeCostMul: [1, 0, 3, 0.25],   // wood and scrap for armor and weapons
-    wallHp: [400, 50, 1500, 10],
-    gateHp: [240, 50, 1000, 10],
-    wallRepair: [80, 10, 400, 10],   // HP one wood mends on a wall or gate
-    buildingHpMul: [1, 0.25, 4, 0.25],
-    towerRange: [150, 40, 320, 8],   // px; barracks arrow range at Lv1
-    towerDmg: [5, 1, 30, 1],         // per arrow at Lv1; +TOWER.dmgPerLevel each barracks level
-    towerCd: [1.4, 0.2, 5, 0.1],     // seconds between tower shots
-    towerStart: [10, 0, 60, 1],      // arrows a fresh barracks comes with
-    towerCap: [20, 5, 100, 1],       // arrows a Lv1 chest holds
+    playerHp: [60, 10, 200, 5, 'The head\'s base HP before armor and boons. Applies at NEW VILLAGE or the next armor change.'],
+    playerDmg: [12, 1, 40, 1, 'The head\'s sword damage at a ×1 weapon (the starting club is ×weaponTier0Mul).'],
+    soldierHp: [60, 5, 100, 1, 'Soldiers\' base HP before barracks level, stars and armor.'],
+    soldierDmg: [10, 1, 30, 1, 'Soldiers\' base damage at a ×1 weapon.'],
+    weaponTier0Mul: [0.5, 0.1, 1, 0.05, 'Damage multiplier of the club and hunting bow everyone starts with. 1 = no weapon progression.'],
+    forgeCostMul: [1, 0, 3, 0.25, 'Wood and scrap for forging armor and weapons scale by this.'],
+    wallHp: [400, 50, 1500, 10, 'HP of a new wall segment.'],
+    gateHp: [240, 50, 1000, 10, 'HP of a new gate.'],
+    wallRepair: [80, 10, 400, 10, 'HP one wood mends on a wall or gate with the hammer.'],
+    buildingHpMul: [1, 0.25, 4, 0.25, 'Scales every building\'s HP (house 240, barracks 400 at ×1). Applies to new buildings and upgrades.'],
+    towerRange: [150, 40, 320, 8, 'Pixels: how far a Lv1 barracks tower shoots (+16 per level).'],
+    towerDmg: [5, 1, 30, 1, 'Damage per tower arrow at Lv1 (+1.5 per barracks level).'],
+    towerCd: [1.4, 0.2, 5, 0.1, 'Seconds between tower shots.'],
+    towerStart: [10, 0, 60, 1, 'Arrows a freshly built barracks comes with.'],
+    towerCap: [20, 5, 100, 1, 'Arrows a Lv1 chest holds (+10 per level).'],
   }, 'defenders'),
   params({
-    raiderHp: [30, 5, 100, 1],
-    raiderDmg: [5, 1, 30, 1],
-    wreckerDmg: [15, 1, 60, 1],      // building damage per wrecker swing
-    wreckerWallDmg: [6, 1, 30, 1],   // what it does to a wall instead
-    bruteWallMul: [3, 1, 6, 0.5],    // a brute's wall damage as a multiple of its blow
+    raiderHp: [30, 5, 100, 1, 'Base HP of a plain raider before wave growth.'],
+    raiderDmg: [5, 1, 30, 1, 'Damage per blow from a plain raider.'],
+    wreckerDmg: [15, 1, 60, 1, 'Building damage per wrecker swing (a Lv1 house is 240 HP).'],
+    wreckerWallDmg: [6, 1, 30, 1, 'What a wrecker does to a wall segment per swing when walled off.'],
+    bruteWallMul: [3, 1, 6, 0.5, 'A brute\'s wall damage as a multiple of its 24-damage blow.'],
   }, 'enemies'),
   params({
-    fog: true,
-    hearths: true,                   // off: nothing burns and nothing is ever cold
-    towerFires: true,
-    godMode: false,                  // the head cannot die
-    freeBuild: false,                // building, upgrading, forging and fortifying cost nothing
+    fog: [true, 'Fog of war. Off lifts it everywhere; on drops it back over the unexplored.'],
+    hearths: [true, 'Off: hearths burn nothing and no building is ever cold.'],
+    towerFires: [true, 'Off: barracks towers hold their fire.'],
+    godMode: [false, 'The head cannot die (revives at full HP).'],
+    freeBuild: [false, 'Building, upgrading, fortifying, forging and hearth stocking cost nothing.'],
   }, 'debug'),
 );
 
