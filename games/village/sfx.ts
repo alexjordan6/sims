@@ -112,4 +112,8 @@ export class Sfx {
   dig(): void { this.noise(0.12, 300, 90, 0.2, 0.6); }
   /** a giant's footstep; `vol` fades with distance */
   thud(vol = 1): void { this.tone('sine', 70, 40, 0.18, 0.35 * vol); this.noise(0.08, 160, 60, 0.15 * vol, 0.8); }
+  /** the Ogre's ground slam: a deep boom with a long rumble under it */
+  slam(): void { this.tone('sine', 55, 28, 0.45, 0.5); this.tone('sawtooth', 90, 40, 0.3, 0.12); this.noise(0.35, 120, 40, 0.3, 0.9); }
+  /** the Ogre's charge: a rising bellow */
+  roar(): void { this.tone('sawtooth', 80, 140, 0.4, 0.22); this.tone('square', 60, 110, 0.4, 0.08, 0.05); this.noise(0.3, 400, 150, 0.12, 0.6); }
 }

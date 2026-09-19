@@ -175,18 +175,27 @@ export const HAUL = { villager: { wood: 16, food: 12 }, player: { wood: 24, food
 export type LoadKind = 'wood' | 'food';
 
 // ---- the Ogre -------------------------------------------------------------------------------
-/** The first boss: a giant who sleeps in his lair by day and prowls around it at night. */
+/**
+ * The first boss: a giant who sleeps in his lair by day and prowls around it at night. Once he
+ * has a target he never sleeps again (see Ogre.aggroed). Three attacks, each with its own cooldown.
+ */
 export const OGRE = {
-  hp: 600, dmg: 25, speed: 34, reach: 30, windup: 0.6, recover: 1.1,
+  hp: 600, speed: 34,
   /** how far from the lair he wanders, and how close you must come for him to hunt you */
   roam: 22, hunt: 14,
-  /** fraction of max HP healed each day he sleeps */
+  /** fraction of max HP healed each day he sleeps (only while he still sleeps) */
   regen: 0.25,
   scrap: 30, renown: 300,
   /** tiles from the lair within which the eerie wind blows (it strengthens as you close in) */
   windRadius: 30,
   /** sprite scale: he's drawn at 48x64 already, so this is on top of that (a person is 16x20) */
   scale: 1.25,
+  /** wide swing: a half-circle in front of him, everyone in it */
+  swing: { dmg: 25, reach: 40, halfAngleCos: 0, windup: 0.6, recover: 1.1, cooldown: 1.5, push: 22, freeze: 0.1 },
+  /** ground slam: everyone around him (unblockable) and the ground itself; drawn by a crowd or while the swing cools */
+  smash: { dmg: 35, radius: 56, windup: 0.9, recover: 1.4, cooldown: 7, push: 40, freeze: 0.25, buildingDmg: 60, defenseDmg: 90, minVictims: 2 },
+  /** charge: a straight rush at where the target stands, through anyone in the way, into whatever stops him */
+  charge: { dmg: 30, minTiles: 5, maxTiles: 12, overshootTiles: 1.5, speedMul: 3, sweep: 14, windup: 0.5, recover: 0.8, stun: 1.6, cooldown: 9, push: 55, freeze: 0.2, buildingDmg: 120, defenseDmg: 180 },
 } as const;
 
 // ---- armor ----------------------------------------------------------------------------------

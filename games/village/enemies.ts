@@ -167,14 +167,32 @@ export class Snatcher extends Raider {
   }
 }
 
+/** Who the Ogre's attacks land on: people, not projectiles or other raiders. */
+const prey = (o: unknown): o is Mover => o instanceof Player || (o instanceof Villager && !o.carriedBy);
+
+/** One of the Ogre's three attacks in progress. Replaces Mover.attack, which only ever hits one body. */
+type OgreMove =
+  | { kind: 'swing'; t: number; ux: number; uy: number; struck: boolean }
+  | { kind: 'smash'; t: number; struck: boolean }
+  | { kind: 'charge'; t: number; phase: 'windup' | 'rush' | 'recover' | 'stunned'; ux: number; uy: number; travelled: number; maxDist: number; hit: Set<number> };
+
 /**
  * The Ogre of the Deepwood: the first boss. Sleeps hidden in his lair by day, prowls around it
  * by night, and hunts anyone who comes near. Never part of a raid; killing him is its own prize.
+ * Once roused (his first target) he never sleeps again: no leash, no dawn retreat, and when his
+ * prey dies he picks the next one anywhere on the map.
  */
 export class Ogre extends Raider {
   state: 'sleeping' | 'roaming' | 'hunting' | 'homing' = 'sleeping';
   /** true once he has first stepped out (the "something stirs" rumour fires then) */
   emerged = false;
+  /** set the first time he takes a target; never cleared */
+  aggroed = false;
+  /** the attack in progress; while set he neither paths nor retargets */
+  move: OgreMove | null = null;
+  /** per-attack cooldowns (seconds), public so tests and the inspector can read or force them */
+  cd = { swing: 0, smash: 0, charge: 0 };
+  lastMove: OgreMove['kind'] | null = null;
   private wanderT = 0;
   private stepT = 0;
 
@@ -188,7 +206,7 @@ export class Ogre extends Raider {
     this.heavy = true;
     this.pushScale = 0.05;
     this.hp = this.maxHp = OGRE.hp;
-    this.dmg = OGRE.dmg;
+    this.dmg = OGRE.swing.dmg;
     this.speed = OGRE.speed;
     this.radius = 9;
     this.hidden = true;
@@ -204,6 +222,7 @@ export class Ogre extends Raider {
 
   update(dt: number, s: VillageScene): void {
     this.tickTimers(dt);
+    this.cd.swing = Math.max(0, this.cd.swing - dt); this.cd.smash = Math.max(0, this.cd.smash - dt); this.cd.charge = Math.max(0, this.cd.charge - dt);
     const night = s.dayTime > BEDTIME.start || s.dayTime < BEDTIME.end;
     if (this.state === 'sleeping') {
       const home = Ogre.homeOf(this.lair);
@@ -217,8 +236,8 @@ export class Ogre extends Raider {
       return;
     }
     if (this.frozen(dt)) return;
-    if (this.attackTick(dt, s)) { return; }
-    if (!night && this.state !== 'homing') { this.state = 'homing'; this.target = null; this.task = 'lumbering home'; this.clearGoal(); }
+    if (this.move && this.moveTick(dt, s)) { this.footsteps(dt, s); this.trample(s); return; }
+    if (!night && !this.aggroed && this.state !== 'homing') { this.state = 'homing'; this.target = null; this.task = 'lumbering home'; this.clearGoal(); }
 
     if (this.state === 'homing') {
       const home = Ogre.homeOf(this.lair);
@@ -234,29 +253,31 @@ export class Ogre extends Raider {
       return;
     }
 
-    // who to hunt: the player within OGRE.hunt tiles, villagers within 6; keep a chase until they get well away
+    // who to hunt: the player within OGRE.hunt tiles, villagers within 6; keep a chase until they get well away.
+    // Once roused there is no range at all: whoever is nearest, wherever they are.
     this.retarget -= dt;
     if (this.retarget <= 0 || !this.target || this.target.dead || this.target.hidden) {
       this.retarget = 0.5;
-      const keep = this.target && !this.target.dead && !this.target.hidden && this.dist(this.target) < OGRE.hunt * 1.5 * TILE ? this.target : null;
+      const keepRange = this.aggroed ? Infinity : OGRE.hunt * 1.5 * TILE;
+      const keep = this.target && !this.target.dead && !this.target.hidden && this.dist(this.target) < keepRange ? this.target : null;
       this.target = keep ?? this.pickPrey(s);
     }
-    if (this.target && this.dist(this.lairCentre) > OGRE.roam * 1.6 * TILE) this.target = null; // leashed to his woods
+    if (this.target && !this.aggroed && this.dist(this.lairCentre) > OGRE.roam * 1.6 * TILE) this.target = null; // leashed to his woods
 
     if (this.target) {
       this.state = 'hunting';
+      if (!this.aggroed) { this.aggroed = true; s.event('raid', 'The Ogre has your scent. He will not rest now.', true); }
       this.task = this.target instanceof Player ? 'hunting you' : `hunting ${(this.target as Villager).name ?? 'someone'}`;
-      // close to well inside reach before swinging, so a standing target can't be whiffed at forever
-      if (this.dist(this.target) <= OGRE.reach - 4 && this.startAttack(s, this.target, this.dmg, OGRE.reach, OGRE.windup, OGRE.recover)) return;
       this.setGoal(s, this.target.tile.tx, this.target.tile.ty);
-      if (!this.path.length && this.dist(this.target) > OGRE.reach) this.target = null; // can't reach: lose interest
+      if (this.selectAttack(s)) return;
+      if (!this.path.length && !this.aggroed && this.dist(this.target) > OGRE.swing.reach) this.target = null; // can't reach: lose interest
       this.followPath(dt);
     } else {
       this.state = 'roaming'; this.task = 'prowling';
       this.wanderT -= dt;
       if (this.wanderT <= 0 || this.followPath(dt)) {
         this.wanderT = s.rng.range(2.5, 6);
-        const c = this.lairCentre, ct = World.toTile(c.x, c.y);
+        const c = this.roamCentre(s), ct = World.toTile(c.x, c.y);
         for (let i = 0; i < 12; i++) {
           const tx = ct.tx + s.rng.int(-OGRE.roam, OGRE.roam), ty = ct.ty + s.rng.int(-Math.round(OGRE.roam * 0.75), Math.round(OGRE.roam * 0.75));
           if (!s.world.inBounds(tx, ty) || s.world.isBlocked(tx, ty, true)) continue;
@@ -266,20 +287,198 @@ export class Ogre extends Raider {
       }
     }
     this.footsteps(dt, s);
-    const t = this.tile;
-    if (s.world.get(t.tx, t.ty)?.kind === 'crop') s.world.set(t.tx, t.ty, 'tilled');
+    this.trample(s);
+  }
+
+  /** Asleep-by-day Ogre prowls his woods; a roused one with nobody in sight prowls the village instead. */
+  private roamCentre(s: VillageScene): { x: number; y: number } {
+    if (!this.aggroed) return this.lairCentre;
+    let best: { x: number; y: number } | null = null, bd = Infinity;
+    for (const b of s.world.buildings) {
+      if (b.kind === 'lair' || b.ruined) continue;
+      const f = BUILDINGS[b.kind], c = World.center(b.tx + f.w / 2, b.ty + f.h / 2), d = this.dist(c);
+      if (d < bd) { bd = d; best = c; }
+    }
+    return best ?? this;
   }
 
   private pickPrey(s: VillageScene): Mover | null {
     let best: Mover | null = null, bd = Infinity;
     for (const a of s.agents) {
-      if (!(a instanceof Villager) && !(a instanceof Player)) continue;
-      const m = a as Mover;
-      if (m.dead || m.hidden || (a instanceof Villager && a.carriedBy)) continue;
-      const d = this.dist(m), range = a instanceof Player ? OGRE.hunt * TILE : 6 * TILE;
-      if (d < range && d < bd) { bd = d; best = m; }
+      if (!prey(a) || a.dead || a.hidden) continue;
+      const d = this.dist(a), range = this.aggroed ? Infinity : a instanceof Player ? OGRE.hunt * TILE : 6 * TILE;
+      if (d < range && d < bd) { bd = d; best = a; }
     }
     return best;
+  }
+
+  // ---- the three attacks ----------------------------------------------------------------------
+
+  /**
+   * Pick an attack for the current target, or none. Charge when he's far and cooled down (a wall in
+   * the way is a reason to charge, not to give up); smash when close and either surrounded or with the
+   * swing still cooling; otherwise the swing at melee range. All cooldowns start at 0, so first contact
+   * with a lone target is always the swing.
+   */
+  private selectAttack(s: VillageScene): boolean {
+    const t = this.target!, d = this.dist(t), tiles = d / TILE;
+    const C = OGRE.charge, M = OGRE.smash, W = OGRE.swing;
+    if (this.cd.charge <= 0 && tiles >= C.minTiles && tiles <= C.maxTiles && !t.elevated && !this.elevated && (s.world.lineClear(this, t) || !this.path.length)) { this.beginCharge(s, t); return true; }
+    if (this.cd.smash <= 0 && d <= M.radius * 0.8 && (this.victimsWithin(s, M.radius) >= M.minVictims || this.cd.swing > 0)) { this.beginSmash(s); return true; }
+    if (this.cd.swing <= 0 && d <= W.reach - 4 && t.elevated === this.elevated && s.world.lineClear(this, t, this.elevated)) { this.beginSwing(s, t); return true; }
+    return false;
+  }
+
+  private victimsWithin(s: VillageScene, r: number): number {
+    let n = 0;
+    s.grid.forEachInRadius(this.x, this.y, r, o => { if (prey(o) && !o.dead && !o.hidden && o.elevated === this.elevated) n++; });
+    return n;
+  }
+
+  private face(t: { x: number; y: number }): { ux: number; uy: number } {
+    const d = this.dist(t) || 1, ux = (t.x - this.x) / d, uy = (t.y - this.y) / d;
+    this.dir = ux < 0 ? -1 : 1;
+    return { ux, uy };
+  }
+
+  private beginSwing(s: VillageScene, t: Mover): void {
+    const { ux, uy } = this.face(t);
+    this.move = { kind: 'swing', t: 0, ux, uy, struck: false };
+    this.vx = this.vy = 0; this.task = 'winding up a swing';
+    s.fx.push({ kind: 'telegraph', who: this, ms: OGRE.swing.windup * 1000 });
+  }
+
+  private beginSmash(s: VillageScene): void {
+    if (this.target) this.face(this.target);
+    this.move = { kind: 'smash', t: 0, struck: false };
+    this.vx = this.vy = 0; this.task = 'raising his club';
+    s.fx.push({ kind: 'telegraph', who: this, ms: OGRE.smash.windup * 1000 });
+  }
+
+  private beginCharge(s: VillageScene, t: Mover): void {
+    const { ux, uy } = this.face(t);
+    const maxDist = Math.min(this.dist(t) + OGRE.charge.overshootTiles * TILE, OGRE.charge.maxTiles * TILE);
+    this.move = { kind: 'charge', t: 0, phase: 'windup', ux, uy, travelled: 0, maxDist, hit: new Set() };
+    this.vx = this.vy = 0; this.clearGoal(); this.task = 'charging';
+    s.fx.push({ kind: 'telegraph', who: this, ms: OGRE.charge.windup * 1000 });
+    s.fx.push({ kind: 'charge', who: this, ux, uy });
+  }
+
+  /** Advance the running attack. Returns true while it still occupies him. */
+  private moveTick(dt: number, s: VillageScene): boolean {
+    const m = this.move!;
+    m.t += dt;
+    switch (m.kind) {
+      case 'swing': {
+        const W = OGRE.swing;
+        this.vx = this.vy = 0;
+        if (!m.struck && m.t >= W.windup) {
+          m.struck = true;
+          s.fx.push({ kind: 'melee', who: this, x: this.x + m.ux * 30, y: this.y + m.uy * 30 });
+          let hits = 0;
+          s.grid.forEachInRadius(this.x, this.y, W.reach, (o, d2) => {
+            if (!prey(o) || o.dead || o.hidden || o.elevated !== this.elevated) return;
+            const dd = Math.sqrt(d2) || 1, ox = (o.x - this.x) / dd, oy = (o.y - this.y) / dd;
+            if (dd > 8 && ox * m.ux + oy * m.uy < W.halfAngleCos) return; // behind him
+            if (!s.world.lineClear(this, o, this.elevated)) return;
+            hits++;
+            this.strike(s, o, W.dmg, ox, oy, W.push, W.freeze, true);
+          });
+          if (!hits) s.fx.push({ kind: 'miss', who: this });
+        }
+        if (m.t >= W.windup + W.recover) this.finish('swing', OGRE.swing.cooldown);
+        return true;
+      }
+      case 'smash': {
+        const M = OGRE.smash;
+        this.vx = this.vy = 0;
+        if (!m.struck && m.t >= M.windup) {
+          m.struck = true;
+          s.fx.push({ kind: 'smash', who: this, x: this.x, y: this.y, r: M.radius });
+          s.grid.forEachInRadius(this.x, this.y, M.radius, (o, d2) => {
+            if (!prey(o) || o.dead || o.hidden || o.elevated !== this.elevated) return;
+            const dd = Math.sqrt(d2) || 1;
+            this.strike(s, o, M.dmg, (o.x - this.x) / dd, (o.y - this.y) / dd, M.push * (1 - dd / M.radius * 0.5), M.freeze, false);
+          });
+          this.crackGround(s, M.radius, M.defenseDmg, M.buildingDmg);
+        }
+        if (m.t >= M.windup + M.recover) this.finish('smash', M.cooldown);
+        return true;
+      }
+      case 'charge': {
+        const C = OGRE.charge;
+        if (m.phase === 'windup') {
+          this.vx = this.vy = 0;
+          if (m.t >= C.windup) { m.phase = 'rush'; m.t = 0; }
+          return true;
+        }
+        if (m.phase === 'rush') {
+          const v = this.speed * C.speedMul;
+          this.vx = m.ux * v; this.vy = m.uy * v;
+          const total = v * dt, steps = Math.ceil(total / 4), step = total / steps;
+          for (let i = 0; i < steps; i++) {
+            const nx = this.x + m.ux * step, ny = this.y + m.uy * step, q = World.toTile(nx, ny);
+            if (s.world.isBlocked(q.tx, q.ty, true)) {
+              // ran into something: it takes the blow, and he takes a moment to shake it off
+              this.crackTile(s, q.tx, q.ty, C.defenseDmg, C.buildingDmg, new Set());
+              s.fx.push({ kind: 'impact', x: nx, y: ny });
+              s.fx.push({ kind: 'smash', who: this, x: this.x, y: this.y, r: 24 });
+              m.phase = 'stunned'; m.t = 0; this.vx = this.vy = 0; this.task = 'dazed';
+              return true;
+            }
+            this.x = nx; this.y = ny; m.travelled += step;
+            s.grid.forEachInRadius(this.x, this.y, C.sweep, o => {
+              if (!prey(o) || o.dead || o.hidden || o.elevated || m.hit.has(o.id)) return;
+              m.hit.add(o.id);
+              // bowled aside: mostly along the charge, a little to whichever side they're on
+              const side = (o.x - this.x) * -m.uy + (o.y - this.y) * m.ux < 0 ? -1 : 1;
+              this.strike(s, o, C.dmg, m.ux * 0.8 - m.uy * side * 0.6, m.uy * 0.8 + m.ux * side * 0.6, C.push, C.freeze, true);
+            });
+            this.trample(s);
+            if (m.travelled >= m.maxDist) { m.phase = 'recover'; m.t = 0; this.vx = this.vy = 0; break; }
+          }
+          return true;
+        }
+        this.vx = this.vy = 0;
+        if (m.t >= (m.phase === 'stunned' ? C.stun : C.recover)) this.finish('charge', C.cooldown);
+        return true;
+      }
+    }
+  }
+
+  private finish(kind: OgreMove['kind'], cooldown: number): void {
+    this.move = null; this.lastMove = kind; this.cd[kind] = cooldown; this.attackCd = 0.05;
+  }
+
+  private strike(s: VillageScene, o: Mover, dmg: number, ux: number, uy: number, push: number, freeze: number, melee: boolean): void {
+    o.hit(dmg, melee);
+    o.shove(ux, uy, push);
+    o.freeze = Math.max(o.freeze, freeze);
+    s.fx.push({ kind: 'hit', attacker: this, target: o, dmg, crit: false, killed: !!o.dead, ux, uy, push });
+  }
+
+  /** Every wall, gate and building whose tile lies under a shockwave of radius r takes a blow. */
+  private crackGround(s: VillageScene, r: number, defenseDmg: number, buildingDmg: number): void {
+    const c = this.tile, span = Math.ceil(r / TILE), seen = new Set<Building>();
+    for (let ty = c.ty - span; ty <= c.ty + span; ty++)
+      for (let tx = c.tx - span; tx <= c.tx + span; tx++)
+        if (this.dist(World.center(tx, ty)) <= r + TILE / 2) this.crackTile(s, tx, ty, defenseDmg, buildingDmg, seen);
+  }
+
+  private crackTile(s: VillageScene, tx: number, ty: number, defenseDmg: number, buildingDmg: number, seen: Set<Building>): void {
+    const t = s.world.get(tx, ty);
+    if (!t) return;
+    if (t.defense && t.defense.hp > 0) {
+      if (s.world.damageDefense(t.defense, defenseDmg)) { s.event('raid', 'The defenses have been breached!', true); s.rescueFallenGuards(); }
+    } else if (t.building && !seen.has(t.building)) {
+      seen.add(t.building);
+      s.damageBuilding(t.building, buildingDmg, this);
+    }
+  }
+
+  private trample(s: VillageScene): void {
+    const t = this.tile;
+    if (s.world.get(t.tx, t.ty)?.kind === 'crop') s.world.set(t.tx, t.ty, 'tilled');
   }
 
   /** Each heavy step nearby: a thud and a tremor (the renderer decides by distance). */

@@ -35,7 +35,11 @@ export type FxEvent =
   | { kind: 'thud'; who: Mover }
   | { kind: 'snore'; x: number; y: number }
   | { kind: 'deposit'; x: number; y: number; text: string; colour: string }
-  | { kind: 'ruin'; building: Building };
+  | { kind: 'ruin'; building: Building }
+  /** the Ogre's ground slam (also his crash into a wall): shockwave of radius r */
+  | { kind: 'smash'; who: Mover; x: number; y: number; r: number }
+  /** the Ogre lowers his head and rushes along (ux, uy) */
+  | { kind: 'charge'; who: Mover; ux: number; uy: number };
 
 export type Screen = 'title' | 'playing' | 'paused' | 'over' | 'won';
 

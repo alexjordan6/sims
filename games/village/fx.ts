@@ -228,6 +228,33 @@ export class Fx {
         break;
       }
       case 'snore': if (this.scene.fog.visibleAt(ev.x, ev.y) > 0.35) this.word('z', ev.x + 6, ev.y, '#d8d0f0', 6, 1.6); break;
+      case 'smash': {
+        // the club comes down: he squashes into the blow, the ground jumps, dust rolls out in a ring
+        const big = ev.r >= 40;
+        this.scene.tweens.killTweensOf(this.anim(ev.who.id));
+        this.scene.tweens.chain({ targets: this.anim(ev.who.id), tweens: [
+          { ox: 0, rot: 0, sx: 1.3, sy: 0.7, duration: 70, ease: 'Quad.In' },
+          { sx: 1, sy: 1, duration: 260, ease: 'Back.Out' },
+        ] });
+        this.shake(big ? 280 : 180, big ? 0.009 : 0.006);
+        if (big) this.sfx.slam(); else this.sfx.thud(1);
+        const n = big ? 18 : 10;
+        for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2; this.dust.explode(3, ev.x + Math.cos(a) * ev.r * 0.8, ev.y + 4 + Math.sin(a) * ev.r * 0.4); }
+        this.puff.explode(big ? 8 : 4, ev.x, ev.y);
+        const ring = this.scene.add.graphics().setDepth(DEPTH.swoosh).setPosition(ev.x, ev.y + 4).setScale(0.2);
+        ring.lineStyle(3, 0xd8c8a0, 0.9); ring.strokeEllipse(0, 0, ev.r * 2, ev.r);
+        this.scene.tweens.add({ targets: ring, scaleX: 1.1, scaleY: 1.1, alpha: 0, duration: big ? 380 : 260, ease: 'Quad.Out', onComplete: () => ring.destroy() });
+        if (big) this.word('SMASH!', ev.x, ev.y - 26, '#ff9a3c', 9, 1.0);
+        break;
+      }
+      case 'charge': {
+        // head down, a bellow, and a scuff of dust kicked back from the start line
+        this.stretch(ev.who.id, ev.ux, ev.uy, 0.35, 260);
+        this.sfx.roar();
+        this.word('!!', ev.who.x, ev.who.y - 22, '#ff6a5a', 9, 0.7);
+        for (let i = 0; i < 4; i++) this.dust.explode(3, ev.who.x - ev.ux * (6 + i * 5), ev.who.y + 6 - ev.uy * (6 + i * 5));
+        break;
+      }
       case 'thud': {
         // the Ogre's footsteps: felt within 30 tiles, louder and heavier the closer he is
         const d = Math.hypot(ev.who.x - this.scene.player.x, ev.who.y - this.scene.player.y) / TILE;
@@ -304,7 +331,7 @@ export class Fx {
     this.scene.tweens.add({ targets: a, ox: -who.dir * 3, rot: -who.dir * 0.28, sy: 1.12, sx: 0.92, duration: Math.max(60, ms * 0.6), ease: 'Sine.Out' });
     this.word('!', who.x, who.y - 16, '#ffe066', 8, 0.9);
     if (who instanceof Raider) this.sfx.grunt();
-    if (who instanceof Raider && (who.boss || who.kind === 'brute')) {
+    if (who instanceof Raider && (who.boss || who.huge || who.kind === 'brute')) {
       const w = this.weaponSprite(who.id, this.weaponFor(who));
       w.setPosition(who.x - who.dir * 4, who.y - 14).setRotation(-who.dir * 2.6).setFlipX(who.dir < 0);
       this.scene.tweens.add({ targets: w, y: who.y - 17, duration: ms * 0.7, yoyo: true });

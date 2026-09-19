@@ -180,8 +180,40 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     ogre.hp = 300; s.dayTime = 0.3; step(s, 20);
     assert(ogre.hidden && ogre.state === 'sleeping' && ogre.hp === 450, 'the Ogre goes home at dawn and heals a quarter');
     assert(!s.agents.some(a => a instanceof Raider && !a.lairBound), 'the Ogre does not count toward an active raid');
-    Object.assign(s.player, { x: ogre.x, y: ogre.y + 40 }); s.dayTime = 0.86; step(s, 3);
+    Object.assign(s.player, { x: ogre.x, y: ogre.y + 40 }); s.player.hp = s.player.maxHp = 500; s.dayTime = 0.86; step(s, 3);
     assert(ogre.state === 'hunting' && s.player.hp <= s.player.maxHp - 25, 'the Ogre hunts a player near his lair at night and hits for 25');
+    // once roused he never sleeps again: dawn comes and he stays out, unhealed, still hunting
+    assert(ogre.aggroed && ogre.lastMove === 'swing', 'the first target rouses the Ogre for good, and first contact is the wide swing');
+    const awakeHp = ogre.hp; Object.assign(s.player, World.center(5, 5)); s.dayTime = 0.3; step(s, 20);
+    assert(!ogre.hidden && ogre.state === 'hunting' && ogre.hp === awakeHp, 'a roused Ogre ignores the dawn and never goes home to heal');
+    // a stationary farmer for him to hit
+    const straw = (s: VillageScene, tx: number, ty: number) => { const v = s.spawn(new Villager(0, 0, s.world.houses[0], 'farmer', 20, `Straw ${tx}`, s.mods)); Object.assign(v, World.center(tx, ty)); v.update = () => {}; return v; };
+    const rouse = (s: VillageScene, tx: number, ty: number) => { const o = s.ogre!; o.state = 'roaming'; o.hidden = false; o.aggroed = true; Object.assign(o, World.center(tx, ty)); s.dayTime = 0.86; return o; };
+    // wide swing: everyone in the half-circle in front of him, nobody behind
+    s = fresh(); clearing(s); s.agents = [s.player, s.ogre!]; Object.assign(s.player, World.center(5, 5));
+    const og = rouse(s, 120, 100); og.cd.smash = og.cd.charge = 99;
+    const front1 = straw(s, 122, 100), front2 = straw(s, 122, 101), behind = straw(s, 118, 100);
+    step(s, 2);
+    assert(og.lastMove === 'swing' && front1.hp < front1.maxHp && front2.hp < front2.maxHp && behind.hp === behind.maxHp, 'the wide swing hits both villagers in front and misses the one behind');
+    // ground smash: a crowd draws it; it bruises the wall segments under the shockwave
+    s = fresh(); fort(s); s.agents = [s.player, s.ogre!]; Object.assign(s.player, World.center(5, 5));
+    const og2 = rouse(s, 125, 107); og2.cd.charge = 99;
+    const c1 = straw(s, 124, 107), c2 = straw(s, 126, 107);
+    const seg = s.world.get(124, 105)!.defense!, segHp = seg.hp;
+    step(s, 3);
+    assert(og2.lastMove === 'smash' && c1.hp < c1.maxHp && c2.hp < c2.maxHp && seg.hp < segHp, `the ground smash hits the crowd and cracks the wall beside him (${seg.hp}/${segHp})`);
+    // charge: closes eight tiles in a straight rush and bowls the target over
+    s = fresh(); clearing(s); s.agents = [s.player, s.ogre!];
+    const og3 = rouse(s, 120, 100); Object.assign(s.player, World.center(128, 100)); s.player.hp = s.player.maxHp = 500;
+    const x0 = og3.x, hp0 = s.player.hp;
+    step(s, 0.7); assert(og3.move?.kind === 'charge', 'at eight tiles the Ogre charges');
+    step(s, 2.5); assert(og3.lastMove === 'charge' && og3.x - x0 > 80 && s.player.hp < hp0, `the charge closes the distance (${((og3.x - x0) / 16).toFixed(1)} tiles) and hits`);
+    // charge into a gate: no path in, so he rushes it anyway; the gate takes a heavy blow and he is left dazed
+    s = fresh(); fort(s); s.agents = [s.player, s.ogre!];
+    const og4 = rouse(s, 125, 110); Object.assign(s.player, World.center(125, 100)); s.player.hp = s.player.maxHp = 500;
+    const bar = s.world.get(125, 105)!.defense!, barHp = bar.hp;
+    step(s, 2);
+    assert(og4.task === 'dazed' && bar.hp < barHp, `a charge into the barred gate batters it (${bar.hp}/${barHp}) and leaves him dazed`);
     // hauling: nothing counts until it's carried to the woodyard / granary
     s = fresh(); clearing(s); s.agents = [s.player, s.ogre!]; s.wood = 0; s.food = 0;
     for (const b of s.hearthBuildings()) b.firewood = p.hearthNights; // full piles, so this armful is for the woodyard
