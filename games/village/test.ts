@@ -254,6 +254,16 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(tenant2.home === spare && spare.residents === 1 && old.residents === oldRes - 1 && !tenant2.hidden && !tenant2.indoors, 'the tenant moves to the other house and steps outside');
     assert(s.wood === before2 + Math.round(COST.house * DISMANTLE.refund), 'half the wood comes back');
     assert(s.demolishProblem(spare) !== null && !s.demolish(spare), 'the last house cannot be demolished while someone lives in it');
+    // a woodcutter walled in with the trees outside doesn't stand there "looking for a tree" forever with wood on his back
+    s = fresh(); s.agents = [s.player]; Object.assign(s.player, World.center(5, 5)); s.wood = 0;
+    for (const b of s.hearthBuildings()) b.firewood = p.hearthNights;
+    const yd2 = doorstep(s.world.woodyard!), bx = yd2.tx, by = yd2.ty + 5;
+    for (let dy = -7; dy <= 7; dy++) for (let dx = -7; dx <= 7; dx++) if (s.world.get(bx + dx, by + dy)?.kind === 'tree') s.world.set(bx + dx, by + dy, 'grass');
+    s.world.set(bx, by, 'tree').stage = 99; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) s.world.placeDefense('wall', bx + dx, by + dy); // a tree boxed in by walls: the nearest, and unreachable
+    const trapped = s.spawn(new Villager(World.center(bx, by - 3).x, World.center(bx, by - 3).y, s.world.houses[0], 'woodcutter', 22, 'Penned', s.mods));
+    trapped.load = { kind: 'wood', n: 12 };
+    step(s, 10);
+    assert(s.wood >= 12 && s.world.get(bx, by)!.kind === 'tree' && !(trapped.goal?.tx === bx && trapped.goal?.ty === by), `a woodcutter whose first-choice tree is unreachable brings his armful in and moves on (${trapped.task})`);
     // hearths: piles burn a night at dawn, cold buildings stall, woodcutters bring firewood before logs
     s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, { x: -400, y: -400 }); s.day = 1; s.dayTime = 0.3;
     const home2 = s.world.houses[0], keep2 = s.world.barracks[0];

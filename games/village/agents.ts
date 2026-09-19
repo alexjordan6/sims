@@ -407,6 +407,9 @@ export class Villager extends Mover {
 
   /** heading to the woodyard / granary with a load */
   private delivering = false;
+  /** job tiles no path led to, keyed by tile index, with the sim time they may be tried again */
+  private unreachable = new Map<number, number>();
+  private failedPicks = 0;
 
   private civilUpdate(dt: number, s: VillageScene, farmer: boolean): void {
     if (s.nearestRaider(this.x, this.y, 90)) { this.task = 'fleeing'; this.delivering = false; this.goHome(s, dt); return; }
@@ -426,11 +429,24 @@ export class Villager extends Mover {
       const w = s.world;
       // arms full: take it in before looking for more work
       if (this.load && this.load.n >= Math.round(HAUL.villager[this.load.kind] * p.haulMul)) { this.delivering = true; this.deliver(dt, s); return; }
+      const ok = (tx: number, ty: number) => (this.unreachable.get(ty * w.cols + tx) ?? 0) <= s.simTime;
       const job = farmer
-        ? w.nearest(this.x, this.y, (t) => t.kind === 'crop' && t.stage >= s.cropDays) ??
-          w.nearest(this.x, this.y, (t) => t.kind === 'tilled')
-        : s.mods.ignoreReserve || w.treeCount > TREE_RESERVE ? this.pickTree(s) : null;
-      if (job) { this.setGoal(s, job.tx, job.ty); this.task = farmer ? (this.role === 'woodcutter' ? 'helping in the field' : 'heading to the field') : 'looking for a tree'; }
+        ? w.nearest(this.x, this.y, (t, tx, ty) => t.kind === 'crop' && t.stage >= s.cropDays && ok(tx, ty)) ??
+          w.nearest(this.x, this.y, (t, tx, ty) => t.kind === 'tilled' && ok(tx, ty))
+        : s.mods.ignoreReserve || w.treeCount > TREE_RESERVE ? this.pickTree(s, ok) : null;
+      if (job) {
+        this.setGoal(s, job.tx, job.ty);
+        // no way there (walled in, or a tree buried in its grove): remember that for a while and pick again next
+        // think — bringing the armful in first, so nobody stands about "looking for a tree" with wood on their back
+        if (!this.path.length && !this.adjacentTo(job)) {
+          this.unreachable.set(job.ty * w.cols + job.tx, s.simTime + 60); this.clearGoal();
+          if (++this.failedPicks >= 5) { this.failedPicks = 0; this.thinkTimer = 4; this.wanderNear(s, this.home); this.task = farmer ? 'no way to the field' : 'no way to the trees'; }
+          else if (this.load) { this.delivering = true; this.deliver(dt, s); }
+          return;
+        }
+        this.failedPicks = 0;
+        this.task = farmer ? (this.role === 'woodcutter' ? 'helping in the field' : 'heading to the field') : 'looking for a tree';
+      }
       else if (this.load) { this.delivering = true; this.deliver(dt, s); return; } // nothing more to do: bring in what's carried
       else { this.wanderNear(s, this.home); this.task = farmer ? 'no crops to tend' : 'leaving the last trees to regrow'; }
       return;
@@ -450,13 +466,13 @@ export class Villager extends Mover {
    * Which tree to fell: thin the grove from its edge and take old growth first, so the core keeps
    * spreading — old growth on the edge, then any old growth, then a young edge tree, then anything.
    */
-  private pickTree(s: VillageScene): TilePos | null {
+  private pickTree(s: VillageScene, ok: (tx: number, ty: number) => boolean = () => true): TilePos | null {
     const w = s.world;
     const edge = (tx: number, ty: number) => w.treeNeighbours(tx, ty) <= 3;
-    return w.nearest(this.x, this.y, (t, tx, ty) => s.isOldGrowth(t) && edge(tx, ty))
-      ?? w.nearest(this.x, this.y, (t) => s.isOldGrowth(t))
-      ?? w.nearest(this.x, this.y, (t, tx, ty) => t.kind === 'tree' && edge(tx, ty))
-      ?? w.nearest(this.x, this.y, (t) => t.kind === 'tree');
+    return w.nearest(this.x, this.y, (t, tx, ty) => s.isOldGrowth(t) && edge(tx, ty) && ok(tx, ty))
+      ?? w.nearest(this.x, this.y, (t, tx, ty) => s.isOldGrowth(t) && ok(tx, ty))
+      ?? w.nearest(this.x, this.y, (t, tx, ty) => t.kind === 'tree' && edge(tx, ty) && ok(tx, ty))
+      ?? w.nearest(this.x, this.y, (t, tx, ty) => t.kind === 'tree' && ok(tx, ty));
   }
 
   /** Walk the load to its building and hand it in; falls back to the job loop if there is nowhere to take it. */
