@@ -354,8 +354,10 @@ export function ensureFortArt(scene: Phaser.Scene): void {
   for (let frame = 0; frame < 4; frame++) {
     const x = frame * 16;
     wall(c, x, 13, 16, 67, PALETTES.barracks);
-    px(c, x, 10, '#3f444e', 16, 9); px(c, x + 1, 11, '#c0b8a4', 14, 6);
-    for (let i = 0; i < 16; i += 6) { px(c, x + i, 5, INK, 5, 7); px(c, x + i + 1, 6, '#a4a6a2', 3, 5); }
+    // grey side edges instead of ink so adjacent segments read as one continuous rampart
+    px(c, x, 14, PALETTES.barracks.wallDark, 1, 65); px(c, x + 15, 14, PALETTES.barracks.wallDark, 1, 65);
+    px(c, x, 10, '#3f444e', 16, 9); px(c, x, 11, '#c0b8a4', 16, 6); // walkway runs edge to edge, no divider at the seam
+    for (let i = 0; i < 16; i += 8) { px(c, x + i, 5, INK, 5, 7); px(c, x + i + 1, 6, '#a4a6a2', 3, 5); } // period 8 tiles evenly across 16px
     if (frame === 1 || frame === 2) {
       px(c, x + 2, 57, '#29252c', 12, 23); px(c, x + 4, 54, '#29252c', 8, 3);
       if (frame === 1) for (let i = 3; i < 14; i += 3) { px(c, x + i, 58, '#8f7251', 2, 22); px(c, x + 2, 65, '#bbb3a0', 12, 2); }
