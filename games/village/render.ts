@@ -42,6 +42,8 @@ export class Renderer {
   private bows = new Map<number, Phaser.GameObjects.Image>();
   /** the bundle of logs / basket someone is carrying */
   private carries = new Map<number, Phaser.GameObjects.Image>();
+  /** things lying (or flying) on the ground */
+  private items = new Map<number, Phaser.GameObjects.Image>();
   /** each building's sprite (frame = level - 1) and, for the supply buildings, its climbing stock column */
   private buildings = new Map<Building, { body: Phaser.GameObjects.Image; lit: Phaser.GameObjects.Image; stock?: Phaser.GameObjects.Image; banner?: Phaser.GameObjects.Image }>();
   /** the sky's tint, multiplied into tiles and sprites; tiles repaint only when it changes */
@@ -84,6 +86,7 @@ export class Renderer {
     for (const sp of this.forts.values()) sp.destroy(); this.forts.clear();
     for (const sp of this.bows.values()) sp.destroy(); this.bows.clear();
     for (const sp of this.carries.values()) sp.destroy(); this.carries.clear();
+    for (const sp of this.items.values()) sp.destroy(); this.items.clear();
     for (const s of this.sprites.values()) s.destroy();
     this.sprites.clear();
     this.fx.clear();
@@ -104,6 +107,7 @@ export class Renderer {
     this.drainDirty();
     this.tintTiles();
     this.syncSprites();
+    this.syncItems();
     for (const ev of this.scene.fx) {
       if (ev.kind === 'upgrade') { this.upgradePop(ev.building); continue; }
       if (ev.kind === 'hearts') { this.fx.hearts(ev.who.x, ev.who.y - 10); continue; }
@@ -214,10 +218,7 @@ export class Renderer {
     const t = w.get(tx, ty)!;
     const frames = tileFrames(t, this.scene.cropDaysOf(t), this.scene.dayTime, this.scene.oldGrowthDays, this.scene.wildRipe(t));
     const { ground, canopy } = frames;
-    let { object } = frames;
-    // food tossed onto a pen sits on the object layer, drawn as whatever there is most of
-    const food = t.pen ? w.penFoodAt(tx, ty) : 0, pileKind = food > 0 ? w.penPileKind(tx, ty) : null;
-    if (pileKind) object = GID.flora + FLORA.pile[pileKind][Math.min(2, Math.ceil(food / Math.max(1, p.tossSize)) - 1)];
+    const { object } = frames;
     this.ground.putTileAt(ground, tx, ty);
     this.objects.putTileAt(object, tx, ty);
     // a tall tree's crown-top lives in the tile above; anything else clears it
@@ -353,10 +354,30 @@ export class Renderer {
     }
   }
 
+  /** One image per item: food as its pile (sized by how much is left), wood as a bundle, scrap as shards; lifted by its height, with a shadow while airborne. */
+  private syncItems(): void {
+    const s = this.scene, seen = new Set<number>();
+    for (const it of s.world.items) {
+      seen.add(it.id);
+      let sp = this.items.get(it.id);
+      if (!sp) { sp = this.scene.add.image(it.x, it.y, 'flora', 0).setOrigin(0.5, 0.85); this.items.set(it.id, sp); }
+      if (it.kind === 'wood') { if (sp.texture.key !== 'carry-wood') sp.setTexture('carry-wood'); }
+      else {
+        const frame = it.kind === 'scrap' ? FLORA.scrap : FLORA.pile[it.food ?? 'wheat'][Math.min(2, Math.max(0, Math.ceil(it.n / Math.max(1, p.tossSize)) - 1))];
+        if (sp.texture.key !== 'flora' || sp.frame.name !== String(frame)) sp.setTexture('flora', frame);
+      }
+      sp.setPosition(Math.round(it.x), Math.round(it.y - it.z)).setDepth(DEPTH.agents + it.y / 1000 - 0.0002).setTint(this.tint).setVisible(!s.fog || s.fog.visibleAt(it.x, it.y) > 0.3);
+      if (!it.rest) sp.setRotation(it.age * 6); else sp.setRotation(0);
+    }
+    for (const [id, sp] of this.items) if (!seen.has(id)) { sp.destroy(); this.items.delete(id); }
+  }
+
   private drawOverlays(): void {
     const s = this.scene;
     const u = this.under;
     u.clear();
+    // shadows under anything in the air
+    for (const it of s.world.items) if (it.z > 0.5) { u.fillStyle(0x000000, 0.25); u.fillEllipse(it.x, it.y + 2, Math.max(4, 8 - it.z / 6), Math.max(2, 4 - it.z / 12)); }
     const tool = s.player.tool;
     if (tool === 'wall' || tool === 'gate' || tool === 'stairs') {
       const q = s.defenseTarget();

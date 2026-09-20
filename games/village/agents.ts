@@ -1,6 +1,6 @@
 import type { Agent } from '@shared/index';
 import { World, doorstep, buildingCenter, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
-import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, CALLINGS, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
+import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, CALLINGS, ITEM, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
 import type { Mods } from './meta';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle } from './characters';
 import type { VillageScene } from './main';
@@ -438,21 +438,24 @@ export class Villager extends Mover {
       return;
     }
     const w = s.world, here = this.tile, inPen = w.get(here.tx, here.ty)?.pen === kind;
-    // a meal is due: walk to the nearest pile in the pen and eat from it
+    // a meal is due: walk to the nearest food lying in the pen and eat from it
     const hungry = this.mealAt <= s.simTime && p.kidFood > 0;
     if (hungry) {
-      const pile = w.nearestPenFood(this.x, this.y, kind);
-      if (pile) {
-        if (!this.goal || this.goal.tx !== pile.tx || this.goal.ty !== pile.ty) this.setGoal(s, pile.tx, pile.ty, true);
-        if (this.followPath(dt) || this.adjacentTo(pile)) {
-          this.vx = this.vy = 0;
+      const item = w.nearestPenItem(this.x, this.y, kind);
+      if (item) {
+        const at = World.toTile(item.x, item.y);
+        if (!this.goal || this.goal.tx !== at.tx || this.goal.ty !== at.ty) this.setGoal(s, at.tx, at.ty, true);
+        const near = this.dist(item) <= ITEM.eatReach;
+        if (near) this.vx = this.vy = 0; else if (this.followPath(dt) && !near) { const d = this.dist(item) || 1; this.x += (item.x - this.x) / d * Math.min(d, this.speed * dt); this.y += (item.y - this.y) / d * Math.min(d, this.speed * dt); } // the last few pixels, off the tile grid
+        if (near) {
           this.eatTimer -= dt;
           this.task = 'eating';
           if (this.eatTimer <= 0) {
             this.eatTimer = 0.6;
             // two meals a day, each half of p.kidFood
-            const bite = w.takePenFood(pile.tx, pile.ty, Math.min(1, p.kidFood / 2 - this.eaten));
-            if (bite) { this.eaten += bite.n; this.eatBite(bite.kind, bite.n); s.fx.push({ kind: 'tool', tool: 'seed', tx: pile.tx, ty: pile.ty, who: this }); }
+            const bite = Math.min(1, p.kidFood / 2 - this.eaten, item.n);
+            if (bite > 0) { item.n -= bite; this.eaten += bite; this.eatBite(item.food ?? 'wheat', bite); s.fx.push({ kind: 'tool', tool: 'seed', tx: at.tx, ty: at.ty, who: this }); }
+            if (item.n <= 1e-9) w.removeItem(item);
             if (this.eaten >= p.kidFood / 2 - 1e-9) { this.eaten = 0; this.shroomMeal = false; this.ateDay = s.day; this.mealAt = s.simTime + p.dayLength / 2; this.clearGoal(); }
           }
         } else this.task = 'off to eat';

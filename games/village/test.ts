@@ -26,6 +26,8 @@ function fort(s: VillageScene) {
   Object.assign(s.player, World.center(124, 100));
   s.fitCamera();
 }
+/** Let thrown things fly, bounce and settle. */
+function settle(s: VillageScene, seconds = 6) { for (let i = 0; i < seconds * 60; i++) s.world.tickItems(1 / 60); }
 /** Roll every house for births `rolls` times (p.birthEvery seconds apart) and return how many were born. */
 function births(s: VillageScene, rolls: number): number {
   const n = s.villagers().length;
@@ -33,7 +35,7 @@ function births(s: VillageScene, rolls: number): number {
   return s.villagers().length - n;
 }
 function step(s: VillageScene, seconds: number) {
-  for (let i = 0; i < Math.ceil(seconds * 60); i++) { s.grid.rebuild(s.agents); for (const a of [...s.agents]) if (!a.dead) a.update(1 / 60, s); s.removeDead(); }
+  for (let i = 0; i < Math.ceil(seconds * 60); i++) { s.grid.rebuild(s.agents); for (const a of [...s.agents]) if (!a.dead) a.update(1 / 60, s); s.world.tickItems(1 / 60); s.removeDead(); }
 }
 document.getElementById('run-checks')!.addEventListener('click', () => {
   output.textContent = ''; summary.textContent = 'Running';
@@ -342,16 +344,29 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     s.player.tool = 'basket'; s.player.load = null; s.food = 100;
     const g = s.world.granary!; Object.assign(s.player, World.center(g.tx + 1, g.ty + BUILDINGS[g.kind].h)); s.fillBasket();
     const basket = s.player.load as { kind: string; n: number } | null; assert(basket?.kind === 'food' && basket.n === HAUL.player.food && s.food === 100 - HAUL.player.food, 'the basket fills with food from the granary');
-    Object.assign(s.player, World.center(123, 99)); s.hoverTile = { tx: 123, ty: 96 };
-    assert(!s.tossProblem() && s.toss() && s.world.penFoodAt(123, 96) === p.tossSize && s.player.load!.n === HAUL.player.food - p.tossSize, `a toss drops ${p.tossSize} food on the pen tile`);
-    s.hoverTile = { tx: 122, ty: 99 }; assert(s.tossProblem() === 'aim at a painted pen', 'food only lands in a pen');
-    s.hoverTile = { tx: 123, ty: 99 + p.tossRange + 2 }; s.world.paintPen(123, 99 + p.tossRange + 2, 'soldier'); assert(s.tossProblem() === 'too far to throw', 'the throw has a range');
-    s.hoverTile = null;
-    // a pen child walks to the pile and eats; an unfed one stops training and starves
+    // a throw is a thing in the world: it flies where you point, bounces, rolls and lies where it stops
+    for (let y = 95; y <= 97; y++) for (let x = 122; x <= 124; x++) if (s.world.get(x, y)!.pen !== 'soldier') s.world.paintPen(x, y, 'soldier');
+    Object.assign(s.player, World.center(123, 100)); const aim = World.center(123, 96); s.hoverPoint = aim;
+    const thrown = s.toss()!;
+    assert(!!thrown && !thrown.rest && thrown.vz > 0 && thrown.n === p.tossSize && thrown.food === 'wheat' && s.player.load!.n === HAUL.player.food - p.tossSize, `a throw launches ${p.tossSize} food into the air`);
+    settle(s);
+    assert(thrown.rest && thrown.z === 0 && Math.hypot(thrown.x - aim.x, thrown.y - aim.y) < 1.5 * 16 && s.world.inPen(thrown, 'soldier'), `it comes down near the aim and lies there (${Math.hypot(thrown.x - aim.x, thrown.y - aim.y).toFixed(0)} px off, in the pen)`);
+    s.hoverPoint = { x: aim.x, y: aim.y - (p.tossRange + 3) * 16 }; assert(s.tossProblem() === 'too far to throw', 'the throw has a range');
+    for (let x = 121; x <= 125; x++) s.world.placeDefense('wall', x, 94);
+    Object.assign(s.player, World.center(123, 97)); s.hoverPoint = World.center(123, 92); const atWall = s.toss()!; settle(s);
+    assert(atWall.rest && atWall.y > 95 * 16 && !s.world.isBlocked(Math.floor(atWall.x / 16), Math.floor(atWall.y / 16), true), `a throw at a wall bounces back and never rests inside it (y ${(atWall.y / 16).toFixed(1)})`);
+    for (let x = 121; x <= 125; x++) { const d = s.world.get(x, 94)!.defense; if (d) s.world.damageDefense(d, Infinity); }
+    s.world.removeItem(atWall); s.hoverPoint = null;
+    // a pen child walks to food lying in the pen and eats; food stray the pen is not theirs
+    s.world.removeItem(thrown);
+    const stray = s.world.dropItem('food', 5, World.center(119, 99).x, World.center(119, 99).y, 'wheat');
     Object.assign(first, World.center(123, 97)); first.mealAt = 0; first.ateDay = 0; s.day = 5;
+    step(s, 3); assert(first.ateDay === 0 && first.task === 'hungry — nothing in the pen' && stray.n === 5, 'a child ignores food lying stray the pen');
+    const meal = s.world.dropItem('food', p.tossSize, World.center(124, 96).x + 5, World.center(124, 96).y - 3, 'wheat');
     step(s, 6);
-    assert(first.ateDay === 5 && Math.abs(s.world.penFoodAt(123, 96) - (p.tossSize - p.kidFood / 2)) < 1e-9, `a hungry pen child eats half of ${p.kidFood} per meal from the pile (${s.world.penFoodAt(123, 96)} left, ate day ${first.ateDay})`);
-    s.world.set(123, 96, 'tree'); assert(!s.world.get(123, 96)!.pen && !s.world.pens.get('soldier')!.has(96 * s.world.cols + 123) && s.world.penFoodAt(123, 96) === 0, 'a tree on a pen tile takes it out of the pen, pile and all');
+    assert(first.ateDay === 5 && Math.abs(meal.n - (p.tossSize - p.kidFood / 2)) < 1e-9, `a hungry pen child eats half of ${p.kidFood} per meal from food lying in the pen (${meal.n} left, ate day ${first.ateDay})`);
+    s.world.removeItem(meal); s.world.removeItem(stray);
+    s.world.set(123, 96, 'tree'); assert(!s.world.get(123, 96)!.pen && !s.world.pens.get('soldier')!.has(96 * s.world.cols + 123), 'a tree on a pen tile takes it out of the pen');
     s.world.set(123, 96, 'grass'); s.world.paintPen(123, 96, 'soldier');
     first.update = () => {}; first.trained = 0; s.world.barracks[0].firewood = 99; s.world.barracks[0].warm = true;
     s.newDay(); assert(first.trained === 1 && first.hungerDays === 0, 'a fed day in the drill yard is a day of drill');
@@ -396,9 +411,10 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     s.world.paintPen(123, 96, 'farmer'); s.player.tool = 'basket'; s.player.basketKind = 'carrot'; s.pantry.carrot = 40;
     const g2 = s.world.granary!; Object.assign(s.player, World.center(g2.tx + 1, g2.ty + BUILDINGS[g2.kind].h)); s.fillBasket();
     assert(held()?.food === 'carrot' && held()!.n === HAUL.player.food && s.pantry.carrot === 40 - HAUL.player.food, 'the basket fills with the chosen kind');
-    Object.assign(s.player, World.center(123, 99)); s.hoverTile = { tx: 123, ty: 96 }; s.toss(); s.hoverTile = null;
-    assert(s.world.penPileAt(123, 96).carrot === p.tossSize && s.world.penPileKind(123, 96) === 'carrot', 'a toss lays a pile of that kind');
-    s.world.addPenFood(123, 96, 1, 'mushroom');
+    for (let y = 95; y <= 97; y++) for (let x = 122; x <= 124; x++) if (s.world.get(x, y)!.pen !== 'farmer') s.world.paintPen(x, y, 'farmer');
+    Object.assign(s.player, World.center(123, 100)); s.hoverPoint = World.center(123, 96); const carrots = s.toss()!; s.hoverPoint = null; settle(s);
+    assert(carrots.food === 'carrot' && carrots.n === p.tossSize && s.world.inPen(carrots, 'farmer'), 'a throw carries its kind');
+    s.world.dropItem('food', 1, World.center(122, 96).x, World.center(122, 96).y, 'mushroom');
     const eater = s.spawn(new Villager(World.center(123, 97).x, World.center(123, 97).y, s.world.houses[0], 'kid', 1, 'Eater', s.mods)); eater.pen = 'farmer'; eater.mealAt = 0; s.day = 9;
     const careWas = eater.care; step(s, 8);
     assert(eater.diet.carrot > 0 && eater.ateDay === 9, `bites go on the diet (${JSON.stringify(eater.diet)})`);
@@ -411,6 +427,23 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(eater.isAdult && plainKid.isAdult && eater.dietBonus.speed === live.speed && eater.speed > plainKid.speed && eater.maxHp > plainKid.maxHp && plainKid.dietBonus.hp === 0, `the diet freezes at coming of age: ${eater.speed.toFixed(1)} vs ${plainKid.speed.toFixed(1)} speed, ${eater.maxHp} vs ${plainKid.maxHp} HP`);
     eater.diet.wheat = 99; assert(eater.dietNow().hp === eater.dietBonus.hp, 'the bonuses of a grown villager no longer move');
     s.removeDead();
+    // what the dead were carrying, and what raiders drop, lies where they fell; the head walks over it
+    s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(124, 100)); s.world.items.length = 0;
+    const hauler = s.spawn(new Villager(World.center(130, 100).x, World.center(130, 100).y, s.world.houses[0], 'woodcutter', 20, 'Hauler', s.mods)); hauler.load = { kind: 'wood', n: 9 };
+    hauler.hp = 0; hauler.dead = true; s.tick(1 / 60); settle(s);
+    const dropped = s.world.items.find((it) => it.kind === 'wood');
+    assert(!!dropped && dropped.n === 9 && dropped.rest && Math.hypot(dropped.x - World.center(130, 100).x, dropped.y - World.center(130, 100).y) < 24, 'a villager killed hauling drops the armful where they fell');
+    const scrapWas = s.scrap; const orc = s.spawn(new Raider(World.center(134, 100).x, World.center(134, 100).y)); orc.hp = 0; orc.dead = true; s.tick(1 / 60); settle(s);
+    const loot = s.world.items.find((it) => it.kind === 'scrap');
+    assert(!!loot && loot.n > 0 && s.scrap === scrapWas, 'a slain raider drops scrap on the ground instead of into your pocket');
+    Object.assign(s.player, { x: loot!.x, y: loot!.y }); s.player.tool = 'sword'; s.tick(1 / 60);
+    assert(s.scrap === scrapWas + loot!.n && !s.world.items.includes(loot!), 'walking over scrap picks it up with any tool');
+    Object.assign(s.player, { x: dropped!.x, y: dropped!.y }); s.player.load = null; s.tick(1 / 60);
+    assert(s.world.items.includes(dropped!) && !s.player.load, 'an armful on the ground waits for hands');
+    s.player.tool = 'hands'; s.tick(1 / 60);
+    assert(held()?.kind === 'wood' && held()!.n === 9 && !s.world.items.includes(dropped!), 'with hands out the head picks the armful up');
+    const snack = s.world.dropItem('food', 3, s.player.x, s.player.y, 'berry'); s.tick(1 / 60);
+    assert(s.world.items.includes(snack) && held()?.kind === 'wood', 'arms full of wood leave food lying');
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;
   } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); }

@@ -555,7 +555,9 @@ export const FLORA = {
   bush: [41, 42] as const,
   mushroom: [43, 44] as const,
   pile: { wheat: [45, 46, 47], carrot: [48, 49, 50], tomato: [28, 29, 30], berry: [51, 52, 53], mushroom: [54, 55, 56] } as const,
-  count: 57,
+  /** scrap iron a raider dropped */
+  scrap: 57,
+  count: 58,
 } as const;
 
 /** Filled ellipse, pixel by pixel. */
@@ -671,7 +673,8 @@ export function ensureFlora(scene: Phaser.Scene): void {
   drawMushroom(ctx, at(FLORA.mushroom[0]), false); drawMushroom(ctx, at(FLORA.mushroom[1]), true);
   for (let i = 0; i < 3; i++) { drawPile(ctx, at(FLORA.pile.wheat[i]), i, 'wheat'); drawPile(ctx, at(FLORA.pile.carrot[i]), i, 'carrot'); drawPile(ctx, at(FLORA.pile.berry[i]), i, 'berry'); drawPile(ctx, at(FLORA.pile.mushroom[i]), i, 'mushroom'); }
   tex.refresh();
-  for (let i = 0; i < FLORA.count; i++) tex.add(i, 0, at(i), 0, 16, 16); // frames, so fx can draw one tile as an image
+  drawScrap(ctx, at(FLORA.scrap));
+  for (let i = 0; i < FLORA.count; i++) tex.add(i, 0, at(i), 0, 16, 16); // frames, so items and fx can draw one tile as an image
 }
 /** rope colours of the three pens, in Calling order: farmer, woodcutter, soldier */
 const PEN_ROPES = ['#6fd36f', '#d6a35c', '#6f9bff'] as const;
@@ -729,6 +732,13 @@ function drawPile(ctx: Ctx, ox: number, size: number, kind: 'wheat' | 'carrot' |
   item(3, 10); item(9, 10);
   if (size >= 1) { item(8, 6); item(3, 6); }
   if (size >= 2) { item(5, 3); item(10, 3); px(ctx, ox + 3, 13, SOIL_DARK, 10, 1); }
+}
+/** A few shards of scrap iron, one with a glint. */
+function drawScrap(ctx: Ctx, ox: number): void {
+  px(ctx, ox + 4, 12, '#4a4e57', 6, 2); px(ctx, ox + 5, 11, '#8d8f95', 4, 1);
+  px(ctx, ox + 8, 8, '#4a4e57', 5, 3); px(ctx, ox + 9, 8, '#8d8f95', 3, 1); px(ctx, ox + 10, 7, '#b0b3b9', 1, 1);
+  px(ctx, ox + 3, 9, '#4a4e57', 3, 2); px(ctx, ox + 3, 9, '#8d8f95', 2, 1);
+  px(ctx, ox + 2, 14, '#3e2c23', 12, 1);
 }
 /** Loaves and roots dropped on the ground: a handful, an armful, a heap. */
 function drawFeed(ctx: Ctx, ox: number, size: number): void {

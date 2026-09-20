@@ -65,7 +65,9 @@ export const p = live(
     kidFood: [1, 0, 4, 0.25, 'Food a pen child eats per day (two half-meals) from the pile the head tosses in. Unfed: no training, then starvation. 0 = pens feed themselves.'],
     kidStarveDays: [3, 1, 10, 1, 'Hungry days a pen child survives.'],
     tossSize: [4, 1, 12, 1, 'Food landing on the pen per throw from the basket.'],
-    tossRange: [6, 2, 12, 1, 'Tiles the head can lob a handful of food.'],
+    tossRange: [6, 2, 12, 1, 'Tiles the head can lob a handful of food. It lands near the cursor, bounces and rolls; walls and trees stop it.'],
+    itemBounce: [0.45, 0, 0.9, 0.05, 'How much of its fall a thrown item bounces back up. 0 = it sticks where it lands.'],
+    itemFriction: [6, 1, 20, 0.5, 'How fast a rolling item slows on the ground (higher = shorter rolls).'],
     dietFull: [6, 1, 30, 1, 'Units of one food a child must eat for its full stat bonus (about three days of a single crop).'],
     dietMul: [1, 0, 3, 0.25, 'Scales every diet bonus (wheat +25% HP, carrots +15% speed, tomatoes +25% work, berries +25% damage at ×1).'],
     wildRegrowMul: [1, 0.25, 4, 0.25, 'Scales how long picked bushes and mushrooms take to regrow (3 / 4 days at ×1).'],
@@ -216,6 +218,23 @@ export const FOODS: Record<FoodKind, Food> = {
 /** the most a full diet of one kind adds to its stat (× p.dietMul) */
 export const DIET_CAP: Record<Exclude<DietStat, 'care'>, number> = { hp: 0.25, speed: 0.15, work: 0.25, dmg: 0.25 };
 export const DIET_STAT_NAME: Record<DietStat, string> = { hp: 'HP', speed: 'speed', work: 'work speed', dmg: 'damage', care: 'care' };
+
+// ---- items on the ground --------------------------------------------------------------------
+/** Thrown food, dropped armfuls and raider loot are free items with a pixel position and a little physics (see items.ts). */
+export const ITEM = {
+  /** px/s² downward on the height axis */
+  gravity: 320,
+  /** horizontal speed kept on each bounce, and on each deflection off a wall or tree */
+  bounceKeep: 0.7, wallKeep: 0.5,
+  /** below this ground speed (px/s) an item on the ground comes to rest */
+  restSpeed: 3,
+  /** how close (px) the head must be to pick one up, and a child to eat from one */
+  reach: 10, eatReach: 12,
+  /** a throw's flight time in seconds: base + distance / speed; the scatter on its velocity */
+  flightBase: 0.4, flightPerPx: 1 / 160, scatter: 0.06,
+  /** the little hop a dropped armful or loot makes */
+  dropHop: 60,
+} as const;
 
 // ---- hauling --------------------------------------------------------------------------------
 /** How much wood or food one pair of arms carries before a trip to the woodyard / granary. */

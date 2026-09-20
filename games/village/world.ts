@@ -1,5 +1,6 @@
 import type { Rng } from '@shared/index';
-import { TILE, COLS, ROWS, BUILDING_HP, HEARTH_WOOD, p, CROP_KINDS, FOOD_KINDS, type Calling, type FoodKind } from './config';
+import { TILE, COLS, ROWS, BUILDING_HP, HEARTH_WOOD, p, CROP_KINDS, type Calling, type FoodKind } from './config';
+import { tickItem, hop, type Item, type ItemKind } from './items';
 
 export type DefenseKind = 'wall' | 'gate' | 'stairs';
 export interface Defense extends TilePos { kind: DefenseKind; hp: number; maxHp: number; open: boolean }
@@ -121,8 +122,9 @@ export class World {
   dirty = new Set<number>();
   /** painted pen tiles by kind (tile indices) and the food piled on them */
   pens = new Map<Calling, Set<number>>();
-  /** food piled on pen tiles, by kind (tile index → kind → units) */
-  penFood = new Map<number, Partial<Record<FoodKind, number>>>();
+  /** things lying on the ground: thrown food, dropped armfuls, loot */
+  items: Item[] = [];
+  private nextItemId = 1;
 
   constructor(public readonly cols = COLS, public readonly rows = ROWS) {
     for (let i = 0; i < cols * rows; i++) { this.tiles.push({ kind: 'grass', stage: 0, work: 0, v: (i * 7919) % 97 }); this.dirty.add(i); }
@@ -161,7 +163,7 @@ export class World {
     if (BLOCKING[t.kind] !== BLOCKING[kind] || fort(t.kind) || fort(kind)) this.revision++;
     t.kind = kind; t.stage = 0; t.work = 0; t.building = undefined; t.part = undefined; t.v = (t.v + 31) % 97;
     // a pen dies with its ground: a building, tree or crop on the tile takes it out of the pen (and its pile)
-    if (t.pen && !PEN_GROUND.has(kind)) { this.pens.get(t.pen)?.delete(i); this.penFood.delete(i); t.pen = undefined; }
+    if (t.pen && !PEN_GROUND.has(kind)) { this.pens.get(t.pen)?.delete(i); t.pen = undefined; }
     if (!CROP_GROUND.has(kind)) t.food = undefined;
     this.dirty.add(i);
     return t;
@@ -173,7 +175,7 @@ export class World {
     const t = this.get(tx, ty), i = ty * this.cols + tx;
     if (!t || t.building || t.defense || !PEN_GROUND.has(t.kind)) return false;
     if (kind === t.pen) kind = null;
-    if (t.pen) { this.pens.get(t.pen)?.delete(i); this.penFood.delete(i); }
+    if (t.pen) this.pens.get(t.pen)?.delete(i);
     t.pen = kind ?? undefined;
     if (kind) { if (!this.pens.has(kind)) this.pens.set(kind, new Set()); this.pens.get(kind)!.add(i); }
     this.dirty.add(i);
@@ -194,46 +196,37 @@ export class World {
   }
   /** Nearest pen tile of a kind (any kind when omitted). */
   nearestPen(x: number, y: number, kind?: Calling): TilePos | null { return this.nearestOf(x, y, this.penTiles(kind)); }
-  /** Nearest pen tile of a kind with food on it. */
-  nearestPenFood(x: number, y: number, kind: Calling): TilePos | null {
-    return this.nearestOf(x, y, [...(this.pens.get(kind) ?? [])].filter((i) => this.pileTotal(this.penFood.get(i)) > 0));
+  // ---- items on the ground ------------------------------------------------------------------
+  /** Put an item in the world at a pixel position (resting, unless it is launched or hopped afterwards). */
+  dropItem(kind: ItemKind, n: number, x: number, y: number, food?: FoodKind, rng?: Rng): Item {
+    const it: Item = { id: this.nextItemId++, kind, food: kind === 'food' ? food : undefined, n, x, y, z: 0, vx: 0, vy: 0, vz: 0, rest: true, age: 0 };
+    this.items.push(it);
+    if (rng) hop(it, rng);
+    return it;
   }
-  private pileTotal(pile: Partial<Record<FoodKind, number>> | undefined): number { let n = 0; if (pile) for (const k of FOOD_KINDS) n += pile[k] ?? 0; return n; }
-  /** Everything on the tile's pile, all kinds together. */
-  penFoodAt(tx: number, ty: number): number { return this.pileTotal(this.penFood.get(ty * this.cols + tx)); }
-  /** The pile itself, by kind. */
-  penPileAt(tx: number, ty: number): Partial<Record<FoodKind, number>> { return this.penFood.get(ty * this.cols + tx) ?? {}; }
-  /** The kind there is most of on the tile (what the sprite shows), or null. */
-  penPileKind(tx: number, ty: number): FoodKind | null {
-    const pile = this.penFood.get(ty * this.cols + tx); if (!pile) return null;
-    let best: FoodKind | null = null, bn = 0;
-    for (const k of FOOD_KINDS) if ((pile[k] ?? 0) > bn) { bn = pile[k]!; best = k; }
+  removeItem(it: Item): void { const i = this.items.indexOf(it); if (i >= 0) this.items.splice(i, 1); }
+  /** what stops a rolling item: the map edge and anything an enemy can't walk through (walls, trees, buildings, closed gates) */
+  private itemBlocked = (x: number, y: number): boolean => { const tx = Math.floor(x / TILE), ty = Math.floor(y / TILE); return !this.inBounds(tx, ty) || this.isBlocked(tx, ty, true); };
+  tickItems(dt: number): void { for (const it of this.items) tickItem(it, dt, this.itemBlocked); }
+  /** Is this item lying inside a pen of that kind? */
+  inPen(it: { x: number; y: number }, pen: Calling): boolean { return this.get(Math.floor(it.x / TILE), Math.floor(it.y / TILE))?.pen === pen; }
+  /** Resting food items inside a pen (all kinds, or one). */
+  penItems(pen: Calling, kind?: FoodKind): Item[] { return this.items.filter((it) => it.rest && it.kind === 'food' && (!kind || it.food === kind) && this.inPen(it, pen)); }
+  penFoodTotal(pen: Calling, kind?: FoodKind): number { return this.penItems(pen, kind).reduce((n, it) => n + it.n, 0); }
+  /** The nearest resting food item lying inside the pen. */
+  nearestPenItem(x: number, y: number, pen: Calling): Item | null {
+    let best: Item | null = null, bd = Infinity;
+    for (const it of this.items) {
+      if (!it.rest || it.kind !== 'food' || !this.inPen(it, pen)) continue;
+      const d = (it.x - x) ** 2 + (it.y - y) ** 2;
+      if (d < bd) { bd = d; best = it; }
+    }
     return best;
   }
-  addPenFood(tx: number, ty: number, n: number, kind: FoodKind = 'wheat'): void {
-    const i = ty * this.cols + tx;
-    const pile = this.penFood.get(i) ?? {};
-    pile[kind] = (pile[kind] ?? 0) + n;
-    this.penFood.set(i, pile);
-    this.dirty.add(i);
-  }
-  /** Eat up to n from the pile, from whatever there is most of; returns what was taken and of which kind. */
-  takePenFood(tx: number, ty: number, n: number): { kind: FoodKind; n: number } | null {
-    const i = ty * this.cols + tx, pile = this.penFood.get(i), kind = this.penPileKind(tx, ty);
-    if (!pile || !kind) return null;
-    const have = pile[kind]!, took = Math.min(have, n);
-    if (took <= 0) return null;
-    if (have - took <= 1e-9) delete pile[kind]; else pile[kind] = have - took;
-    if (this.pileTotal(pile) <= 1e-9) this.penFood.delete(i);
-    this.dirty.add(i);
-    return { kind, n: took };
-  }
-  /** Food on every tile of a pen (all kinds, or one). */
-  penFoodTotal(pen: Calling, kind?: FoodKind): number {
-    let n = 0;
-    for (const i of this.pens.get(pen) ?? []) { const pile = this.penFood.get(i); n += kind ? (pile?.[kind] ?? 0) : this.pileTotal(pile); }
-    return n;
-  }
+  /** Resting items within r px of a point. */
+  itemsNear(x: number, y: number, r: number): Item[] { return this.items.filter((it) => it.rest && (it.x - x) ** 2 + (it.y - y) ** 2 <= r * r); }
+  /** Items lying on a tile. */
+  itemsOn(tx: number, ty: number): Item[] { return this.items.filter((it) => Math.floor(it.x / TILE) === tx && Math.floor(it.y / TILE) === ty); }
   /** Sow a crop: the tile becomes a growing crop of that kind. */
   sow(tx: number, ty: number, kind: FoodKind): Tile { const t = this.set(tx, ty, 'crop'); t.food = kind; return t; }
   private stamping = false;
