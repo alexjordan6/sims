@@ -767,9 +767,6 @@ export class VillageScene extends SimScene {
         let pts = (fed ? 1 : -1) + (wellFed ? 1 : 0) + (parents >= 2 ? 1 : 0) + (sibling ? 1 : 0) + (v.home.level >= 2 && !v.home.ruined && v.home.warm ? 1 : 0) - (v.home.ruined ? 1 : 0) + (v.home.warm ? 0 : p.coldKidCare) + (v.encouragedDay === this.day ? 1 : 0) - (v.fledDay === this.day ? 1 : 0);
         v.care += pts; v.careDays++;
         v.stars = v.starsNow();
-        // yesterday's training in the pen: only when fed, and a drill yard needs a warm barracks to drill anyone
-        const canTrain = v.pen === 'soldier' ? this.world.barracks.some((b) => b.warm) : true;
-        if (v.apprenticeAt(this) && canTrain && fed) v.trained = Math.min(Villager.drillNeeded(this), v.trained + 1);
       }
       if (this.mods.dawnHeal) v.hp = v.maxHp; // Second Wind: a night's rest heals everything
     }

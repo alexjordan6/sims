@@ -236,7 +236,7 @@ export class Villager extends Mover {
   private shroomMeal = false;
   /** died of hunger (so the death isn't also reported as a killing) */
   starved = false;
-  /** days of apprenticeship done (drill at the barracks, the field, the woodyard) */
+  /** days of training done in the pen (fractional: it accrues by the hour while they are there and fed) */
   trained = 0;
   name: string;
   // ---- upbringing (children); frozen into stars/trait at coming of age
@@ -292,7 +292,7 @@ export class Villager extends Mover {
   /** What this child will become as things stand — shown in the UI so nothing is a surprise. The pen decides, not the house. */
   outlook(s: VillageScene): { role: Calling; skilled: boolean } {
     const kind = this.pen ?? this.calling;
-    const daysLeft = Math.max(0, Math.ceil(s.adultAge - this.age)); // fed training days still possible
+    const daysLeft = Math.max(0, s.adultAge - this.age); // training days still possible, if fed all the way
     const skilled = s.mods.fullDrill || (!!this.pen && this.trained + daysLeft >= Villager.drillNeeded(s));
     // soldiers must finish drill; an untrained drill-yard child grows up a farmer
     if (kind === 'soldier' && !skilled) return { role: 'farmer', skilled: false };
@@ -466,12 +466,17 @@ export class Villager extends Mover {
     // night: doze where they stand
     if ((s.dayTime > BEDTIME.start || s.dayTime < BEDTIME.end) && inPen) { this.task = 'asleep in the pen'; this.vx = this.vy = 0; this.clearGoal(); return; }
     if (!hungry) this.task = kind === 'soldier' ? 'drilling' : kind === 'farmer' ? 'learning to farm' : 'learning the axe';
-    // drift between pen tiles; every so often a bit of training
+    // training accrues by the hour, while they are in the pen and fed (a drill yard needs a warm barracks to drill anyone)
+    const canTrain = kind !== 'soldier' || s.world.barracks.some((b) => b.warm);
+    // (a waking day in the pen is a day of training: the night asleep does not count against them)
+    const waking = 1 - (1 - BEDTIME.start + BEDTIME.end);
+    if (inPen && !hungry && canTrain) this.trained = Math.min(Villager.drillNeeded(s), this.trained + dt / (p.dayLength * waking));
+    // run about between pen tiles, stopping now and then for a swing or a stroke of the hoe
     const arrived = this.followPath(dt);
     this.thinkTimer -= dt;
-    if (this.thinkTimer <= 0 || (arrived && !inPen)) {
-      this.thinkTimer = s.rng.range(1.5, 3);
-      if (inPen && !hungry && s.rng.chance(0.6)) {
+    if (this.thinkTimer <= 0 || arrived) {
+      this.thinkTimer = s.rng.range(0.6, 1.4);
+      if (inPen && !hungry && s.rng.chance(0.3)) {
         if (kind === 'soldier') s.fx.push({ kind: 'swing', who: this, dx: this.dir, dy: 0, stage: 0 });
         else s.fx.push({ kind: 'tool', tool: kind === 'farmer' ? 'hoe' : 'axe', tx: here.tx, ty: here.ty, who: this });
         this.vx = this.vy = 0; this.clearGoal();

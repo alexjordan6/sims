@@ -605,7 +605,7 @@ export class UI {
       const o = m.outlook(s), need = Villager.drillNeeded(s);
       const stars = m.starsNow();
       const line = !m.pen ? `no pen painted — playing near home · ${need} fed training days to be skilled`
-        : `training at the ${PEN_NAME[m.pen]} · ${m.trained}/${need} days${m.pen === 'soldier' && o.role !== 'soldier' ? ' — <em class="warn">too late to finish drill</em>' : ''}`;
+        : `training at the ${PEN_NAME[m.pen]} · ${m.trained.toFixed(1)}/${need} days${m.pen === 'soldier' && o.role !== 'soldier' ? ' — <em class="warn">too late to finish drill</em>' : ''}`;
       const list = s.careToday(m).map((c) => `<li class="${c.ok ? 'ok' : ''}">${c.ok ? '✓' : '✗'} ${c.label}${!c.ok && c.note ? ` <small>· ${esc(c.note)}</small>` : ''}</li>`).join('');
       const why = s.encourageProblem(m);
       html += `<div class="upbring"><div class="cap">UPBRINGING</div>
@@ -658,7 +658,7 @@ export class UI {
         if (v.role === 'kid') {
           const o = v.outlook(s);
           const icon = o.role === 'soldier' ? spr('dungeon', DUNGEON.sword, 16) : o.role === 'woodcutter' ? spr('town', TOWN.iconAxe, 16) : spr('town', TOWN.iconHoe, 16);
-          bar = `<span class="outlook ${o.role === 'soldier' ? 'm' : 'c'}">${icon}${v.apprenticeAt(s) ? ` ${v.trained}/${Villager.drillNeeded(s)}` : ''} <span class="rstars">${'★'.repeat(v.starsNow())}</span></span>`;
+          bar = `<span class="outlook ${o.role === 'soldier' ? 'm' : 'c'}">${icon}${v.apprenticeAt(s) ? ` ${v.trained.toFixed(1)}/${Villager.drillNeeded(s)}` : ''} <span class="rstars">${'★'.repeat(v.starsNow())}</span></span>`;
         } else {
           const pct = Math.max(0, v.hp / v.maxHp * 100);
           bar = `<div class="bar hp ${pct < 40 ? 'low' : ''}"><i style="width:${pct}%"></i></div>`;

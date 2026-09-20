@@ -1,5 +1,5 @@
 import type { Rng } from '@shared/index';
-import { TILE, COLS, ROWS, BUILDING_HP, HEARTH_WOOD, p, CROP_KINDS, type Calling, type FoodKind } from './config';
+import { TILE, COLS, ROWS, BUILDING_HP, HEARTH_WOOD, ITEM, p, CROP_KINDS, type Calling, type FoodKind } from './config';
 import { tickItem, hop, type Item, type ItemKind } from './items';
 
 export type DefenseKind = 'wall' | 'gate' | 'stairs';
@@ -206,7 +206,12 @@ export class World {
   }
   removeItem(it: Item): void { const i = this.items.indexOf(it); if (i >= 0) this.items.splice(i, 1); }
   /** what stops a rolling item: the map edge and anything an enemy can't walk through (walls, trees, buildings, closed gates) */
-  private itemBlocked = (x: number, y: number): boolean => { const tx = Math.floor(x / TILE), ty = Math.floor(y / TILE); return !this.inBounds(tx, ty) || this.isBlocked(tx, ty, true); };
+  private itemBlocked = (x: number, y: number, z: number): boolean => {
+    const tx = Math.floor(x / TILE), ty = Math.floor(y / TILE), t = this.get(tx, ty);
+    if (!t) return true;
+    if (t.kind === 'tree') return z < ITEM.treeHeight; // lobbed over the crown
+    return this.isBlocked(tx, ty, true);
+  };
   tickItems(dt: number): void { for (const it of this.items) tickItem(it, dt, this.itemBlocked); }
   /** Is this item lying inside a pen of that kind? */
   inPen(it: { x: number; y: number }, pen: Calling): boolean { return this.get(Math.floor(it.x / TILE), Math.floor(it.y / TILE))?.pen === pen; }

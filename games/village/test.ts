@@ -289,18 +289,19 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(kid2.care - careBefore === 1, `a cold night costs the child a care point (${kid2.care - careBefore} instead of 2)`);
     assert(kid2.trained === trainedBefore, 'a child with no pen trains nowhere');
     s.world.paintPen(123, 98, 'soldier');
-    const cadet = s.spawn(new Villager(0, 0, home2, 'kid', 1, 'Cadet', s.mods)); cadet.update = () => {}; cadet.pen = 'soldier'; cadet.ateDay = s.day; home2.residents = 4;
-    s.newDay(); assert(cadet.trained === 0, 'a cold barracks drills nobody');
+    const cadet = s.spawn(new Villager(World.center(123, 98).x, World.center(123, 98).y, home2, 'kid', 1, 'Cadet', s.mods)); cadet.pen = 'soldier'; cadet.ateDay = s.day; cadet.mealAt = 1e9; home2.residents = 4;
+    step(s, 2); assert(cadet.trained === 0, 'a cold barracks drills nobody');
     assert(births(s, 25) === 0, 'no children are born in a cold house');
     s.wood = 1; assert(!s.stockHearth(home2) && home2.firewood === 0, 'stocking a hearth needs the wood');
     s.wood = 50; assert(s.stockHearth(home2) && home2.firewood === 1 && s.wood === 50 - cost0, `a night of wood costs ${cost0} from the village pile`);
     s.stockHearth(home2); s.stockHearth(home2); assert(home2.firewood === p.hearthNights && !s.stockHearth(home2), 'the pile holds three nights and no more');
     cadet.ateDay = s.day; s.newDay(); assert(home2.warm && !keep2.warm, 'a stocked house is warm again while the barracks stays cold');
-    assert(cadet.trained === 0, 'still no drill while the barracks is cold');
+    step(s, 2); assert(cadet.trained === 0, 'still no drill while the barracks is cold');
     const soldier2 = s.spawn(new Villager(World.center(125, 100).x, World.center(125, 100).y, home2, 'soldier', 20, 'Guard', s.mods)); soldier2.hp = 10; soldier2.trained = 3;
     s.mods.soldierRegen = 5; step(s, 2); assert(soldier2.hp === 10, 'soldiers do not mend while the barracks is cold');
     keep2.firewood = 1; cadet.ateDay = s.day; s.newDay(); step(s, 2); assert(soldier2.hp > 10, 'a warm barracks mends them again');
-    assert(cadet.trained === 1, 'a fed child in the drill yard earns a day of drill once the barracks is warm');
+    assert(cadet.trained > 0 && Math.abs(cadet.trained - 2 / (p.dayLength * 0.52)) < 0.01, `a fed child in the drill yard drills by the waking hour once the barracks is warm (${cadet.trained.toFixed(3)} days after 2 s)`);
+    cadet.dead = true; s.removeDead();
     for (const b of s.hearthBuildings()) b.firewood = p.hearthNights;
     const cabin = s.world.place('house', 122, 96); cabin.firewood = 0; // the one empty pile in the village, in the clearing
     const carrier = s.spawn(new Villager(World.center(124, 104).x, World.center(124, 104).y, home2, 'woodcutter', 22, 'Carrier', s.mods));
@@ -368,9 +369,11 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     s.world.removeItem(meal); s.world.removeItem(stray);
     s.world.set(123, 96, 'tree'); assert(!s.world.get(123, 96)!.pen && !s.world.pens.get('soldier')!.has(96 * s.world.cols + 123), 'a tree on a pen tile takes it out of the pen');
     s.world.set(123, 96, 'grass'); s.world.paintPen(123, 96, 'soldier');
-    first.update = () => {}; first.trained = 0; s.world.barracks[0].firewood = 99; s.world.barracks[0].warm = true;
-    s.newDay(); assert(first.trained === 1 && first.hungerDays === 0, 'a fed day in the drill yard is a day of drill');
-    first.ateDay = 0; s.newDay(); assert(first.trained === 1 && first.hungerDays === 1, 'a day without food from the pile is a hungry day and no training');
+    first.trained = 0; s.world.barracks[0].firewood = 99; s.world.barracks[0].warm = true; Object.assign(first, World.center(123, 96)); first.mealAt = 1e9;
+    step(s, 3); assert(first.trained > 0 && first.hungerDays === 0, 'time in the drill yard, fed, is drill');
+    const drilled = first.trained; first.ateDay = 0; s.newDay(); assert(first.hungerDays === 1, 'a day without food from the pile is a hungry day');
+    first.mealAt = 0; step(s, 2); assert(first.trained === drilled && first.task === 'hungry — nothing in the pen', 'a hungry child with nothing to eat stops training');
+    first.update = () => {};
     for (let i = 1; i < p.kidStarveDays && !first.dead; i++) s.newDay();
     assert(first.dead, `${p.kidStarveDays} hungry days starve a pen child`);
     s.removeDead();

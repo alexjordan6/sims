@@ -50,14 +50,14 @@ export const p = live(
     birthChance: [0.5, 0, 1, 0.05, 'Base birth rate: chance per birth roll (every birthEvery seconds) for a couple in a warm house with a free crib and food to spare.'],
     feverDays: [5, 1, 15, 1, 'Baby Fever: days of food in store (at today\'s rations) that count as a surplus.'],
     feverBonus: [0.4, 0, 0.9, 0.05, 'Baby Fever: birth chance added while the surplus holds.'],
-    cadetDays: [3, 1, 8, 1, 'Fed training days a pen child needs to come of age skilled (a drill-yard child needs them to be a soldier at all).'],
+    cadetDays: [3, 0.5, 8, 0.5, 'Days in the pen, fed, a child needs to come of age skilled (a drill-yard child needs them to be a soldier at all). Must fit inside childDays.'],
     bedBonus: [0, -2, 6, 1, 'Beds added to every house on top of its level (4 / 6 / 8). Beds no longer gate births — cribs do.'],
     coldKidCare: [-1, -3, 0, 1, 'Care points a child loses after a night in a cold house.'],
     fleeRange: [120, 20, 300, 5, 'Pixels: children run for the nearest door when a raider is this close.'],
   }, 'growth'),
   params({
     infantDays: [0.5, 0.1, 10, 0.1, 'Days an infant spends in the nursery before walking out to a pen. A house births at most cribs / infantDays children a day.'],
-    childDays: [2, 0.25, 20, 0.25, 'Days from leaving the nursery to coming of age (Quick to Grow takes 2 off).'],
+    childDays: [4, 0.25, 20, 0.25, 'Days from leaving the nursery to coming of age (Quick to Grow takes 2 off). Give them at least cadetDays in the pen, or nobody comes of age skilled — or a soldier.'],
     adultDays: [20, 1, 100, 1, 'Days of adulthood before a villager grows old.'],
     elderDays: [5, 0.5, 30, 0.5, 'Days an elder lives on (slower, grey) before passing away.'],
     birthEvery: [10, 1, 120, 1, 'Real seconds between birth rolls in each house (needs a couple, a warm hearth, a free crib and food to spare; birthChance decides the roll).'],
@@ -234,6 +234,8 @@ export const ITEM = {
   flightBase: 0.4, flightPerPx: 1 / 160, scatter: 0.06,
   /** the little hop a dropped armful or loot makes */
   dropHop: 60,
+  /** a thrown item clears a tree once it flies higher than this (px); walls and buildings are never cleared */
+  treeHeight: 16,
 } as const;
 
 // ---- hauling --------------------------------------------------------------------------------

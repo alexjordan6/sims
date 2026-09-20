@@ -24,15 +24,15 @@ export interface Item {
   age: number;
 }
 
-/** Does a point block an item? Walls, trees, buildings and closed gates do; open ground does not. */
-export type Blocked = (x: number, y: number) => boolean;
+/** Does a point block an item flying at height z? Walls, buildings and closed gates always do; a tree only below its crown; open ground never. */
+export type Blocked = (x: number, y: number, z: number) => boolean;
 
 /**
  * Throw an item from `from` so that it comes to rest around `to`, bounces and all — with a little
  * scatter, as any throw has. The bounces and the roll carry it past its first landing, so the throw
  * is rehearsed on open ground and the pace scaled until the rest point falls on the aim.
  */
-export function launch(it: Item, from: { x: number; y: number }, to: { x: number; y: number }, rng: Rng, height = 8): void {
+export function launch(it: Item, from: { x: number; y: number }, to: { x: number; y: number }, rng: Rng, height = 12): void {
   const dx = to.x - from.x, dy = to.y - from.y, dist = Math.hypot(dx, dy);
   const T = ITEM.flightBase + dist * ITEM.flightPerPx;
   const s = () => 1 + rng.range(-ITEM.scatter, ITEM.scatter);
@@ -71,7 +71,7 @@ export function tickItem(it: Item, dt: number, blocked: Blocked): void {
   }
   // move one axis at a time and bounce off anything that blocks walking
   const nx = it.x + it.vx * dt, ny = it.y + it.vy * dt;
-  if (blocked(nx, it.y)) it.vx = -it.vx * ITEM.wallKeep; else it.x = nx;
-  if (blocked(it.x, ny)) it.vy = -it.vy * ITEM.wallKeep; else it.y = ny;
+  if (blocked(nx, it.y, it.z)) it.vx = -it.vx * ITEM.wallKeep; else it.x = nx;
+  if (blocked(it.x, ny, it.z)) it.vy = -it.vy * ITEM.wallKeep; else it.y = ny;
   if (it.z === 0 && Math.hypot(it.vx, it.vy) < ITEM.restSpeed) { it.vx = it.vy = 0; it.rest = true; }
 }
