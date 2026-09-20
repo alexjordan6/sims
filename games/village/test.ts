@@ -4,7 +4,7 @@ import { World, doorstep, hearthCost, BUILDINGS, type BuildingKind } from './wor
 import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, Wrecker, waveComposition } from './enemies';
-import { COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST } from './config';
+import { COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
 const output = document.getElementById('test-results')!, summary = document.getElementById('test-summary')!;
@@ -368,6 +368,48 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     const speedWas = second.speed; second.age = s.elderAge; s.tickAges(0);
     assert(second.elder && second.speed < speedWas, 'past adultDays a villager grows old and slows');
     second.age = second.deathAt(s); s.tickAges(0); assert(second.dead, 'an elder passes away at the end of elderDays');
+    s.removeDead();
+    // diet: the pantry keeps kinds apart
+    // diet: the pantry keeps kinds apart, crops and wild food have kinds, and what a child eats is who they become
+    const held = () => s.player.load as { kind: string; n: number; food?: string } | null;
+    s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(124, 100));
+    for (const k of FOOD_KINDS) s.pantry[k] = 0;
+    s.food = 50; assert(s.pantry.wheat === 50 && s.food === 50, 'a plainKid food gain lands in wheat');
+    s.addFood(20, 'carrot'); s.addFood(5, 'berry'); assert(s.food === 75 && s.pantry.carrot === 20, 'the granary keeps each kind apart');
+    s.food -= 60; assert(s.food === 15 && s.pantry.wheat === 0 && s.pantry.carrot === 10 && s.pantry.berry === 5, `generic spending drains the fullest kind first (${JSON.stringify(s.pantry)})`);
+    s.player.tool = 'seeds'; s.player.cropKind = 'carrot'; s.world.set(122, 98, 'tilled'); s.hoverTile = { tx: 122, ty: 98 }; Object.assign(s.player, World.center(122, 99)); s.interact();
+    const sown = s.world.get(122, 98)!;
+    assert(sown.kind === 'crop' && sown.food === 'carrot' && s.cropDaysOf(sown) === s.cropDays + FOODS.carrot.days, 'seeds sow the chosen crop and it ripens on its own clock');
+    sown.stage = 99; s.player.tool = 'hands'; s.player.load = null; s.interact();
+    assert(held()?.food === 'carrot' && held()!.n === s.cropYieldOf('carrot') && s.world.get(122, 98)!.kind === 'tilled' && s.world.get(122, 98)!.food === 'carrot', 'harvesting by hand yields the crop and the soil remembers it');
+    const sower = s.spawn(new Villager(World.center(122, 99).x, World.center(122, 99).y, s.world.houses[0], 'farmer', 20, 'Sower', s.mods));
+    for (const q of s.world.find(t => t.kind === 'crop' || t.kind === 'tilled')) if (q.tx !== 122 || q.ty !== 98) s.world.set(q.tx, q.ty, 'grass');
+    step(s, 6); assert(s.world.get(122, 98)!.kind === 'crop' && s.world.get(122, 98)!.food === 'carrot', `a farmer replants what the soil remembers (${s.world.get(122, 98)!.kind} ${s.world.get(122, 98)!.food})`);
+    sower.dead = true; s.removeDead();
+    s.world.set(126, 98, 'bush').stage = 99; s.hoverTile = { tx: 126, ty: 98 }; Object.assign(s.player, World.center(126, 99)); s.player.load = null; s.interact();
+    const bush = s.world.get(126, 98)!;
+    assert(held()?.food === 'berry' && held()!.n === FOODS.berry.yield && bush.kind === 'bush' && bush.stage === 0 && !s.wildRipe(bush), 'a ripe bush is picked by hand and starts regrowing');
+    const berries = held()!.n; s.interact(); assert(held()?.n === berries, 'a picked bush gives nothing');
+    for (let i = 0; i < s.regrowDays('berry'); i++) s.newDay(); assert(s.wildRipe(bush), `a bush bears again after ${s.regrowDays('berry')} days`);
+    s.hoverTile = null; s.player.load = null;
+    // the basket takes one kind; a child's bites build a diet that freezes at coming of age
+    s.world.paintPen(123, 96, 'farmer'); s.player.tool = 'basket'; s.player.basketKind = 'carrot'; s.pantry.carrot = 40;
+    const g2 = s.world.granary!; Object.assign(s.player, World.center(g2.tx + 1, g2.ty + BUILDINGS[g2.kind].h)); s.fillBasket();
+    assert(held()?.food === 'carrot' && held()!.n === HAUL.player.food && s.pantry.carrot === 40 - HAUL.player.food, 'the basket fills with the chosen kind');
+    Object.assign(s.player, World.center(123, 99)); s.hoverTile = { tx: 123, ty: 96 }; s.toss(); s.hoverTile = null;
+    assert(s.world.penPileAt(123, 96).carrot === p.tossSize && s.world.penPileKind(123, 96) === 'carrot', 'a toss lays a pile of that kind');
+    s.world.addPenFood(123, 96, 1, 'mushroom');
+    const eater = s.spawn(new Villager(World.center(123, 97).x, World.center(123, 97).y, s.world.houses[0], 'kid', 1, 'Eater', s.mods)); eater.pen = 'farmer'; eater.mealAt = 0; s.day = 9;
+    const careWas = eater.care; step(s, 8);
+    assert(eater.diet.carrot > 0 && eater.ateDay === 9, `bites go on the diet (${JSON.stringify(eater.diet)})`);
+    eater.update = () => {}; eater.diet = { wheat: 0, carrot: 0, tomato: 0, berry: 0, mushroom: 0 };
+    eater.eatBite('mushroom', 0.5); eater.eatBite('mushroom', 0.5); assert(eater.care === careWas + 1, 'a mushroom meal is worth one care point');
+    eater.diet.carrot = p.dietFull; eater.diet.wheat = p.dietFull / 2;
+    const live = eater.dietNow(); assert(Math.abs(live.speed - DIET_CAP.speed * p.dietMul) < 1e-9 && Math.abs(live.hp - DIET_CAP.hp * p.dietMul / 2) < 1e-9 && live.work === 0, `the diet projects its bonuses (${JSON.stringify(live)})`);
+    const plainKid = s.spawn(new Villager(0, 0, s.world.houses[0], 'kid', 1, 'Plain', s.mods)); plainKid.update = () => {};
+    for (const k of [eater, plainKid]) { k.age = s.adultAge; k.pen = null; } s.tickAges(0);
+    assert(eater.isAdult && plainKid.isAdult && eater.dietBonus.speed === live.speed && eater.speed > plainKid.speed && eater.maxHp > plainKid.maxHp && plainKid.dietBonus.hp === 0, `the diet freezes at coming of age: ${eater.speed.toFixed(1)} vs ${plainKid.speed.toFixed(1)} speed, ${eater.maxHp} vs ${plainKid.maxHp} HP`);
+    eater.diet.wheat = 99; assert(eater.dietNow().hp === eater.dietBonus.hp, 'the bonuses of a grown villager no longer move');
     s.removeDead();
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;

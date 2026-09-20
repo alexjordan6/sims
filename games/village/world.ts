@@ -1,9 +1,10 @@
 import type { Rng } from '@shared/index';
-import { TILE, COLS, ROWS, BUILDING_HP, HEARTH_WOOD, p, type Calling } from './config';
+import { TILE, COLS, ROWS, BUILDING_HP, HEARTH_WOOD, p, CROP_KINDS, FOOD_KINDS, type Calling, type FoodKind } from './config';
 
 export type DefenseKind = 'wall' | 'gate' | 'stairs';
 export interface Defense extends TilePos { kind: DefenseKind; hp: number; maxHp: number; open: boolean }
-export type TileKind = 'grass' | 'tree' | 'sapling' | 'tilled' | 'crop' | BuildingKind | DefenseKind;
+/** 'bush' and 'mushroom' are wild food: they stay put, get picked by hand and regrow (see Tile.stage) */
+export type TileKind = 'grass' | 'tree' | 'sapling' | 'tilled' | 'crop' | 'bush' | 'mushroom' | BuildingKind | DefenseKind;
 export type BuildingKind = 'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern' | 'lair';
 
 /** Footprint per building kind; (tx, ty) is the top-left, the door sits on the bottom row at `door`. */
@@ -17,7 +18,11 @@ export const BUILDINGS: Record<BuildingKind, { w: number; h: number; door: numbe
 };
 export const MAX_LEVEL = 3;
 /** ground a building can go on (flattened when it goes up) */
-export const BUILDABLE: ReadonlySet<TileKind> = new Set<TileKind>(['grass', 'sapling', 'tilled']);
+export const BUILDABLE: ReadonlySet<TileKind> = new Set<TileKind>(['grass', 'sapling', 'tilled', 'bush', 'mushroom']);
+/** tile kinds that remember which crop they carry (sown, or the last thing harvested) */
+export const CROP_GROUND: ReadonlySet<TileKind> = new Set<TileKind>(['crop', 'tilled']);
+/** what a wild tile yields, and the pile kind it makes */
+export const WILD_FOOD: Partial<Record<TileKind, FoodKind>> = { bush: 'berry', mushroom: 'mushroom' };
 /** ground a training pen can be painted on */
 export const PEN_GROUND: ReadonlySet<TileKind> = new Set<TileKind>(['grass', 'tilled']);
 
@@ -77,8 +82,10 @@ export function yardOf(b: Building): TilePos[] {
 
 export interface Tile {
   kind: TileKind;
-  /** crops: growth 0..cropDays (mature when >=); saplings: days toward a tree; trees: age in days (old growth at OLD_GROWTH_DAYS) */
+  /** crops: growth 0..cropDays (mature when >=); saplings: days toward a tree; trees: age in days (old growth at OLD_GROWTH_DAYS); bushes/mushrooms: days since picked */
   stage: number;
+  /** crops and tilled soil: the crop sown here (soil keeps the memory so farmers replant the same) */
+  food?: FoodKind;
   /** trees: chop progress accumulated by workers; buildings: upgrade hammering */
   work: number;
   /** visual variant (grass/tree frame choice), picked when the tile is set */
@@ -97,7 +104,7 @@ export interface Tile {
 export interface TilePos { tx: number; ty: number }
 
 export const BLOCKING: Record<TileKind, boolean> = {
-  grass: false, tilled: false, crop: false, sapling: false, tree: true, house: true, barracks: true, granary: true, woodyard: true,
+  grass: false, tilled: false, crop: false, sapling: false, bush: false, mushroom: false, tree: true, house: true, barracks: true, granary: true, woodyard: true,
   tavern: true, lair: true, wall: true, gate: false, stairs: false,
 };
 
@@ -114,7 +121,8 @@ export class World {
   dirty = new Set<number>();
   /** painted pen tiles by kind (tile indices) and the food piled on them */
   pens = new Map<Calling, Set<number>>();
-  penFood = new Map<number, number>();
+  /** food piled on pen tiles, by kind (tile index → kind → units) */
+  penFood = new Map<number, Partial<Record<FoodKind, number>>>();
 
   constructor(public readonly cols = COLS, public readonly rows = ROWS) {
     for (let i = 0; i < cols * rows; i++) { this.tiles.push({ kind: 'grass', stage: 0, work: 0, v: (i * 7919) % 97 }); this.dirty.add(i); }
@@ -154,6 +162,7 @@ export class World {
     t.kind = kind; t.stage = 0; t.work = 0; t.building = undefined; t.part = undefined; t.v = (t.v + 31) % 97;
     // a pen dies with its ground: a building, tree or crop on the tile takes it out of the pen (and its pile)
     if (t.pen && !PEN_GROUND.has(kind)) { this.pens.get(t.pen)?.delete(i); this.penFood.delete(i); t.pen = undefined; }
+    if (!CROP_GROUND.has(kind)) t.food = undefined;
     this.dirty.add(i);
     return t;
   }
@@ -187,24 +196,46 @@ export class World {
   nearestPen(x: number, y: number, kind?: Calling): TilePos | null { return this.nearestOf(x, y, this.penTiles(kind)); }
   /** Nearest pen tile of a kind with food on it. */
   nearestPenFood(x: number, y: number, kind: Calling): TilePos | null {
-    return this.nearestOf(x, y, [...(this.pens.get(kind) ?? [])].filter((i) => (this.penFood.get(i) ?? 0) > 0));
+    return this.nearestOf(x, y, [...(this.pens.get(kind) ?? [])].filter((i) => this.pileTotal(this.penFood.get(i)) > 0));
   }
-  penFoodAt(tx: number, ty: number): number { return this.penFood.get(ty * this.cols + tx) ?? 0; }
-  addPenFood(tx: number, ty: number, n: number): void {
+  private pileTotal(pile: Partial<Record<FoodKind, number>> | undefined): number { let n = 0; if (pile) for (const k of FOOD_KINDS) n += pile[k] ?? 0; return n; }
+  /** Everything on the tile's pile, all kinds together. */
+  penFoodAt(tx: number, ty: number): number { return this.pileTotal(this.penFood.get(ty * this.cols + tx)); }
+  /** The pile itself, by kind. */
+  penPileAt(tx: number, ty: number): Partial<Record<FoodKind, number>> { return this.penFood.get(ty * this.cols + tx) ?? {}; }
+  /** The kind there is most of on the tile (what the sprite shows), or null. */
+  penPileKind(tx: number, ty: number): FoodKind | null {
+    const pile = this.penFood.get(ty * this.cols + tx); if (!pile) return null;
+    let best: FoodKind | null = null, bn = 0;
+    for (const k of FOOD_KINDS) if ((pile[k] ?? 0) > bn) { bn = pile[k]!; best = k; }
+    return best;
+  }
+  addPenFood(tx: number, ty: number, n: number, kind: FoodKind = 'wheat'): void {
     const i = ty * this.cols + tx;
-    this.penFood.set(i, (this.penFood.get(i) ?? 0) + n);
+    const pile = this.penFood.get(i) ?? {};
+    pile[kind] = (pile[kind] ?? 0) + n;
+    this.penFood.set(i, pile);
     this.dirty.add(i);
   }
-  /** Eat up to n from the pile; returns what was taken. */
-  takePenFood(tx: number, ty: number, n: number): number {
-    const i = ty * this.cols + tx, have = this.penFood.get(i) ?? 0, took = Math.min(have, n);
-    if (took <= 0) return 0;
-    if (have - took <= 0) this.penFood.delete(i); else this.penFood.set(i, have - took);
+  /** Eat up to n from the pile, from whatever there is most of; returns what was taken and of which kind. */
+  takePenFood(tx: number, ty: number, n: number): { kind: FoodKind; n: number } | null {
+    const i = ty * this.cols + tx, pile = this.penFood.get(i), kind = this.penPileKind(tx, ty);
+    if (!pile || !kind) return null;
+    const have = pile[kind]!, took = Math.min(have, n);
+    if (took <= 0) return null;
+    if (have - took <= 1e-9) delete pile[kind]; else pile[kind] = have - took;
+    if (this.pileTotal(pile) <= 1e-9) this.penFood.delete(i);
     this.dirty.add(i);
-    return took;
+    return { kind, n: took };
   }
-  /** Food on every tile of a pen kind. */
-  penFoodTotal(kind: Calling): number { let n = 0; for (const i of this.pens.get(kind) ?? []) n += this.penFood.get(i) ?? 0; return n; }
+  /** Food on every tile of a pen (all kinds, or one). */
+  penFoodTotal(pen: Calling, kind?: FoodKind): number {
+    let n = 0;
+    for (const i of this.pens.get(pen) ?? []) { const pile = this.penFood.get(i); n += kind ? (pile?.[kind] ?? 0) : this.pileTotal(pile); }
+    return n;
+  }
+  /** Sow a crop: the tile becomes a growing crop of that kind. */
+  sow(tx: number, ty: number, kind: FoodKind): Tile { const t = this.set(tx, ty, 'crop'); t.food = kind; return t; }
   private stamping = false;
   markDirty(tx: number, ty: number): void {
     this.dirty.add(ty * this.cols + tx);
@@ -472,9 +503,10 @@ export class World {
     this.placeHouse(hx - 9, hy - 5);
     this.placeBarracks(hx + 5, hy - 5);
     const half = Math.floor(fieldW / 2);
+    // the starting field: a row of each crop
     for (let ty = hy + 1; ty <= hy + 3; ty++)
       for (let tx = hx - half; tx <= hx + half; tx++) {
-        const t = this.set(tx, ty, 'crop');
+        const t = this.sow(tx, ty, CROP_KINDS[(ty - hy - 1) % CROP_KINDS.length]);
         t.stage = rng.int(0, 2);
       }
     this.place('granary', hx + half + 2, hy + 1);
@@ -493,6 +525,15 @@ export class World {
       for (let dy = -1; dy <= f.h + 1; dy++) for (let dx = -1; dx <= f.w; dx++) this.set(tx + dx, ty + dy, 'grass');
       if (!this.bfs({ tx: tx + f.door, ty: ty + f.h }, { tx: hx, ty: hy }).length) continue;
       this.lair = this.place('lair', tx, ty);
+    }
+    // Wild food in the woods (after the lair, so older seeds keep their layout): berry bushes at the forest edge, mushrooms in the shade of old growth
+    for (let ty = 1; ty < this.rows - 1; ty++) for (let tx = 1; tx < this.cols - 1; tx++) {
+      const t = this.get(tx, ty)!;
+      if (t.kind !== 'grass' || t.trail || t.biome === 'meadow' || Math.abs(tx - hx) < 14 && Math.abs(ty - hy) < 10) continue;
+      const near = this.treeNeighbours(tx, ty);
+      if (!near) continue;
+      if (rng.chance(0.035)) this.set(tx, ty, 'bush').stage = 99;
+      else if (near >= 3 && rng.chance(0.05)) this.set(tx, ty, 'mushroom').stage = 99;
     }
   }
 }

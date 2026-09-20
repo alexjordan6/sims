@@ -66,6 +66,10 @@ export const p = live(
     kidStarveDays: [3, 1, 10, 1, 'Hungry days a pen child survives.'],
     tossSize: [4, 1, 12, 1, 'Food landing on the pen per throw from the basket.'],
     tossRange: [6, 2, 12, 1, 'Tiles the head can lob a handful of food.'],
+    dietFull: [6, 1, 30, 1, 'Units of one food a child must eat for its full stat bonus (about three days of a single crop).'],
+    dietMul: [1, 0, 3, 0.25, 'Scales every diet bonus (wheat +25% HP, carrots +15% speed, tomatoes +25% work, berries +25% damage at ×1).'],
+    wildRegrowMul: [1, 0.25, 4, 0.25, 'Scales how long picked bushes and mushrooms take to regrow (3 / 4 days at ×1).'],
+    wildSprout: [0.01, 0, 0.1, 0.005, 'Daily chance each old-growth tree sprouts a berry bush or mushrooms on a grass tile beside it.'],
   }, 'lifecycle'),
   params({
     playerHp: [60, 10, 200, 5, 'The head\'s base HP before armor and boons. Applies at NEW VILLAGE or the next armor change.'],
@@ -183,6 +187,35 @@ export const TRAITS: Record<Trait, { name: string; blurb: string }> = {
 };
 /** beds per house level (index = level); overridden upward by the Big Families boon */
 export const HOUSE_BEDS = [0, 4, 6, 8] as const;
+
+// ---- food and diet --------------------------------------------------------------------------
+/** Every kind of food. Crops are sown on soil; wild food grows in the woods and is picked by hand. What a child eats decides the adult. */
+export type FoodKind = 'wheat' | 'carrot' | 'tomato' | 'berry' | 'mushroom';
+export const FOOD_KINDS: readonly FoodKind[] = ['wheat', 'carrot', 'tomato', 'berry', 'mushroom'];
+export const CROP_KINDS: readonly FoodKind[] = ['wheat', 'carrot', 'tomato'];
+export type DietStat = 'hp' | 'speed' | 'work' | 'dmg' | 'care';
+export interface Food {
+  name: string; one: string;
+  source: 'crop' | 'wild';
+  /** crops: days to ripen on top of p.cropDays; wild: days to regrow after picking (× p.wildRegrowMul) */
+  days: number;
+  /** crops: yield on top of the cropYield slider; wild: what one picking gives */
+  yield: number;
+  stat: DietStat;
+  blurb: string;
+  /** pile / label colour */
+  colour: string;
+}
+export const FOODS: Record<FoodKind, Food> = {
+  wheat: { name: 'Wheat', one: 'wheat', source: 'crop', days: 0, yield: 0, stat: 'hp', blurb: 'hearty: +HP for life', colour: '#e0b04a' },
+  carrot: { name: 'Carrots', one: 'carrot', source: 'crop', days: 0, yield: -1, stat: 'speed', blurb: 'quick on their feet', colour: '#e8772c' },
+  tomato: { name: 'Tomatoes', one: 'tomato', source: 'crop', days: 1, yield: 1, stat: 'work', blurb: 'tireless workers', colour: '#c9564a' },
+  berry: { name: 'Berries', one: 'berry', source: 'wild', days: 3, yield: 3, stat: 'dmg', blurb: 'fierce: soldiers hit harder', colour: '#8c4ab0' },
+  mushroom: { name: 'Mushrooms', one: 'mushroom', source: 'wild', days: 4, yield: 2, stat: 'care', blurb: 'a care point with every meal', colour: '#a8765a' },
+};
+/** the most a full diet of one kind adds to its stat (× p.dietMul) */
+export const DIET_CAP: Record<Exclude<DietStat, 'care'>, number> = { hp: 0.25, speed: 0.15, work: 0.25, dmg: 0.25 };
+export const DIET_STAT_NAME: Record<DietStat, string> = { hp: 'HP', speed: 'speed', work: 'work speed', dmg: 'damage', care: 'care' };
 
 // ---- hauling --------------------------------------------------------------------------------
 /** How much wood or food one pair of arms carries before a trip to the woodyard / granary. */

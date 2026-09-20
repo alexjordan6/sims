@@ -1,6 +1,6 @@
 import type { Agent } from '@shared/index';
 import { World, doorstep, buildingCenter, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
-import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, CALLINGS, type Calling, type Trait, type LoadKind } from './config';
+import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, CALLINGS, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
 import type { Mods } from './meta';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle } from './characters';
 import type { VillageScene } from './main';
@@ -25,12 +25,15 @@ export abstract class Mover implements Agent {
   hidden = false;
   elevated = false;
   /** what this body is carrying: chopped wood or picked food, on its way to the woodyard / granary */
-  load: { kind: LoadKind; n: number } | null = null;
-  /** Put a yield in this body's arms (one kind at a time — the other kind is taken in first). */
-  pickUp(kind: LoadKind, n: number): void {
-    if (this.load && this.load.kind !== kind) return;
-    this.load = { kind, n: (this.load?.n ?? 0) + n };
+  /** what the arms hold: wood, or food of one kind */
+  load: { kind: LoadKind; n: number; food?: FoodKind } | null = null;
+  /** Put a yield in this body's arms (one kind at a time — the other kind is taken in first; one crop per armful). */
+  pickUp(kind: LoadKind, n: number, food?: FoodKind): void {
+    if (this.load && (this.load.kind !== kind || (kind === 'food' && this.load.food !== food))) return;
+    this.load = { kind, n: (this.load?.n ?? 0) + n, food: kind === 'food' ? food : undefined };
   }
+  /** Can these arms take n of this? */
+  canCarry(kind: LoadKind, food?: FoodKind): boolean { return !this.load || (this.load.kind === kind && (kind !== 'food' || this.load.food === food)); }
   hostile = false;
   aim = { x: 1, y: 0 };
   private pathRevision = -1;
@@ -226,6 +229,11 @@ export class Villager extends Mover {
   /** pen children: the day they last ate from the pile, and sim time their next meal is due */
   ateDay = 0;
   mealAt = 0;
+  /** what they ate as a child, by kind, and the bonuses it froze into at coming of age */
+  diet: Record<FoodKind, number> = { wheat: 0, carrot: 0, tomato: 0, berry: 0, mushroom: 0 };
+  dietBonus: Record<Exclude<DietStat, 'care'>, number> = { hp: 0, speed: 0, work: 0, dmg: 0 };
+  /** mushrooms counted toward today's care point (one per meal) */
+  private shroomMeal = false;
   /** died of hunger (so the death isn't also reported as a killing) */
   starved = false;
   /** days of apprenticeship done (drill at the barracks, the field, the woodyard) */
@@ -296,9 +304,21 @@ export class Villager extends Mover {
     if (!this.careDays) return 0;
     return Math.max(0, Math.min(5, Math.round((this.care / this.careDays) * (5 / 6))));
   }
-  /** Work-speed multiplier from upbringing: skill, stars and traits. */
+  /** What the diet so far would give at coming of age (live for children, the frozen numbers for adults). */
+  dietNow(): Record<Exclude<DietStat, 'care'>, number> {
+    if (this.isAdult) return this.dietBonus;
+    const out = { hp: 0, speed: 0, work: 0, dmg: 0 };
+    for (const k of FOOD_KINDS) { const stat = FOODS[k].stat; if (stat !== 'care') out[stat] += DIET_CAP[stat] * p.dietMul * Math.min(1, this.diet[k] / Math.max(1, p.dietFull)); }
+    return out;
+  }
+  /** A bite from a pen pile: it goes on the diet; mushrooms also earn a care point (once per meal). */
+  eatBite(kind: FoodKind, n: number): void {
+    this.diet[kind] += n;
+    if (kind === 'mushroom' && !this.shroomMeal) { this.shroomMeal = true; this.care += 1; }
+  }
+  /** Work-speed multiplier from upbringing: skill, stars, traits and diet. */
   get workMul(): number {
-    return (this.skilled ? 1.4 : 1) * (1 + STAR_BONUS * this.stars) * (this.trait === 'tireless' ? 1.25 : 1) * (this.elder ? ELDER_MUL : 1);
+    return (this.skilled ? 1.4 : 1) * (1 + STAR_BONUS * this.stars) * (this.trait === 'tireless' ? 1.25 : 1) * (1 + this.dietBonus.work) * (this.elder ? ELDER_MUL : 1);
   }
 
   applyRole(mods: Mods): void {
@@ -312,8 +332,8 @@ export class Villager extends Mover {
     // how they were raised follows them for life
     if (this.isAdult) {
       const stars = 1 + STAR_BONUS * this.stars;
-      this.maxHp *= stars * (this.trait === 'hardy' ? 1.25 : 1) * (this.stars <= 1 ? 0.9 : 1);
-      this.speed *= stars * (this.trait === 'quick' ? 1.2 : 1) * (this.elder ? ELDER_MUL : 1);
+      this.maxHp *= stars * (this.trait === 'hardy' ? 1.25 : 1) * (this.stars <= 1 ? 0.9 : 1) * (1 + this.dietBonus.hp);
+      this.speed *= stars * (this.trait === 'quick' ? 1.2 : 1) * (1 + this.dietBonus.speed) * (this.elder ? ELDER_MUL : 1);
     }
     this.maxHp = Math.round(this.maxHp * mods.hpMul * (this.role === 'soldier' ? 1 : mods.villagerHpMul));
     this.hp = Math.min(this.hp, this.maxHp);
@@ -324,6 +344,7 @@ export class Villager extends Mover {
   comeOfAge(s: VillageScene): void {
     const { role, skilled } = this.outlook(s);
     this.stars = this.starsNow();
+    this.dietBonus = this.dietNow(); // what they ate is who they are
     this.skilled = skilled;
     if (this.stars >= 5) this.trait = s.rng.pick(Object.keys(TRAITS) as Trait[]);
     if (this.calling === 'soldier' && role !== 'soldier') s.event('grow', `${this.name} came of age before finishing drill — a farmer instead`, true);
@@ -431,8 +452,8 @@ export class Villager extends Mover {
             this.eatTimer = 0.6;
             // two meals a day, each half of p.kidFood
             const bite = w.takePenFood(pile.tx, pile.ty, Math.min(1, p.kidFood / 2 - this.eaten));
-            if (bite > 0) { this.eaten += bite; s.fx.push({ kind: 'tool', tool: 'seed', tx: pile.tx, ty: pile.ty, who: this }); }
-            if (this.eaten >= p.kidFood / 2 - 1e-9) { this.eaten = 0; this.ateDay = s.day; this.mealAt = s.simTime + p.dayLength / 2; this.clearGoal(); }
+            if (bite) { this.eaten += bite.n; this.eatBite(bite.kind, bite.n); s.fx.push({ kind: 'tool', tool: 'seed', tx: pile.tx, ty: pile.ty, who: this }); }
+            if (this.eaten >= p.kidFood / 2 - 1e-9) { this.eaten = 0; this.shroomMeal = false; this.ateDay = s.day; this.mealAt = s.simTime + p.dayLength / 2; this.clearGoal(); }
           }
         } else this.task = 'off to eat';
         return;
@@ -498,7 +519,8 @@ export class Villager extends Mover {
       if (this.load && this.load.n >= Math.round(HAUL.villager[this.load.kind] * p.haulMul)) { this.delivering = true; this.deliver(dt, s); return; }
       const ok = (tx: number, ty: number) => (this.unreachable.get(ty * w.cols + tx) ?? 0) <= s.simTime;
       const job = farmer
-        ? w.nearest(this.x, this.y, (t, tx, ty) => t.kind === 'crop' && t.stage >= s.cropDays && ok(tx, ty)) ??
+        ? (this.load?.kind === 'food' ? w.nearest(this.x, this.y, (t, tx, ty) => t.kind === 'crop' && s.isRipe(t) && t.food === this.load!.food && ok(tx, ty)) : null) ??
+          w.nearest(this.x, this.y, (t, tx, ty) => t.kind === 'crop' && s.isRipe(t) && ok(tx, ty)) ??
           w.nearest(this.x, this.y, (t, tx, ty) => t.kind === 'tilled' && ok(tx, ty))
         : s.mods.ignoreReserve || w.treeCount > TREE_RESERVE ? this.pickTree(s, ok) : null;
       if (job) {
@@ -571,15 +593,16 @@ export class Villager extends Mover {
   private finishWork(s: VillageScene, farmer: boolean): void {
     const g = this.goal!;
     const t = s.world.get(g.tx, g.ty)!;
-    if (farmer && t.kind === 'crop' && t.stage >= s.cropDays) {
-      // leave ripe crops standing while the granary is full or the arms hold wood
-      if (s.food < s.foodCap && (!this.load || this.load.kind === 'food')) {
-        s.world.set(g.tx, g.ty, 'tilled');
-        const yieldNow = (s.mods.cropYield + (this.skilled && this.role === 'farmer' ? 1 : 0)) * (this.trait === 'greenthumb' && s.rng.chance(0.25) ? 2 : 1);
-        this.pickUp('food', yieldNow);
+    if (farmer && t.kind === 'crop' && s.isRipe(t)) {
+      // leave ripe crops standing while the granary is full or the arms hold wood / another crop
+      const kind = t.food ?? 'wheat';
+      if (s.food < s.foodCap && this.canCarry('food', kind)) {
+        s.world.set(g.tx, g.ty, 'tilled'); // the soil remembers the crop
+        const yieldNow = (s.cropYieldOf(kind) + (this.skilled && this.role === 'farmer' ? 1 : 0)) * (this.trait === 'greenthumb' && s.rng.chance(0.25) ? 2 : 1);
+        this.pickUp('food', yieldNow, kind);
       }
     }
-    else if (farmer && t.kind === 'tilled') { s.world.set(g.tx, g.ty, 'crop'); }
+    else if (farmer && t.kind === 'tilled') { s.world.sow(g.tx, g.ty, t.food ?? 'wheat'); }
     else if (!farmer && t.kind === 'tree' && (!this.load || this.load.kind === 'wood')) { const wood = s.treeYield(t) + (this.skilled ? 4 : 0); s.world.set(g.tx, g.ty, 'sapling'); this.pickUp('wood', wood); }
     this.clearGoal();
   }
@@ -610,7 +633,7 @@ export class Villager extends Mover {
     if (this.target && !this.target.dead) {
       this.task = 'fighting';
       if (this.attackTick(dt, s)) return;
-      const dmg = p.soldierDmg * weaponMul(this.weapons, this.weapon === 'bow' ? 'bow' : 'melee') * s.mods.soldierDmgMul * (s.world.barracksLevel >= 3 ? 1.2 : 1) * (this.skilled ? 1.15 : 1) * (this.trait === 'brave' ? 1.2 : 1);
+      const dmg = p.soldierDmg * weaponMul(this.weapons, this.weapon === 'bow' ? 'bow' : 'melee') * s.mods.soldierDmgMul * (s.world.barracksLevel >= 3 ? 1.2 : 1) * (this.skilled ? 1.15 : 1) * (this.trait === 'brave' ? 1.2 : 1) * (1 + this.dietBonus.dmg);
       if (this.weapon === 'bow') {
         const range = this.elevated ? 210 : 160;
         if (this.dist(this.target) <= range && s.world.lineClear(this, this.target, this.elevated)) {
@@ -852,9 +875,20 @@ export const SWING = { reach: 24, halfAngleCos: 0.35, comboWindow: 0.5, recoverA
 export class Player extends Mover {
   facing = { x: 0, y: 1 };
   tool: Tool = 'hands';
-  /** which pen the paint tool lays down */
+  /** which pen the paint tool lays down, which crop the seeds sow, which food the basket takes */
   penKind: Calling = 'farmer';
+  cropKind: FoodKind = 'wheat';
+  basketKind: FoodKind = 'wheat';
   cyclePen(): void { this.penKind = CALLINGS[(CALLINGS.indexOf(this.penKind) + 1) % CALLINGS.length]; }
+  cycleCrop(): void { this.cropKind = CROP_KINDS[(CROP_KINDS.indexOf(this.cropKind) + 1) % CROP_KINDS.length]; }
+  /** next food kind for the basket; skips kinds the pantry is out of (unless every kind is) */
+  cycleBasket(stock: Record<FoodKind, number>): void {
+    const any = FOOD_KINDS.some((k) => stock[k] > 0);
+    for (let i = 1; i <= FOOD_KINDS.length; i++) {
+      const k = FOOD_KINDS[(FOOD_KINDS.indexOf(this.basketKind) + i) % FOOD_KINDS.length];
+      if (!any || stock[k] > 0) { this.basketKind = k; return; }
+    }
+  }
   swing: Swing | null = null;
   /** stage the next swing will be, and how long since the last swing ended */
   private nextStage = 0;

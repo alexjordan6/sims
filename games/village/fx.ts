@@ -214,7 +214,7 @@ export class Fx {
       case 'miss': this.dust.explode(4, ev.who.x + ev.who.dir * 10, ev.who.y + 2); this.sfx.whiff(); break;
       case 'cast': this.magic.explode(10, ev.who.x, ev.who.y - 8); this.scene.tweens.add({ targets: this.anim(ev.who.id), sy: 1.15, sx: 0.9, duration: 120, yoyo: true }); this.sfx.bolt(); break;
       case 'impact': this.magic.explode(6, ev.x, ev.y); break;
-      case 'lob': this.lob(ev.x, ev.y, ev.tx, ev.ty); break;
+      case 'lob': this.lob(ev.x, ev.y, ev.tx, ev.ty, ev.food); break;
       case 'tool': this.tool(ev.tool, ev.tx, ev.ty, sprites, ev.who); break;
       case 'boss': this.bossArrive(ev.who, sprites); this.sfx.horn(); break;
       case 'slowmo': this.zoomBump(0.08, 120, 420); break;
@@ -557,9 +557,9 @@ export class Fx {
 
   /** Word pop ("POW!", "!", "DOUBLE!"): slams in big, tilts, hangs, fades. */
   /** A handful of food arcs from the basket to the pen tile and lands in a puff. */
-  private lob(x0: number, y0: number, tx: number, ty: number): void {
+  private lob(x0: number, y0: number, tx: number, ty: number, food: keyof typeof FLORA.pile = 'wheat'): void {
     const x1 = (tx + 0.5) * TILE, y1 = (ty + 0.5) * TILE;
-    const sp = this.scene.add.image(x0, y0, 'flora', FLORA.feed[0]).setDepth(DEPTH.weapon).setScale(0.6);
+    const sp = this.scene.add.image(x0, y0, 'flora', FLORA.pile[food][0]).setDepth(DEPTH.weapon).setScale(0.6);
     const arc = { t: 0 }, ms = 380 + Math.hypot(x1 - x0, y1 - y0) * 1.2, lift = 18 + Math.hypot(x1 - x0, y1 - y0) * 0.25;
     this.scene.tweens.add({
       targets: arc, t: 1, duration: ms, ease: 'Linear',

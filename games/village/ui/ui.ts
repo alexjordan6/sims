@@ -1,7 +1,7 @@
 import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type Tool } from '../agents';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
-import { OGRE, HAUL, COST, p, TOWER, HEARTH_WOOD, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, CALLING_NAME, TRAITS, HEARTY_RATION, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, PEN_NAME, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS } from '../config';
+import { OGRE, HAUL, COST, p, TOWER, HEARTH_WOOD, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, CALLING_NAME, TRAITS, HEARTY_RATION, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, PEN_NAME, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, DIET_STAT_NAME, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS } from '../config';
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
@@ -114,9 +114,9 @@ export class UI {
     this.hotbar = h(`<div class="hotbar">
       <div class="slots panel">
         <span class="cap slots-cap">TOOLS <kbd>1-9</kbd></span>
-        ${slot('hands', 'farm', FARM.iconHand, 'HANDS', 'Harvest ripe crops')}
+        ${slot('hands', 'farm', FARM.iconHand, 'HANDS', 'Harvest ripe crops; pick berries and mushrooms in the woods')}
         ${slot('hoe', 'town', TOWN.iconHoe, 'HOE', 'Till grass into soil; clears stumps; three hits on soil flatten it back to grass')}
-        ${slot('seeds', 'farm', FARM.grassTuft, 'SEEDS', 'Crops on tilled soil, trees on grass')}
+        ${slot('seeds', 'farm', FARM.grassTuft, 'SEEDS', 'Sow the chosen crop on tilled soil (F cycles wheat / carrots / tomatoes), trees on grass. What a child eats decides the adult')}
         ${slot('axe', 'town', TOWN.iconAxe, 'AXE', 'Chop trees for wood (3 hits); clears stumps and saplings')}
         ${slot('sword', 'dungeon', DUNGEON.sword, 'SWORD', 'Swing at raiders in front of you. You start with a club — forge a real blade at the barracks chest')}
         ${slot('house', 'town', TOWN.wallWoodDoor, 'HOUSE', 'A family of 4 lives here and has children', COST.house)}
@@ -128,7 +128,7 @@ export class UI {
         ${slot('stairs', 'town', TOWN.iconHammer, 'STAIRS', 'Connect stairs to your walls. Use hands or X to climb and descend', 10)}
         ${slot('tavern', 'town', TOWN.wallWoodDoor, 'TAVERN', 'A cozy place to eat, rest and gather', COST.tavern)}
         ${slot('pen', 'farm', FARM.grassTuft, 'PEN', 'Paint a training pen on open ground: children leave the nursery for it and train there until they come of age. F cycles farm / wood / drill; painting the same kind again erases')}
-        ${slot('basket', 'farm', FARM.crate, 'BASKET', 'Walk up to the granary to fill the basket with food, then aim at a pen and toss. Pen children eat only what you throw in')}
+        ${slot('basket', 'farm', FARM.crate, 'BASKET', 'F picks a kind of food; walk up to the granary to fill the basket with it, then aim at a pen and toss. Pen children eat only what you throw in, and what they eat is who they become')}
       </div>
       <div class="hint"><kbd>click / C</kbd><span class="hint-text"></span></div>
     </div>`);
@@ -445,6 +445,7 @@ export class UI {
     const days = s.surplusDays(), fever = s.feverActive();
     const feverBadge = s.mods.babyFever ? `<span class="badge fever ${fever ? 'on' : ''}" title="${fever ? `Baby fever: births ${Math.round(100 * p.feverBonus)}% more likely while the larder holds ${p.feverDays}+ days of food` : `Baby fever needs ${p.feverDays} days of food in store — ${Math.ceil(p.feverDays * s.dailyRation() - s.food)} more`}">FEVER</span>` : '';
     q('.food').innerHTML = `${s.food | 0}<small>/${s.foodCap} · ${Number.isFinite(days) ? `${days.toFixed(days < 10 ? 1 : 0)} days` : '∞'}</small>${feverBadge}${inHand('food')}`;
+    q('.t-food').title = `${FOOD_KINDS.map((k) => `${s.pantry[k] | 0} ${FOODS[k].one}`).join(' · ')} — each villager eats 1 a day; the small number is how many days the larder would last. Pen children eat only what the basket tosses in.`;
     q('.scrap').textContent = String(s.scrap);
     q('.pop').innerHTML = ([
       ['farmer', CHAR.farmer, 'FARM'], ['woodcutter', CHAR.woodcutter, 'WOOD'], ['infant', CHAR.kid, 'CRIBS'], ['kid', CHAR.kid, 'KIDS'], ['soldier', CHAR.soldier, 'ARMY'], ['elder', CHAR.woodcutter, 'OLD'],
@@ -473,7 +474,8 @@ export class UI {
       el.classList.toggle('on', s.player.tool === tool);
       el.classList.toggle('off', (tool === 'house' || tool === 'barracks') && s.wood < COST[tool]);
       if (tool === 'pen') { const lbl = el.querySelector('.lbl')!, want = s.player.penKind === 'farmer' ? 'FARM PEN' : s.player.penKind === 'woodcutter' ? 'WOOD PEN' : 'DRILL PEN'; if (lbl.textContent !== want) lbl.textContent = want; }
-      if (tool === 'basket') { const lbl = el.querySelector('.lbl')!, want = s.player.load?.kind === 'food' ? `BASKET ${s.player.load.n}` : 'BASKET'; if (lbl.textContent !== want) lbl.textContent = want; }
+      if (tool === 'basket') { const lbl = el.querySelector('.lbl')!, want = s.player.load?.kind === 'food' ? `${s.player.load.n} ${FOODS[s.player.load.food ?? 'wheat'].name.toUpperCase()}` : `BASKET · ${FOODS[s.player.basketKind].name.toUpperCase()}`; if (lbl.textContent !== want) lbl.textContent = want; }
+      if (tool === 'seeds') { const lbl = el.querySelector('.lbl')!, want = FOODS[s.player.cropKind].name.toUpperCase(); if (lbl.textContent !== want) lbl.textContent = want; }
     });
     const hint = this.hotbar.querySelector('.hint-text')!;
     const carry = s.carryHint();
@@ -528,6 +530,7 @@ export class UI {
         html += `<b>Beds</b><span>${s.bedsTaken(b)} / ${s.beds(b)}${s.bedsTaken(b) > s.beds(b) ? ' <em class="warn">· crowded</em>' : ''}</span>`;
         html += `<b>Nursery</b><span>${infants} / ${s.cribs(b)} cribs${b.ruined ? '' : why ? ` · <em class="warn">no births: ${esc(why)}</em>` : ` · ${Math.round(100 * s.birthChance(b))}% every ${p.birthEvery}s · next roll in ${Math.ceil(s.birthIn(b))}s${s.feverActive() ? ' <em class="fever-txt">· baby fever</em>' : ''}`}<em class="d"> infants walk out to a pen after ${p.infantDays} days</em></span>`;
       }
+      if (b.kind === 'granary') html += `<b>Stock</b><span>${FOOD_KINDS.map((k) => `<span style="color:${FOODS[k].colour}">${s.pantry[k] | 0}</span> ${FOODS[k].one}`).join(' · ')}<em class="d"> the basket takes one kind at a time (F)</em></span>`;
       if (b.kind === 'barracks') {
         const ammo = b.ammo ?? 0, cap = s.towerCap(b);
         html += `<b>Sponsors</b><span>${s.world.swornHouses.length} / ${s.world.sponsorship(s.mods.sponsorBonus)} houses sworn</span>`;
@@ -610,8 +613,13 @@ export class UI {
         <div class="lean ${o.role === 'soldier' ? 'm' : 'c'}">will be ${o.skilled ? 'a skilled' : 'a plain'} ${o.role.toUpperCase()} at age ${s.adultAge.toFixed(1)}</div><div class="d">${line}</div>
         <ul class="care">${list}</ul>
         <button class="btn small ok encourage" ${why ? 'disabled' : ''}>ENCOURAGE${why ? ` · ${esc(why)}` : ''}</button></div>`;
+      const d = s.dietReport(m);
+      html += `<div class="upbring diet"><div class="cap">DIET</div>
+        ${d.kinds.map((k) => `<div class="lbl"><span>${FOODS[k.kind].name}</span><span>${k.n % 1 ? k.n.toFixed(1) : k.n} · ${FOODS[k.kind].stat === 'care' ? 'care' : `+${Math.round(DIET_CAP[FOODS[k.kind].stat as keyof typeof DIET_CAP] * p.dietMul * k.share * 100)}% ${DIET_STAT_NAME[FOODS[k.kind].stat]}`}</span></div><div class="bar diet"><i style="width:${Math.round(k.share * 100)}%;background:${FOODS[k.kind].colour}"></i></div>`).join('')}
+        <div class="d">${d.bonuses ? `growing up: ${d.bonuses}` : `nothing eaten from the pen yet — ${p.dietFull} of one food for its full bonus`}</div></div>`;
     } else if (m instanceof Villager) {
-      html += `<div class="upbring"><div class="cap">RAISED</div><div class="stars">${'★'.repeat(m.stars)}<span class="dim">${'☆'.repeat(5 - m.stars)}</span> <small>${m.skilled ? 'skilled' : 'plain'}${m.trait ? ` · ${TRAITS[m.trait].name} — ${TRAITS[m.trait].blurb}` : ''}</small></div></div>`;
+      const d = s.dietReport(m);
+      html += `<div class="upbring"><div class="cap">RAISED</div><div class="stars">${'★'.repeat(m.stars)}<span class="dim">${'☆'.repeat(5 - m.stars)}</span> <small>${m.skilled ? 'skilled' : 'plain'}${m.trait ? ` · ${TRAITS[m.trait].name} — ${TRAITS[m.trait].blurb}` : ''}</small></div>${d.bonuses ? `<div class="d">fed on ${d.kinds.filter((k) => k.n > 0).sort((a, b) => b.n - a.n).slice(0, 2).map((k) => FOODS[k.kind].name.toLowerCase()).join(' and ')}: ${d.bonuses}</div>` : ''}</div>`;
     }
     if (m instanceof Player || (m instanceof Villager && m.role === 'soldier')) {
       const st = armorStats(m.armor);
@@ -887,7 +895,7 @@ export class UI {
           <h3>THE TRICK</h3>
           <p>You can't recruit anyone. <b>Every adult was a child you raised.</b> See RAISING CHILDREN below.</p>
           <h3>EACH DAY</h3>
-          <p>Every villager eats 1 food. Crops ripen in ${s.cropDays} day${s.cropDays > 1 ? 's' : ''}. Couples with a spare bed have children. Everyone heals overnight.</p>
+          <p>Every villager eats 1 food. Crops ripen in ${s.cropDays}–${s.cropDays + 1} days. Couples with a free crib have children. Everyone heals overnight.</p>
           <p><b>Nothing counts until it's carried in.</b> Chopped wood and picked crops ride on the arms of whoever took them: woodcutters haul ${HAUL.villager.wood} wood to the woodyard per trip, farmers ${HAUL.villager.food} food to the granary. You carry ${HAUL.player.wood} wood or ${HAUL.player.food} food and unload by walking up to the building. Long walks are wasted work — keep the woodyard by the grove and the granary by the field.</p>
         </section>
         <section>
@@ -911,6 +919,10 @@ export class UI {
           ${building('barracks', 'Barracks · ' + COST.barracks + ' wood', 'Sponsors sworn houses; cadets drill in its yard.')}
           ${building('granary', 'Granary', 'Holds your food; the harvest is carried here. The crate stack beside it climbs as the store fills.')}
           ${building('woodyard', 'Woodyard', 'Holds your wood; chopped logs are carried here. The log stack beside the cabin climbs as it fills.')}
+          <h3>FOOD & DIET</h3>
+          <p><b>Three crops.</b> Take <b>SEEDS</b> and press <b>F</b> to choose: ${CROP_KINDS.map((k) => `<b>${FOODS[k].name.toLowerCase()}</b> (${FOODS[k].blurb})`).join(', ')}. Sow on tilled soil; farmers harvest what is ripe and <b>replant the same crop</b>, so the field stays what you made it. The starting field has a row of each.</p>
+          <p><b>Foraging.</b> <b>Berry bushes</b> grow at the forest edge and <b>mushrooms</b> in the shade of old growth. Pick them with <b>HANDS</b> (${FOODS.berry.yield} berries, ${FOODS.mushroom.yield} mushrooms); they grow back in ${s.regrowDays('berry')} / ${s.regrowDays('mushroom')} days, and old trees seed new patches now and then. Berries make <b>fierce</b> children (+damage); a mushroom meal is worth a <b>care point</b>.</p>
+          <p><b>What they eat is who they become.</b> The granary keeps each kind apart. The <b>BASKET</b> takes one kind (F to choose) and what lands in a pen is what its children eat. Every unit of a food moves that child toward its bonus — ${p.dietFull} units of one kind for the full ${Math.round(DIET_CAP.hp * p.dietMul * 100)}% HP (wheat), ${Math.round(DIET_CAP.speed * p.dietMul * 100)}% speed (carrots), ${Math.round(DIET_CAP.work * p.dietMul * 100)}% work speed (tomatoes) or ${Math.round(DIET_CAP.dmg * p.dietMul * 100)}% damage (berries) — and a mixed diet gives a little of each. The bonuses <b>lock in at coming of age</b> and last for life; the child's card shows the diet as it builds. Adults eat whatever is in store and it changes nothing.</p>
           <h3>RAISING CHILDREN</h3>
           <p><b>Life.</b> Everyone is born an <b>infant</b> in the house nursery (${p.infantDays} days), walks out a <b>child</b> to a training pen until age ${s.adultAge.toFixed(1)}, works as an <b>adult</b> for ${p.adultDays} days, then grows <b>old</b> — slower and grey — and passes away about ${p.elderDays} days later. The sliders (backtick) under <b>lifecycle</b> set every one of these.</p>
           <p><b>Births.</b> Every ${p.birthEvery} seconds a couple in a warm house with a free <b>crib</b> (${p.cribs} in a Lv1 nursery, +1 per level) has a ${Math.round(100 * p.birthChance)}% chance of a child (needs food to spare). A house can raise at most cribs ÷ infantDays children a day, so more houses and bigger nurseries mean more children. The <b>Baby Fever</b> legacy boon adds ${Math.round(100 * p.feverBonus)}% while the larder holds <b>${p.feverDays}+ days of food</b> for everyone — the FOOD tile shows the days, and a FEVER badge glows while it holds. More mouths shrink the surplus, so it only lasts if the fields keep up.</p>

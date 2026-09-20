@@ -531,6 +531,9 @@ const LEAF_DARK = '#2f6b2e', LEAF = '#4f9a3c', LEAF_LIGHT = '#7cc65a', LEAF_HI =
 const PINE_DARK = '#1f5a3a', PINE = '#2f7d4e', PINE_LIGHT = '#57a56a';
 const TRUNK = '#6b4226', TRUNK_DARK = '#3b2314', TRUNK_LIGHT = '#8f5c34';
 const SOIL = '#7a4d2b', SOIL_DARK = '#5a3619', SOIL_LIGHT = '#9a6a3e';
+const CARROT = '#e8772c', CARROT_HI = '#f7a25a';
+const BERRY = '#8c4ab0', BERRY_HI = '#c98fe0';
+const SHROOM = '#a8765a', SHROOM_HI = '#d9b39a', SHROOM_STEM = '#d8cbb4';
 const TOMATO = '#d9382f', TOMATO_HI = '#f06a5a', FRUIT_GREEN = '#8bc34a', FLOWER = '#ffe27a', STAKE = '#a67b4a';
 
 /** Frame indices into the `flora` tileset (a single row of 16x16 tiles). */
@@ -546,7 +549,13 @@ export const FLORA = {
   /** painted training pens (farm / wood / drill) and the food piles tossed onto them (small / medium / heap) */
   pen: [25, 26, 27] as const,
   feed: [28, 29, 30] as const,
-  count: 31,
+  /** the other crops, five growth phases each; wild food, picked / ripe; and piles of each kind (small / medium / heap) */
+  wheat: [31, 32, 33, 34, 35] as const,
+  carrot: [36, 37, 38, 39, 40] as const,
+  bush: [41, 42] as const,
+  mushroom: [43, 44] as const,
+  pile: { wheat: [45, 46, 47], carrot: [48, 49, 50], tomato: [28, 29, 30], berry: [51, 52, 53], mushroom: [54, 55, 56] } as const,
+  count: 57,
 } as const;
 
 /** Filled ellipse, pixel by pixel. */
@@ -657,6 +666,10 @@ export function ensureFlora(scene: Phaser.Scene): void {
   drawTilled(ctx, at(FLORA.tilled));
   PEN_ROPES.forEach((rope, i) => drawPen(ctx, at(FLORA.pen[i]), rope, i));
   for (let i = 0; i < 3; i++) drawFeed(ctx, at(FLORA.feed[i]), i);
+  for (let i = 0; i < 5; i++) { drawWheat(ctx, at(FLORA.wheat[i]), i); drawCarrot(ctx, at(FLORA.carrot[i]), i); }
+  drawBush(ctx, at(FLORA.bush[0]), false); drawBush(ctx, at(FLORA.bush[1]), true);
+  drawMushroom(ctx, at(FLORA.mushroom[0]), false); drawMushroom(ctx, at(FLORA.mushroom[1]), true);
+  for (let i = 0; i < 3; i++) { drawPile(ctx, at(FLORA.pile.wheat[i]), i, 'wheat'); drawPile(ctx, at(FLORA.pile.carrot[i]), i, 'carrot'); drawPile(ctx, at(FLORA.pile.berry[i]), i, 'berry'); drawPile(ctx, at(FLORA.pile.mushroom[i]), i, 'mushroom'); }
   tex.refresh();
   for (let i = 0; i < FLORA.count; i++) tex.add(i, 0, at(i), 0, 16, 16); // frames, so fx can draw one tile as an image
 }
@@ -668,6 +681,54 @@ function drawPen(ctx: Ctx, ox: number, rope: string, v: number): void {
   for (let i = 0; i < 10; i++) px(ctx, ox + ((i * 7 + v * 3) % 16), (i * 5 + 2) % 16, i % 2 ? '#7a5a38' : '#9a7a52');
   px(ctx, ox, 0, rope, 16, 1); px(ctx, ox, 15, rope, 16, 1); px(ctx, ox, 0, rope, 1, 16); px(ctx, ox + 15, 0, rope, 1, 16);
   for (const [x, y] of [[0, 0], [15, 0], [0, 15], [15, 15]] as const) px(ctx, ox + x, y, '#3e2c23');
+}
+/** Wheat: a sprout, blades, a tall green stand, heading out, golden ears. */
+function drawWheat(ctx: Ctx, ox: number, phase: number): void {
+  if (phase === 0) { px(ctx, ox + 6, 11, SOIL_DARK, 4, 3); px(ctx, ox + 7, 10, SOIL_LIGHT, 2, 1); px(ctx, ox + 8, 9, LEAF_LIGHT, 1, 1); return; }
+  const stalks = phase === 1 ? [5, 8, 11] : [3, 5, 7, 9, 11, 13];
+  const top = phase === 1 ? 10 : phase === 2 ? 6 : 3;
+  const stem = phase >= 4 ? HAY_DARK : LEAF_DARK, blade = phase >= 4 ? HAY : phase === 3 ? LEAF : LEAF_LIGHT;
+  for (const x of stalks) { px(ctx, ox + x, top, stem, 1, 15 - top); px(ctx, ox + x - 1, top + 3, blade, 1, 2); px(ctx, ox + x + 1, top + 5, blade, 1, 2); }
+  if (phase >= 3) for (const x of stalks) { px(ctx, ox + x - 1, top - 1, phase === 4 ? HAY : LEAF_LIGHT, 3, 3); px(ctx, ox + x, top - 2, phase === 4 ? HAY_DARK : LEAF, 1, 1); if (phase === 4) px(ctx, ox + x - 1, top, HAY_DARK, 1, 1); }
+}
+/** Carrots: a sprout, feathery tops, a full green top, the shoulder of the root showing, ripe orange roots. */
+function drawCarrot(ctx: Ctx, ox: number, phase: number): void {
+  if (phase === 0) { px(ctx, ox + 6, 11, SOIL_DARK, 4, 3); px(ctx, ox + 7, 10, SOIL_LIGHT, 2, 1); px(ctx, ox + 8, 9, LEAF_LIGHT, 1, 1); return; }
+  const plants = phase === 1 ? [[5, 11], [10, 9]] : [[3, 11], [8, 8], [12, 12]];
+  for (const [x, y] of plants) {
+    const h = phase === 1 ? 3 : phase === 2 ? 5 : 6;
+    px(ctx, ox + x, y - h, LEAF_DARK, 1, h);
+    for (let i = 0; i < h; i += 2) { px(ctx, ox + x - 1, y - h + i, LEAF_LIGHT, 1, 1); px(ctx, ox + x + 1, y - h + i + 1, LEAF, 1, 1); }
+    if (phase >= 3) { px(ctx, ox + x - 1, y, CARROT, 3, phase === 4 ? 3 : 1); px(ctx, ox + x, y, CARROT_HI, 1, 1); if (phase === 4) px(ctx, ox + x, y + 3, CARROT, 1, 1); }
+  }
+}
+/** A berry bush: a round dark-green shrub, dotted with berries when ripe. */
+function drawBush(ctx: Ctx, ox: number, ripe: boolean): void {
+  blob(ctx, ox + 8, 10, 6, 4.5, LEAF_DARK); blob(ctx, ox + 8, 9.5, 5, 3.5, LEAF); blob(ctx, ox + 6.5, 8.5, 2.5, 1.5, LEAF_LIGHT);
+  px(ctx, ox + 7, 14, TRUNK_DARK, 2, 2);
+  if (ripe) for (const [x, y] of [[4, 9], [7, 7], [10, 8], [12, 11], [6, 12], [9, 11]] as const) { px(ctx, ox + x, y, BERRY, 2, 2); px(ctx, ox + x, y, BERRY_HI, 1, 1); }
+}
+/** Mushrooms under the trees: a few caps on pale stems when grown, a stub of stems when picked. */
+function drawMushroom(ctx: Ctx, ox: number, ripe: boolean): void {
+  px(ctx, ox + 3, 13, SOIL_DARK, 10, 2); px(ctx, ox + 4, 12, LEAF_DARK, 3, 1); px(ctx, ox + 10, 12, LEAF_DARK, 2, 1);
+  const caps = ripe ? [[4, 7, 5], [10, 5, 4], [8, 10, 3]] : [[5, 12, 0], [10, 12, 0]];
+  for (const [x, y, w] of caps) {
+    if (!w) { px(ctx, ox + x, y, SHROOM_STEM, 2, 2); continue; }
+    px(ctx, ox + x + 1, y + 2, SHROOM_STEM, w - 2, 13 - y - 2); px(ctx, ox + x + 1, y + 2, '#e8dcc8', 1, 13 - y - 2);
+    px(ctx, ox + x, y, SHROOM, w, 3); px(ctx, ox + x + 1, y - 1, SHROOM, w - 2, 1); px(ctx, ox + x + 1, y, SHROOM_HI, 1, 1); px(ctx, ox + x + w - 2, y + 1, SHROOM_HI, 1, 1);
+  }
+}
+/** Piles of a kind: sheaves of wheat, heaps of carrots, berries, mushrooms (tomatoes use the loaves-and-roots frames). */
+function drawPile(ctx: Ctx, ox: number, size: number, kind: 'wheat' | 'carrot' | 'berry' | 'mushroom'): void {
+  const item = (x: number, y: number) => {
+    if (kind === 'wheat') { px(ctx, ox + x, y, HAY_DARK, 5, 3); px(ctx, ox + x + 1, y, HAY, 3, 2); px(ctx, ox + x + 2, y - 1, HAY, 1, 1); }
+    else if (kind === 'carrot') { px(ctx, ox + x, y, CARROT, 5, 2); px(ctx, ox + x, y, CARROT_HI, 2, 1); px(ctx, ox + x + 5, y, LEAF, 1, 2); }
+    else if (kind === 'berry') { px(ctx, ox + x, y, BERRY, 3, 3); px(ctx, ox + x + 2, y - 1, BERRY, 2, 2); px(ctx, ox + x, y, BERRY_HI, 1, 1); }
+    else { px(ctx, ox + x + 1, y + 1, SHROOM_STEM, 2, 2); px(ctx, ox + x, y, SHROOM, 4, 2); px(ctx, ox + x + 1, y, SHROOM_HI, 1, 1); }
+  };
+  item(3, 10); item(9, 10);
+  if (size >= 1) { item(8, 6); item(3, 6); }
+  if (size >= 2) { item(5, 3); item(10, 3); px(ctx, ox + 3, 13, SOIL_DARK, 10, 1); }
 }
 /** Loaves and roots dropped on the ground: a handful, an armful, a heap. */
 function drawFeed(ctx: Ctx, ox: number, size: number): void {

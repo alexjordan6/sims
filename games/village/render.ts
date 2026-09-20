@@ -212,11 +212,12 @@ export class Renderer {
 
   private paintTile(w: World, tx: number, ty: number): void {
     const t = w.get(tx, ty)!;
-    const { ground, canopy } = tileFrames(t, this.scene.cropDays, this.scene.dayTime, this.scene.oldGrowthDays);
-    let { object } = tileFrames(t, this.scene.cropDays, this.scene.dayTime, this.scene.oldGrowthDays);
-    // food tossed onto a pen sits on the object layer
-    const food = t.pen ? w.penFoodAt(tx, ty) : 0;
-    if (food > 0) object = GID.flora + FLORA.feed[Math.min(2, Math.ceil(food / Math.max(1, p.tossSize)) - 1)];
+    const frames = tileFrames(t, this.scene.cropDaysOf(t), this.scene.dayTime, this.scene.oldGrowthDays, this.scene.wildRipe(t));
+    const { ground, canopy } = frames;
+    let { object } = frames;
+    // food tossed onto a pen sits on the object layer, drawn as whatever there is most of
+    const food = t.pen ? w.penFoodAt(tx, ty) : 0, pileKind = food > 0 ? w.penPileKind(tx, ty) : null;
+    if (pileKind) object = GID.flora + FLORA.pile[pileKind][Math.min(2, Math.ceil(food / Math.max(1, p.tossSize)) - 1)];
     this.ground.putTileAt(ground, tx, ty);
     this.objects.putTileAt(object, tx, ty);
     // a tall tree's crown-top lives in the tile above; anything else clears it
@@ -231,9 +232,9 @@ export class Renderer {
     const w = this.scene.world;
     for (const q of w.find((t) => t.kind === 'crop')) {
       const t = w.get(q.tx, q.ty)!;
-      const phase = cropPhase(t, this.scene.cropDays, this.scene.dayTime);
+      const phase = cropPhase(t, this.scene.cropDaysOf(t), this.scene.dayTime);
       const shown = this.objects.getTileAt(q.tx, q.ty)?.index ?? EMPTY;
-      const want = GID.flora + (t.v % 2 ? FLORA.crop2 : FLORA.crop)[phase];
+      const want = GID.flora + cropFrames(t)[phase];
       if (shown !== want) w.markDirty(q.tx, q.ty);
     }
   }
@@ -491,7 +492,11 @@ function cropPhase(t: Tile, cropDays: number, dayTime: number): number {
 /** Ground + object gids for a tile (and the crown-top for the tile above, for tall trees). */
 const PEN_INDEX: Record<string, number> = { farmer: 0, woodcutter: 1, soldier: 2 };
 function penGround(kind: string): number { return GID.flora + FLORA.pen[PEN_INDEX[kind] ?? 0]; }
-function tileFrames(t: Tile, cropDays: number, dayTime: number, oldDays: number): { ground: number; object: number; canopy?: number } {
+/** the five growth frames of the crop sown on a tile */
+function cropFrames(t: Tile): readonly number[] {
+  return t.food === 'wheat' ? FLORA.wheat : t.food === 'carrot' ? FLORA.carrot : t.v % 2 ? FLORA.crop2 : FLORA.crop;
+}
+function tileFrames(t: Tile, cropDays: number, dayTime: number, oldDays: number, wildRipe = false): { ground: number; object: number; canopy?: number } {
   const grass = GID.town + TOWN.grass[t.v % TOWN.grass.length];
   const F = GID.flora;
   switch (t.kind) {
@@ -504,7 +509,9 @@ function tileFrames(t: Tile, cropDays: number, dayTime: number, oldDays: number)
       return { ground: grass, object: F + (t.work === 1 ? FLORA.oakChopped : pine ? FLORA.pineTrunk : FLORA.oakTrunk), canopy: F + (pine ? FLORA.pineTop : FLORA.oakTop) };
     }
     case 'tilled': return { ground: t.pen ? penGround(t.pen) : F + FLORA.tilled, object: EMPTY };
-    case 'crop': return { ground: F + FLORA.tilled, object: F + (t.v % 2 ? FLORA.crop2 : FLORA.crop)[cropPhase(t, cropDays, dayTime)] };
+    case 'crop': return { ground: F + FLORA.tilled, object: F + cropFrames(t)[cropPhase(t, cropDays, dayTime)] };
+    case 'bush': return { ground: grass, object: F + FLORA.bush[wildRipe ? 1 : 0] };
+    case 'mushroom': return { ground: grass, object: F + FLORA.mushroom[wildRipe ? 1 : 0] };
     case 'sapling': return { ground: grass, object: F + (t.stage < 2 ? FLORA.stump : t.stage === 2 ? FLORA.sprout : FLORA.sapling) };
     case 'house':
     case 'barracks':

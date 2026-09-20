@@ -11,6 +11,8 @@ const TERRAIN: Record<TileKind, [number, number, number]> = {
   grass: [98, 168, 76],
   tree: [40, 96, 44],
   sapling: [72, 134, 58],
+  bush: [70, 120, 52],
+  mushroom: [150, 120, 90],
   tilled: [140, 96, 58],
   crop: [150, 196, 70],
   house: [196, 84, 62],
