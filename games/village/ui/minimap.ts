@@ -20,7 +20,7 @@ const TERRAIN: Record<TileKind, [number, number, number]> = {
   tavern: [210, 164, 88], lair: [70, 50, 40], wall: [163, 169, 178], gate: [209, 177, 113], stairs: [128, 194, 218],
 };
 
-const ROLE = { kid: '#f5d8a8', farmer: '#7fd37f', woodcutter: '#c9a26b', soldier: '#6f9bff' } as const;
+const ROLE = { infant: '#f5d8a8', kid: '#f5d8a8', farmer: '#7fd37f', woodcutter: '#c9a26b', soldier: '#6f9bff' } as const;
 
 export class Minimap {
   readonly el: HTMLCanvasElement;

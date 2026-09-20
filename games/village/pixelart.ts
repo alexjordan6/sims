@@ -543,7 +543,10 @@ export const FLORA = {
   crop: [14, 15, 16, 17, 18] as const,
   crop2: [19, 20, 21, 22, 23] as const,
   tilled: 24,
-  count: 25,
+  /** painted training pens (farm / wood / drill) and the food piles tossed onto them (small / medium / heap) */
+  pen: [25, 26, 27] as const,
+  feed: [28, 29, 30] as const,
+  count: 31,
 } as const;
 
 /** Filled ellipse, pixel by pixel. */
@@ -652,5 +655,24 @@ export function ensureFlora(scene: Phaser.Scene): void {
   drawYoung(ctx, at(FLORA.saplingBig), 2); // a sheltered sapling is already a small tree
   for (let i = 0; i < 5; i++) { drawCrop(ctx, at(FLORA.crop[i]), i, false); drawCrop(ctx, at(FLORA.crop2[i]), i, true); }
   drawTilled(ctx, at(FLORA.tilled));
+  PEN_ROPES.forEach((rope, i) => drawPen(ctx, at(FLORA.pen[i]), rope, i));
+  for (let i = 0; i < 3; i++) drawFeed(ctx, at(FLORA.feed[i]), i);
   tex.refresh();
+}
+/** rope colours of the three pens, in Calling order: farmer, woodcutter, soldier */
+const PEN_ROPES = ['#6fd36f', '#d6a35c', '#6f9bff'] as const;
+/** Trampled earth ringed by a coloured rope on posts. */
+function drawPen(ctx: Ctx, ox: number, rope: string, v: number): void {
+  px(ctx, ox, 0, '#8a6a46', 16, 16);
+  for (let i = 0; i < 10; i++) px(ctx, ox + ((i * 7 + v * 3) % 16), (i * 5 + 2) % 16, i % 2 ? '#7a5a38' : '#9a7a52');
+  px(ctx, ox, 0, rope, 16, 1); px(ctx, ox, 15, rope, 16, 1); px(ctx, ox, 0, rope, 1, 16); px(ctx, ox + 15, 0, rope, 1, 16);
+  for (const [x, y] of [[0, 0], [15, 0], [0, 15], [15, 15]] as const) px(ctx, ox + x, y, '#3e2c23');
+}
+/** Loaves and roots dropped on the ground: a handful, an armful, a heap. */
+function drawFeed(ctx: Ctx, ox: number, size: number): void {
+  const loaf = (x: number, y: number) => { px(ctx, ox + x, y, '#8a5a2a', 5, 3); px(ctx, ox + x + 1, y, '#d9a05a', 3, 2); px(ctx, ox + x + 1, y, '#f0c878', 2, 1); };
+  const root = (x: number, y: number) => { px(ctx, ox + x, y, '#c9564a', 3, 3); px(ctx, ox + x + 1, y - 1, '#4f9a3c', 1, 1); px(ctx, ox + x, y, '#e07a6a', 1, 1); };
+  loaf(3, 10); root(9, 10);
+  if (size >= 1) { loaf(8, 6); root(3, 6); }
+  if (size >= 2) { loaf(5, 3); root(10, 3); px(ctx, ox + 3, 13, '#5a3619', 10, 1); }
 }

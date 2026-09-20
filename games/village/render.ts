@@ -4,7 +4,7 @@ import { Mover, Villager, Raider, Player, Arrow } from './agents';
 import { Bolt } from './enemies';
 import { TOWN, CHAR } from './atlas';
 import { ensureCharacter, seedLook, type Look } from './characters';
-import { p, TILE, COLS, ROWS, CAPS, WALL_HEIGHT, OGRE } from './config';
+import { p, TILE, COLS, ROWS, CAPS, WALL_HEIGHT, OGRE, PEN_COLOUR } from './config';
 import type { VillageScene } from './main';
 import { Fx } from './fx';
 import { ensureBuildingArt, ensureFlora, FLORA, BUILDING_TEXTURE, LIT_TEXTURE, STACK_ROWS } from './pixelart';
@@ -212,7 +212,11 @@ export class Renderer {
 
   private paintTile(w: World, tx: number, ty: number): void {
     const t = w.get(tx, ty)!;
-    const { ground, object, canopy } = tileFrames(t, this.scene.cropDays, this.scene.dayTime, this.scene.oldGrowthDays);
+    const { ground, canopy } = tileFrames(t, this.scene.cropDays, this.scene.dayTime, this.scene.oldGrowthDays);
+    let { object } = tileFrames(t, this.scene.cropDays, this.scene.dayTime, this.scene.oldGrowthDays);
+    // food tossed onto a pen sits on the object layer
+    const food = t.pen ? w.penFoodAt(tx, ty) : 0;
+    if (food > 0) object = GID.flora + FLORA.feed[Math.min(2, Math.ceil(food / Math.max(1, p.tossSize)) - 1)];
     this.ground.putTileAt(ground, tx, ty);
     this.objects.putTileAt(object, tx, ty);
     // a tall tree's crown-top lives in the tile above; anything else clears it
@@ -388,6 +392,9 @@ export class Renderer {
       } else {
         // gold when the held tool can act here ("E: …"), white otherwise; a dim box marks an out-of-reach hover
         const can = s.hint().startsWith('E:');
+        if (s.player.tool === 'pen' && can) { u.fillStyle(PEN_COLOUR[s.player.penKind], 0.35); u.fillRect(f.tx * TILE, f.ty * TILE, TILE, TILE); }
+        // the basket's throw: an arc from the head to the pile
+        if (s.player.tool === 'basket' && can) { const q = s.hoverTile ?? f; u.lineStyle(1, 0xffe066, 0.5); u.lineBetween(s.player.x, s.player.y - 8, (q.tx + 0.5) * TILE, (q.ty + 0.5) * TILE); }
         u.lineStyle(2, can ? 0xffe066 : 0xffffff, can ? 0.95 : 0.55);
         u.strokeRect(f.tx * TILE + 1, f.ty * TILE + 1, TILE - 2, TILE - 2);
         const hv = s.hoverTile;
@@ -482,11 +489,13 @@ function cropPhase(t: Tile, cropDays: number, dayTime: number): number {
 }
 
 /** Ground + object gids for a tile (and the crown-top for the tile above, for tall trees). */
+const PEN_INDEX: Record<string, number> = { farmer: 0, woodcutter: 1, soldier: 2 };
+function penGround(kind: string): number { return GID.flora + FLORA.pen[PEN_INDEX[kind] ?? 0]; }
 function tileFrames(t: Tile, cropDays: number, dayTime: number, oldDays: number): { ground: number; object: number; canopy?: number } {
   const grass = GID.town + TOWN.grass[t.v % TOWN.grass.length];
   const F = GID.flora;
   switch (t.kind) {
-    case 'grass': return { ground: grass, object: EMPTY };
+    case 'grass': return { ground: t.pen ? penGround(t.pen) : grass, object: EMPTY };
     case 'tree': {
       if (t.work >= 2) return { ground: grass, object: F + FLORA.bare };
       const old = t.stage >= oldDays;
@@ -494,7 +503,7 @@ function tileFrames(t: Tile, cropDays: number, dayTime: number, oldDays: number)
       const pine = t.v % 3 === 1;
       return { ground: grass, object: F + (t.work === 1 ? FLORA.oakChopped : pine ? FLORA.pineTrunk : FLORA.oakTrunk), canopy: F + (pine ? FLORA.pineTop : FLORA.oakTop) };
     }
-    case 'tilled': return { ground: F + FLORA.tilled, object: EMPTY };
+    case 'tilled': return { ground: t.pen ? penGround(t.pen) : F + FLORA.tilled, object: EMPTY };
     case 'crop': return { ground: F + FLORA.tilled, object: F + (t.v % 2 ? FLORA.crop2 : FLORA.crop)[cropPhase(t, cropDays, dayTime)] };
     case 'sapling': return { ground: grass, object: F + (t.stage < 2 ? FLORA.stump : t.stage === 2 ? FLORA.sprout : FLORA.sapling) };
     case 'house':
@@ -514,7 +523,8 @@ export function lookFor(m: Mover): Look | null {
   const blade = m.weapons.melee > 0 ? 'sword' : 'club';
   if (m instanceof Player) return { ...base, skin: 1, hair: 0, hairStyle: 0, body: 'adult', outfit: 'head', held: m.tool === 'sword' ? blade : m.tool === 'bow' ? 'bow' : m.tool === 'axe' ? 'axe' : m.tool === 'hoe' ? 'hoe' : 'none' };
   if (m instanceof Villager) {
-    if (m.role === 'kid') return { ...base, body: 'kid', outfit: 'kid', held: 'none' };
+    if (m.role === 'kid' || m.role === 'infant') return { ...base, body: 'kid', outfit: 'kid', held: 'none' };
+    if (m.elder) base.hair = 6; // grey
     const held = m.role === 'farmer' ? 'hoe' : m.role === 'woodcutter' ? 'axe' : m.weapon === 'bow' ? 'bow' : blade;
     return { ...base, body: 'adult', outfit: m.role, held };
   }

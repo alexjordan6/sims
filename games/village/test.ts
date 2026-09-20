@@ -1,6 +1,6 @@
 import './main';
 import type { VillageScene } from './main';
-import { World, doorstep, hearthCost, type BuildingKind } from './world';
+import { World, doorstep, hearthCost, BUILDINGS, type BuildingKind } from './world';
 import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, Wrecker, waveComposition } from './enemies';
@@ -25,6 +25,12 @@ function fort(s: VillageScene) {
   s.world.placeDefense('stairs', 120, 96); s.world.placeDefense('wall', 120, 95);
   Object.assign(s.player, World.center(124, 100));
   s.fitCamera();
+}
+/** Roll every house for births `rolls` times (p.birthEvery seconds apart) and return how many were born. */
+function births(s: VillageScene, rolls: number): number {
+  const n = s.villagers().length;
+  for (let i = 0; i < rolls; i++) { s.simTime += p.birthEvery; s.tickBirths(); }
+  return s.villagers().length - n;
 }
 function step(s: VillageScene, seconds: number) {
   for (let i = 0; i < Math.ceil(seconds * 60); i++) { s.grid.rebuild(s.agents); for (const a of [...s.agents]) if (!a.dead) a.update(1 / 60, s); s.removeDead(); }
@@ -279,16 +285,20 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(!home2.warm && !keep2.warm, 'an empty pile leaves the building cold the next dawn');
     // fed +1 and two parents +1 would make 2; the cold night takes one back
     assert(kid2.care - careBefore === 1, `a cold night costs the child a care point (${kid2.care - careBefore} instead of 2)`);
-    assert(kid2.trained === trainedBefore, 'a cold barracks drills nobody');
-    let born = 0; for (let i = 0; i < 25; i++) { const n = s.villagers().length; s.newDay(); born += s.villagers().length - n; }
-    assert(born === 0, 'no children are born in a cold house');
+    assert(kid2.trained === trainedBefore, 'a child with no pen trains nowhere');
+    s.world.paintPen(123, 98, 'soldier');
+    const cadet = s.spawn(new Villager(0, 0, home2, 'kid', 1, 'Cadet', s.mods)); cadet.update = () => {}; cadet.pen = 'soldier'; cadet.ateDay = s.day; home2.residents = 4;
+    s.newDay(); assert(cadet.trained === 0, 'a cold barracks drills nobody');
+    assert(births(s, 25) === 0, 'no children are born in a cold house');
     s.wood = 1; assert(!s.stockHearth(home2) && home2.firewood === 0, 'stocking a hearth needs the wood');
     s.wood = 50; assert(s.stockHearth(home2) && home2.firewood === 1 && s.wood === 50 - cost0, `a night of wood costs ${cost0} from the village pile`);
     s.stockHearth(home2); s.stockHearth(home2); assert(home2.firewood === p.hearthNights && !s.stockHearth(home2), 'the pile holds three nights and no more');
-    s.newDay(); assert(home2.warm && !keep2.warm, 'a stocked house is warm again while the barracks stays cold');
+    cadet.ateDay = s.day; s.newDay(); assert(home2.warm && !keep2.warm, 'a stocked house is warm again while the barracks stays cold');
+    assert(cadet.trained === 0, 'still no drill while the barracks is cold');
     const soldier2 = s.spawn(new Villager(World.center(125, 100).x, World.center(125, 100).y, home2, 'soldier', 20, 'Guard', s.mods)); soldier2.hp = 10; soldier2.trained = 3;
     s.mods.soldierRegen = 5; step(s, 2); assert(soldier2.hp === 10, 'soldiers do not mend while the barracks is cold');
-    keep2.firewood = 1; s.newDay(); step(s, 2); assert(soldier2.hp > 10, 'a warm barracks mends them again');
+    keep2.firewood = 1; cadet.ateDay = s.day; s.newDay(); step(s, 2); assert(soldier2.hp > 10, 'a warm barracks mends them again');
+    assert(cadet.trained === 1, 'a fed child in the drill yard earns a day of drill once the barracks is warm');
     for (const b of s.hearthBuildings()) b.firewood = p.hearthNights;
     const cabin = s.world.place('house', 122, 96); cabin.firewood = 0; // the one empty pile in the village, in the clearing
     const carrier = s.spawn(new Villager(World.center(124, 104).x, World.center(124, 104).y, home2, 'woodcutter', 22, 'Carrier', s.mods));
@@ -307,9 +317,56 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     s.mods.babyFever = true;
     assert(s.feverActive() && Math.abs(s.birthChance(nest) - (p.birthChance + p.feverBonus)) < 1e-9, `with Baby Fever and ${s.surplusDays()} days of food, births run at ${Math.round(100 * s.birthChance(nest))}%`);
     s.food = 2 * p.feverDays - 1; assert(!s.feverActive() && s.birthChance(nest) === p.birthChance, 'below the surplus line the fever breaks and births fall back to normal');
-    const dawns = 30, tally = (fever: boolean) => { s.reset(7); s.screen = 'playing'; s.paused = true; s.agents = [s.player]; Object.assign(s.player, { x: -400, y: -400 }); const h = s.world.houses[0]; h.firewood = 99; const a = s.spawn(new Villager(0, 0, h, 'farmer', 20, 'A', s.mods)), b = s.spawn(new Villager(0, 0, h, 'farmer', 20, 'B', s.mods)); a.update = b.update = () => {}; h.residents = 2; s.mods.babyFever = fever; let born = 0; for (let i = 0; i < dawns; i++) { s.food = 1000; h.firewood = 99; h.residents = 2; const n = s.villagers().length; s.newDay(); born += s.villagers().length - n; for (const k of s.villagers()) if (k.role === 'kid') k.dead = true; s.removeDead(); } return born; };
+    const dawns = 30, tally = (fever: boolean) => { s.reset(7); s.screen = 'playing'; s.paused = true; s.agents = [s.player]; Object.assign(s.player, { x: -400, y: -400 }); const h = s.world.houses[0]; h.firewood = 99; const a = s.spawn(new Villager(0, 0, h, 'farmer', 20, 'A', s.mods)), b = s.spawn(new Villager(0, 0, h, 'farmer', 20, 'B', s.mods)); a.update = b.update = () => {}; h.residents = 2; s.mods.babyFever = fever; let born = 0; for (let i = 0; i < dawns; i++) { s.food = 1000; h.firewood = 99; h.warm = true; h.residents = 2; born += births(s, 1); for (const k of s.villagers()) if (k.role === 'infant') k.dead = true; s.removeDead(); } return born; };
     const plain = tally(false), fevered = tally(true);
-    assert(fevered > plain, `over ${dawns} well-fed dawns the fever brought ${fevered} births against ${plain} without it`);
+    assert(fevered > plain, `over ${dawns} well-fed birth rolls the fever brought ${fevered} births against ${plain} without it`);
+    // the breeding program: nurseries, pens, the basket, the stages of life
+    s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(124, 100)); s.mods.babyFever = false;
+    const hearth = s.world.houses[0]; hearth.firewood = 99; hearth.warm = true; hearth.calling = 'soldier';
+    const mum = s.spawn(new Villager(0, 0, hearth, 'farmer', 20, 'Mum', s.mods)), dad = s.spawn(new Villager(0, 0, hearth, 'farmer', 20, 'Dad', s.mods));
+    mum.update = dad.update = () => {}; hearth.residents = 2; s.food = 200;
+    const chanceWas = p.birthChance; p.birthChance = 1;
+    assert(!s.birthProblem(hearth), `a warm house with a couple, a free crib and food is ready for births (${s.birthProblem(hearth)})`);
+    const bornNow = births(s, s.cribs(hearth) + 5);
+    const infants = s.infantsOf(hearth);
+    assert(bornNow === s.cribs(hearth) && infants.length === s.cribs(hearth) && infants.every((v) => v.role === 'infant' && v.hidden && v.indoors === hearth), `births fill the nursery and stop at ${s.cribs(hearth)} cribs (${bornNow} born)`);
+    assert(s.birthProblem(hearth) === 'the nursery is full', 'a full nursery stalls births');
+    p.birthChance = chanceWas;
+    assert(s.world.paintPen(123, 96, 'soldier') && s.world.get(123, 96)!.pen === 'soldier', 'the pen tool paints a drill yard on grass');
+    s.world.set(130, 96, 'tree'); assert(!s.world.paintPen(130, 96, 'farmer'), 'pens only go on open ground');
+    s.world.paintPen(124, 96, 'soldier'); s.world.paintPen(124, 96, 'soldier'); assert(!s.world.get(124, 96)!.pen && s.world.pens.get('soldier')!.size === 1, 'painting the same kind again erases it');
+    const first = infants[0]; first.age = p.infantDays; s.tickAges(0);
+    assert(first.role === 'kid' && !first.hidden && first.pen === 'soldier', `an infant of age ${p.infantDays} walks out of the nursery to the house's pen (${first.role}, ${first.pen})`);
+    assert(s.villagers().filter((v) => v.role === 'infant').length === s.cribs(hearth) - 1 && !s.birthProblem(hearth), 'the crib frees up for the next birth');
+    // the basket: fill at the granary, toss onto the pen
+    s.player.tool = 'basket'; s.player.load = null; s.food = 100;
+    const g = s.world.granary!; Object.assign(s.player, World.center(g.tx + 1, g.ty + BUILDINGS[g.kind].h)); s.fillBasket();
+    const basket = s.player.load as { kind: string; n: number } | null; assert(basket?.kind === 'food' && basket.n === HAUL.player.food && s.food === 100 - HAUL.player.food, 'the basket fills with food from the granary');
+    Object.assign(s.player, World.center(123, 99)); s.hoverTile = { tx: 123, ty: 96 };
+    assert(!s.tossProblem() && s.toss() && s.world.penFoodAt(123, 96) === p.tossSize && s.player.load!.n === HAUL.player.food - p.tossSize, `a toss drops ${p.tossSize} food on the pen tile`);
+    s.hoverTile = { tx: 122, ty: 99 }; assert(s.tossProblem() === 'aim at a painted pen', 'food only lands in a pen');
+    s.hoverTile = { tx: 123, ty: 99 + p.tossRange + 2 }; s.world.paintPen(123, 99 + p.tossRange + 2, 'soldier'); assert(s.tossProblem() === 'too far to throw', 'the throw has a range');
+    s.hoverTile = null;
+    // a pen child walks to the pile and eats; an unfed one stops training and starves
+    Object.assign(first, World.center(123, 97)); first.mealAt = 0; first.ateDay = 0; s.day = 5;
+    step(s, 6);
+    assert(first.ateDay === 5 && s.world.penFoodAt(123, 96) === p.tossSize - p.kidFood, `a hungry pen child eats ${p.kidFood} from the pile (${s.world.penFoodAt(123, 96)} left, ate day ${first.ateDay})`);
+    first.update = () => {}; first.trained = 0; s.world.barracks[0].firewood = 99; s.world.barracks[0].warm = true;
+    s.newDay(); assert(first.trained === 1 && first.hungerDays === 0, 'a fed day in the drill yard is a day of drill');
+    first.ateDay = 0; s.newDay(); assert(first.trained === 1 && first.hungerDays === 1, 'a day without food from the pile is a hungry day and no training');
+    for (let i = 1; i < p.kidStarveDays && !first.dead; i++) s.newDay();
+    assert(first.dead, `${p.kidStarveDays} hungry days starve a pen child`);
+    s.removeDead();
+    // coming of age takes the pen's role; old age slows, then ends
+    const second = s.infantsOf(hearth)[0]; second.age = p.infantDays; s.tickAges(0); second.update = () => {};
+    second.trained = Villager.drillNeeded(s); second.age = s.adultAge; second.ateDay = s.day; s.tickAges(0);
+    assert(second.role === 'soldier' && second.skilled && second.isAdult, `a drilled child of the drill yard comes of age a skilled soldier (${second.role})`);
+    const third = s.infantsOf(hearth)[0]; third.age = p.infantDays; s.tickAges(0); third.update = () => {}; third.trained = 0; third.age = s.adultAge; s.tickAges(0);
+    assert(third.role === 'farmer' && !third.skilled, `an undrilled drill-yard child comes of age a plain farmer (${third.role})`);
+    const speedWas = second.speed; second.age = s.elderAge; s.tickAges(0);
+    assert(second.elder && second.speed < speedWas, 'past adultDays a villager grows old and slows');
+    second.age = second.deathAt(s); s.tickAges(0); assert(second.dead, 'an elder passes away at the end of elderDays');
+    s.removeDead();
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;
   } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); }

@@ -89,6 +89,7 @@ export const CHAR = {
   farmer: { key: 'farm', frame: FARM.farmerHat },
   woodcutter: { key: 'dungeon', frame: DUNGEON.man },
   kid: { key: 'dungeon', frame: DUNGEON.villager },
+  infant: { key: 'dungeon', frame: DUNGEON.villager },
   soldier: { key: 'dungeon', frame: DUNGEON.knight },
   raider: { key: 'dungeon', frame: DUNGEON.orc },
   warlord: { key: 'dungeon', frame: DUNGEON.orc },

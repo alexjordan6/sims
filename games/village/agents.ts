@@ -1,6 +1,6 @@
 import type { Agent } from '@shared/index';
-import { World, doorstep, buildingCenter, yardOf, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
-import { p, TREE_RESERVE, CADET_AGE_BEFORE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, type Calling, type Trait, type LoadKind } from './config';
+import { World, doorstep, buildingCenter, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
+import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, CALLINGS, type Calling, type Trait, type LoadKind } from './config';
 import type { Mods } from './meta';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle } from './characters';
 import type { VillageScene } from './main';
@@ -207,7 +207,8 @@ export abstract class Mover implements Agent {
 // ---------------------------------------------------------------------------
 // villagers
 
-export type Role = 'kid' | 'farmer' | 'woodcutter' | 'soldier';
+/** 'infant' lives unseen in the house nursery; 'kid' trains in a pen; the rest are grown (an elder keeps their role, see Villager.elder) */
+export type Role = 'infant' | 'kid' | 'farmer' | 'woodcutter' | 'soldier';
 
 export class Villager extends Mover {
   weapon: 'sword' | 'bow' = 'sword';
@@ -215,8 +216,16 @@ export class Villager extends Mover {
   private stairsGoal: TilePos | null = null;
   indoors: House | null = null;
   role: Role;
-  age: number; // days
+  /** age in days (fractional: it advances every tick) */
+  age: number;
   hungerDays = 0;
+  /** grown old: slower, grey, and living on borrowed time (see p.elderDays) */
+  elder = false;
+  /** the pen kind a child trains in (null: no pen painted — they play near home and eat at home) */
+  pen: Calling | null = null;
+  /** pen children: the day they last ate from the pile, and sim time their next meal is due */
+  ateDay = 0;
+  mealAt = 0;
   /** days of apprenticeship done (drill at the barracks, the field, the woodyard) */
   trained = 0;
   name: string;
@@ -257,26 +266,27 @@ export class Villager extends Mover {
   barracksHp = 0;
 
   get isAdult(): boolean {
-    return this.role !== 'kid';
+    return this.role !== 'kid' && this.role !== 'infant';
   }
-  /** What the house is raising this child to be. */
+  get isChild(): boolean { return this.role === 'kid' || this.role === 'infant'; }
+  /** What the house is raising this child to be (which pen they walk to). */
   get calling(): Calling { return this.home.calling ?? 'farmer'; }
-  /** Old enough to apprentice (drill, the field, the woodyard). */
-  apprenticeAt(s: VillageScene): boolean {
-    return this.role === 'kid' && this.age >= s.adultAge - CADET_AGE_BEFORE;
+  /** Training in a pen (every child with a pen trains, every day they are fed). */
+  apprenticeAt(_s?: VillageScene): boolean {
+    return this.role === 'kid' && !!this.pen;
   }
-  /** kept for the soldier path: a soldier cadet is just an apprentice with a soldier calling */
-  cadetAt(s: VillageScene): boolean { return this.apprenticeAt(s) && this.calling === 'soldier'; }
-  /** Apprenticeship days needed to come of age skilled (War Drums lowers it). */
+  /** The age this villager passes away: the village's death age, give or take a bit so elders don't drop in unison. */
+  deathAt(s: VillageScene): number { return s.deathAge + ((this.id % 7) / 6 - 0.5) * p.elderDays * 0.5; }
+  /** Training days needed to come of age skilled (War Drums lowers it). */
   static drillNeeded(s: VillageScene): number { return Math.max(1, p.cadetDays + s.mods.cadetDaysDelta); }
-  /** What this child will become as things stand — shown in the UI so nothing is a surprise. */
+  /** What this child will become as things stand — shown in the UI so nothing is a surprise. The pen decides, not the house. */
   outlook(s: VillageScene): { role: Calling; skilled: boolean } {
-    const startAge = s.adultAge - CADET_AGE_BEFORE;
-    const daysLeft = s.adultAge - Math.max(this.age, startAge); // apprentice days still to come, today's included
-    const skilled = s.mods.fullDrill || this.trained + daysLeft >= Villager.drillNeeded(s);
-    // soldiers must finish drill; an untrained cadet grows up a farmer
-    if (this.calling === 'soldier' && !skilled) return { role: 'farmer', skilled: false };
-    return { role: this.calling, skilled };
+    const kind = this.pen ?? this.calling;
+    const daysLeft = Math.max(0, Math.ceil(s.adultAge - this.age)); // fed training days still possible
+    const skilled = s.mods.fullDrill || (!!this.pen && this.trained + daysLeft >= Villager.drillNeeded(s));
+    // soldiers must finish drill; an untrained drill-yard child grows up a farmer
+    if (kind === 'soldier' && !skilled) return { role: 'farmer', skilled: false };
+    return { role: this.pen ? kind : 'farmer', skilled };
   }
   /** Care stars right now: five for averaging six care points a day. */
   starsNow(): number {
@@ -286,11 +296,12 @@ export class Villager extends Mover {
   }
   /** Work-speed multiplier from upbringing: skill, stars and traits. */
   get workMul(): number {
-    return (this.skilled ? 1.4 : 1) * (1 + STAR_BONUS * this.stars) * (this.trait === 'tireless' ? 1.25 : 1);
+    return (this.skilled ? 1.4 : 1) * (1 + STAR_BONUS * this.stars) * (this.trait === 'tireless' ? 1.25 : 1) * (this.elder ? ELDER_MUL : 1);
   }
 
   applyRole(mods: Mods): void {
     switch (this.role) {
+      case 'infant': this.radius = 1; this.color = 0xf5d8a8; this.maxHp = 5; this.speed = 0; break;
       case 'kid': this.radius = 2; this.color = 0xf5d8a8; this.maxHp = 10; this.speed = 30; break;
       case 'farmer': this.radius = 3; this.color = 0x7fd37f; this.maxHp = 20; this.speed = 35; break;
       case 'woodcutter': this.radius = 3; this.color = 0xc9a26b; this.maxHp = 20; this.speed = 35; break;
@@ -300,7 +311,7 @@ export class Villager extends Mover {
     if (this.isAdult) {
       const stars = 1 + STAR_BONUS * this.stars;
       this.maxHp *= stars * (this.trait === 'hardy' ? 1.25 : 1) * (this.stars <= 1 ? 0.9 : 1);
-      this.speed *= stars * (this.trait === 'quick' ? 1.2 : 1);
+      this.speed *= stars * (this.trait === 'quick' ? 1.2 : 1) * (this.elder ? ELDER_MUL : 1);
     }
     this.maxHp = Math.round(this.maxHp * mods.hpMul * (this.role === 'soldier' ? 1 : mods.villagerHpMul));
     this.hp = Math.min(this.hp, this.maxHp);
@@ -315,11 +326,13 @@ export class Villager extends Mover {
     if (this.stars >= 5) this.trait = s.rng.pick(Object.keys(TRAITS) as Trait[]);
     if (this.calling === 'soldier' && role !== 'soldier') s.event('grow', `${this.name} came of age before finishing drill — a farmer instead`, true);
     this.role = role;
+    this.pen = null; // grown: they eat at the granary like everyone else
     this.barracksHp = s.world.barracksLevel >= 3 ? 30 : s.world.barracksLevel >= 2 ? 15 : 0;
     this.applyRole(s.mods);
     this.hp = this.maxHp;
     const star = '★'.repeat(this.stars) + '☆'.repeat(5 - this.stars);
-    s.event(this.role === 'soldier' ? 'soldier' : 'grow', `${this.name} came of age — ${skilled ? 'a skilled ' : 'a '}${this.role}, ${star}${this.trait ? ` (${TRAITS[this.trait].name})` : ''}`, true);
+    // with a breeding program running, only the gifted are worth a toast; the rest go to the journal
+    s.event(this.role === 'soldier' ? 'soldier' : 'grow', `${this.name} came of age — ${skilled ? 'a skilled ' : 'a '}${this.role}, ${star}${this.trait ? ` (${TRAITS[this.trait].name})` : ''}`, !!this.trait);
     s.stats.childrenRaised++;
     s.stats.starsTotal += this.stars;
     if (this.role === 'soldier') s.stats.soldiersRaised++;
@@ -333,6 +346,7 @@ export class Villager extends Mover {
       else { this.x = this.carriedBy.x; this.y = this.carriedBy.y - 8; this.vx = this.vy = 0; this.task = 'being carried off!'; return; }
     }
     if (this.hidden) {
+      if (this.role === 'infant') { this.task = 'in the nursery'; this.vx = this.vy = 0; return; }
       if (this.role === 'kid') {
         const bedtime = s.dayTime > BEDTIME.start || s.dayTime < BEDTIME.end;
         this.task = bedtime ? 'asleep' : 'hiding indoors';
@@ -344,7 +358,8 @@ export class Villager extends Mover {
       return;
     }
     switch (this.role) {
-      case 'kid': this.kidUpdate(dt, s); break;
+      case 'infant': return;
+      case 'kid': if (this.pen) this.penUpdate(dt, s); else this.kidUpdate(dt, s); break;
       case 'farmer': this.civilUpdate(dt, s, true); break;
       case 'woodcutter': this.civilUpdate(dt, s, this.helpingFarm(s)); break;
       case 'soldier': this.soldierUpdate(dt, s); break;
@@ -365,27 +380,11 @@ export class Villager extends Mover {
     // bedtime: home to sleep
     if (s.dayTime > BEDTIME.start || s.dayTime < BEDTIME.end) { this.task = 'off to bed'; this.goHome(s, dt); return; }
 
-    // apprentices spend the working day where their calling is: the barracks yard, the field, the woodyard
-    const workHours = s.dayTime > 0.3 && s.dayTime < 0.75;
-    const spot = this.apprenticeAt(s) && workHours ? this.apprenticeSpot(s) : null;
-    if (spot) {
-      if (!this.goal || this.goal.tx !== spot.tx || this.goal.ty !== spot.ty) this.setGoal(s, spot.tx, spot.ty, true);
-      const there = this.followPath(dt);
-      const c = this.calling;
-      if (there) {
-        this.task = c === 'soldier' ? 'drilling at the barracks' : c === 'farmer' ? 'learning to farm' : 'learning the axe';
-        this.vx = this.vy = 0;
-        this.thinkTimer -= dt;
-        if (this.thinkTimer <= 0) {
-          this.thinkTimer = s.rng.range(1.2, 2.2);
-          if (c === 'soldier') s.fx.push({ kind: 'swing', who: this, dx: this.dir, dy: 0, stage: 0 });
-          else s.fx.push({ kind: 'tool', tool: c === 'farmer' ? 'hoe' : 'axe', tx: spot.tx, ty: spot.ty, who: this });
-        }
-      } else this.task = c === 'soldier' ? 'off to drill' : c === 'farmer' ? 'off to the field' : 'off to the woodyard';
-      return;
-    }
+    // a pen painted since they left the nursery: off they go
+    const pen = this.findPen(s);
+    if (pen) { this.pen = pen; this.mealAt = s.simTime + p.dayLength / 4; this.clearGoal(); return; }
 
-    this.task = 'playing';
+    this.task = 'no pen to train in';
     this.thinkTimer -= dt;
     if (this.thinkTimer <= 0 || this.followPath(dt)) {
       this.thinkTimer = s.rng.range(2, 5);
@@ -394,6 +393,70 @@ export class Villager extends Mover {
       if (s.world.inBounds(tx, ty) && !s.world.isBlocked(tx, ty)) this.setGoal(s, tx, ty, true);
     }
   }
+
+  /** The pen this child should train in: the house's calling if one is painted, else any pen. */
+  findPen(s: VillageScene): Calling | null {
+    if (s.world.pens.get(this.calling)?.size) return this.calling;
+    for (const c of CALLINGS) if (s.world.pens.get(c)?.size) return c;
+    return null;
+  }
+
+  // --- pen children: live in the painted pen, eat what the head tosses in, train ---------
+
+  private penUpdate(dt: number, s: VillageScene): void {
+    const kind = this.pen!;
+    const tiles = s.world.pens.get(kind);
+    if (!tiles?.size) { this.pen = null; this.clearGoal(); return; } // the pen was erased: back to playing near home
+    const danger = s.nearestRaider(this.x, this.y, p.fleeRange);
+    if (danger || (this.sentHome && s.raidActive)) {
+      if (danger && this.fledDay !== s.day) this.fledDay = s.day;
+      this.task = 'running for cover';
+      this.goInside(s, dt, s.nearestShelter(this.x, this.y) ?? this.home);
+      return;
+    }
+    const w = s.world, here = this.tile, inPen = w.get(here.tx, here.ty)?.pen === kind;
+    // a meal is due: walk to the nearest pile in the pen and eat from it
+    const hungry = this.mealAt <= s.simTime && p.kidFood > 0;
+    if (hungry) {
+      const pile = w.nearestPenFood(this.x, this.y, kind);
+      if (pile) {
+        if (!this.goal || this.goal.tx !== pile.tx || this.goal.ty !== pile.ty) this.setGoal(s, pile.tx, pile.ty, true);
+        if (this.followPath(dt) || this.adjacentTo(pile)) {
+          this.vx = this.vy = 0;
+          this.eatTimer -= dt;
+          this.task = 'eating';
+          if (this.eatTimer <= 0) {
+            this.eatTimer = 0.6;
+            if (w.takePenFood(pile.tx, pile.ty, 1) > 0) { this.eaten += 1; s.fx.push({ kind: 'tool', tool: 'seed', tx: pile.tx, ty: pile.ty, who: this }); }
+            if (this.eaten >= p.kidFood) { this.eaten = 0; this.ateDay = s.day; this.mealAt = s.simTime + p.dayLength / 2; this.clearGoal(); }
+          }
+        } else this.task = 'off to eat';
+        return;
+      }
+      this.task = 'hungry — nothing in the pen';
+    }
+    // night: doze where they stand
+    if ((s.dayTime > BEDTIME.start || s.dayTime < BEDTIME.end) && inPen) { this.task = 'asleep in the pen'; this.vx = this.vy = 0; this.clearGoal(); return; }
+    if (!hungry) this.task = kind === 'soldier' ? 'drilling' : kind === 'farmer' ? 'learning to farm' : 'learning the axe';
+    // drift between pen tiles; every so often a bit of training
+    const arrived = this.followPath(dt);
+    this.thinkTimer -= dt;
+    if (this.thinkTimer <= 0 || (arrived && !inPen)) {
+      this.thinkTimer = s.rng.range(1.5, 3);
+      if (inPen && !hungry && s.rng.chance(0.6)) {
+        if (kind === 'soldier') s.fx.push({ kind: 'swing', who: this, dx: this.dir, dy: 0, stage: 0 });
+        else s.fx.push({ kind: 'tool', tool: kind === 'farmer' ? 'hoe' : 'axe', tx: here.tx, ty: here.ty, who: this });
+        this.vx = this.vy = 0; this.clearGoal();
+      } else {
+        let pick = -1, n = s.rng.int(0, tiles.size - 1);
+        for (const i of tiles) if (n-- <= 0) { pick = i; break; }
+        if (pick >= 0) this.setGoal(s, pick % w.cols, (pick / w.cols) | 0, true);
+      }
+    }
+  }
+  /** food units nibbled toward today's meal, and the pause between bites */
+  private eaten = 0;
+  private eatTimer = 0;
 
   // --- farmers / woodcutters ------------------------------------------------
 
@@ -452,7 +515,7 @@ export class Villager extends Mover {
       return;
     }
 
-    if (this.goal && this.followPath(dt)) {
+    if (this.goal && this.followPath(dt) && this.goal) { // (followPath drops the goal when the way is blocked)
       const t = s.world.get(this.goal.tx, this.goal.ty);
       const isJob = farmer ? t?.kind === 'crop' || t?.kind === 'tilled' : t?.kind === 'tree';
       if (isJob && this.adjacentTo(this.goal)) {
@@ -573,29 +636,6 @@ export class Villager extends Mover {
   }
 
   // --- helpers --------------------------------------------------------------
-
-  /** Where an apprentice of this calling spends the day. */
-  private apprenticeSpot(s: VillageScene): TilePos | null {
-    const w = s.world;
-    if (this.calling === 'soldier') {
-      const b = s.nearestBarracks(this.x, this.y);
-      if (!b) return null;
-      const yard = yardOf(b);
-      return yard[1 + (this.id % (yard.length - 1))];
-    }
-    if (this.calling === 'woodcutter') {
-      const y = w.woodyard;
-      if (!y) return null;
-      const yard = yardOf(y);
-      return yard[this.id % yard.length];
-    }
-    // farmers: the edge of the field nearest home
-    const hc = buildingCenter(this.home);
-    const crop = w.nearest(hc.tx * 16, hc.ty * 16, (t) => t.kind === 'crop' || t.kind === 'tilled');
-    if (!crop) return null;
-    const around = [[0, 1], [1, 0], [0, -1], [-1, 0], [1, 1], [-1, 1]].map(([dx, dy]) => ({ tx: crop.tx + dx, ty: crop.ty + dy })).filter((q) => w.inBounds(q.tx, q.ty) && !w.isBlocked(q.tx, q.ty) && w.get(q.tx, q.ty)!.kind !== 'crop');
-    return around[this.id % Math.max(1, around.length)] ?? crop;
-  }
 
   /** Run to a building's doorstep and duck inside (children take the nearest shelter). */
   private goInside(s: VillageScene, dt: number, b: House): void {
@@ -779,8 +819,8 @@ export class Arrow extends Mover {
 // player
 
 /** What the player holds. The equipped tool decides what E does. */
-export type Tool = 'hands' | 'hoe' | 'seeds' | 'axe' | 'sword' | 'house' | 'barracks' | 'hammer' | 'bow' | 'tavern' | 'wall' | 'gate' | 'stairs';
-export const TOOLS: Tool[] = ['hands', 'hoe', 'seeds', 'axe', 'sword', 'house', 'barracks', 'hammer', 'bow', 'tavern', 'wall', 'gate', 'stairs'];
+export type Tool = 'hands' | 'hoe' | 'seeds' | 'axe' | 'sword' | 'house' | 'barracks' | 'hammer' | 'bow' | 'tavern' | 'wall' | 'gate' | 'stairs' | 'pen' | 'basket';
+export const TOOLS: Tool[] = ['hands', 'hoe', 'seeds', 'axe', 'sword', 'house', 'barracks', 'hammer', 'bow', 'tavern', 'wall', 'gate', 'stairs', 'pen', 'basket'];
 
 /** A sword swing in progress: an arc in front of the player that connects during its active window. */
 /** A sword swing in progress: an arc in front of the player that connects during its active window. */
@@ -808,6 +848,9 @@ export const SWING = { reach: 24, halfAngleCos: 0.35, comboWindow: 0.5, recoverA
 export class Player extends Mover {
   facing = { x: 0, y: 1 };
   tool: Tool = 'hands';
+  /** which pen the paint tool lays down */
+  penKind: Calling = 'farmer';
+  cyclePen(): void { this.penKind = CALLINGS[(CALLINGS.indexOf(this.penKind) + 1) % CALLINGS.length]; }
   swing: Swing | null = null;
   /** stage the next swing will be, and how long since the last swing ended */
   private nextStage = 0;

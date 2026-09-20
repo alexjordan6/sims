@@ -5,7 +5,7 @@ import { ensureCharacter, frameSize } from './characters';
 import { lookFor } from './render';
 import type { Mover } from './agents';
 
-type Furnishing = { x: number; y: number; w: number; h: number; kind: 'bed' | 'table' | 'hearth' | 'rack' | 'bar' | 'shelf' | 'chest'; label: string };
+type Furnishing = { x: number; y: number; w: number; h: number; kind: 'bed' | 'table' | 'hearth' | 'rack' | 'bar' | 'shelf' | 'chest' | 'crib'; label: string };
 
 /** Walkable rooms use their own coordinates; the outdoor simulation keeps running. */
 export class Interior {
@@ -36,6 +36,8 @@ export class Interior {
     if (b.kind === 'house') {
       for (let i = 0; i < Math.min(6, this.s.beds(b)); i++) this.furniture.push({ x: 32 + i % 3 * 29, y: 73 + Math.floor(i / 3) * 47, w: 22, h: 34, kind: 'bed', label: 'A soft bed · rest by the hearth' });
       this.furniture.push({ x: 211, y: 101, w: 58, h: 26, kind: 'table', label: 'The family table' });
+      // the nursery: a row of cribs along the right wall (label is refreshed live by hint())
+      for (let i = 0; i < Math.min(8, this.s.cribs(b)); i++) this.furniture.push({ x: 202 + i % 4 * 23, y: 138 + Math.floor(i / 4) * 30, w: 19, h: 22, kind: 'crib', label: 'Nursery' });
     } else if (b.kind === 'barracks') {
       for (let i = 0; i < 3 + b.level; i++) this.furniture.push({ x: 30 + i % 3 * 28, y: 76 + Math.floor(i / 3) * 46, w: 21, h: 32, kind: 'bed', label: 'Soldiers’ bunks' });
       this.furniture.push({ x: 220, y: 42, w: 59, h: 29, kind: 'rack', label: 'Fletch 10 arrows · 2 wood' }, { x: 208, y: 112, w: 62, h: 27, kind: 'table', label: 'Command table · inspect soldiers to equip bows and set posts' });
@@ -102,6 +104,7 @@ export class Interior {
   hint(): string {
     if (this.y > 175 && Math.abs(this.x - 160) < 30) return 'E: exit to the village';
     const f = this.nearby();
+    if (f?.kind === 'crib' && this.building) { const b = this.building, why = this.s.birthProblem(b); f.label = `Nursery · ${this.s.infantsOf(b).length} of ${this.s.cribs(b)} cribs${why ? ` · no births: ${why}` : ` · next birth roll in ${Math.ceil(this.s.birthIn(b))}s (${Math.round(100 * this.s.birthChance(b))}%)`} · infants walk out to a pen after ${p.infantDays} days`; }
     if (f?.kind === 'chest' && this.building) f.label = `Armor chest · tower arrows ${this.building.ammo ?? 0} / ${this.s.towerCap(this.building)} · restock 10 for 2 wood · forge armor`;
     if (f?.kind === 'hearth' && this.building) {
       const b = this.building, pile = `${b.firewood} / ${p.hearthNights} nights of wood · burns ${hearthCost(b)} a night`;
@@ -172,6 +175,10 @@ export class Interior {
         rect(x + w / 2 - 3, y + 6, 6, 6, '#d9b25a'); rect(x + w / 2 - 1, y + 8, 2, 3, '#3e2c23');
         const stock = Math.min(4, Math.ceil((b.ammo ?? 0) / (this.s.towerCap(b) / 4)));
         for (let i = 0; i < stock; i++) { rect(x + 8 + i * 5, y - 6, 1, 9, '#d3ab6d'); rect(x + 7 + i * 5, y - 7, 3, 3, i % 2 ? '#d2d8d8' : '#c9564a'); }
+      } else if (kind === 'crib') {
+        rect(x, y + 4, w, h - 4, '#5a3a28'); rect(x + 2, y + 6, w - 4, h - 8, '#c9a26b'); rect(x + 2, y + 6, w - 4, 4, '#eee0bd');
+        for (let i = 0; i < w; i += 3) rect(x + i, y, 1, h, '#8a5c34');
+        rect(x, y, w, 1, '#a87848'); rect(x, y + h - 1, w, 1, '#3e2c23');
       } else if (kind === 'shelf') {
         rect(x, y, w, h, '#b78453');
         for (let i = 0; i < 7; i++) rect(x + 3 + i * 4, y + 3, 3, 11, ['#818f69', '#b45f53', '#e0b57a'][i % 3]);
@@ -182,14 +189,18 @@ export class Interior {
       }
     }
     // people are drawn with their real looks (outfit, armor, dye), the same textures the world uses
-    const person = (x: number, y: number, m: Mover, walk = false) => {
+    const person = (x: number, y: number, m: Mover, walk = false, scale = 1) => {
       const look = lookFor(m); if (!look) return;
       const key = ensureCharacter(this.s, look), { w, h } = frameSize(look.body);
       const tex = this.s.textures.getFrame(key, walk ? 1 : 0); if (!tex) return;
-      c.drawImage(tex.source.image as CanvasImageSource, tex.cutX, tex.cutY, tex.width, tex.height, Math.round(x - w / 2), Math.round(y - h * 0.75), w, h);
+      c.drawImage(tex.source.image as CanvasImageSource, tex.cutX, tex.cutY, tex.width, tex.height, Math.round(x - w * scale / 2), Math.round(y - h * scale * 0.75), w * scale, h * scale);
     };
-    const residents = this.s.villagers().filter(v => v.hidden && v.indoors === b);
+    const residents = this.s.villagers().filter(v => v.hidden && v.indoors === b && v.role !== 'infant');
     residents.forEach((v, i) => person(46 + i % 3 * 28, 86 + Math.floor(i / 3) * 46, v));
+    // infants in their cribs (a crowded nursery shows the overflow as a count)
+    const cribs = this.furniture.filter(f => f.kind === 'crib'), infants = this.s.infantsOf(b);
+    infants.slice(0, cribs.length).forEach((v, i) => { const f = cribs[i]; person(f.x + f.w / 2, f.y + f.h - 3 + Math.sin(this.time * 2 + i) * 0.5, v, false, 0.7); });
+    if (infants.length > cribs.length) { c.font = '8px monospace'; c.fillStyle = '#f0d4a2'; c.fillText(`+${infants.length - cribs.length}`, 282, 200); }
     const keeper = this.s.villagers().find(v => v.role !== 'kid');
     if (b.kind === 'tavern' && keeper) person(247, 47, keeper);
     const p = this.s.player;

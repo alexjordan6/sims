@@ -50,13 +50,23 @@ export const p = live(
     birthChance: [0.5, 0, 1, 0.05, 'Base birth rate: chance per couple per dawn in a warm house with a free bed and food to spare.'],
     feverDays: [5, 1, 15, 1, 'Baby Fever: days of food in store (at today\'s rations) that count as a surplus.'],
     feverBonus: [0.4, 0, 0.9, 0.05, 'Baby Fever: birth chance added while the surplus holds.'],
-    adultAge: [8, 1, 40, 1, 'Age in days a child comes of age (Quick to Grow takes 2 off).'],
-    oldAge: [70, 20, 200, 1, 'Age in days from which villagers may die of old age.'],
-    cadetDays: [3, 1, 8, 1, 'Days of drill a sworn child needs to come of age a soldier.'],
-    bedBonus: [0, -2, 6, 1, 'Beds added to every house on top of its level (4 / 6 / 8).'],
+    cadetDays: [3, 1, 8, 1, 'Fed training days a pen child needs to come of age skilled (a drill-yard child needs them to be a soldier at all).'],
+    bedBonus: [0, -2, 6, 1, 'Beds added to every house on top of its level (4 / 6 / 8). Beds no longer gate births — cribs do.'],
     coldKidCare: [-1, -3, 0, 1, 'Care points a child loses after a night in a cold house.'],
     fleeRange: [120, 20, 300, 5, 'Pixels: children run for the nearest door when a raider is this close.'],
   }, 'growth'),
+  params({
+    infantDays: [0.5, 0.1, 10, 0.1, 'Days an infant spends in the nursery before walking out to a pen. A house births at most cribs / infantDays children a day.'],
+    childDays: [2, 0.25, 20, 0.25, 'Days from leaving the nursery to coming of age (Quick to Grow takes 2 off).'],
+    adultDays: [20, 1, 100, 1, 'Days of adulthood before a villager grows old.'],
+    elderDays: [5, 0.5, 30, 0.5, 'Days an elder lives on (slower, grey) before passing away.'],
+    birthEvery: [10, 1, 120, 1, 'Real seconds between birth rolls in each house (needs a couple, a warm hearth, a free crib and food to spare; birthChance decides the roll).'],
+    cribs: [4, 1, 12, 1, 'Cribs in a Lv1 house nursery (+1 per level). A full nursery stalls births there.'],
+    kidFood: [1, 0, 4, 0.25, 'Food a pen child must eat per day from the pile the head tosses in. Unfed: no training, then starvation.'],
+    kidStarveDays: [3, 1, 10, 1, 'Hungry days a pen child survives.'],
+    tossSize: [4, 1, 12, 1, 'Food landing on the pen per throw from the basket.'],
+    tossRange: [6, 2, 12, 1, 'Tiles the head can lob a handful of food.'],
+  }, 'lifecycle'),
   params({
     playerHp: [60, 10, 200, 5, 'The head\'s base HP before armor and boons. Applies at NEW VILLAGE or the next armor change.'],
     playerDmg: [12, 1, 40, 1, 'The head\'s sword damage at a ×1 weapon (the starting club is ×weaponTier0Mul).'],
@@ -147,8 +157,7 @@ export const LEVEL_LOOKS: Record<'house' | 'barracks' | 'granary' | 'woodyard' |
   woodyard: ['', 'cabin', 'chimney', 'lantern and loft window'],
 };
 // ---- children ------------------------------------------------------------------------------
-/** a child starts apprenticing this many days before coming of age, and needs p.cadetDays at it to come of age skilled */
-export const CADET_AGE_BEFORE = 3;
+/** a pen child trains every fed day and needs p.cadetDays of it to come of age skilled */
 /** care stars: +6% HP and work speed per star for life */
 export const STAR_BONUS = 0.06;
 /** a child on hearty rations eats this much a day (and is "well fed") */
@@ -157,6 +166,12 @@ export const HEARTY_RATION = 2;
 export const BEDTIME = { start: 0.8, end: 0.28 } as const;
 export type Calling = 'farmer' | 'woodcutter' | 'soldier';
 export const CALLING_NAME: Record<Calling, string> = { farmer: 'farmers', woodcutter: 'woodcutters', soldier: 'soldiers' };
+export const CALLINGS: readonly Calling[] = ['farmer', 'woodcutter', 'soldier'];
+/** painted training pens, one kind per calling: children live and train there until they come of age */
+export const PEN_NAME: Record<Calling, string> = { farmer: 'training field', woodcutter: 'wood lot', soldier: 'drill yard' };
+export const PEN_COLOUR: Record<Calling, number> = { farmer: 0x6fd36f, woodcutter: 0xd6a35c, soldier: 0x6f9bff };
+/** elders work and walk at this share of their adult pace */
+export const ELDER_MUL = 0.75;
 /** gifted traits: a five-star child gets one for life */
 export type Trait = 'hardy' | 'quick' | 'brave' | 'greenthumb' | 'tireless';
 export const TRAITS: Record<Trait, { name: string; blurb: string }> = {

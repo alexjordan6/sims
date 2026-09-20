@@ -6,7 +6,7 @@ import { DEFENSE_COST, WALL_HEIGHT } from './config';
 import { Interior } from './interior';
 import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, waveComposition } from './enemies';
 import { Fog } from './fog';
-import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, type LoadKind, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, CADET_AGE_BEFORE, HEARTY_RATION, CALLING_NAME, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, type LoadKind, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, HEARTY_RATION, PEN_NAME, CALLING_NAME, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
@@ -32,6 +32,8 @@ export type FxEvent =
   | { kind: 'hearts'; who: Mover }
   | { kind: 'melee'; who: Mover; x: number; y: number }
   | { kind: 'arrow'; who: Mover }
+  /** a handful of food lobbed from the basket onto a pen tile */
+  | { kind: 'lob'; x: number; y: number; tx: number; ty: number }
   | { kind: 'thud'; who: Mover }
   | { kind: 'snore'; x: number; y: number }
   | { kind: 'deposit'; x: number; y: number; text: string; colour: string }
@@ -173,15 +175,17 @@ export class VillageScene extends SimScene {
     this.player.maxHp += this.mods.playerHpBonus;
     this.player.hp = this.player.maxHp;
 
-    const ma = this.addVillager(home, 'farmer', 22);
-    const pa = this.addVillager(home, 'woodcutter', 22);
-    this.addVillager(home, 'kid', 4).parents = [ma, pa];
-    for (let i = 0; i < this.mods.startSoldiers; i++) this.addVillager(home, 'soldier', 25);
+    // the founders are young adults: a few days past coming of age, well short of growing old
+    const grown = this.adultAge + 3;
+    const ma = this.addVillager(home, 'farmer', grown);
+    const pa = this.addVillager(home, 'woodcutter', grown);
+    this.addVillager(home, 'kid', p.infantDays).parents = [ma, pa];
+    for (let i = 0; i < this.mods.startSoldiers; i++) this.addVillager(home, 'soldier', grown + 2);
     if (this.mods.extraAdults > 0) {
       // a second family, in the nearest open 2x2 to the left of the first house
       const spot = [[-5, 0], [-6, 0], [5, 0], [0, 5], [-5, 5], [5, 5]].map(([dx, dy]) => ({ tx: home.tx + dx, ty: home.ty + dy })).find((q) => this.world.canBuild('house', q.tx, q.ty)) ?? { tx: home.tx - 3, ty: home.ty };
       const h2 = this.world.placeHouse(spot.tx, spot.ty);
-      for (let i = 0; i < this.mods.extraAdults; i++) this.addVillager(h2, i % 2 ? 'woodcutter' : 'farmer', 22);
+      for (let i = 0; i < this.mods.extraAdults; i++) this.addVillager(h2, i % 2 ? 'woodcutter' : 'farmer', grown);
     }
     this.event('info', `A new village in ${this.world.denseForests ? 'the deep woodland' : 'the open meadows'}. Follow trails to explore. Build walls and stairs, then station archers.`);
   }
@@ -191,6 +195,8 @@ export class VillageScene extends SimScene {
     const c = World.center(d.tx, d.ty);
     const v = new Villager(c.x + this.rng.range(-4, 4), c.y + this.rng.range(-4, 4), home, role, age, NAMES[this.nameIdx++ % NAMES.length], this.mods);
     if (role === 'soldier') { v.barracksHp = this.world.barracksLevel >= 3 ? 30 : this.world.barracksLevel >= 2 ? 15 : 0; v.applyRole(this.mods); v.hp = v.maxHp; }
+    // infants live in the nursery, unseen until they walk out
+    if (role === 'infant') { v.hidden = true; v.indoors = home; const c = buildingCenter(home); v.x = c.tx * TILE; v.y = c.ty * TILE; }
     home.residents++;
     return this.spawn(v);
   }
@@ -225,6 +231,7 @@ export class VillageScene extends SimScene {
     kb.on('keydown-V', () => this.openArmory(this.armoryFor ? null : this.player));
     kb.on('keydown-TAB', (e: KeyboardEvent) => { e.preventDefault?.(); this.player.cycleTool(e.shiftKey ? -1 : 1); });
     kb.on('keydown-Q', () => this.player.cycleTool());
+    kb.on('keydown-F', () => { if (this.player.tool === 'pen') this.player.cyclePen(); else this.player.tool = 'pen'; });
     kb.on('keydown-M', () => this.toggleMute());
     kb.on('keydown-Z', () => this.cycleZoom());
 
@@ -386,7 +393,11 @@ export class VillageScene extends SimScene {
     if (b) this.selectBuilding(b); else this.select(null);
   }
 
-  get adultAge(): number { return Math.max(1, p.adultAge + this.mods.adultAgeDelta); }
+  /** Age in days a child comes of age: the nursery, then the pen (Quick to Grow shortens it). */
+  get adultAge(): number { return Math.max(p.infantDays + 0.1, p.infantDays + p.childDays + this.mods.adultAgeDelta); }
+  /** Age from which a villager is an elder, and the age they pass away. */
+  get elderAge(): number { return this.adultAge + p.adultDays; }
+  get deathAge(): number { return this.elderAge + p.elderDays; }
   nearestBarracks(x: number, y: number): Building | null {
     let best: Building | null = null, bd = Infinity;
     for (const b of this.world.barracks) { const c = buildingCenter(b); const d = (c.tx * TILE - x) ** 2 + (c.ty * TILE - y) ** 2; if (d < bd) { bd = d; best = b; } }
@@ -410,7 +421,7 @@ export class VillageScene extends SimScene {
       const why = this.swearProblem(h);
       if (why) { this.event('info', why, true); return false; }
       h.calling = 'soldier';
-      this.event('soldier', `House sworn to the barracks — its children will drill from age ${this.adultAge - CADET_AGE_BEFORE}`, true);
+      this.event('soldier', 'House sworn to the barracks — its children will go to the drill yard', true);
       return true;
     }
     const wasSworn = h.calling === 'soldier';
@@ -614,6 +625,8 @@ export class VillageScene extends SimScene {
 
 
     for (const a of this.agents) a.update(dt, this);
+    this.tickAges(dt);
+    this.tickBirths();
     this.tickTowers(dt);
     for (const a of this.agents) if (a.dead) this.onDeath(a as Mover);
     this.removeDead();
@@ -630,11 +643,12 @@ export class VillageScene extends SimScene {
       if (this.boss?.dead) { this.endRun(true); return; }
       this.event('raid', 'Raid repelled!', true);
     }
-    // the head unloads by walking up to the woodyard / granary
-    if (this.player.load && !this.player.hidden) {
-      const b = this.player.load.kind === 'wood' ? this.world.woodyard : this.world.granary;
+    // the head unloads by walking up to the woodyard / granary — or, with the basket out, fills it there
+    if (!this.player.hidden) {
+      const basket = this.player.tool === 'basket' && (!this.player.load || this.player.load.kind === 'food');
+      const b = basket ? this.world.granary : this.player.load ? (this.player.load.kind === 'wood' ? this.world.woodyard : this.world.granary) : null;
       const pt = this.player.tile;
-      if (b && pt.tx >= b.tx - 1 && pt.tx <= b.tx + BUILDINGS[b.kind].w && pt.ty >= b.ty - 1 && pt.ty <= b.ty + BUILDINGS[b.kind].h) this.deposit(this.player);
+      if (b && pt.tx >= b.tx - 1 && pt.tx <= b.tx + BUILDINGS[b.kind].w && pt.ty >= b.ty - 1 && pt.ty <= b.ty + BUILDINGS[b.kind].h) { if (basket) this.fillBasket(); else if (this.player.load) this.deposit(this.player); }
     }
     this.stats.peakPop = Math.max(this.stats.peakPop, this.villagers().length);
     if (this.player.dead) { if (p.godMode) { this.player.dead = false; this.player.hp = this.player.maxHp; } else this.endRun(false); }
@@ -681,13 +695,20 @@ export class VillageScene extends SimScene {
     if (this.mods.babyFever && this.feverWas !== null && fever !== this.feverWas) this.event('birth', fever ? 'Baby fever: full larders, and the village knows it.' : 'The surplus is gone — births return to normal.', true);
     this.feverWas = fever;
 
-    // villagers: eat, age, grow up, grow old
-    const villagers = this.villagers();
+    // villagers: eat (pen children from their pile, everyone else from the granary), tally the children's day
+    const villagers = this.villagers(), warnedPens = new Set<Calling>();
     for (const v of villagers) {
-      const hearty = v.role === 'kid' && !!v.home.hearty && !v.home.ruined;
+      if (v.role === 'infant') continue; // nursed
+      const hearty = v.role === 'kid' && !v.pen && !!v.home.hearty && !v.home.ruined;
       const ration = this.rationOf(v);
       let wellFed = false;
-      if (this.food >= ration) { this.food -= ration; v.hungerDays = 0; wellFed = hearty; }
+      if (v.pen) {
+        // yesterday's meal came off the pen pile, or didn't
+        if (v.ateDay >= this.day - 1) { v.hungerDays = 0; wellFed = true; }
+        else if (++v.hungerDays >= p.kidStarveDays) { v.dead = true; v.hp = 0; this.event('death', `${v.name} starved in the ${PEN_NAME[v.pen]}`, true); continue; }
+        else if (!warnedPens.has(v.pen)) { warnedPens.add(v.pen); this.event('food', `Children in the ${PEN_NAME[v.pen]} are going hungry — toss food in`, true); }
+      }
+      else if (this.food >= ration) { this.food -= ration; v.hungerDays = 0; wellFed = hearty; }
       else if (hearty && this.food >= ration / HEARTY_RATION) { this.food -= ration / HEARTY_RATION; v.hungerDays = 0; } // enough for a plain meal at least
       else if (++v.hungerDays >= 3 + this.mods.starveDaysDelta) { v.dead = true; v.hp = 0; this.event('death', `${v.name} starved`, true); continue; }
       else this.event('food', `${v.name} went hungry`);
@@ -699,28 +720,11 @@ export class VillageScene extends SimScene {
         let pts = (fed ? 1 : -1) + (wellFed ? 1 : 0) + (parents >= 2 ? 1 : 0) + (sibling ? 1 : 0) + (v.home.level >= 2 && !v.home.ruined && v.home.warm ? 1 : 0) - (v.home.ruined ? 1 : 0) + (v.home.warm ? 0 : p.coldKidCare) + (v.encouragedDay === this.day ? 1 : 0) - (v.fledDay === this.day ? 1 : 0);
         v.care += pts; v.careDays++;
         v.stars = v.starsNow();
-        // yesterday's apprenticeship: only if they had somewhere to go (a cold barracks drills nobody)
-        const canTrain = v.calling === 'soldier' ? this.world.barracks.some((b) => b.warm) : v.calling === 'woodcutter' ? !!this.world.woodyard : true;
-        if (v.apprenticeAt(this) && canTrain) v.trained = Math.min(Villager.drillNeeded(this), v.trained + 1);
+        // yesterday's training in the pen: only when fed, and a drill yard needs a warm barracks to drill anyone
+        const canTrain = v.pen === 'soldier' ? this.world.barracks.some((b) => b.warm) : true;
+        if (v.apprenticeAt(this) && canTrain && fed) v.trained = Math.min(Villager.drillNeeded(this), v.trained + 1);
       }
-      v.age++;
       if (this.mods.dawnHeal) v.hp = v.maxHp; // Second Wind: a night's rest heals everything
-      if (v.role === 'kid' && v.age >= Math.max(1, p.adultAge + this.mods.adultAgeDelta)) v.comeOfAge(this);
-      else if (v.age >= p.oldAge && this.rng.chance(0.25)) { v.dead = true; this.event('death', `${v.name} died of old age`); }
-    }
-
-    // births: a couple sharing a house with room and food to spare
-    for (const h of this.world.houses) {
-      const adults = villagers.filter((v) => v.home === h && v.isAdult && !v.dead);
-      if (adults.length >= 2 && h.warm && h.residents < this.beds(h) && this.food > 10 && this.rng.chance(this.birthChance(h, fever))) {
-        const kid = this.addVillager(h, 'kid', 0);
-        kid.parents = [adults[0], adults[1]];
-        if (h.residents < this.beds(h) && this.rng.chance(this.mods.twinChance)) {
-          const twin = this.addVillager(h, 'kid', 0);
-          twin.parents = [adults[0], adults[1]];
-          this.event('birth', `Twins! ${kid.name} and ${twin.name} were born`, true);
-        } else this.event('birth', `${kid.name} was born`, true);
-      }
     }
 
     // move-ins: adults from crowded houses take a spare room elsewhere
@@ -735,6 +739,107 @@ export class VillageScene extends SimScene {
     else if (this.isRaidDay(this.day)) this.spawnRaid();
     else if (this.day === p.bossDay - RUN.warnDays) this.event('raid', `The Warlord marches — he arrives in ${RUN.warnDays} days`, true);
     else if (this.isRaidDay(this.day + warn) || this.day + warn === p.bossDay) this.event('raid', warn > 1 ? `Scouts report raiders — they arrive in ${warn} days` : 'Raiders sighted — they arrive tomorrow', true);
+  }
+
+  // ---- the breeding program: nurseries, ages, pens ------------------------------------
+
+  /** Cribs in a house's nursery: p.cribs, one more per level. */
+  cribs(h: Building): number { return h.ruined ? 0 : p.cribs + h.level - 1; }
+  infantsOf(h: Building): Villager[] { return this.villagers().filter((v) => v.role === 'infant' && v.home === h && !v.dead); }
+  /** Seconds until this house next rolls for a birth (0 when due). */
+  birthIn(h: Building): number { return Math.max(0, (h.nextBirth ?? 0) - this.simTime); }
+  /** Why no child will be born in this house right now, or null. */
+  birthProblem(h: Building): string | null {
+    if (h.ruined) return 'in ruins';
+    if (!h.warm) return 'the hearth is cold';
+    if (this.villagers().filter((v) => v.home === h && v.isAdult && !v.dead).length < 2) return 'needs a couple living here';
+    if (this.infantsOf(h).length >= this.cribs(h)) return 'the nursery is full';
+    if (this.food <= 10) return 'food to spare first';
+    return null;
+  }
+  /** Every house rolls for a birth every p.birthEvery seconds: a couple, a warm hearth, a free crib, food to spare. */
+  tickBirths(): void {
+    const fever = this.feverActive();
+    for (const h of this.world.houses) {
+      if (h.nextBirth === undefined) h.nextBirth = this.simTime + this.rng.range(0, p.birthEvery);
+      if (h.nextBirth > this.simTime) continue;
+      h.nextBirth = this.simTime + p.birthEvery;
+      if (this.birthProblem(h) || !this.rng.chance(this.birthChance(h, fever))) continue;
+      const adults = this.villagers().filter((v) => v.home === h && v.isAdult && !v.dead);
+      const kid = this.addVillager(h, 'infant', 0);
+      kid.parents = [adults[0], adults[1]];
+      if (this.infantsOf(h).length < this.cribs(h) && this.rng.chance(this.mods.twinChance)) {
+        const twin = this.addVillager(h, 'infant', 0);
+        twin.parents = [adults[0], adults[1]];
+        this.event('birth', `Twins! ${kid.name} and ${twin.name} were born`);
+      } else this.event('birth', `${kid.name} was born`);
+    }
+  }
+  /** Everyone ages every tick; the stages turn as the thresholds pass. */
+  tickAges(dt: number): void {
+    const days = dt / p.dayLength;
+    for (const v of this.villagers()) {
+      if (v.dead) continue;
+      v.age += days;
+      if (v.role === 'infant') { if (v.age >= p.infantDays) this.leaveNursery(v); }
+      else if (v.role === 'kid') { if (v.age >= this.adultAge) { v.comeOfAge(this); this.rehouse(v); } }
+      else if (!v.elder) { if (v.age >= this.elderAge) { v.elder = true; v.applyRole(this.mods); this.event('info', `${v.name} has grown old`); } }
+      else if (v.age >= v.deathAt(this)) { v.dead = true; v.hp = 0; this.event('death', `${v.name} passed away at ${Math.floor(v.age)}`); }
+    }
+  }
+  /** An infant walks out of the house to the pen of its house's calling (or any pen; or plays by the door until one is painted). */
+  leaveNursery(v: Villager): void {
+    v.role = 'kid'; v.applyRole(this.mods); v.hp = v.maxHp;
+    v.unhide(this);
+    v.pen = v.findPen(this);
+    v.mealAt = this.simTime + p.dayLength / 4;
+    v.ateDay = this.day;
+    this.event('grow', v.pen ? `${v.name} left the nursery for the ${PEN_NAME[v.pen]}` : `${v.name} left the nursery — no pen to train in`);
+  }
+  /** A new adult takes a bed near where they trained, else the least crowded house. */
+  rehouse(v: Villager): void {
+    const houses = this.world.houses.filter((h) => !h.ruined);
+    if (!houses.length) return;
+    const byDist = (h: Building) => { const c = buildingCenter(h); return (c.tx * TILE - v.x) ** 2 + (c.ty * TILE - v.y) ** 2; };
+    const next = houses.filter((h) => h.residents < this.beds(h)).sort((a, b) => byDist(a) - byDist(b))[0]
+      ?? houses.sort((a, b) => (a.residents - this.beds(a)) - (b.residents - this.beds(b)))[0];
+    if (next && next !== v.home) { v.home.residents--; v.home = next; next.residents++; }
+  }
+  /** Walking up to the granary with the basket out takes food for the pens. */
+  fillBasket(): void {
+    const g = this.world.granary, pl = this.player;
+    if (!g || g.ruined) return;
+    const room = HAUL.player.food - (pl.load?.n ?? 0);
+    const take = Math.min(room, Math.floor(this.food));
+    if (take <= 0) return;
+    this.food -= take;
+    pl.pickUp('food', take);
+    const c = buildingCenter(g);
+    this.fx.push({ kind: 'deposit', x: c.tx * TILE, y: (g.ty + BUILDINGS[g.kind].h) * TILE - 6, text: `-${take} food`, colour: '#e0b04a' });
+  }
+  /** Why the basket can't toss onto the target, or null. */
+  tossProblem(q: TilePos = this.hoverTile ?? this.player.faced): string | null {
+    const pl = this.player;
+    if (!pl.load || pl.load.kind !== 'food') return 'the basket is empty — walk up to the granary (or harvest by hand)';
+    const t = this.world.get(q.tx, q.ty);
+    if (!t?.pen) return 'aim at a painted pen';
+    const pt = pl.tile;
+    if (Math.max(Math.abs(q.tx - pt.tx), Math.abs(q.ty - pt.ty)) > p.tossRange) return 'too far to throw';
+    return null;
+  }
+  toss(): boolean {
+    const q = this.hoverTile ?? this.player.faced, why = this.tossProblem(q);
+    if (why) { this.event('food', why); return false; }
+    const pl = this.player, n = Math.min(pl.load!.n, p.tossSize);
+    pl.load!.n -= n; if (pl.load!.n <= 0) pl.load = null;
+    this.world.addPenFood(q.tx, q.ty, n);
+    this.fx.push({ kind: 'lob', x: pl.x, y: pl.y - 8, tx: q.tx, ty: q.ty });
+    return true;
+  }
+  /** Children in a pen and the food waiting on it. */
+  penReport(kind: Calling): { kids: number; hungry: number; food: number } {
+    const kids = this.villagers().filter((v) => v.role === 'kid' && v.pen === kind && !v.dead);
+    return { kids: kids.length, hungry: kids.filter((v) => v.hungerDays > 0 || v.task.startsWith('hungry')).length, food: this.world.penFoodTotal(kind) };
   }
 
   /** Days between raids (Long Peace stretches it). */
@@ -817,8 +922,8 @@ export class VillageScene extends SimScene {
     if (a === this.hovered) this.hovered = null;
     if (a instanceof Villager) {
       a.home.residents--;
-      for (const k of this.villagers()) if (k.role === 'kid' && k.parents.includes(a)) k.care -= 1; // losing a parent
-      if (a.hp <= 0 && a.hungerDays < 3) this.event('death', `${a.name} the ${a.role} was killed`, true);
+      for (const k of this.villagers()) if (k.isChild && k.parents.includes(a)) k.care -= 1; // losing a parent
+      if (a.hp <= 0 && a.hungerDays < 3 && a.age < a.deathAt(this)) this.event('death', `${a.name} the ${a.role} was killed`, true);
     } else if (a instanceof Raider) {
       if (a.carrying && !a.carrying.dead) { const kid = a.carrying; kid.carriedBy = null; a.carrying = null; this.event('grow', `${kid.name} was rescued!`, true); }
       if (a.hp <= 0) {
@@ -911,6 +1016,7 @@ export class VillageScene extends SimScene {
 
   /** What one villager eats at dawn (hearty children eat double while their house stands). */
   rationOf(v: Villager): number {
+    if (v.role === 'infant' || v.pen) return 0; // nursed, or fed from the pen pile
     const hearty = v.role === 'kid' && !!v.home.hearty && !v.home.ruined;
     return p.foodPerDay * this.mods.foodPerDayMul * (hearty ? HEARTY_RATION : 1);
   }
@@ -975,7 +1081,7 @@ export class VillageScene extends SimScene {
   buildingBlurb(b: Building): string {
     if (b.ruined) return `in ruins · nothing works until the hammer rebuilds it (${this.rebuildCost(b)} wood)`;
     const hearth = hasHearth(b) ? (b.warm ? ` · hearth ${hearthCost(b)} wood/night · ${b.firewood} night${b.firewood === 1 ? '' : 's'} stocked` : ` · COLD — ${b.firewood ? 'lit again at dawn' : 'the pile is empty'}`) : '';
-    const now = b.kind === 'house' ? `${b.residents}/${this.beds(b)} beds${b.level >= 3 ? ' · births +15%' : ''}${' · raises ' + CALLING_NAME[b.calling ?? 'farmer']}${b.hearty ? ' · hearty rations' : ''}`
+    const now = b.kind === 'house' ? `${b.residents - this.infantsOf(b).length}/${this.beds(b)} beds · nursery ${this.infantsOf(b).length}/${this.cribs(b)}${b.level >= 3 ? ' · births +15%' : ''}${' · raises ' + CALLING_NAME[b.calling ?? 'farmer']}${b.hearty ? ' · hearty rations' : ''}`
       : b.kind === 'granary' ? `${this.food | 0}/${CAPS[b.level]} food · the harvest is carried here`
       : b.kind === 'woodyard' ? `${this.wood | 0}/${CAPS[b.level]} wood · chopped logs are carried here`
       : LEVEL_PERKS[b.kind][b.level];
@@ -1417,7 +1523,8 @@ export class VillageScene extends SimScene {
   /** Is the mouse aiming the tool (hovering a tile within reach)? */
   get cursorAiming(): boolean {
     const hv = this.hoverTile, pt = this.player.tile;
-    return !!hv && Math.max(Math.abs(hv.tx - pt.tx), Math.abs(hv.ty - pt.ty)) <= VillageScene.TOOL_REACH;
+    const reach = this.player.tool === 'basket' ? p.tossRange : VillageScene.TOOL_REACH;
+    return !!hv && Math.max(Math.abs(hv.tx - pt.tx), Math.abs(hv.ty - pt.ty)) <= reach;
   }
   /** The tile a tool acts on: the hovered tile when it's next to you (mouse), else the tile you face. */
   get target(): TilePos {
@@ -1460,6 +1567,12 @@ export class VillageScene extends SimScene {
         return;
       }
       case 'wall': case 'gate': case 'stairs': this.buildDefense(pl.tool); return;
+      case 'pen': {
+        if (this.world.paintPen(tx, ty, pl.penKind)) this.fx.push({ kind: 'tool', tool: 'hoe', tx, ty });
+        else this.event('build', 'Pens go on open grass or soil');
+        return;
+      }
+      case 'basket': this.toss(); return;
       case 'sword': {
         const stage = pl.pressAttack();
         if (stage >= 0) this.fx.push({ kind: 'swing', who: pl, dx: pl.facing.x, dy: pl.facing.y, stage });
@@ -1535,6 +1648,7 @@ export class VillageScene extends SimScene {
   /** "carrying 8 wood — walk up to the woodyard to unload", shown while the head holds something. */
   carryHint(): string | null {
     const l = this.player.load;
+    if (l?.kind === 'food' && this.player.tool === 'basket') return `basket ${l.n}/${HAUL.player.food} food — aim at a pen and E to toss`;
     return l ? `carrying ${l.n} ${l.kind} — walk up to the ${l.kind === 'wood' ? 'woodyard' : 'granary'} to unload` : null;
   }
   hint(): string {
@@ -1559,6 +1673,17 @@ export class VillageScene extends SimScene {
       case 'sword': {
         const near = this.nearestRaider(pl.x, pl.y, 40);
         return near ? 'E: attack!' : 'E: swing sword';
+      }
+      case 'pen': {
+        const r = this.penReport(pl.penKind), where = t?.pen ? (t.pen === pl.penKind ? 'E: erase' : `E: repaint as ${PEN_NAME[pl.penKind]}`) : `E: paint ${PEN_NAME[pl.penKind]}`;
+        return `${where} · F: next pen kind · ${r.kids} training here, ${r.food} food on the ground`;
+      }
+      case 'basket': {
+        const why = this.tossProblem();
+        const carry = pl.load?.kind === 'food' ? `basket ${pl.load.n}/${HAUL.player.food}` : 'basket empty';
+        if (why) return `${carry} — ${why}`;
+        const q = this.hoverTile ?? pl.faced, pen = this.world.get(q.tx, q.ty)!.pen!, r = this.penReport(pen);
+        return `E: toss ${Math.min(pl.load!.n, p.tossSize)} food into the ${PEN_NAME[pen]} (${carry} · ${r.kids} children, ${r.hungry} hungry, ${r.food} on the ground)`;
       }
       case 'house':
       case 'tavern':

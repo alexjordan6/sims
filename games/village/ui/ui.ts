@@ -1,7 +1,7 @@
 import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type Tool } from '../agents';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
-import { OGRE, HAUL, COST, p, TOWER, HEARTH_WOOD, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, CALLING_NAME, TRAITS, HEARTY_RATION, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, CADET_AGE_BEFORE, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS } from '../config';
+import { OGRE, HAUL, COST, p, TOWER, HEARTH_WOOD, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, CALLING_NAME, TRAITS, HEARTY_RATION, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, PEN_NAME, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS } from '../config';
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
@@ -28,7 +28,7 @@ export function spr(key: string, frame: number, size = 32, extra = ''): string {
   return `<span class="spr ${key} ${cls} ${extra}" style="background-position:${framePos(frame, scale)}"></span>`;
 }
 
-const ROLE_LABEL: Record<string, string> = { kid: 'Child', farmer: 'Farmer', woodcutter: 'Woodcutter', soldier: 'Soldier' };
+const ROLE_LABEL: Record<string, string> = { infant: 'Infant', kid: 'Child', farmer: 'Farmer', woodcutter: 'Woodcutter', soldier: 'Soldier' };
 const ENEMY_LABEL: Record<string, string> = { raider: 'Raider', warlord: 'Warlord', rat: 'Rat — eats crops', snatcher: 'Snatcher — steals children', brute: 'Brute — heavy', shaman: 'Shaman — ranged', wrecker: 'Wrecker — tears down buildings' };
 
 const EVENT_ICON: Record<EventKind, { key: string; frame: number }> = {
@@ -127,6 +127,8 @@ export class UI {
         ${slot('gate', 'town', TOWN.wallWoodDoor, 'GATE', 'Friendly villagers pass; X toggles opening to everyone', 12)}
         ${slot('stairs', 'town', TOWN.iconHammer, 'STAIRS', 'Connect stairs to your walls. Use hands or X to climb and descend', 10)}
         ${slot('tavern', 'town', TOWN.wallWoodDoor, 'TAVERN', 'A cozy place to eat, rest and gather', COST.tavern)}
+        ${slot('pen', 'farm', FARM.grassTuft, 'PEN', 'Paint a training pen on open ground: children leave the nursery for it and train there until they come of age. F cycles farm / wood / drill; painting the same kind again erases')}
+        ${slot('basket', 'farm', FARM.crate, 'BASKET', 'Walk up to the granary to fill the basket with food, then aim at a pen and toss. Pen children eat only what you throw in')}
       </div>
       <div class="hint"><kbd>click / C</kbd><span class="hint-text"></span></div>
     </div>`);
@@ -422,12 +424,12 @@ export class UI {
     if (tower) { const t = s.towerAmmo(); tower.textContent = s.world.barracks.length ? `TOWER CHESTS · ${t.ammo} / ${t.cap} arrows${t.ammo ? '' : ' · EMPTY'}` : ''; tower.classList.toggle('dry', !t.ammo); tower.classList.toggle('low', t.ammo > 0 && t.ammo / Math.max(1, t.cap) <= 0.25); }
     const exit = this.side.querySelector<HTMLButtonElement>('.leave-room'); if (exit) exit.hidden = !s.interior.active;
     const vs = s.villagers();
-    const count = (r: string) => vs.filter((v) => v.role === r).length;
+    const count = (r: string) => r === 'elder' ? vs.filter((v) => v.elder).length : vs.filter((v) => v.role === r).length;
     const hour = Math.floor(s.dayTime * 24);
     const night = s.dayTime < 0.22 || s.dayTime > 0.8;
     const raidIn = s.nextRaidDay - s.day;
     const held = s.player.load ? `${s.player.load.kind}${s.player.load.n}` : '';
-    const key = `${s.day}|${hour}|${held}|${s.food | 0}/${s.foodCap}|${s.surplusDays().toFixed(1)}|${s.feverActive()}|${s.wood | 0}/${s.woodCap}|${s.scrap}|${count('farmer')}|${count('woodcutter')}|${count('kid')}|${count('soldier')}|${s.player.hp}|${s.raidActive}|${s.boss?.hp ?? ''}|${raidIn}|${s.speed}|${s.paused}|${night}`;
+    const key = `${s.day}|${hour}|${held}|${s.food | 0}/${s.foodCap}|${s.surplusDays().toFixed(1)}|${s.feverActive()}|${s.wood | 0}/${s.woodCap}|${s.scrap}|${count('farmer')}|${count('woodcutter')}|${count('infant')}|${count('kid')}|${count('soldier')}|${count('elder')}|${s.player.hp}|${s.raidActive}|${s.boss?.hp ?? ''}|${raidIn}|${s.speed}|${s.paused}|${night}`;
     if (key === this.lastTop) return;
     this.lastTop = key;
 
@@ -445,8 +447,8 @@ export class UI {
     q('.food').innerHTML = `${s.food | 0}<small>/${s.foodCap} · ${Number.isFinite(days) ? `${days.toFixed(days < 10 ? 1 : 0)} days` : '∞'}</small>${feverBadge}${inHand('food')}`;
     q('.scrap').textContent = String(s.scrap);
     q('.pop').innerHTML = ([
-      ['farmer', CHAR.farmer, 'FARM'], ['woodcutter', CHAR.woodcutter, 'WOOD'], ['kid', CHAR.kid, 'KIDS'], ['soldier', CHAR.soldier, 'ARMY'],
-    ] as [string, { key: string; frame: number }, string][]).map(([r, c, lbl]) => `<span class="chip ${r}" title="${ROLE_LABEL[r]}s">${spr(c.key, c.frame, 24)}<b>${count(r)}</b><i>${lbl}</i></span>`).join('');
+      ['farmer', CHAR.farmer, 'FARM'], ['woodcutter', CHAR.woodcutter, 'WOOD'], ['infant', CHAR.kid, 'CRIBS'], ['kid', CHAR.kid, 'KIDS'], ['soldier', CHAR.soldier, 'ARMY'], ['elder', CHAR.woodcutter, 'OLD'],
+    ] as [string, { key: string; frame: number }, string][]).map(([r, c, lbl]) => `<span class="chip ${r}" title="${r === 'elder' ? 'Elders' : ROLE_LABEL[r] + 's'} · ${vs.length} villagers in all">${spr(c.key, c.frame, 24)}<b>${count(r)}</b><i>${lbl}</i></span>`).join('');
     const raid = q('.raid');
     const bossNext = s.nextRaidDay === p.bossDay;
     const orc = spr('dungeon', DUNGEON.orc, 24, 'flip');
@@ -470,6 +472,8 @@ export class UI {
       const tool = el.dataset.tool as Tool;
       el.classList.toggle('on', s.player.tool === tool);
       el.classList.toggle('off', (tool === 'house' || tool === 'barracks') && s.wood < COST[tool]);
+      if (tool === 'pen') { const lbl = el.querySelector('.lbl')!, want = s.player.penKind === 'farmer' ? 'FARM PEN' : s.player.penKind === 'woodcutter' ? 'WOOD PEN' : 'DRILL PEN'; if (lbl.textContent !== want) lbl.textContent = want; }
+      if (tool === 'basket') { const lbl = el.querySelector('.lbl')!, want = s.player.load?.kind === 'food' ? `BASKET ${s.player.load.n}` : 'BASKET'; if (lbl.textContent !== want) lbl.textContent = want; }
     });
     const hint = this.hotbar.querySelector('.hint-text')!;
     const carry = s.carryHint();
@@ -519,7 +523,11 @@ export class UI {
         const why = s.stockProblem(b);
         html += `<b>Hearth</b><span>${b.warm ? 'warm' : '<em class="warn">COLD</em>'} · ${b.firewood} / ${p.hearthNights} night${b.firewood === 1 ? '' : 's'} stocked · burns ${hearthCost(b)} wood a night <button class="btn small ${why ? '' : 'ok'} stock-hearth" ${why ? 'disabled' : ''} title="${why ? esc(why) : 'from the village pile; woodcutters stock it on their own'}">STOCK +1 NIGHT · ${hearthCost(b)} WOOD</button>${!b.warm ? `<em class="d"> ${b.firewood ? 'lit again at dawn' : 'empty — no births, drill, regen or meals until it burns'}</em>` : ''}</span>`;
       }
-      if (b.kind === 'house') html += `<b>Beds</b><span>${b.residents} / ${s.beds(b)}${b.ruined ? '' : ` · births ${Math.round(100 * s.birthChance(b))}% a day${s.feverActive() ? ' <em class="fever-txt">· baby fever</em>' : ''}`}</span>`;
+      if (b.kind === 'house') {
+        const infants = s.infantsOf(b).length, why = s.birthProblem(b);
+        html += `<b>Beds</b><span>${b.residents - infants} / ${s.beds(b)}${b.residents - infants > s.beds(b) ? ' <em class="warn">· crowded</em>' : ''}</span>`;
+        html += `<b>Nursery</b><span>${infants} / ${s.cribs(b)} cribs${b.ruined ? '' : why ? ` · <em class="warn">no births: ${esc(why)}</em>` : ` · ${Math.round(100 * s.birthChance(b))}% every ${p.birthEvery}s · next roll in ${Math.ceil(s.birthIn(b))}s${s.feverActive() ? ' <em class="fever-txt">· baby fever</em>' : ''}`}<em class="d"> infants walk out to a pen after ${p.infantDays} days</em></span>`;
+      }
       if (b.kind === 'barracks') {
         const ammo = b.ammo ?? 0, cap = s.towerCap(b);
         html += `<b>Sponsors</b><span>${s.world.swornHouses.length} / ${s.world.sponsorship(s.mods.sponsorBonus)} houses sworn</span>`;
@@ -540,9 +548,9 @@ export class UI {
         const why = calling === 'soldier' ? null : s.swearProblem(b);
         const seg = (c: Calling, label: string, dis = false) => `<button class="btn small ${calling === c ? 'on' : ''}" data-raise="${c}" ${dis ? 'disabled' : ''}>${label}</button>`;
         html += `<div class="raise"><div class="cap">RAISE CHILDREN AS</div><div class="seg">${seg('farmer', 'FARMERS')}${seg('woodcutter', 'CUTTERS')}${seg('soldier', 'SOLDIERS', !!why)}</div>
-          <div class="d">${calling === 'soldier' ? `Sworn to the barracks: children drill from age ${s.adultAge - CADET_AGE_BEFORE} and come of age as soldiers.` : `Children apprentice at ${calling === 'farmer' ? 'the field' : 'the woodyard'} from age ${s.adultAge - CADET_AGE_BEFORE} and come of age <b>skilled</b>.`}${why ? ` <em class="warn">Soldiers: ${esc(why)}</em>` : ''}</div></div>`;
+          <div class="d">Children leave the nursery for the nearest <b>${PEN_NAME[calling]}</b> you have painted (any pen if there is none) and train there until age ${s.adultAge}; ${Villager.drillNeeded(s)} fed days make them <b>skilled</b>.${s.world.pens.get(calling)?.size ? '' : ` <em class="warn">No ${PEN_NAME[calling]} painted yet — PEN tool, F to pick the kind.</em>`}${why ? ` <em class="warn">Soldiers: ${esc(why)}</em>` : ''}</div></div>`;
         html += `<div class="raise"><div class="cap">CHILDREN'S RATIONS</div><div class="seg"><button class="btn small ${b.hearty ? '' : 'on'}" data-rations="plain">PLAIN</button><button class="btn small ${b.hearty ? 'on' : ''}" data-rations="hearty">HEARTY</button></div>
-          <div class="d">${b.hearty ? `Each child eats ${HEARTY_RATION} food a day and grows up <b>well fed</b> — a care star's worth every day.` : 'Hearty rations cost double food per child but count toward their care.'}</div></div>`;
+          <div class="d">Only for children with no pen to go to. ${b.hearty ? `Each eats ${HEARTY_RATION} food a day and counts as <b>well fed</b>.` : 'Hearty rations cost double food per child but count toward their care.'} Pen children eat what you toss in.</div></div>`;
       }
       if (b.kind === 'house' || b.kind === 'barracks' || b.kind === 'tavern') {
         const why = s.demolishProblem(b), refund = s.demolishRefund(b), arming = this.confirmDemolish === b;
@@ -581,22 +589,25 @@ export class UI {
     html += `<div class="rows">`;
     html += `<b>Health</b><div class="bar hp ${hpPct < 40 ? 'low' : ''}"><i style="width:${hpPct}%"></i><span class="bar-txt">${Math.max(0, m.hp | 0)} / ${m.maxHp}</span></div>`;
     if (m instanceof Villager) {
-      html += `<b>Age</b><span>${m.age} days${m.role === 'kid' ? ` <em>· grows up in ${Math.max(0, p.adultAge + s.mods.adultAgeDelta - m.age)}</em>` : ''}</span>`;
-      html += `<b>Home</b><span>${m.home.residents} of ${s.beds(m.home)} beds · raises ${CALLING_NAME[m.home.calling ?? 'farmer']}${m.home.hearty ? ' · hearty' : ''}</span>`;
-      html += `<b>Fed</b><span>${m.hungerDays === 0 ? 'yes' : `<em class="warn">hungry for ${m.hungerDays} days</em>`}</span>`;
+      const stage = m.role === 'infant' ? ` <em>· infant, leaves the nursery in ${Math.max(0, p.infantDays - m.age).toFixed(1)} days</em>`
+        : m.role === 'kid' ? ` <em>· child, comes of age in ${Math.max(0, s.adultAge - m.age).toFixed(1)} days${m.pen ? ` at the ${PEN_NAME[m.pen]}` : ' — no pen to train in'}</em>`
+        : m.elder ? ` <em>· elder</em>` : ` <em>· grows old at ${Math.round(s.elderAge)}</em>`;
+      html += `<b>Age</b><span>${m.age.toFixed(1)} days${stage}</span>`;
+      html += `<b>Home</b><span>${m.home.residents - s.infantsOf(m.home).length} of ${s.beds(m.home)} beds · raises ${CALLING_NAME[m.home.calling ?? 'farmer']}${m.home.hearty ? ' · hearty' : ''}</span>`;
+      html += `<b>Fed</b><span>${m.role === 'infant' ? 'nursed' : m.pen ? (m.ateDay >= s.day ? 'ate today from the pen pile' : m.hungerDays ? `<em class="warn">hungry for ${m.hungerDays} days — toss food into the ${PEN_NAME[m.pen]}</em>` : 'not yet today') : m.hungerDays === 0 ? 'yes' : `<em class="warn">hungry for ${m.hungerDays} days</em>`}</span>`;
     }
     if (m.load) html += `<b>Carrying</b><span>${m.load.n} ${m.load.kind}</span>`;
     html += `<b>Doing</b><span>${esc(m.task || '—')}${m instanceof Villager && m.carriedBy ? ` <em class="warn">— kill the ${esc(m.carriedBy.name.toLowerCase())} to free them</em>` : ''}</span></div>`;
     if (m instanceof Villager && m.role === 'kid') {
-      const o = m.outlook(s), need = Villager.drillNeeded(s), startAge = s.adultAge - CADET_AGE_BEFORE;
+      const o = m.outlook(s), need = Villager.drillNeeded(s);
       const stars = m.starsNow();
-      const line = m.age < startAge ? `apprentices from age ${startAge} · ${need} days to be skilled`
-        : `apprentice · ${m.trained}/${need} days${m.calling === 'soldier' && o.role !== 'soldier' ? ' — <em class="warn">too late to finish drill</em>' : ''}`;
+      const line = !m.pen ? `no pen painted — playing near home · ${need} fed training days to be skilled`
+        : `training at the ${PEN_NAME[m.pen]} · ${m.trained}/${need} days${m.pen === 'soldier' && o.role !== 'soldier' ? ' — <em class="warn">too late to finish drill</em>' : ''}`;
       const list = s.careToday(m).map((c) => `<li class="${c.ok ? 'ok' : ''}">${c.ok ? '✓' : '✗'} ${c.label}${!c.ok && c.note ? ` <small>· ${esc(c.note)}</small>` : ''}</li>`).join('');
       const why = s.encourageProblem(m);
       html += `<div class="upbring"><div class="cap">UPBRINGING</div>
         <div class="stars">${'★'.repeat(stars)}<span class="dim">${'☆'.repeat(5 - stars)}</span> <small>${stars === 5 ? 'gifted' : stars >= 3 ? 'well raised' : stars >= 2 ? 'getting by' : m.careDays ? 'neglected' : 'a fresh start'}</small></div>
-        <div class="lean ${o.role === 'soldier' ? 'm' : 'c'}">will be ${o.skilled ? 'a skilled' : 'a plain'} ${o.role.toUpperCase()} at age ${s.adultAge}</div><div class="d">${line}</div>
+        <div class="lean ${o.role === 'soldier' ? 'm' : 'c'}">will be ${o.skilled ? 'a skilled' : 'a plain'} ${o.role.toUpperCase()} at age ${s.adultAge.toFixed(1)}</div><div class="d">${line}</div>
         <ul class="care">${list}</ul>
         <button class="btn small ok encourage" ${why ? 'disabled' : ''}>ENCOURAGE${why ? ` · ${esc(why)}` : ''}</button></div>`;
     } else if (m instanceof Villager) {
@@ -624,6 +635,7 @@ export class UI {
     const s = this.scene;
     const vs = s.villagers();
     const groups: [string, string, Villager[]][] = [
+      ['Infants', 'kid', vs.filter((v) => v.role === 'infant').sort((a, b) => b.age - a.age)],
       ['Children', 'kid', vs.filter((v) => v.role === 'kid').sort((a, b) => b.age - a.age)],
       ['Soldiers', 'soldier', vs.filter((v) => v.role === 'soldier')],
       ['Workers', 'farmer', vs.filter((v) => v.role === 'farmer' || v.role === 'woodcutter')],
@@ -644,7 +656,7 @@ export class UI {
           bar = `<div class="bar hp ${pct < 40 ? 'low' : ''}"><i style="width:${pct}%"></i></div>`;
         }
         const lk = lookFor(v);
-        html += `<div class="row ${s.selected === v ? 'sel' : ''}" data-id="${v.id}">${lk ? `<img class="art row-portrait" src="${charImg(lk)}" alt="">` : spr(c.key, c.frame, 24)}<span class="n">${esc(v.name)}</span><span class="a">${v.age}d</span>${bar}</div>`;
+        html += `<div class="row ${s.selected === v ? 'sel' : ''}" data-id="${v.id}">${lk ? `<img class="art row-portrait" src="${charImg(lk)}" alt="">` : spr(c.key, c.frame, 24)}<span class="n">${esc(v.name)}</span><span class="a">${v.age.toFixed(1)}d${v.elder ? ' · old' : ''}</span>${bar}</div>`;
       }
     }
     if (!vs.length) html = '<p class="empty">Nobody lives here yet.</p>';
@@ -883,7 +895,7 @@ export class UI {
           ${who('dungeon', DUNGEON.hero, 'player', 'You', 'Equip a tool, then click: hoe tills, seeds plant, hands harvest, axe chops, sword fights, hammer upgrades.')}
           ${who('farm', FARM.farmerHat, 'farmer', 'Farmer', 'Plants and harvests the fields on their own.')}
           ${who('dungeon', DUNGEON.man, 'woodcutter', 'Woodcutter', 'Fells trees for wood — old growth first, thinning a grove from its edge so the core keeps spreading. Leaves the last ' + TREE_RESERVE + ' standing. Helps in the field when the woodyard is full.')}
-          ${who('dungeon', DUNGEON.villager, 'kid', 'Child', 'Plays near home. Becomes a worker — or a soldier, if their house is sworn and they finish drill.')}
+          ${who('dungeon', DUNGEON.villager, 'kid', 'Child', 'Born into the house nursery; walks out to a painted pen and trains there, eating only what you toss in. Comes of age as what the pen teaches.')}
           ${who('dungeon', DUNGEON.knight, 'soldier', 'Soldier', 'Guards the barracks and fights raiders.')}
           ${who('dungeon', DUNGEON.orc, 'raider', 'Raider', 'Walks at the nearest person and hits them. Tramples crops.')}
           ${who('dungeon', 123, 'raider', 'Rat swarm', 'At least 10 arrive together and spread across the field. Foragers doubles their eating time, but crops are never immune. Scare them with equipped weapons or stop them with gates.')}
@@ -900,8 +912,10 @@ export class UI {
           ${building('granary', 'Granary', 'Holds your food; the harvest is carried here. The crate stack beside it climbs as the store fills.')}
           ${building('woodyard', 'Woodyard', 'Holds your wood; chopped logs are carried here. The log stack beside the cabin climbs as it fills.')}
           <h3>RAISING CHILDREN</h3>
-          <p><b>Births.</b> A couple in a warm house with a free bed has a ${Math.round(100 * p.birthChance)}% chance of a child each dawn (needs food to spare). The <b>Baby Fever</b> legacy boon adds ${Math.round(100 * p.feverBonus)}% while the larder holds <b>${p.feverDays}+ days of food</b> for everyone — the FOOD tile shows the days, and a FEVER badge glows while it holds. More mouths shrink the surplus, so it only lasts if the fields keep up.</p>
-          <p><b>Callings.</b> Pick a house (right click / X, or tap it) and set RAISE CHILDREN AS: <b>FARMERS</b>, <b>CUTTERS</b> or <b>SOLDIERS</b>. From age ${s.adultAge - CADET_AGE_BEFORE} its children apprentice every working day — at the field, the woodyard or the barracks yard — and after ${Villager.drillNeeded(s)} days come of age <b>skilled</b>: faster work, bigger harvests and loads, tougher soldiers. Unfinished apprentices grow up plain.</p>
+          <p><b>Life.</b> Everyone is born an <b>infant</b> in the house nursery (${p.infantDays} days), walks out a <b>child</b> to a training pen until age ${s.adultAge.toFixed(1)}, works as an <b>adult</b> for ${p.adultDays} days, then grows <b>old</b> — slower and grey — and passes away about ${p.elderDays} days later. The sliders (backtick) under <b>lifecycle</b> set every one of these.</p>
+          <p><b>Births.</b> Every ${p.birthEvery} seconds a couple in a warm house with a free <b>crib</b> (${p.cribs} in a Lv1 nursery, +1 per level) has a ${Math.round(100 * p.birthChance)}% chance of a child (needs food to spare). A house can raise at most cribs ÷ infantDays children a day, so more houses and bigger nurseries mean more children. The <b>Baby Fever</b> legacy boon adds ${Math.round(100 * p.feverBonus)}% while the larder holds <b>${p.feverDays}+ days of food</b> for everyone — the FOOD tile shows the days, and a FEVER badge glows while it holds. More mouths shrink the surplus, so it only lasts if the fields keep up.</p>
+          <p><b>Pens.</b> Take the <b>PEN</b> tool (F picks the kind: <b>training field</b>, <b>wood lot</b> or <b>drill yard</b>) and paint it over open grass; painting the same kind again erases it. A child leaving the nursery walks to the nearest pen of its house's calling (RAISE CHILDREN AS on the house card), or any pen if that kind isn't painted, and lives there day and night. What the pen teaches is what they become; ${Villager.drillNeeded(s)} fed days there make them <b>skilled</b>: faster work, bigger harvests and loads, tougher soldiers. A drill yard only drills while a warm barracks stands.</p>
+          <p><b>Feeding the pens.</b> Pen children eat nothing from the granary — only what you throw in. Take the <b>BASKET</b>, walk up to the granary to fill it (${HAUL.player.food} food), aim at a pen tile within ${p.tossRange} tiles and toss: ${p.tossSize} food lands on the ground and the children come and eat it (${p.kidFood} a day each). A child that misses a day stops training; after ${p.kidStarveDays} hungry days they starve. The basket's hint and the pen's hover tell you how many are there and how much food is left.</p>
           <p><b>Care.</b> Each dawn a child earns care for the day before: fed · <b>well fed</b> (the house on HEARTY rations, ${HEARTY_RATION} food a day) · both parents alive · another child at home · a Lv2+ house · your <b>encouragement</b>. Running from raiders, going hungry or losing a parent costs care. It averages into <b>stars</b> (★ to ★★★★★) that are fixed at coming of age and last for life: each star is +6% HP and work speed; five stars make a <b>gifted</b> adult with a trait (Hardy, Quick, Brave, Green Thumb, Tireless); a neglected child grows up frail.</p>
           <p><b>Encourage.</b> Walk up to a child and press X (or tap them, or the button on their card): a moment together, once a day, worth a care point and a day of apprenticeship. During a raid it also sends them inside.</p>
           <p><b>Children go to bed at dusk</b> and sleep indoors until dawn, and they <b>run for the nearest door</b> when raiders are near. Snatchers take children caught in the open.</p>
@@ -911,7 +925,7 @@ export class UI {
           <h3>ARMOR</h3>
           <p>You and your soldiers have four armor slots — <b>helmet</b> (HP), <b>chest</b> (less damage taken), <b>legs</b> (speed) and <b>shield</b> (a chance to block melee hits outright; archers can't carry one). Each has three tiers: <b>leather</b> for wood, <b>iron</b> and <b>steel</b> for wood plus <b>scrap iron</b> looted from slain raiders (needs a Lv2 / Lv3 barracks). Open the ARMORY with <kbd>V</kbd>, from the barracks card, or from a soldier's card; dye tabards and pick helmets and plumes there too — what they wear is what you see.</p>
           <h3>SOLDIERS</h3>
-          <p>Pick a house (right click / X, or tap it) and set <b>RAISE CHILDREN AS: SOLDIERS</b> to <b>swear</b> it to the barracks — it flies a banner. A barracks sponsors <b>one sworn house per level</b> (two barracks Lv2 = 4 houses). Children of a sworn house become <b>cadets</b> ${CADET_AGE_BEFORE} days before coming of age: each day they walk to the barracks yard and drill. ${Villager.drillNeeded(s)} days of drill make a soldier at age ${s.adultAge}; a child sworn too late comes of age a worker. Every child's outlook is shown in the inspector and the villagers list — no surprises.</p>
+          <p>Pick a house (right click / X, or tap it) and set <b>RAISE CHILDREN AS: SOLDIERS</b> to <b>swear</b> it to the barracks — it flies a banner. A barracks sponsors <b>one sworn house per level</b> (two barracks Lv2 = 4 houses). Children of a sworn house head for the <b>drill yard</b> pen. ${Villager.drillNeeded(s)} fed days of drill make a soldier at age ${s.adultAge.toFixed(1)}; a child that can't finish comes of age a worker. Every child's outlook is shown in the inspector and the villagers list — no surprises.</p>
           <h3>FOG & THE OGRE</h3>
           <p>The world is dark until someone sees it. You see 10 tiles, buildings light 8, soldiers 6 and other villagers 4; what you've seen stays on the map, dimmed, but raiders in the dark are invisible until they step into sight — walls with people on them are your eyes. The minimap shows how much you've explored.</p>
           <p>Somewhere 50–85 tiles out in the woods is <b>the Ogre's lair</b>. On day 2 the woodcutters give you a direction. The Ogre is huge — far bigger than any raider — sleeps in his lair by day and prowls the woods around it at night, hunting anyone within ${OGRE.hunt} tiles. He has three telegraphed attacks — a wide swing (${OGRE.swing.dmg}), a ground smash (${OGRE.smash.dmg}, cracks walls and buildings) and a charge (${OGRE.charge.dmg}, batters whatever stops it) — shrugs off knockback and heals a quarter of his ${OGRE.hp} HP each day he sleeps. Once he has your scent he never sleeps again and will follow you home, so don't rouse him until you can finish him: iron mail, a shield, a few archers. Slaying him is worth ${OGRE.scrap} scrap and ${OGRE.renown} renown.</p>

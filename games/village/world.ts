@@ -18,6 +18,8 @@ export const BUILDINGS: Record<BuildingKind, { w: number; h: number; door: numbe
 export const MAX_LEVEL = 3;
 /** ground a building can go on (flattened when it goes up) */
 export const BUILDABLE: ReadonlySet<TileKind> = new Set<TileKind>(['grass', 'sapling', 'tilled']);
+/** ground a training pen can be painted on */
+export const PEN_GROUND: ReadonlySet<TileKind> = new Set<TileKind>(['grass', 'tilled']);
 
 export interface Building {
   kind: BuildingKind;
@@ -30,6 +32,8 @@ export interface Building {
   calling?: Calling;
   /** houses: children eat a double ration and count as well fed */
   hearty?: boolean;
+  /** houses: sim time of the next birth roll (see VillageScene.tickBirths) */
+  nextBirth?: number;
   /** barracks: arrows left in the tower's chest */
   ammo?: number;
   /** barracks: seconds until the tower may fire again */
@@ -86,6 +90,8 @@ export interface Tile {
   defense?: Defense;
   biome?: 'meadow' | 'woodland' | 'deepwood';
   trail?: boolean;
+  /** painted training pen this tile belongs to (grass or soil underneath) */
+  pen?: Calling;
 }
 
 export interface TilePos { tx: number; ty: number }
@@ -106,6 +112,9 @@ export class World {
   treeCount = 0;
   /** tile indices changed since the renderer last drained this */
   dirty = new Set<number>();
+  /** painted pen tiles by kind (tile indices) and the food piled on them */
+  pens = new Map<Calling, Set<number>>();
+  penFood = new Map<number, number>();
 
   constructor(public readonly cols = COLS, public readonly rows = ROWS) {
     for (let i = 0; i < cols * rows; i++) { this.tiles.push({ kind: 'grass', stage: 0, work: 0, v: (i * 7919) % 97 }); this.dirty.add(i); }
@@ -143,9 +152,58 @@ export class World {
     const fort = (k: TileKind) => k === 'wall' || k === 'gate' || k === 'stairs';
     if (BLOCKING[t.kind] !== BLOCKING[kind] || fort(t.kind) || fort(kind)) this.revision++;
     t.kind = kind; t.stage = 0; t.work = 0; t.building = undefined; t.part = undefined; t.v = (t.v + 31) % 97;
+    if (t.pen && !PEN_GROUND.has(kind)) this.paintPen(tx, ty, null);
     this.dirty.add(i);
     return t;
   }
+
+  // ---- training pens ------------------------------------------------------------------------
+  /** Paint (or with null / the same kind, erase) a pen tile. Only open ground takes paint. */
+  paintPen(tx: number, ty: number, kind: Calling | null): boolean {
+    const t = this.get(tx, ty), i = ty * this.cols + tx;
+    if (!t || t.building || t.defense || !PEN_GROUND.has(t.kind)) return false;
+    if (kind === t.pen) kind = null;
+    if (t.pen) { this.pens.get(t.pen)?.delete(i); this.penFood.delete(i); }
+    t.pen = kind ?? undefined;
+    if (kind) { if (!this.pens.has(kind)) this.pens.set(kind, new Set()); this.pens.get(kind)!.add(i); }
+    this.dirty.add(i);
+    return true;
+  }
+  penTiles(kind?: Calling): number[] {
+    if (kind) return [...(this.pens.get(kind) ?? [])];
+    return [...this.pens.values()].flatMap((set) => [...set]);
+  }
+  private nearestOf(x: number, y: number, idx: Iterable<number>): TilePos | null {
+    let best: TilePos | null = null, bd = Infinity;
+    for (const i of idx) {
+      const tx = i % this.cols, ty = (i / this.cols) | 0, c = World.center(tx, ty);
+      const d = (c.x - x) ** 2 + (c.y - y) ** 2;
+      if (d < bd) { bd = d; best = { tx, ty }; }
+    }
+    return best;
+  }
+  /** Nearest pen tile of a kind (any kind when omitted). */
+  nearestPen(x: number, y: number, kind?: Calling): TilePos | null { return this.nearestOf(x, y, this.penTiles(kind)); }
+  /** Nearest pen tile of a kind with food on it. */
+  nearestPenFood(x: number, y: number, kind: Calling): TilePos | null {
+    return this.nearestOf(x, y, [...(this.pens.get(kind) ?? [])].filter((i) => (this.penFood.get(i) ?? 0) > 0));
+  }
+  penFoodAt(tx: number, ty: number): number { return this.penFood.get(ty * this.cols + tx) ?? 0; }
+  addPenFood(tx: number, ty: number, n: number): void {
+    const i = ty * this.cols + tx;
+    this.penFood.set(i, (this.penFood.get(i) ?? 0) + n);
+    this.dirty.add(i);
+  }
+  /** Eat up to n from the pile; returns what was taken. */
+  takePenFood(tx: number, ty: number, n: number): number {
+    const i = ty * this.cols + tx, have = this.penFood.get(i) ?? 0, took = Math.min(have, n);
+    if (took <= 0) return 0;
+    if (have - took <= 0) this.penFood.delete(i); else this.penFood.set(i, have - took);
+    this.dirty.add(i);
+    return took;
+  }
+  /** Food on every tile of a pen kind. */
+  penFoodTotal(kind: Calling): number { let n = 0; for (const i of this.pens.get(kind) ?? []) n += this.penFood.get(i) ?? 0; return n; }
   private stamping = false;
   markDirty(tx: number, ty: number): void {
     this.dirty.add(ty * this.cols + tx);
