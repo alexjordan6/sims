@@ -226,6 +226,8 @@ export class Villager extends Mover {
   /** pen children: the day they last ate from the pile, and sim time their next meal is due */
   ateDay = 0;
   mealAt = 0;
+  /** died of hunger (so the death isn't also reported as a killing) */
+  starved = false;
   /** days of apprenticeship done (drill at the barracks, the field, the woodyard) */
   trained = 0;
   name: string;
@@ -382,7 +384,7 @@ export class Villager extends Mover {
 
     // a pen painted since they left the nursery: off they go
     const pen = this.findPen(s);
-    if (pen) { this.pen = pen; this.mealAt = s.simTime + p.dayLength / 4; this.clearGoal(); return; }
+    if (pen) { this.pen = pen; this.mealAt = s.simTime + p.dayLength / 4; this.ateDay = s.day; this.clearGoal(); return; }
 
     this.task = 'no pen to train in';
     this.thinkTimer -= dt;
@@ -427,8 +429,10 @@ export class Villager extends Mover {
           this.task = 'eating';
           if (this.eatTimer <= 0) {
             this.eatTimer = 0.6;
-            if (w.takePenFood(pile.tx, pile.ty, 1) > 0) { this.eaten += 1; s.fx.push({ kind: 'tool', tool: 'seed', tx: pile.tx, ty: pile.ty, who: this }); }
-            if (this.eaten >= p.kidFood) { this.eaten = 0; this.ateDay = s.day; this.mealAt = s.simTime + p.dayLength / 2; this.clearGoal(); }
+            // two meals a day, each half of p.kidFood
+            const bite = w.takePenFood(pile.tx, pile.ty, Math.min(1, p.kidFood / 2 - this.eaten));
+            if (bite > 0) { this.eaten += bite; s.fx.push({ kind: 'tool', tool: 'seed', tx: pile.tx, ty: pile.ty, who: this }); }
+            if (this.eaten >= p.kidFood / 2 - 1e-9) { this.eaten = 0; this.ateDay = s.day; this.mealAt = s.simTime + p.dayLength / 2; this.clearGoal(); }
           }
         } else this.task = 'off to eat';
         return;

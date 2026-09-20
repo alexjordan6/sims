@@ -152,7 +152,8 @@ export class World {
     const fort = (k: TileKind) => k === 'wall' || k === 'gate' || k === 'stairs';
     if (BLOCKING[t.kind] !== BLOCKING[kind] || fort(t.kind) || fort(kind)) this.revision++;
     t.kind = kind; t.stage = 0; t.work = 0; t.building = undefined; t.part = undefined; t.v = (t.v + 31) % 97;
-    if (t.pen && !PEN_GROUND.has(kind)) this.paintPen(tx, ty, null);
+    // a pen dies with its ground: a building, tree or crop on the tile takes it out of the pen (and its pile)
+    if (t.pen && !PEN_GROUND.has(kind)) { this.pens.get(t.pen)?.delete(i); this.penFood.delete(i); t.pen = undefined; }
     this.dirty.add(i);
     return t;
   }

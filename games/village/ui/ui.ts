@@ -525,7 +525,7 @@ export class UI {
       }
       if (b.kind === 'house') {
         const infants = s.infantsOf(b).length, why = s.birthProblem(b);
-        html += `<b>Beds</b><span>${b.residents - infants} / ${s.beds(b)}${b.residents - infants > s.beds(b) ? ' <em class="warn">· crowded</em>' : ''}</span>`;
+        html += `<b>Beds</b><span>${s.bedsTaken(b)} / ${s.beds(b)}${s.bedsTaken(b) > s.beds(b) ? ' <em class="warn">· crowded</em>' : ''}</span>`;
         html += `<b>Nursery</b><span>${infants} / ${s.cribs(b)} cribs${b.ruined ? '' : why ? ` · <em class="warn">no births: ${esc(why)}</em>` : ` · ${Math.round(100 * s.birthChance(b))}% every ${p.birthEvery}s · next roll in ${Math.ceil(s.birthIn(b))}s${s.feverActive() ? ' <em class="fever-txt">· baby fever</em>' : ''}`}<em class="d"> infants walk out to a pen after ${p.infantDays} days</em></span>`;
       }
       if (b.kind === 'barracks') {
@@ -593,7 +593,7 @@ export class UI {
         : m.role === 'kid' ? ` <em>· child, comes of age in ${Math.max(0, s.adultAge - m.age).toFixed(1)} days${m.pen ? ` at the ${PEN_NAME[m.pen]}` : ' — no pen to train in'}</em>`
         : m.elder ? ` <em>· elder</em>` : ` <em>· grows old at ${Math.round(s.elderAge)}</em>`;
       html += `<b>Age</b><span>${m.age.toFixed(1)} days${stage}</span>`;
-      html += `<b>Home</b><span>${m.home.residents - s.infantsOf(m.home).length} of ${s.beds(m.home)} beds · raises ${CALLING_NAME[m.home.calling ?? 'farmer']}${m.home.hearty ? ' · hearty' : ''}</span>`;
+      html += `<b>Home</b><span>${s.bedsTaken(m.home)} of ${s.beds(m.home)} beds · raises ${CALLING_NAME[m.home.calling ?? 'farmer']}${m.home.hearty ? ' · hearty' : ''}</span>`;
       html += `<b>Fed</b><span>${m.role === 'infant' ? 'nursed' : m.pen ? (m.ateDay >= s.day ? 'ate today from the pen pile' : m.hungerDays ? `<em class="warn">hungry for ${m.hungerDays} days — toss food into the ${PEN_NAME[m.pen]}</em>` : 'not yet today') : m.hungerDays === 0 ? 'yes' : `<em class="warn">hungry for ${m.hungerDays} days</em>`}</span>`;
     }
     if (m.load) html += `<b>Carrying</b><span>${m.load.n} ${m.load.kind}</span>`;

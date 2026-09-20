@@ -350,7 +350,9 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     // a pen child walks to the pile and eats; an unfed one stops training and starves
     Object.assign(first, World.center(123, 97)); first.mealAt = 0; first.ateDay = 0; s.day = 5;
     step(s, 6);
-    assert(first.ateDay === 5 && s.world.penFoodAt(123, 96) === p.tossSize - p.kidFood, `a hungry pen child eats ${p.kidFood} from the pile (${s.world.penFoodAt(123, 96)} left, ate day ${first.ateDay})`);
+    assert(first.ateDay === 5 && Math.abs(s.world.penFoodAt(123, 96) - (p.tossSize - p.kidFood / 2)) < 1e-9, `a hungry pen child eats half of ${p.kidFood} per meal from the pile (${s.world.penFoodAt(123, 96)} left, ate day ${first.ateDay})`);
+    s.world.set(123, 96, 'tree'); assert(!s.world.get(123, 96)!.pen && !s.world.pens.get('soldier')!.has(96 * s.world.cols + 123) && s.world.penFoodAt(123, 96) === 0, 'a tree on a pen tile takes it out of the pen, pile and all');
+    s.world.set(123, 96, 'grass'); s.world.paintPen(123, 96, 'soldier');
     first.update = () => {}; first.trained = 0; s.world.barracks[0].firewood = 99; s.world.barracks[0].warm = true;
     s.newDay(); assert(first.trained === 1 && first.hungerDays === 0, 'a fed day in the drill yard is a day of drill');
     first.ateDay = 0; s.newDay(); assert(first.trained === 1 && first.hungerDays === 1, 'a day without food from the pile is a hungry day and no training');

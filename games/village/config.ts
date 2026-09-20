@@ -47,7 +47,7 @@ export const p = live(
     hearthStart: [1, 0, 3, 1, 'Nights of wood a newly built building comes with.'],
   }, 'hearths'),
   params({
-    birthChance: [0.5, 0, 1, 0.05, 'Base birth rate: chance per couple per dawn in a warm house with a free bed and food to spare.'],
+    birthChance: [0.5, 0, 1, 0.05, 'Base birth rate: chance per birth roll (every birthEvery seconds) for a couple in a warm house with a free crib and food to spare.'],
     feverDays: [5, 1, 15, 1, 'Baby Fever: days of food in store (at today\'s rations) that count as a surplus.'],
     feverBonus: [0.4, 0, 0.9, 0.05, 'Baby Fever: birth chance added while the surplus holds.'],
     cadetDays: [3, 1, 8, 1, 'Fed training days a pen child needs to come of age skilled (a drill-yard child needs them to be a soldier at all).'],
@@ -62,7 +62,7 @@ export const p = live(
     elderDays: [5, 0.5, 30, 0.5, 'Days an elder lives on (slower, grey) before passing away.'],
     birthEvery: [10, 1, 120, 1, 'Real seconds between birth rolls in each house (needs a couple, a warm hearth, a free crib and food to spare; birthChance decides the roll).'],
     cribs: [4, 1, 12, 1, 'Cribs in a Lv1 house nursery (+1 per level). A full nursery stalls births there.'],
-    kidFood: [1, 0, 4, 0.25, 'Food a pen child must eat per day from the pile the head tosses in. Unfed: no training, then starvation.'],
+    kidFood: [1, 0, 4, 0.25, 'Food a pen child eats per day (two half-meals) from the pile the head tosses in. Unfed: no training, then starvation. 0 = pens feed themselves.'],
     kidStarveDays: [3, 1, 10, 1, 'Hungry days a pen child survives.'],
     tossSize: [4, 1, 12, 1, 'Food landing on the pen per throw from the basket.'],
     tossRange: [6, 2, 12, 1, 'Tiles the head can lob a handful of food.'],

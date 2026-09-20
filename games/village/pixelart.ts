@@ -658,6 +658,7 @@ export function ensureFlora(scene: Phaser.Scene): void {
   PEN_ROPES.forEach((rope, i) => drawPen(ctx, at(FLORA.pen[i]), rope, i));
   for (let i = 0; i < 3; i++) drawFeed(ctx, at(FLORA.feed[i]), i);
   tex.refresh();
+  for (let i = 0; i < FLORA.count; i++) tex.add(i, 0, at(i), 0, 16, 16); // frames, so fx can draw one tile as an image
 }
 /** rope colours of the three pens, in Calling order: farmer, woodcutter, soldier */
 const PEN_ROPES = ['#6fd36f', '#d6a35c', '#6f9bff'] as const;

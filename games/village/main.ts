@@ -704,13 +704,13 @@ export class VillageScene extends SimScene {
       let wellFed = false;
       if (v.pen) {
         // yesterday's meal came off the pen pile, or didn't
-        if (v.ateDay >= this.day - 1) { v.hungerDays = 0; wellFed = true; }
-        else if (++v.hungerDays >= p.kidStarveDays) { v.dead = true; v.hp = 0; this.event('death', `${v.name} starved in the ${PEN_NAME[v.pen]}`, true); continue; }
+        if (p.kidFood <= 0 || v.ateDay >= this.day - 1) { v.hungerDays = 0; wellFed = true; }
+        else if (++v.hungerDays >= p.kidStarveDays) { v.dead = true; v.hp = 0; v.starved = true; this.event('death', `${v.name} starved in the ${PEN_NAME[v.pen]}`, true); continue; }
         else if (!warnedPens.has(v.pen)) { warnedPens.add(v.pen); this.event('food', `Children in the ${PEN_NAME[v.pen]} are going hungry — toss food in`, true); }
       }
       else if (this.food >= ration) { this.food -= ration; v.hungerDays = 0; wellFed = hearty; }
       else if (hearty && this.food >= ration / HEARTY_RATION) { this.food -= ration / HEARTY_RATION; v.hungerDays = 0; } // enough for a plain meal at least
-      else if (++v.hungerDays >= 3 + this.mods.starveDaysDelta) { v.dead = true; v.hp = 0; this.event('death', `${v.name} starved`, true); continue; }
+      else if (++v.hungerDays >= 3 + this.mods.starveDaysDelta) { v.dead = true; v.hp = 0; v.starved = true; this.event('death', `${v.name} starved`, true); continue; }
       else this.event('food', `${v.name} went hungry`);
       if (v.role === 'kid') {
         // yesterday's care, tallied at dawn: what they ate, who was around, where they live, whether you came by
@@ -729,7 +729,7 @@ export class VillageScene extends SimScene {
 
     // move-ins: adults from crowded houses take a spare room elsewhere
     for (const h of this.world.houses) {
-      if (h.residents >= this.beds(h)) continue;
+      if (!this.hasBed(h)) continue;
       const mover = villagers.find((v) => v.isAdult && !v.dead && v.home !== h && villagers.filter((o) => o.home === v.home && o.isAdult).length > 2);
       if (mover) { mover.home.residents--; mover.home = h; h.residents++; this.event('info', `${mover.name} moved into a new house`); }
     }
@@ -746,6 +746,9 @@ export class VillageScene extends SimScene {
   /** Cribs in a house's nursery: p.cribs, one more per level. */
   cribs(h: Building): number { return h.ruined ? 0 : p.cribs + h.level - 1; }
   infantsOf(h: Building): Villager[] { return this.villagers().filter((v) => v.role === 'infant' && v.home === h && !v.dead); }
+  /** Beds in use: residents less the infants, who sleep in cribs. */
+  bedsTaken(h: Building): number { return h.residents - this.infantsOf(h).length; }
+  hasBed(h: Building): boolean { return this.bedsTaken(h) < this.beds(h); }
   /** Seconds until this house next rolls for a birth (0 when due). */
   birthIn(h: Building): number { return Math.max(0, (h.nextBirth ?? 0) - this.simTime); }
   /** Why no child will be born in this house right now, or null. */
@@ -801,8 +804,8 @@ export class VillageScene extends SimScene {
     const houses = this.world.houses.filter((h) => !h.ruined);
     if (!houses.length) return;
     const byDist = (h: Building) => { const c = buildingCenter(h); return (c.tx * TILE - v.x) ** 2 + (c.ty * TILE - v.y) ** 2; };
-    const next = houses.filter((h) => h.residents < this.beds(h)).sort((a, b) => byDist(a) - byDist(b))[0]
-      ?? houses.sort((a, b) => (a.residents - this.beds(a)) - (b.residents - this.beds(b)))[0];
+    const next = houses.filter((h) => this.hasBed(h)).sort((a, b) => byDist(a) - byDist(b))[0]
+      ?? houses.sort((a, b) => (this.bedsTaken(a) - this.beds(a)) - (this.bedsTaken(b) - this.beds(b)))[0];
     if (next && next !== v.home) { v.home.residents--; v.home = next; next.residents++; }
   }
   /** Walking up to the granary with the basket out takes food for the pens. */
@@ -923,7 +926,7 @@ export class VillageScene extends SimScene {
     if (a instanceof Villager) {
       a.home.residents--;
       for (const k of this.villagers()) if (k.isChild && k.parents.includes(a)) k.care -= 1; // losing a parent
-      if (a.hp <= 0 && a.hungerDays < 3 && a.age < a.deathAt(this)) this.event('death', `${a.name} the ${a.role} was killed`, true);
+      if (a.hp <= 0 && !a.starved && a.age < a.deathAt(this)) this.event('death', `${a.name} the ${a.role} was killed`, true);
     } else if (a instanceof Raider) {
       if (a.carrying && !a.carrying.dead) { const kid = a.carrying; kid.carriedBy = null; a.carrying = null; this.event('grow', `${kid.name} was rescued!`, true); }
       if (a.hp <= 0) {
@@ -1081,7 +1084,7 @@ export class VillageScene extends SimScene {
   buildingBlurb(b: Building): string {
     if (b.ruined) return `in ruins · nothing works until the hammer rebuilds it (${this.rebuildCost(b)} wood)`;
     const hearth = hasHearth(b) ? (b.warm ? ` · hearth ${hearthCost(b)} wood/night · ${b.firewood} night${b.firewood === 1 ? '' : 's'} stocked` : ` · COLD — ${b.firewood ? 'lit again at dawn' : 'the pile is empty'}`) : '';
-    const now = b.kind === 'house' ? `${b.residents - this.infantsOf(b).length}/${this.beds(b)} beds · nursery ${this.infantsOf(b).length}/${this.cribs(b)}${b.level >= 3 ? ' · births +15%' : ''}${' · raises ' + CALLING_NAME[b.calling ?? 'farmer']}${b.hearty ? ' · hearty rations' : ''}`
+    const now = b.kind === 'house' ? `${this.bedsTaken(b)}/${this.beds(b)} beds · nursery ${this.infantsOf(b).length}/${this.cribs(b)}${b.level >= 3 ? ' · births +15%' : ''}${' · raises ' + CALLING_NAME[b.calling ?? 'farmer']}${b.hearty ? ' · hearty rations' : ''}`
       : b.kind === 'granary' ? `${this.food | 0}/${CAPS[b.level]} food · the harvest is carried here`
       : b.kind === 'woodyard' ? `${this.wood | 0}/${CAPS[b.level]} wood · chopped logs are carried here`
       : LEVEL_PERKS[b.kind][b.level];
@@ -1170,7 +1173,7 @@ export class VillageScene extends SimScene {
       // the evicted take the nearest house with a spare bed, else the nearest house at all
       const houses = this.world.houses.filter((h) => h !== b && !h.ruined);
       const c = buildingCenter(b), byDist = (h: Building) => { const hc = buildingCenter(h); return (hc.tx - c.tx) ** 2 + (hc.ty - c.ty) ** 2; };
-      const next = houses.filter((h) => h.residents < this.beds(h)).sort((x, y) => byDist(x) - byDist(y))[0] ?? houses.sort((x, y) => byDist(x) - byDist(y))[0];
+      const next = houses.filter((h) => this.hasBed(h)).sort((x, y) => byDist(x) - byDist(y))[0] ?? houses.sort((x, y) => byDist(x) - byDist(y))[0];
       if (next) { b.residents--; v.home = next; next.residents++; }
     }
     if (this.interior.building === b) this.interior.leave();
