@@ -1,9 +1,10 @@
 import type { Agent } from '@shared/index';
 import { World, doorstep, buildingCenter, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
-import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, CALLINGS, ITEM, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
+import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, CALLINGS, ITEM, MASS, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
 import type { Mods } from './meta';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle } from './characters';
 import type { VillageScene } from './main';
+import type { Item } from './items';
 
 // All distances are in world pixels: 16 px per tile.
 
@@ -55,6 +56,8 @@ export abstract class Mover implements Agent {
   get armorSpeed(): number { return armorStats(this.armor).speedMul; }
   /** what this agent is doing, for the inspector */
   task = '';
+  /** how hard this body is to push aside when bodies overlap */
+  get mass(): number { return MASS.villager; }
 
   path: TilePos[] = [];
   goal: TilePos | null = null;
@@ -278,6 +281,7 @@ export class Villager extends Mover {
   get isAdult(): boolean {
     return this.role !== 'kid' && this.role !== 'infant';
   }
+  override get mass(): number { return this.isChild ? MASS.kid : MASS.villager; }
   get isChild(): boolean { return this.role === 'kid' || this.role === 'infant'; }
   /** What the house is raising this child to be (which pen they walk to). */
   get calling(): Calling { return this.home.calling ?? 'farmer'; }
@@ -445,11 +449,12 @@ export class Villager extends Mover {
       if (item) {
         const at = World.toTile(item.x, item.y);
         if (!this.goal || this.goal.tx !== at.tx || this.goal.ty !== at.ty) this.setGoal(s, at.tx, at.ty, true);
-        const near = this.dist(item) <= ITEM.eatReach;
+        // close enough to eat: at the pile, or in the ring around it when someone else already has the pile
+        const near = this.dist(item) <= ITEM.eatReach || (this.dist(item) <= ITEM.eatReach * 2 && s.someoneEating(item, this));
         if (near) this.vx = this.vy = 0; else if (this.followPath(dt) && !near) { const d = this.dist(item) || 1; this.x += (item.x - this.x) / d * Math.min(d, this.speed * dt); this.y += (item.y - this.y) / d * Math.min(d, this.speed * dt); } // the last few pixels, off the tile grid
         if (near) {
           this.eatTimer -= dt;
-          this.task = 'eating';
+          this.task = 'eating'; this.eatingFrom = item;
           if (this.eatTimer <= 0) {
             this.eatTimer = 0.6;
             // two meals a day, each half of p.kidFood
@@ -458,11 +463,12 @@ export class Villager extends Mover {
             if (item.n <= 1e-9) w.removeItem(item);
             if (this.eaten >= p.kidFood / 2 - 1e-9) { this.eaten = 0; this.shroomMeal = false; this.ateDay = s.day; this.mealAt = s.simTime + p.dayLength / 2; this.clearGoal(); }
           }
-        } else this.task = 'off to eat';
+        } else { this.task = 'off to eat'; this.eatingFrom = null; }
         return;
       }
       this.task = 'hungry — nothing in the pen';
     }
+    this.eatingFrom = null;
     // night: doze where they stand
     if ((s.dayTime > BEDTIME.start || s.dayTime < BEDTIME.end) && inPen) { this.task = 'asleep in the pen'; this.vx = this.vy = 0; this.clearGoal(); return; }
     if (!hungry) this.task = kind === 'soldier' ? 'drilling' : kind === 'farmer' ? 'learning to farm' : 'learning the axe';
@@ -471,22 +477,34 @@ export class Villager extends Mover {
     // (a waking day in the pen is a day of training: the night asleep does not count against them)
     const waking = 1 - (1 - BEDTIME.start + BEDTIME.end);
     if (inPen && !hungry && canTrain) this.trained = Math.min(Villager.drillNeeded(s), this.trained + dt / (p.dayLength * waking));
-    // run about between pen tiles, stopping now and then for a swing or a stroke of the hoe
+    // run about the pen: every leg a real run to a spot a couple of tiles off, a swing or a stroke of the hoe on the way
+    const walk = this.speed; this.speed *= p.penPace;
     const arrived = this.followPath(dt);
+    this.speed = walk;
     this.thinkTimer -= dt;
     if (this.thinkTimer <= 0 || arrived) {
-      this.thinkTimer = s.rng.range(0.6, 1.4);
-      if (inPen && !hungry && s.rng.chance(0.3)) {
-        if (kind === 'soldier') s.fx.push({ kind: 'swing', who: this, dx: this.dir, dy: 0, stage: 0 });
-        else s.fx.push({ kind: 'tool', tool: kind === 'farmer' ? 'hoe' : 'axe', tx: here.tx, ty: here.ty, who: this });
-        this.vx = this.vy = 0; this.clearGoal();
-      } else {
-        let pick = -1, n = s.rng.int(0, tiles.size - 1);
-        for (const i of tiles) if (n-- <= 0) { pick = i; break; }
-        if (pick >= 0) this.setGoal(s, pick % w.cols, (pick / w.cols) | 0, true);
+      this.thinkTimer = s.rng.range(1.5, 3);
+      let pick = -1, best = -1;
+      for (let tries = 0; tries < 4; tries++) {
+        let n = s.rng.int(0, tiles.size - 1), i = -1;
+        for (const t of tiles) if (n-- <= 0) { i = t; break; }
+        if (i < 0) continue;
+        const d = Math.hypot((i % w.cols) - here.tx, ((i / w.cols) | 0) - here.ty);
+        if (d > best) { best = d; pick = i; }
+        if (d >= 2) break;
       }
+      if (pick >= 0) this.setGoal(s, pick % w.cols, (pick / w.cols) | 0, true);
+    }
+    this.trainTimer -= dt;
+    if (this.trainTimer <= 0 && inPen && !hungry) {
+      this.trainTimer = s.rng.range(2, 4);
+      if (kind === 'soldier') s.fx.push({ kind: 'swing', who: this, dx: this.dir, dy: 0, stage: 0 });
+      else s.fx.push({ kind: 'tool', tool: kind === 'farmer' ? 'hoe' : 'axe', tx: here.tx, ty: here.ty, who: this });
     }
   }
+  /** the pile this child is eating from right now (so others can crowd round it) */
+  eatingFrom: Item | null = null;
+  private trainTimer = 0;
   /** food units nibbled toward today's meal, and the pause between bites */
   private eaten = 0;
   private eatTimer = 0;
@@ -735,6 +753,7 @@ export interface RaiderOpts {
  * every `instanceof Raider` check — soldier targeting, the sword arc, villagers fleeing — covers them.
  */
 export class Raider extends Mover {
+  override get mass(): number { return this.boss ? MASS.warlord : this.kind === 'rat' ? MASS.rat : this.kind === 'snatcher' ? MASS.snatcher : MASS.raider; }
   protected siege: { defense: Defense; t: number; struck: boolean } | null = null;
   /** Enemies can breach fortifications, while homes and supply buildings remain indestructible. */
   breach(dt: number, s: VillageScene): boolean {
@@ -881,6 +900,7 @@ export const COMBO = [
 export const SWING = { reach: 24, halfAngleCos: 0.35, comboWindow: 0.5, recoverAfterSpin: 0.4, stepIn: 10 } as const;
 
 export class Player extends Mover {
+  override get mass(): number { return MASS.player; }
   facing = { x: 0, y: 1 };
   tool: Tool = 'hands';
   /** which pen the paint tool lays down, which crop the seeds sow, which food the basket takes */

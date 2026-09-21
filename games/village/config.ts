@@ -68,6 +68,7 @@ export const p = live(
     tossRange: [6, 2, 12, 1, 'Tiles the head can lob a handful of food. It lands near the cursor, bounces and rolls; walls and trees stop it.'],
     itemBounce: [0.45, 0, 0.9, 0.05, 'How much of its fall a thrown item bounces back up. 0 = it sticks where it lands.'],
     itemFriction: [6, 1, 20, 0.5, 'How fast a rolling item slows on the ground (higher = shorter rolls).'],
+    penPace: [1.25, 0.5, 2, 0.05, 'How fast children run about the pen, as a multiple of their walking speed.'],
     dietFull: [6, 1, 30, 1, 'Units of one food a child must eat for its full stat bonus (about three days of a single crop).'],
     dietMul: [1, 0, 3, 0.25, 'Scales every diet bonus (wheat +25% HP, carrots +15% speed, tomatoes +25% work, berries +25% damage at ×1).'],
     wildRegrowMul: [1, 0.25, 4, 0.25, 'Scales how long picked bushes and mushrooms take to regrow (3 / 4 days at ×1).'],
@@ -103,6 +104,7 @@ export const p = live(
     towerFires: [true, 'Off: barracks towers hold their fire.'],
     godMode: [false, 'The head cannot die (revives at full HP).'],
     freeBuild: [false, 'Building, upgrading, fortifying, forging and hearth stocking cost nothing.'],
+    collide: [true, 'Bodies push each other apart. Off: everyone walks through everyone, as before.'],
   }, 'debug'),
 );
 
@@ -218,6 +220,10 @@ export const FOODS: Record<FoodKind, Food> = {
 /** the most a full diet of one kind adds to its stat (× p.dietMul) */
 export const DIET_CAP: Record<Exclude<DietStat, 'care'>, number> = { hp: 0.25, speed: 0.15, work: 0.25, dmg: 0.25 };
 export const DIET_STAT_NAME: Record<DietStat, string> = { hp: 'HP', speed: 'speed', work: 'work speed', dmg: 'damage', care: 'care' };
+
+// ---- bodies ---------------------------------------------------------------------------------
+/** How hard a body is to push aside when two overlap: the lighter one gives way (see VillageScene.separate). */
+export const MASS = { kid: 0.5, villager: 1, player: 2, raider: 1, brute: 2, ogre: 10, warlord: 3, rat: 0.3, snatcher: 0.8 } as const;
 
 // ---- items on the ground --------------------------------------------------------------------
 /** Thrown food, dropped armfuls and raider loot are free items with a pixel position and a little physics (see items.ts). */

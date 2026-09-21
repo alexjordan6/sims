@@ -1,6 +1,6 @@
 import { Mover, Raider, Villager, Player, type RaiderOpts } from './agents';
 import { World, BUILDINGS, type TilePos, type Building } from './world';
-import { COLS, ROWS, TILE, OGRE, BEDTIME, WRECKER, p } from './config';
+import { COLS, ROWS, TILE, OGRE, BEDTIME, WRECKER, p, MASS } from './config';
 import type { VillageScene } from './main';
 
 // Enemy kinds beyond the plain raider. Each has a different job so raids need different answers.
@@ -183,6 +183,7 @@ type OgreMove =
  * prey dies he picks the next one anywhere on the map.
  */
 export class Ogre extends Raider {
+  override get mass(): number { return MASS.ogre; }
   state: 'sleeping' | 'roaming' | 'hunting' | 'homing' = 'sleeping';
   /** true once he has first stepped out (the "something stirs" rumour fires then) */
   emerged = false;
@@ -491,6 +492,7 @@ export class Ogre extends Raider {
 
 /** Slow, huge, hits hard, ignores knockback. Goes for soldiers first. */
 export class Brute extends Raider {
+  override get mass(): number { return MASS.brute; }
   constructor(x: number, y: number, opts: RaiderOpts = {}) {
     super(x, y, opts);
     this.kind = 'brute';

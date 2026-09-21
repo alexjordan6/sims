@@ -447,6 +447,41 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(held()?.kind === 'wood' && held()!.n === 9 && !s.world.items.includes(dropped!), 'with hands out the head picks the armful up');
     const snack = s.world.dropItem('food', 3, s.player.x, s.player.y, 'berry'); s.tick(1 / 60);
     assert(s.world.items.includes(snack) && held()?.kind === 'wood', 'arms full of wood leave food lying');
+    // bodies: nobody stands inside anybody; the light give way to the heavy; walls are never entered
+    s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(124, 100)); s.world.items.length = 0;
+    const home3 = s.world.houses[0];
+    const twinA = s.spawn(new Villager(World.center(128, 100).x, World.center(128, 100).y, home3, 'farmer', 20, 'A', s.mods));
+    const twinB = s.spawn(new Villager(World.center(128, 100).x, World.center(128, 100).y, home3, 'farmer', 20, 'B', s.mods));
+    twinA.update = twinB.update = () => {};
+    s.tick(1 / 60); s.tick(1 / 60);
+    assert(twinA.dist(twinB) >= twinA.radius + twinB.radius - 0.01, `two bodies on one spot push apart (${twinA.dist(twinB).toFixed(1)} px)`);
+    assert(Math.abs(twinA.x - World.center(128, 100).x) > 0.5 && Math.abs(twinB.x - World.center(128, 100).x) > 0.5, 'equals share the push');
+    const giant = s.ogre!; s.agents.push(giant); giant.hidden = false; giant.state = 'hunting'; giant.update = () => {}; Object.assign(giant, World.center(132, 100));
+    const tot = s.spawn(new Villager(giant.x + 2, giant.y, home3, 'kid', 1, 'Tot', s.mods)); tot.update = () => {};
+    const ogreWas = giant.x; s.tick(1 / 60); s.tick(1 / 60); s.tick(1 / 60);
+    assert(tot.dist(giant) >= tot.radius + giant.radius - 0.01 && Math.abs(giant.x - ogreWas) < 0.5, `the Ogre pushes a child aside and barely moves (giant moved ${Math.abs(giant.x - ogreWas).toFixed(2)} px)`);
+    tot.dead = true; s.removeDead(); giant.hidden = true; s.agents = s.agents.filter((a) => a !== giant);
+    for (let y = 98; y <= 102; y++) s.world.placeDefense('wall', 135, y);
+    const pinned = s.spawn(new Villager(135 * 16 - 3, World.center(135, 100).y, home3, 'farmer', 20, 'Pinned', s.mods)); pinned.update = () => {};
+    const pusher = s.spawn(new Villager(135 * 16 - 4, World.center(135, 100).y, home3, 'farmer', 20, 'Pusher', s.mods)); pusher.update = () => {};
+    for (let i = 0; i < 5; i++) s.tick(1 / 60);
+    assert(pinned.x < 135 * 16 && pusher.x < pinned.x && pinned.dist(pusher) >= 5.9, `a body against a wall is not pushed into it; the other gives way (${pinned.x.toFixed(1)} / ${pusher.x.toFixed(1)})`);
+    // a crowd at one pile all get to eat
+    s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(124, 104)); s.world.items.length = 0;
+    for (let y = 95; y <= 99; y++) for (let x = 120; x <= 126; x++) if (s.world.get(x, y)!.pen !== 'farmer') s.world.paintPen(x, y, 'farmer');
+    const crowd: Villager[] = [];
+    for (let i = 0; i < 8; i++) { const k = s.spawn(new Villager(World.center(120 + i % 4, 95 + (i >> 2)).x, World.center(120 + i % 4, 95 + (i >> 2)).y, s.world.houses[0], 'kid', 1, 'C' + i, s.mods)); k.pen = 'farmer'; k.mealAt = 0; crowd.push(k); }
+    const pile = s.world.dropItem('food', 40, World.center(123, 97).x, World.center(123, 97).y, 'wheat'); s.day = 4;
+    for (let i = 0; i < 12 * 60; i++) s.tick(1 / 60);
+    assert(crowd.every((k) => k.ateDay === 4), `eight children round one pile all get a bite (${crowd.filter((k) => k.ateDay === 4).length} of 8 ate, ${pile.n} left)`);
+    let minGap = 99; for (const a1 of crowd) for (const b1 of crowd) if (a1 !== b1) minGap = Math.min(minGap, a1.dist(b1));
+    assert(minGap >= 3, `no two children share a spot while crowding (closest ${minGap.toFixed(1)} px)`);
+    // children run about the pen
+    for (const k of crowd) k.mealAt = 1e9;
+    const legs: number[] = []; const last = crowd.map((k) => ({ x: k.x, y: k.y }));
+    for (let i = 0; i < 10 * 60; i++) { s.tick(1 / 60); if (i % 60 === 59) crowd.forEach((k, j) => { legs.push(Math.hypot(k.x - last[j].x, k.y - last[j].y)); last[j] = { x: k.x, y: k.y }; }); }
+    const avg = legs.reduce((n, d) => n + d, 0) / legs.length;
+    assert(avg >= 16, `children keep running about the pen (${avg.toFixed(0)} px a second on average)`);
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;
   } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); }

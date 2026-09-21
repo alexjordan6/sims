@@ -1,11 +1,11 @@
 import Phaser from 'phaser';
-import { SimScene, launch, button } from '@shared/index';
+import { SimScene, launch, button, SpatialGrid } from '@shared/index';
 import { launch as throwItem, type Item } from './items';
 import { World, WILD_FOOD, doorstep, buildingCenter, buildingMaxHp, hasHearth, hearthCost, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos } from './world';
 import { Villager, Raider, Player, Mover, Arrow, TOOLS, type Role, type Tool } from './agents';
 import { DEFENSE_COST, WALL_HEIGHT } from './config';
 import { Interior } from './interior';
-import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, waveComposition } from './enemies';
+import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, Bolt, waveComposition } from './enemies';
 import { Fog } from './fog';
 import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, type LoadKind, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, HEARTY_RATION, PEN_NAME, ITEM, FOODS, FOOD_KINDS, DIET_STAT_NAME, type FoodKind, CALLING_NAME, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
@@ -662,6 +662,7 @@ export class VillageScene extends SimScene {
 
 
     for (const a of this.agents) a.update(dt, this);
+    this.separate();
     this.tickAges(dt);
     this.tickBirths();
     this.world.tickItems(dt);
@@ -909,6 +910,46 @@ export class VillageScene extends SimScene {
     const on = this.world.itemsOn(tx, ty);
     return on.map((it) => `${it.n % 1 ? it.n.toFixed(1) : it.n} ${it.kind === 'scrap' ? 'scrap' : it.kind === 'wood' ? 'wood' : FOODS[it.food ?? 'wheat'].one}`).join(', ');
   }
+  // ---- bodies ---------------------------------------------------------------------------------
+
+  /** a fine grid just for body-to-body pushes (the main grid's cells are sized for aggro queries) */
+  private bodies = new SpatialGrid<Mover>(COLS * TILE, ROWS * TILE, 12);
+  /** Nobody stands inside anybody: overlapping bodies push apart, the lighter one giving way, and nobody is pushed into a wall. */
+  separate(): void {
+    if (!p.collide) return;
+    const solid: Mover[] = [];
+    for (const a of this.agents) {
+      if (!(a instanceof Mover) || a.dead || a.hidden || a instanceof Arrow || a instanceof Bolt) continue;
+      if (a instanceof Villager && (a.carriedBy || a.role === 'infant')) continue;
+      solid.push(a);
+    }
+    this.bodies.rebuild(solid);
+    for (const a of solid) {
+      this.bodies.forEachInRadius(a.x, a.y, a.radius + 6, (b, d2) => {
+        if (b === a || b.id < a.id || b.elevated !== a.elevated) return; // each pair once
+        const minD = a.radius + b.radius;
+        if (d2 >= minD * minD) return;
+        let d = Math.sqrt(d2), ux: number, uy: number;
+        if (d < 0.01) { const ang = (a.id * 2.399 + b.id) % (Math.PI * 2); ux = Math.cos(ang); uy = Math.sin(ang); d = 0.01; } // dead centre: pick a direction
+        else { ux = (b.x - a.x) / d; uy = (b.y - a.y) / d; }
+        const overlap = minD - d, share = b.mass / (a.mass + b.mass);
+        this.nudge(a, -ux * overlap * share, -uy * overlap * share);
+        this.nudge(b, ux * overlap * (1 - share), uy * overlap * (1 - share));
+      });
+    }
+  }
+  /** Move a body by (dx, dy) unless that puts it in a blocked tile (then it stays and the other body takes the whole push next tick). */
+  private nudge(m: Mover, dx: number, dy: number): void {
+    const nx = m.x + dx, ny = m.y + dy, t = World.toTile(nx, ny);
+    if (m instanceof Player ? !m.fits(nx, ny, this.world) : this.world.isBlocked(t.tx, t.ty, m.hostile, m.elevated)) return;
+    m.x = nx; m.y = ny;
+  }
+  /** Is another child already eating from this pile (within reach of it)? */
+  someoneEating(item: Item, notMe: Villager): boolean {
+    for (const v of this.villagers()) if (v !== notMe && v.eatingFrom === item && !v.dead && Math.hypot(v.x - item.x, v.y - item.y) <= ITEM.eatReach) return true;
+    return false;
+  }
+
   /** Children in a pen and the food waiting on it. */
   penReport(kind: Calling): { kids: number; hungry: number; food: number; piles: string } {
     const kids = this.villagers().filter((v) => v.role === 'kid' && v.pen === kind && !v.dead);
