@@ -280,13 +280,13 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     s.newDay(); assert(home2.firewood === 0 && home2.warm && keep2.warm, 'dawn burns a night and the building stays warm');
     const parent1 = s.spawn(new Villager(0, 0, home2, 'farmer', 20, 'Ma', s.mods)), parent2 = s.spawn(new Villager(0, 0, home2, 'farmer', 20, 'Pa', s.mods));
     parent1.update = parent2.update = () => {}; home2.residents = 2;
-    const kid2 = s.spawn(new Villager(0, 0, home2, 'kid', 5, 'Sprout', s.mods)); kid2.update = () => {}; kid2.parents = [parent1, parent2]; kid2.hungerDays = 0;
-    home2.calling = 'soldier'; kid2.trained = 0; home2.residents = 3;
+    const kid2 = s.spawn(new Villager(0, 0, home2, 'kid', 5, 'Sprout', s.mods)); kid2.update = () => {}; kid2.parents = [parent1, parent2]; kid2.hungerDays = 0; kid2.ateDay = 99; // fed from a pen every day, for the care sums
+    kid2.trained = 0; home2.residents = 3;
     const careBefore = kid2.care, trainedBefore = kid2.trained; s.food = 200;
     s.newDay();
     assert(!home2.warm && !keep2.warm, 'an empty pile leaves the building cold the next dawn');
-    // fed +1 and two parents +1 would make 2; the cold night takes one back
-    assert(kid2.care - careBefore === 1, `a cold night costs the child a care point (${kid2.care - careBefore} instead of 2)`);
+    // fed +1, well fed from the pen +1 and two parents +1 would make 3; the cold night takes one back
+    assert(kid2.care - careBefore === 2, `a cold night costs the child a care point (${kid2.care - careBefore} instead of 3)`);
     assert(kid2.trained === trainedBefore, 'a child with no pen trains nowhere');
     s.world.paintPen(123, 98, 'soldier');
     const cadet = s.spawn(new Villager(World.center(123, 98).x, World.center(123, 98).y, home2, 'kid', 1, 'Cadet', s.mods)); cadet.pen = 'soldier'; cadet.ateDay = s.day; cadet.mealAt = 1e9; home2.residents = 4;
@@ -325,7 +325,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(fevered > plain, `over ${dawns} well-fed birth rolls the fever brought ${fevered} births against ${plain} without it`);
     // the breeding program: nurseries, pens, the basket, the stages of life
     s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(124, 100)); s.mods.babyFever = false;
-    const hearth = s.world.houses[0]; hearth.firewood = 99; hearth.warm = true; hearth.calling = 'soldier';
+    const hearth = s.world.houses[0]; hearth.firewood = 99; hearth.warm = true;
     const mum = s.spawn(new Villager(0, 0, hearth, 'farmer', 20, 'Mum', s.mods)), dad = s.spawn(new Villager(0, 0, hearth, 'farmer', 20, 'Dad', s.mods));
     mum.update = dad.update = () => {}; hearth.residents = 2; s.food = 200;
     const chanceWas = p.birthChance; p.birthChance = 1;
@@ -382,7 +382,10 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     second.trained = Villager.drillNeeded(s); second.age = s.adultAge; second.ateDay = s.day; s.tickAges(0);
     assert(second.role === 'soldier' && second.skilled && second.isAdult, `a drilled child of the drill yard comes of age a skilled soldier (${second.role})`);
     const third = s.infantsOf(hearth)[0]; third.age = p.infantDays; s.tickAges(0); third.update = () => {}; third.trained = 0; third.age = s.adultAge; s.tickAges(0);
-    assert(third.role === 'farmer' && !third.skilled, `an undrilled drill-yard child comes of age a plain farmer (${third.role})`);
+    assert(third.role === 'soldier' && !third.skilled, `an undrilled drill-yard child still comes of age a soldier, just a plain one (${third.role})`);
+    const nopen = s.infantsOf(hearth)[0]; nopen.age = p.infantDays; for (const i of [...s.world.pens.get('soldier') ?? []]) s.world.paintPen(i % s.world.cols, (i / s.world.cols) | 0, null); s.tickAges(0); nopen.update = () => {}; nopen.pen = null; nopen.age = s.adultAge + 1; s.tickAges(0);
+    assert(nopen.role === 'kid', 'a child with no pen never comes of age: nothing decided what they are');
+    nopen.dead = true; s.removeDead(); s.world.paintPen(123, 96, 'soldier');
     const speedWas = second.speed; second.age = s.elderAge; s.tickAges(0);
     assert(second.elder && second.speed < speedWas, 'past adultDays a villager grows old and slows');
     second.age = second.deathAt(s); s.tickAges(0); assert(second.dead, 'an elder passes away at the end of elderDays');
@@ -426,7 +429,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     eater.diet.carrot = p.dietFull; eater.diet.wheat = p.dietFull / 2;
     const live = eater.dietNow(); assert(Math.abs(live.speed - DIET_CAP.speed * p.dietMul) < 1e-9 && Math.abs(live.hp - DIET_CAP.hp * p.dietMul / 2) < 1e-9 && live.work === 0, `the diet projects its bonuses (${JSON.stringify(live)})`);
     const plainKid = s.spawn(new Villager(0, 0, s.world.houses[0], 'kid', 1, 'Plain', s.mods)); plainKid.update = () => {};
-    for (const k of [eater, plainKid]) { k.age = s.adultAge; k.pen = null; } s.tickAges(0);
+    for (const k of [eater, plainKid]) { k.age = s.adultAge; k.pen = 'farmer'; } s.tickAges(0);
     assert(eater.isAdult && plainKid.isAdult && eater.dietBonus.speed === live.speed && eater.speed > plainKid.speed && eater.maxHp > plainKid.maxHp && plainKid.dietBonus.hp === 0, `the diet freezes at coming of age: ${eater.speed.toFixed(1)} vs ${plainKid.speed.toFixed(1)} speed, ${eater.maxHp} vs ${plainKid.maxHp} HP`);
     eater.diet.wheat = 99; assert(eater.dietNow().hp === eater.dietBonus.hp, 'the bonuses of a grown villager no longer move');
     s.removeDead();

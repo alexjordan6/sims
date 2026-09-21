@@ -7,7 +7,7 @@ import { DEFENSE_COST, WALL_HEIGHT } from './config';
 import { Interior } from './interior';
 import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, Bolt, waveComposition } from './enemies';
 import { Fog } from './fog';
-import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, type LoadKind, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, HEARTY_RATION, PEN_NAME, ITEM, FOODS, FOOD_KINDS, DIET_STAT_NAME, type FoodKind, CALLING_NAME, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, type LoadKind, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, LEVEL_PERKS, PEN_NAME, ITEM, FOODS, FOOD_KINDS, DIET_STAT_NAME, type FoodKind, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
@@ -83,7 +83,7 @@ export class VillageScene extends SimScene {
   raidActive = false;
   screen: Screen = 'title';
   selected: Mover | null = null;
-  /** a building picked with X / right-click / tap (houses can be sworn from its card) */
+  /** a building picked with X / right-click / tap */
   selectedBuilding: Building | null = null;
   /** the inspector can also show a tile (crop, tree, pen, wall…) or a thing lying on the ground */
   selectedTile: TilePos | null = null;
@@ -241,6 +241,7 @@ export class VillageScene extends SimScene {
       button('spawn raid', () => { if (this.screen === 'playing') this.spawnRaid(); }, 'Start a raid now, sized for the current wave.');
       button('+50 wood', () => { this.wood = Math.min(this.woodCap, this.wood + 50); }, 'Wood into the woodyard, up to its cap.');
       button('+50 food', () => { this.food = Math.min(this.foodCap, this.food + 50); }, 'Food into the granary, up to its cap.');
+      button('copy settings', () => this.copySettings(), 'Copies every slider as JSON — paste it into games/village/defaults.json to make it the new default.');
       button('+20 scrap', () => { this.scrap += 20; }, 'Scrap iron for iron and steel forging.');
     }
     // Stardew-style: C / left click = use tool, X / right click = check, E / Esc = menu, 1-8 or Tab / wheel = tools
@@ -439,14 +440,14 @@ export class VillageScene extends SimScene {
   // ---- the inspector's take on tiles, pens and things on the ground -------------------------
 
   /** The connected pen a tile belongs to, and who is in it. */
-  penCard(q: TilePos): { kind: Calling; tiles: number[]; kids: Villager[]; hungry: number; piles: string; houses: number } | null {
+  penCard(q: TilePos): { kind: Calling; tiles: number[]; kids: Villager[]; hungry: number; piles: string } | null {
     const kind = this.world.get(q.tx, q.ty)?.pen;
     if (!kind) return null;
     const tiles = this.world.penRegion(q.tx, q.ty), inRegion = new Set(tiles);
     const kids = this.villagers().filter((v) => v.role === 'kid' && v.pen === kind && !v.dead && inRegion.has(v.tile.ty * this.world.cols + v.tile.tx));
     const piles = FOOD_KINDS.map((k) => [k, this.world.items.filter((it) => it.rest && it.kind === 'food' && it.food === k && inRegion.has(Math.floor(it.y / TILE) * this.world.cols + Math.floor(it.x / TILE))).reduce((n, it) => n + it.n, 0)] as const)
       .filter(([, n]) => n > 0).map(([k, n]) => `${n % 1 ? n.toFixed(1) : n} ${FOODS[k].one}`).join(', ');
-    return { kind, tiles, kids, hungry: kids.filter((v) => v.hungerDays > 0 || v.task.startsWith('hungry')).length, piles, houses: this.world.houses.filter((h) => (h.calling ?? 'farmer') === kind && !h.ruined).length };
+    return { kind, tiles, kids, hungry: kids.filter((v) => v.hungerDays > 0 || v.task.startsWith('hungry')).length, piles };
   }
   /** Repaint a whole pen as another kind (children there switch with it). */
   repaintPen(tiles: number[], kind: Calling): void {
@@ -479,6 +480,14 @@ export class VillageScene extends SimScene {
     return seen.size - 1;
   }
 
+  /** Every slider's current value as the JSON defaults.json expects, onto the clipboard (or a prompt to copy from). */
+  copySettings(): void {
+    const live = p as unknown as Record<string, unknown>;
+    const json = JSON.stringify(Object.fromEntries(Object.keys(live).map((k) => [k, live[k]])), null, 2);
+    const done = () => this.event('info', 'Settings copied — paste them into games/village/defaults.json', true);
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(json).then(done, () => window.prompt('Copy these settings:', json));
+    else window.prompt('Copy these settings:', json);
+  }
   /** F: the held tool's variant — the pen's kind, the crop the seeds sow, the food the basket takes; any other tool picks up the pen. */
   cycleVariant(): void {
     const pl = this.player;
@@ -496,39 +505,6 @@ export class VillageScene extends SimScene {
     let best: Building | null = null, bd = Infinity;
     for (const b of this.world.barracks) { const c = buildingCenter(b); const d = (c.tx * TILE - x) ** 2 + (c.ty * TILE - y) ** 2; if (d < bd) { bd = d; best = b; } }
     return best;
-  }
-
-  /** Why a house can't be sworn to the barracks right now, or null. */
-  swearProblem(h: Building): string | null {
-    if (h.kind !== 'house') return 'Only houses can be sworn';
-    if (h.calling === 'soldier') return null;
-    const cap = this.world.sponsorship(this.mods.sponsorBonus);
-    const used = this.world.swornHouses.length;
-    if (!cap) return 'Build a barracks first';
-    if (used >= cap) return `Your barracks sponsor ${cap} house${cap === 1 ? '' : 's'} — upgrade one or build another`;
-    return null;
-  }
-  /** Decide what a house raises its children to be. Soldiers need barracks sponsorship. */
-  setCalling(h: Building, calling: Calling): boolean {
-    if ((h.calling ?? 'farmer') === calling) return true;
-    if (calling === 'soldier') {
-      const why = this.swearProblem(h);
-      if (why) { this.event('info', why, true); return false; }
-      h.calling = 'soldier';
-      this.event('soldier', 'House sworn to the barracks — its children will go to the drill yard', true);
-      return true;
-    }
-    const wasSworn = h.calling === 'soldier';
-    h.calling = calling;
-    this.event('info', `${wasSworn ? 'House released — it' : 'This house'} now raises ${CALLING_NAME[calling]}`, true);
-    return true;
-  }
-  /** kept for older callers: toggles the soldier calling */
-  swear(h: Building): boolean { return this.setCalling(h, h.calling === 'soldier' ? 'farmer' : 'soldier'); }
-  /** Hearty rations: the house's children eat double and count as well fed. */
-  setRations(h: Building, hearty: boolean): void {
-    h.hearty = hearty;
-    this.event('food', hearty ? `Hearty rations for the children of this house (${HEARTY_RATION} food a day each)` : 'Back to plain rations', true);
   }
 
   // ---- armory ---------------------------------------------------------------------------------
@@ -640,7 +616,7 @@ export class VillageScene extends SimScene {
     const parents = kid.parents.filter((q) => !q.dead).length;
     return [
       { label: 'Fed', ok: kid.hungerDays === 0 },
-      { label: 'Well fed', ok: !!kid.home.hearty && !kid.home.ruined && kid.hungerDays === 0, note: 'hearty rations' },
+      { label: 'Well fed', ok: kid.ateDay >= this.day, note: 'ate from the pen today' },
       { label: 'Family', ok: parents >= 2, note: parents === 1 ? 'one parent' : parents === 0 ? 'no parents' : undefined },
       { label: 'Company', ok: sibling, note: 'another child at home' },
       { label: 'Warm', ok: kid.home.warm, note: kid.home.warm ? 'the hearth is lit' : 'their house is cold — stock its hearth' },
@@ -738,7 +714,7 @@ export class VillageScene extends SimScene {
     // finding the lair: the first time it comes into sight
     if (!this.lairFound && this.world.lair && this.fog) {
       const c = buildingCenter(this.world.lair);
-      if (this.fog.visibleAt(c.tx * TILE, c.ty * TILE) > 0.5) { this.lairFound = true; this.event('raid', "You found the Ogre's lair. He sleeps by day.", true); }
+      if (this.fog.visibleAt(c.tx * TILE, c.ty * TILE) > 0.5) { this.lairFound = true; this.event('raid', "You found the Ogre's lair. He sleeps by day."); }
     }
     if (this.raidActive && !this.agents.some((a) => a instanceof Raider && !a.lairBound)) {
       this.raidActive = false;
@@ -798,7 +774,7 @@ export class VillageScene extends SimScene {
     if (this.day === 2 && this.world.lair && !this.lairFound) {
       const l = this.world.lair, dx = l.tx + 2 - COLS / 2, dy = l.ty + 2 - ROWS / 2;
       const ns = Math.abs(dy) > Math.abs(dx) * 0.4 ? (dy < 0 ? 'north' : 'south') : '', ew = Math.abs(dx) > Math.abs(dy) * 0.4 ? (dx < 0 ? 'west' : 'east') : '';
-      this.event('info', `The woodcutters whisper of a giant in the forest to the ${ns}${ns && ew ? '-' : ''}${ew}. He only walks at night.`, true);
+      this.event('info', `The woodcutters whisper of a giant in the forest to the ${ns}${ns && ew ? '-' : ''}${ew}. He only walks at night.`);
     }
 
     this.burnHearths();
@@ -811,17 +787,16 @@ export class VillageScene extends SimScene {
     const villagers = this.villagers(), warnedPens = new Set<Calling>();
     for (const v of villagers) {
       if (v.role === 'infant') continue; // nursed
-      const hearty = v.role === 'kid' && !v.pen && !!v.home.hearty && !v.home.ruined;
       const ration = this.rationOf(v);
       let wellFed = false;
-      if (v.pen) {
-        // yesterday's meal came off the pen pile, or didn't
+      if (v.role === 'kid') {
+        // children eat nothing but what lands in a pen: yesterday's meal came off a pile, or it didn't
         if (p.kidFood <= 0 || v.ateDay >= this.day - 1) { v.hungerDays = 0; wellFed = true; }
-        else if (++v.hungerDays >= p.kidStarveDays) { v.dead = true; v.hp = 0; v.starved = true; this.event('death', `${v.name} starved in the ${PEN_NAME[v.pen]}`, true); continue; }
-        else if (!warnedPens.has(v.pen)) { warnedPens.add(v.pen); this.event('food', `Children in the ${PEN_NAME[v.pen]} are going hungry — toss food in`, true); }
+        else if (++v.hungerDays >= p.kidStarveDays) { v.dead = true; v.hp = 0; v.starved = true; this.event('death', `${v.name} starved${v.pen ? ` in the ${PEN_NAME[v.pen]}` : ' with no pen to eat in'}`, true); continue; }
+        else if (v.pen && !warnedPens.has(v.pen)) { warnedPens.add(v.pen); this.event('food', `Children in the ${PEN_NAME[v.pen]} are going hungry — toss food in`, true); }
+        else if (!v.pen && !warnedPens.has('none' as Calling)) { warnedPens.add('none' as Calling); this.event('food', 'Children with no pen are going hungry — paint one and throw food in', true); }
       }
-      else if (this.food >= ration) { this.food -= ration; v.hungerDays = 0; wellFed = hearty; }
-      else if (hearty && this.food >= ration / HEARTY_RATION) { this.food -= ration / HEARTY_RATION; v.hungerDays = 0; } // enough for a plain meal at least
+      else if (this.food >= ration) { this.food -= ration; v.hungerDays = 0; }
       else if (++v.hungerDays >= 3 + this.mods.starveDaysDelta) { v.dead = true; v.hp = 0; v.starved = true; this.event('death', `${v.name} starved`, true); continue; }
       else this.event('food', `${v.name} went hungry`);
       if (v.role === 'kid') {
@@ -899,7 +874,7 @@ export class VillageScene extends SimScene {
       else if (v.age >= v.deathAt(this)) { v.dead = true; v.hp = 0; this.event('death', `${v.name} passed away at ${Math.floor(v.age)}`); }
     }
   }
-  /** An infant walks out of the house to the pen of its house's calling (or any pen; or plays by the door until one is painted). */
+  /** An infant walks out of the house to the nearest pen (or plays by the door until one is painted). */
   leaveNursery(v: Villager): void {
     v.role = 'kid'; v.applyRole(this.mods); v.hp = v.maxHp;
     v.unhide(this);
@@ -1201,11 +1176,10 @@ export class VillageScene extends SimScene {
 
   // ---- food and births --------------------------------------------------------
 
-  /** What one villager eats at dawn (hearty children eat double while their house stands). */
+  /** What one villager eats from the granary at dawn: grown villagers only (infants are nursed, children eat from the pens). */
   rationOf(v: Villager): number {
-    if (v.role === 'infant' || v.pen) return 0; // nursed, or fed from the pen pile
-    const hearty = v.role === 'kid' && !!v.home.hearty && !v.home.ruined;
-    return p.foodPerDay * this.mods.foodPerDayMul * (hearty ? HEARTY_RATION : 1);
+    if (v.isChild) return 0;
+    return p.foodPerDay * this.mods.foodPerDayMul;
   }
   /** Everyone's rations for one dawn. */
   dailyRation(): number { return this.villagers().reduce((n, v) => n + this.rationOf(v), 0); }
@@ -1269,7 +1243,7 @@ export class VillageScene extends SimScene {
   buildingBlurb(b: Building): string {
     if (b.ruined) return `in ruins · nothing works until the hammer rebuilds it (${this.rebuildCost(b)} wood)`;
     const hearth = hasHearth(b) ? (b.warm ? ` · hearth ${hearthCost(b)} wood/night · ${b.firewood} night${b.firewood === 1 ? '' : 's'} stocked` : ` · COLD — ${b.firewood ? 'lit again at dawn' : 'the pile is empty'}`) : '';
-    const now = b.kind === 'house' ? `${this.bedsTaken(b)}/${this.beds(b)} beds · nursery ${this.infantsOf(b).length}/${this.cribs(b)}${b.level >= 3 ? ' · births +15%' : ''}${' · raises ' + CALLING_NAME[b.calling ?? 'farmer']}${b.hearty ? ' · hearty rations' : ''}`
+    const now = b.kind === 'house' ? `${this.bedsTaken(b)}/${this.beds(b)} beds · nursery ${this.infantsOf(b).length}/${this.cribs(b)}${b.level >= 3 ? ' · births +15%' : ''}`
       : b.kind === 'granary' ? `${this.food | 0}/${CAPS[b.level]} food (${FOOD_KINDS.filter((k) => this.pantry[k] >= 1).map((k) => `${this.pantry[k] | 0} ${FOODS[k].one}`).join(', ') || 'empty'}) · the harvest is carried here`
       : b.kind === 'woodyard' ? `${this.wood | 0}/${CAPS[b.level]} wood · chopped logs are carried here`
       : LEVEL_PERKS[b.kind][b.level];

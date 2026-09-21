@@ -232,7 +232,7 @@ export class Ogre extends Raider {
       if (this.stepT > 2.2) { this.stepT = 0; s.fx.push({ kind: 'snore', x: home.x, y: home.y - TILE * 2.5 }); }
       if (night) {
         this.state = 'roaming'; this.hidden = false; this.wanderT = 0; this.task = 'prowling';
-        if (!this.emerged) { this.emerged = true; s.event('raid', 'Something huge stirs in the deep woods.', true); }
+        if (!this.emerged) { this.emerged = true; s.event('raid', 'Something huge stirs in the deep woods.'); }
       }
       return;
     }

@@ -132,7 +132,7 @@ export const NODES: Node[] = [
   // ---- War
   { id: 'war1', branch: 'war', tier: 1, name: 'Drill Yard', cost: 50, blurb: 'Soldiers +15 HP', icon: { key: 'dungeon', frame: 102 }, apply: (m) => (m.soldierHpBonus += 15) },
   { id: 'war2a', branch: 'war', tier: 2, side: 'a', requires: 'war1', name: 'War Drums', cost: 100, blurb: 'Cadets need 2 days of drill instead of 3', icon: { key: 'town', frame: 95 }, apply: (m) => (m.cadetDaysDelta -= 1) },
-  { id: 'war3a', branch: 'war', tier: 3, side: 'a', requires: 'war2a', name: 'Blooded', cost: 250, blurb: 'Soldiers deal +50%; every barracks sponsors one more house', icon: { key: 'dungeon', frame: 105 }, apply: (m) => { m.soldierDmgMul *= 1.5; m.sponsorBonus += 1; } },
+  { id: 'war3a', branch: 'war', tier: 3, side: 'a', requires: 'war2a', name: 'Blooded', cost: 250, blurb: 'Soldiers deal +50%', icon: { key: 'dungeon', frame: 105 }, apply: (m) => { m.soldierDmgMul *= 1.5; m.sponsorBonus += 1; } },
   { id: 'war2b', branch: 'war', tier: 2, side: 'b', requires: 'war1', name: 'Veteran', cost: 150, blurb: 'Start with a trained soldier', icon: { key: 'dungeon', frame: 96 }, apply: (m) => (m.startSoldiers += 1) },
   { id: 'war3b', branch: 'war', tier: 3, side: 'b', requires: 'war2b', name: 'Old Guard', cost: 250, blurb: 'Start with two; soldiers regen 2 HP/s out of combat', icon: { key: 'dungeon', frame: 97 }, apply: (m) => { m.startSoldiers += 1; m.soldierRegen += 2; } },
   // ---- Stronghold

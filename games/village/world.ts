@@ -34,10 +34,6 @@ export interface Building {
   level: number;
   /** houses: count of villagers who call this home */
   residents: number;
-  /** houses: what its children are raised to be (farmers when unset); 'soldier' needs barracks sponsorship */
-  calling?: Calling;
-  /** houses: children eat a double ration and count as well fed */
-  hearty?: boolean;
   /** houses: sim time of the next birth roll (see VillageScene.tickBirths) */
   nextBirth?: number;
   /** barracks: arrows left in the tower's chest */
@@ -140,9 +136,6 @@ export class World {
   get woodyard(): Building | undefined { return this.buildings.find((b) => b.kind === 'woodyard'); }
   /** The best barracks level in the village (0 if none). */
   get barracksLevel(): number { return this.barracks.reduce((m, b) => Math.max(m, b.level), 0); }
-  /** Houses a barracks can sponsor: one per level, summed over every barracks (+ any bonus). */
-  sponsorship(bonusPerBarracks = 0): number { return this.barracks.reduce((n, b) => n + b.level + bonusPerBarracks, 0); }
-  get swornHouses(): Building[] { return this.houses.filter((h) => h.calling === 'soldier'); }
 
   inBounds(tx: number, ty: number): boolean {
     return tx >= 0 && ty >= 0 && tx < this.cols && ty < this.rows;

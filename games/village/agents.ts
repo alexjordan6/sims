@@ -283,8 +283,6 @@ export class Villager extends Mover {
   }
   override get mass(): number { return this.isChild ? MASS.kid : MASS.villager; }
   get isChild(): boolean { return this.role === 'kid' || this.role === 'infant'; }
-  /** What the house is raising this child to be (which pen they walk to). */
-  get calling(): Calling { return this.home.calling ?? 'farmer'; }
   /** Training in a pen (every child with a pen trains, every day they are fed). */
   apprenticeAt(_s?: VillageScene): boolean {
     return this.role === 'kid' && !!this.pen;
@@ -293,14 +291,11 @@ export class Villager extends Mover {
   deathAt(s: VillageScene): number { return s.deathAge + ((this.id % 7) / 6 - 0.5) * p.elderDays * 0.5; }
   /** Training days needed to come of age skilled (War Drums lowers it). */
   static drillNeeded(s: VillageScene): number { return Math.max(1, p.cadetDays + s.mods.cadetDaysDelta); }
-  /** What this child will become as things stand — shown in the UI so nothing is a surprise. The pen decides, not the house. */
-  outlook(s: VillageScene): { role: Calling; skilled: boolean } {
-    const kind = this.pen ?? this.calling;
+  /** What this child will become as things stand — shown in the UI so nothing is a surprise. The pen decides; without one, nothing is decided yet. */
+  outlook(s: VillageScene): { role: Calling | null; skilled: boolean } {
     const daysLeft = Math.max(0, s.adultAge - this.age); // training days still possible, if fed all the way
     const skilled = s.mods.fullDrill || (!!this.pen && this.trained + daysLeft >= Villager.drillNeeded(s));
-    // soldiers must finish drill; an untrained drill-yard child grows up a farmer
-    if (kind === 'soldier' && !skilled) return { role: 'farmer', skilled: false };
-    return { role: this.pen ? kind : 'farmer', skilled };
+    return { role: this.pen, skilled };
   }
   /** Care stars right now: five for averaging six care points a day. */
   starsNow(): number {
@@ -347,11 +342,11 @@ export class Villager extends Mover {
   /** Called on the day the kid reaches adultAge: their upbringing becomes who they are. */
   comeOfAge(s: VillageScene): void {
     const { role, skilled } = this.outlook(s);
+    if (!role) return; // no pen ever taught them anything: they stay a child until one does
     this.stars = this.starsNow();
     this.dietBonus = this.dietNow(); // what they ate is who they are
     this.skilled = skilled;
     if (this.stars >= 5) this.trait = s.rng.pick(Object.keys(TRAITS) as Trait[]);
-    if (this.calling === 'soldier' && role !== 'soldier') s.event('grow', `${this.name} came of age before finishing drill — a farmer instead`, true);
     this.role = role;
     this.pen = null; // grown: they eat at the granary like everyone else
     this.barracksHp = s.world.barracksLevel >= 3 ? 30 : s.world.barracksLevel >= 2 ? 15 : 0;
@@ -359,7 +354,7 @@ export class Villager extends Mover {
     this.hp = this.maxHp;
     const star = '★'.repeat(this.stars) + '☆'.repeat(5 - this.stars);
     // with a breeding program running, only the gifted are worth a toast; the rest go to the journal
-    s.event(this.role === 'soldier' ? 'soldier' : 'grow', `${this.name} came of age — ${skilled ? 'a skilled ' : 'a '}${this.role}, ${star}${this.trait ? ` (${TRAITS[this.trait].name})` : ''}`, !!this.trait);
+    s.event(this.role === 'soldier' ? 'soldier' : 'grow', `${this.name} came of age — ${skilled ? 'a skilled ' : 'a '}${this.role}, ${star}${this.trait ? ` (${TRAITS[this.trait].name})` : ''}`);
     s.stats.childrenRaised++;
     s.stats.starsTotal += this.stars;
     if (this.role === 'soldier') s.stats.soldiersRaised++;
@@ -421,11 +416,10 @@ export class Villager extends Mover {
     }
   }
 
-  /** The pen this child should train in: the house's calling if one is painted, else any pen. */
+  /** The pen this child should train in: the nearest one painted, whatever it teaches. */
   findPen(s: VillageScene): Calling | null {
-    if (s.world.pens.get(this.calling)?.size) return this.calling;
-    for (const c of CALLINGS) if (s.world.pens.get(c)?.size) return c;
-    return null;
+    const q = s.world.nearestPen(this.x, this.y);
+    return q ? s.world.get(q.tx, q.ty)?.pen ?? null : null;
   }
 
   // --- pen children: live in the painted pen, eat what the head tosses in, train ---------
