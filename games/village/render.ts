@@ -381,9 +381,34 @@ export class Renderer {
     if (s.posting) {
       for (const d of s.world.defenses.values()) { u.fillStyle(0x78d8f0, 0.5); u.fillRect(d.tx * TILE + 2, d.ty * TILE - WALL_HEIGHT + 2, 12, 12); }
     }
-    // target-tile cursor; in build mode the footprint preview, red when blocked
+    // the shaman wand: the marquee, cyan rings under the squad, a pennant on every held spot and a red ring under a hunted raider
+    const wand = tool === 'wand';
+    if (wand) {
+      const CYAN = 0x78d8f0;
+      if (s.drag) { const d = s.drag; u.fillStyle(CYAN, 0.12); u.fillRect(Math.min(d.x0, d.x1), Math.min(d.y0, d.y1), Math.abs(d.x1 - d.x0), Math.abs(d.y1 - d.y0)); u.lineStyle(1, CYAN, 0.9); u.strokeRect(Math.min(d.x0, d.x1) + 0.5, Math.min(d.y0, d.y1) + 0.5, Math.abs(d.x1 - d.x0), Math.abs(d.y1 - d.y0)); }
+      const pulse = 0.5 + 0.5 * Math.sin(s.time.now / 220);
+      for (const v of s.squad) {
+        if (v.dead || v.hidden) continue;
+        const y = v.y - (v.elevated ? WALL_HEIGHT : 0) + 1;
+        u.fillStyle(CYAN, 0.12 + 0.1 * pulse); u.fillEllipse(v.x, y, 20 + 3 * pulse, 10 + 1.5 * pulse);
+        u.lineStyle(1, CYAN, 0.9); u.strokeEllipse(v.x, y, 15 + 3 * pulse, 7.5 + 1.5 * pulse);
+      }
+      const hunted = new Set<Mover>();
+      for (const v of s.fighters()) {
+        const o = v.order;
+        if (!o) continue;
+        if (o.kind === 'hold') {
+          const x = (o.tx + 0.5) * TILE, y = (o.ty + 0.5) * TILE;
+          u.lineStyle(1, CYAN, 0.35); u.strokeRect(o.tx * TILE + 3.5, o.ty * TILE + 3.5, TILE - 7, TILE - 7);
+          u.lineStyle(1, 0x2a1a16, 1); u.lineBetween(x, y - 2, x, y - 14); // the pole
+          u.fillStyle(CYAN, 0.95); u.fillTriangle(x + 1, y - 14, x + 8, y - 11, x + 1, y - 8); // the pennant
+        } else if (o.kind === 'attack' && !o.target.dead && !o.target.hidden) hunted.add(o.target);
+      }
+      for (const m of hunted) { u.fillStyle(0xff4040, 0.12 + 0.1 * pulse); u.fillEllipse(m.x, m.y + 1, 22 + 4 * pulse, 11 + 2 * pulse); u.lineStyle(1, 0xff4040, 0.9); u.strokeEllipse(m.x, m.y + 1, 16 + 4 * pulse, 8 + 2 * pulse); }
+    }
+    // target-tile cursor; in build mode the footprint preview, red when blocked (the wand has no reach: no cursor)
     const f = s.target;
-    if (s.world.inBounds(f.tx, f.ty)) {
+    if (!wand && s.world.inBounds(f.tx, f.ty)) {
       const build = s.player.build !== 'none';
       if (build) {
         const kind = s.player.build as BuildingKind;
@@ -566,7 +591,7 @@ export function lookFor(m: Mover): Look | null {
   const base = { ...seed, armor: m.armor, dye: m.dye, helmetStyle: m.helmetStyle, plume: m.plume };
   // a crude blade shows as a club until the chest forges a real sword
   const blade = m.weapons.melee > 0 ? 'sword' : 'club';
-  if (m instanceof Player) return { ...base, skin: 1, hair: 0, hairStyle: 0, body: 'adult', outfit: 'head', held: m.tool === 'sword' ? blade : m.tool === 'bow' ? 'bow' : m.tool === 'axe' ? 'axe' : m.tool === 'hoe' ? 'hoe' : 'none' };
+  if (m instanceof Player) return { ...base, skin: 1, hair: 0, hairStyle: 0, body: 'adult', outfit: 'head', held: m.tool === 'sword' ? blade : m.tool === 'bow' ? 'bow' : m.tool === 'axe' ? 'axe' : m.tool === 'hoe' ? 'hoe' : m.tool === 'wand' ? 'wand' : 'none' };
   if (m instanceof Villager) {
     if (m.gnome) return { ...base, body: m.isChild ? 'gnomekid' : 'gnome', outfit: 'gnome', held: m.isAdult ? 'club' : 'none' };
     if (m.role === 'kid' || m.role === 'infant') return { ...base, body: 'kid', outfit: 'kid', held: 'none' };

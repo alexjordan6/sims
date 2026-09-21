@@ -1,6 +1,6 @@
 import type { Agent } from '@shared/index';
 import { World, doorstep, buildingCenter, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
-import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, CALLINGS, ITEM, MASS, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
+import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, CALLINGS, ORDER, ITEM, MASS, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
 import type { Mods } from './meta';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle } from './characters';
 import type { VillageScene } from './main';
@@ -216,9 +216,13 @@ export abstract class Mover implements Agent {
 /** 'infant' lives unseen in the house nursery; 'kid' trains in a pen; the rest are grown (an elder keeps their role, see Villager.elder). 'gnome' is a grown gnome: no calling, fights like a soldier (see Villager.gnome) */
 export type Role = 'infant' | 'kid' | 'farmer' | 'woodcutter' | 'soldier' | 'gnome';
 
+/** A standing order from the shaman wand: hold a spot (fight what comes within ORDER.leash of it), hunt one enemy, or shadow the head. A wall post is the other stance; the two never coexist. */
+export type Order = { kind: 'hold'; tx: number; ty: number } | { kind: 'attack'; target: Mover } | { kind: 'follow' };
+
 export class Villager extends Mover {
   weapon: 'sword' | 'bow' = 'sword';
   post: TilePos | null = null;
+  order: Order | null = null;
   private stairsGoal: TilePos | null = null;
   indoors: House | null = null;
   role: Role;
@@ -651,10 +655,17 @@ export class Villager extends Mover {
       if (exit) { this.setGoal(s, exit.tx, exit.ty); this.followPath(dt); if (this.dist(World.center(exit.tx, exit.ty)) < 3) { this.elevated = false; this.clearGoal(); } }
       this.task = 'returning down the stairs'; return;
     }
+    // an order's quarry is down: the squad holds the ground it took
+    const order = this.order;
+    if (order?.kind === 'attack' && (order.target.dead || order.target.hidden)) { this.order = { kind: 'hold', ...this.tile }; this.retarget = 0; }
     this.retarget -= dt;
     if (this.retarget <= 0) {
       this.retarget = 0.4;
-      this.target = s.bestTarget(this.x, this.y, !gnome && this.weapon === 'bow' ? 190 : 130);
+      const leash = ORDER.leash * TILE;
+      this.target = order?.kind === 'attack' ? (order.target as Raider)
+        : order?.kind === 'hold' ? s.bestTarget((order.tx + 0.5) * TILE, (order.ty + 0.5) * TILE, leash)
+        : order?.kind === 'follow' ? s.bestTarget(s.player.x, s.player.y, leash)
+        : s.bestTarget(this.x, this.y, !gnome && this.weapon === 'bow' ? 190 : 130);
     }
     if (this.target && !this.target.dead) {
       this.task = 'fighting';
@@ -678,6 +689,18 @@ export class Villager extends Mover {
     }
     this.target = null;
     if (this.post) { this.setGoal(s, this.post.tx, this.post.ty); this.followPath(dt); this.task = 'watching from the wall'; return; }
+    if (this.order?.kind === 'hold') {
+      const o = this.order;
+      if (this.tile.tx === o.tx && this.tile.ty === o.ty) { this.vx = this.vy = 0; this.clearGoal(); }
+      else { this.setGoal(s, o.tx, o.ty); if (this.followPath(dt) && !this.goal) { this.vx = this.vy = 0; } }
+      this.task = 'holding position'; return;
+    }
+    if (this.order?.kind === 'follow') {
+      const pl = s.player, gap = ORDER.followGap * TILE;
+      if (this.dist(pl) > gap) { this.setGoal(s, pl.tile.tx, pl.tile.ty); this.followPath(dt); }
+      else { this.vx = this.vy = 0; this.clearGoal(); }
+      this.task = 'following you'; return;
+    }
     this.task = gnome ? 'pottering about' : 'on patrol';
     // a cold barracks mends nobody (and no barracks mends a gnome)
     const regen = !gnome && s.world.barracks.some((b) => b.warm) ? s.mods.soldierRegen + (s.world.barracksLevel >= 3 ? 1 : 0) : 0;
@@ -875,8 +898,8 @@ export class Arrow extends Mover {
 // player
 
 /** What the player holds. The equipped tool decides what E does. */
-export type Tool = 'hands' | 'hoe' | 'seeds' | 'axe' | 'sword' | 'house' | 'barracks' | 'hammer' | 'bow' | 'tavern' | 'wall' | 'gate' | 'stairs' | 'pen' | 'basket' | 'gnomehouse';
-export const TOOLS: Tool[] = ['hands', 'hoe', 'seeds', 'axe', 'sword', 'house', 'barracks', 'hammer', 'bow', 'tavern', 'wall', 'gate', 'stairs', 'pen', 'basket', 'gnomehouse'];
+export type Tool = 'hands' | 'hoe' | 'seeds' | 'axe' | 'sword' | 'house' | 'barracks' | 'hammer' | 'bow' | 'tavern' | 'wall' | 'gate' | 'stairs' | 'pen' | 'basket' | 'gnomehouse' | 'wand';
+export const TOOLS: Tool[] = ['hands', 'hoe', 'seeds', 'axe', 'sword', 'house', 'barracks', 'hammer', 'bow', 'tavern', 'wall', 'gate', 'stairs', 'pen', 'basket', 'gnomehouse', 'wand'];
 
 /** A sword swing in progress: an arc in front of the player that connects during its active window. */
 /** A sword swing in progress: an arc in front of the player that connects during its active window. */

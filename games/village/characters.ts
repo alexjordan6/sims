@@ -6,7 +6,7 @@ import { ARMOR, DYES, PLUMES, WEAPONS, p, type ArmorSlot, type WeaponSlot } from
 
 export type Body = 'adult' | 'kid' | 'orc' | 'imp' | 'rat' | 'shaman' | 'boss' | 'brute' | 'ogre' | 'gnome' | 'gnomekid';
 export type Outfit = 'farmer' | 'woodcutter' | 'soldier' | 'kid' | 'head' | 'none' | 'gnome';
-export type Held = 'none' | 'hoe' | 'axe' | 'sword' | 'club' | 'bow';
+export type Held = 'none' | 'hoe' | 'axe' | 'sword' | 'club' | 'bow' | 'wand';
 export type HelmetStyle = 0 | 1 | 2;
 
 export interface Armor { helmet: number; chest: number; legs: number; shield: number }
@@ -147,6 +147,7 @@ function drawHeld(ctx: Ctx, ox: number, oy: number, held: Held): void {
   else if (held === 'sword') { P(13, 5, '#c9d3de', 1, 7); P(12, 12, '#e0b04a', 3, 1); P(13, 13, '#6b4226', 1, 2); }
   else if (held === 'club') { P(13, 8, '#8f5c34', 1, 7); P(12, 5, '#6b4226', 3, 4); P(13, 5, '#a8733f', 1, 3); } // a knotted stick with a fat head
   else if (held === 'bow') { P(14, 5, '#8f5c34', 1, 9); P(13, 5, '#8f5c34', 1, 1); P(13, 13, '#8f5c34', 1, 1); }
+  else if (held === 'wand') { P(13, 6, '#3b2314', 1, 9); P(12, 4, '#78d8f0', 3, 1); P(13, 3, '#d8f6ff', 1, 3); P(12, 5, '#78d8f0', 1, 1); P(14, 5, '#78d8f0', 1, 1); } // a knotted stick with a glowing knot
 }
 
 

@@ -4,7 +4,7 @@ import { World, doorstep, hearthCost, BUILDINGS, type BuildingKind } from './wor
 import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, Wrecker, waveComposition } from './enemies';
-import { COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP } from './config';
+import { COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
 const output = document.getElementById('test-results')!, summary = document.getElementById('test-summary')!;
@@ -530,6 +530,41 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(fought && gfoe.hp < gfoe.maxHp, `grown gnomes go for a raider in sight (${Math.max(0, gfoe.hp)}/${gfoe.maxHp} hp left)`);
     gfoe.dead = true; s.removeDead(); step(s, 1);
     assert(gma.task === 'pottering about' || gma.task === 'fighting', 'with nothing to fight a gnome potters about the cottage');
+    // the shaman wand: pick a squad, send it, hunt, follow, man the wall, release
+    s = fresh(); fort(s); s.agents = [s.player]; s.food = 100;
+    const wden = s.world.place('gnomehouse', 127, 102), [wg] = s.foundGnomes(wden);
+    const wa = s.spawn(new Villager(...Object.values(World.center(122, 100)) as [number, number], s.world.houses[0], 'soldier', 20, 'Wand A', s.mods));
+    const wb = s.spawn(new Villager(...Object.values(World.center(123, 100)) as [number, number], s.world.houses[0], 'soldier', 20, 'Wand B', s.mods));
+    const wf = s.spawn(new Villager(...Object.values(World.center(124, 100)) as [number, number], s.world.houses[0], 'farmer', 20, 'Wand farmer', s.mods));
+    Object.assign(wg, World.center(125, 100));
+    s.selectBox(121 * 16, 99 * 16, 126 * 16, 101 * 16);
+    assert(s.squad.length === 3 && s.squad.includes(wa) && s.squad.includes(wb) && s.squad.includes(wg) && !s.squad.includes(wf), `a box picks soldiers and gnomes, never a farmer (${s.squad.map((v) => v.name).join(', ')})`);
+    s.orderHold(128, 98);
+    const spots = new Set(s.squad.map((v) => v.order && v.order.kind === 'hold' ? `${v.order.tx},${v.order.ty}` : '?'));
+    assert(spots.size === 3 && [...spots].every((k) => Math.max(Math.abs(+k.split(',')[0] - 128), Math.abs(+k.split(',')[1] - 98)) <= 1), `a hold order spreads the squad over the spot (${[...spots].join(' ')})`);
+    step(s, 8);
+    assert(s.squad.every((v) => v.task === 'holding position' && v.order?.kind === 'hold' && v.tile.tx === v.order.tx && v.tile.ty === v.order.ty), `the squad walks there and holds (${s.squad.map((v) => v.task).join(', ')})`);
+    const wfar = s.spawn(new Raider(...Object.values(World.center(121, 103)) as [number, number])); wfar.update = () => {}; wfar.hp = wfar.maxHp = 9999; // (the starting barracks tower would pick off a plain raider)
+    step(s, 1);
+    assert(s.squad.every((v) => v.task === 'holding position'), 'a raider beyond the leash is left alone');
+    const wnear = s.spawn(new Raider(...Object.values(World.center(130, 99)) as [number, number])); wnear.update = () => {}; wnear.hp = wnear.maxHp = 9999;
+    step(s, 6);
+    assert(s.squad.some((v) => v.task === 'fighting') && wnear.hp < 9999, 'a raider inside the leash is fought from the held spot');
+    wnear.dead = true; s.removeDead(); step(s, 3);
+    assert(s.squad.every((v) => v.task === 'holding position'), 'with the raider down they drift back to the spot');
+    s.orderAttack(wfar); const d0 = wa.dist(wfar); step(s, 3);
+    assert(wa.order?.kind === 'attack' && wa.dist(wfar) < d0 - 16, `an attack order sends them across the map (${Math.round(d0)} → ${Math.round(wa.dist(wfar))} px)`);
+    wfar.dead = true; s.removeDead(); step(s, 0.5);
+    assert(wa.order?.kind === 'hold', 'when the quarry falls the squad holds the ground it took');
+    s.orderFollow(); Object.assign(s.player, World.center(124, 103)); step(s, 6);
+    assert(s.squad.every((v) => v.order?.kind === 'follow' && v.dist(s.player) <= (ORDER.followGap + 1.5) * 16), `follow me keeps the squad at the head's heels (${s.squad.map((v) => Math.round(v.dist(s.player) / 16)).join(', ')} tiles)`);
+    s.orderFollow(); assert(s.squad.every((v) => v.order?.kind === 'hold'), 'F again: they hold where they stand');
+    const posted = s.orderPost({ tx: 124, ty: 95 });
+    assert(posted.length === 2 && posted.every((v) => v.post && !v.order && v.weapon === 'bow') && wg.order?.kind === 'hold', 'a wall top posts the soldiers (bows out) and leaves the gnome holding');
+    s.release(); assert(s.squad.every((v) => !v.order && !v.post), 'release: no orders, no posts');
+    s.clearSquad(); s.orderHold(126, 99);
+    assert(s.fighters().every((v) => v.order?.kind === 'hold'), 'with nobody picked an order goes to every fighter');
+    s.release();
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;
   } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); }

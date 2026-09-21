@@ -2,12 +2,12 @@ import Phaser from 'phaser';
 import { SimScene, launch, button, SpatialGrid } from '@shared/index';
 import { launch as throwItem, type Item } from './items';
 import { World, WILD_FOOD, doorstep, buildingCenter, buildingMaxHp, hasHearth, hearthCost, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos } from './world';
-import { Villager, Raider, Player, Mover, Arrow, TOOLS, type Role, type Tool } from './agents';
+import { Villager, Raider, Player, Mover, Arrow, TOOLS, type Role, type Tool, type Order } from './agents';
 import { DEFENSE_COST, WALL_HEIGHT } from './config';
 import { Interior } from './interior';
 import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, Bolt, waveComposition } from './enemies';
 import { Fog } from './fog';
-import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, type LoadKind, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, GNOME_BEDS, LEVEL_PERKS, PEN_NAME, ITEM, FOODS, FOOD_KINDS, DIET_STAT_NAME, type FoodKind, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, type LoadKind, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, GNOME_BEDS, ORDER, LEVEL_PERKS, PEN_NAME, ITEM, FOODS, FOOD_KINDS, DIET_STAT_NAME, type FoodKind, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
@@ -77,6 +77,10 @@ export class VillageScene extends SimScene {
   armoryChest: Building | null = null;
   interior = new Interior(this);
   posting: Villager | null = null;
+  /** the shaman wand's squad: fighters picked with the left button; orders go to them (or to everyone when empty) */
+  squad: Villager[] = [];
+  /** a marquee being dragged with the wand, in world pixels */
+  drag: { x0: number; y0: number; x1: number; y1: number } | null = null;
   day = 1;
   /** 0..1 within the day; night around 0.8..0.2 */
   dayTime = 0.3;
@@ -165,6 +169,7 @@ export class VillageScene extends SimScene {
   setup(): void {
     this.interior.leave();
     this.posting = null;
+    this.squad = []; this.drag = null;
     this.arrows = 30; this.feverWas = null;
     this.scrap = 0;
     this.armoryFor = null;
@@ -294,6 +299,7 @@ export class VillageScene extends SimScene {
     this.input.mouse?.disableContextMenu();
     this.input.on('pointerdown', (ptr: Phaser.Input.Pointer, objs: Phaser.GameObjects.GameObject[]) => {
       if (this.posting) { const q = World.toTile(ptr.worldX, ptr.worldY + WALL_HEIGHT); this.assignPost(this.posting, q); return; }
+      if (this.player.tool === 'wand' && this.screen === 'playing' && !this.interior.active) { this.wandDown(ptr, objs); return; }
       if (document.body.classList.contains('touch')) { this.pick(ptr, objs); return; }
       if (ptr.rightButtonDown()) { this.pick(ptr, objs); return; }
       if (this.screen !== 'playing') return;
@@ -303,6 +309,7 @@ export class VillageScene extends SimScene {
       if (dx) this.player.dir = dx < 0 ? -1 : 1;
       this.interact();
     });
+    this.input.on('pointerup', (ptr: Phaser.Input.Pointer) => this.wandUp(ptr));
     this.input.on('wheel', (_p: unknown, _o: unknown, _dx: number, dy: number) => this.player.cycleTool(dy > 0 ? 1 : -1));
     this.input.on('gameout', () => { this.hovered = null; this.hoverTile = null; this.hoverPoint = null; this.ui?.tooltip(null); });
 
@@ -501,6 +508,7 @@ export class VillageScene extends SimScene {
     if (pl.tool === 'pen') pl.cyclePen();
     else if (pl.tool === 'seeds') pl.cycleCrop();
     else if (pl.tool === 'basket') { if (pl.load?.kind === 'food') { this.event('food', 'Empty the basket first (toss it, or switch tools at the granary to store it)'); return; } pl.cycleBasket(this.pantry); }
+    else if (pl.tool === 'wand') this.orderFollow();
     else pl.tool = 'pen';
   }
   /** Age in days a child comes of age: the nursery, then the pen (Quick to Grow shortens it). */
@@ -653,6 +661,7 @@ export class VillageScene extends SimScene {
   hoverPoint: { x: number; y: number } | null = null;
 
   private onPointerMove(ptr: Phaser.Input.Pointer): void {
+    if (this.drag) { this.drag.x1 = ptr.worldX; this.drag.y1 = ptr.worldY; }
     this.hoverTile = document.body.classList.contains('touch') ? null : { tx: Math.floor(ptr.worldX / TILE), ty: Math.floor(ptr.worldY / TILE) };
     this.hoverPoint = this.hoverTile ? { x: ptr.worldX, y: ptr.worldY } : null;
     if (!this.ui || (this.screen !== 'playing' && this.screen !== 'paused')) { this.ui?.tooltip(null); return; }
@@ -1089,6 +1098,7 @@ export class VillageScene extends SimScene {
     this.fx.push({ kind: 'death', who: a, x: a.x, y: a.y });
     if (a === this.selected) this.selected = null;
     if (a === this.hovered) this.hovered = null;
+    if (a instanceof Villager) this.squad = this.squad.filter((v) => v !== a);
     if (a instanceof Mover && a.load && a.load.n > 0 && !(a instanceof Player)) this.world.dropItem(a.load.kind, a.load.n, a.x, a.y, a.load.food, this.rng); // the armful falls where they fell
     if (a instanceof Villager) {
       a.home.residents--;
@@ -1551,9 +1561,112 @@ export class VillageScene extends SimScene {
   assignPost(v: Villager, q: TilePos): boolean {
     if (!this.world.get(q.tx, q.ty)?.defense || !this.reachableStairs(v, q)) { this.event('info', 'Choose a wall top connected to reachable stairs.', true); return false; }
     if (this.villagers().some(o => o !== v && o.post?.tx === q.tx && o.post?.ty === q.ty)) { this.event('info', 'That post is already occupied.', true); return false; }
-    v.post = q; this.equipSoldier(v, 'bow'); this.posting = null;
+    v.post = q; v.order = null; this.equipSoldier(v, 'bow'); this.posting = null;
     this.event('soldier', `${v.name} is taking an archer post.`, true); return true;
   }
+  // ---- the shaman wand: a squad and its orders ------------------------------------------------
+
+  /** Everyone the wand can command: grown soldiers and gnomes on their feet. */
+  fighters(): Villager[] { return this.villagers().filter((v) => this.commandable(v)); }
+  commandable(v: Villager): boolean { return !v.dead && v.isAdult && (v.role === 'soldier' || v.role === 'gnome'); }
+  /** Who an order goes to: the squad, or everyone when nobody is picked. */
+  recipients(): Villager[] { return this.squad.length ? this.squad.filter((v) => this.commandable(v)) : this.fighters(); }
+  selectSquad(list: Villager[], add = false): void {
+    const picked = list.filter((v) => this.commandable(v));
+    if (add) for (const v of picked) { const i = this.squad.indexOf(v); if (i >= 0) this.squad.splice(i, 1); else this.squad.push(v); }
+    else this.squad = picked;
+    // one fighter picked: the card shows them; a squad is described in the hint bar instead
+    if (this.squad.length === 1) this.select(this.squad[0]);
+  }
+  /** Everyone standing inside a world-space box (any corner order). */
+  selectBox(x0: number, y0: number, x1: number, y1: number, add = false): void {
+    const l = Math.min(x0, x1), r = Math.max(x0, x1), t = Math.min(y0, y1), b = Math.max(y0, y1);
+    this.selectSquad(this.fighters().filter((v) => !v.hidden && v.x >= l && v.x <= r && v.y >= t && v.y <= b), add);
+  }
+  clearSquad(): void { this.squad = []; }
+  private giveOrder(v: Villager, order: Order | null): void { v.order = order; v.post = null; v.clearGoal(); }
+  private wandFx(x: number, y: number, text: string): void {
+    this.fx.push({ kind: 'deposit', x, y, text, colour: '#78d8f0' });
+    this.fx.push({ kind: 'cast', who: this.player });
+  }
+  /** Send the squad to a spot: one free tile each, the spot first, then the ring around it. */
+  orderHold(tx: number, ty: number): Villager[] {
+    const who = this.recipients();
+    if (!who.length) return who;
+    const w = this.world, free = (q: TilePos) => w.inBounds(q.tx, q.ty) && !w.isBlocked(q.tx, q.ty);
+    const spots: TilePos[] = [];
+    for (let r = 0; spots.length < who.length && r <= ORDER.spread + Math.ceil(who.length / 8); r++)
+      for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+        const q = { tx: tx + dx, ty: ty + dy };
+        if (free(q) && !spots.some((o) => o.tx === q.tx && o.ty === q.ty)) spots.push(q);
+      }
+    if (!spots.length) { this.event('info', 'Nowhere to stand there.'); return []; }
+    // nearest fighter takes the centre, and so on outward
+    const sorted = [...who].sort((a, b) => a.dist(World.center(tx, ty)) - b.dist(World.center(tx, ty)));
+    sorted.forEach((v, i) => this.giveOrder(v, { kind: 'hold', ...spots[Math.min(i, spots.length - 1)] }));
+    this.wandFx((tx + 0.5) * TILE, ty * TILE, 'HOLD');
+    return sorted;
+  }
+  orderAttack(m: Raider): Villager[] {
+    const who = this.recipients();
+    for (const v of who) this.giveOrder(v, { kind: 'attack', target: m });
+    if (who.length) this.wandFx(m.x, m.y - 12, 'ATTACK');
+    return who;
+  }
+  /** F with the wand: the squad shadows the head; pressed again, they hold where they stand. */
+  orderFollow(): Villager[] {
+    const who = this.recipients();
+    const following = who.length > 0 && who.every((v) => v.order?.kind === 'follow');
+    for (const v of who) this.giveOrder(v, following ? { kind: 'hold', ...v.tile } : { kind: 'follow' });
+    if (who.length) this.wandFx(this.player.x, this.player.y - 14, following ? 'HOLD' : 'FOLLOW');
+    return who;
+  }
+  /** Man the wall: the clicked battlement to the nearest fighter, the rest to free connected wall tops nearby. */
+  orderPost(q: TilePos): Villager[] {
+    const who = this.recipients().filter((v) => v.role === 'soldier'); // gnomes can't draw a bow
+    if (!who.length) { this.event('info', 'Only soldiers can take a wall post.'); return []; }
+    const taken = (t: TilePos) => this.villagers().some((o) => o.post?.tx === t.tx && o.post?.ty === t.ty);
+    const tops = [...this.world.defenses.values()].filter((d) => d.kind === 'wall').sort((a, b) => Math.hypot(a.tx - q.tx, a.ty - q.ty) - Math.hypot(b.tx - q.tx, b.ty - q.ty));
+    const sorted = [...who].sort((a, b) => a.dist(World.center(q.tx, q.ty)) - b.dist(World.center(q.tx, q.ty)));
+    const posted: Villager[] = [];
+    for (const v of sorted) {
+      const spot = tops.find((t) => !taken(t) && !posted.some((o) => o.post?.tx === t.tx && o.post?.ty === t.ty) && this.reachableStairs(v, t));
+      if (!spot) break;
+      v.order = null; v.post = spot; v.clearGoal(); this.equipSoldier(v, 'bow'); posted.push(v);
+    }
+    if (!posted.length) this.event('info', 'No free battlement with connected stairs there.', true);
+    else this.wandFx((q.tx + 0.5) * TILE, q.ty * TILE - WALL_HEIGHT, 'POST');
+    return posted;
+  }
+  /** Back to patrol: no order, no post. */
+  release(): void { for (const v of this.recipients()) this.giveOrder(v, null); }
+  /** The wand's pointer: left picks (a click or a marquee), right orders; touch does both with one finger. */
+  private wandDown(ptr: Phaser.Input.Pointer, objs: Phaser.GameObjects.GameObject[]): void {
+    const m = (objs[0]?.getData('agent') as Mover | undefined) ?? null;
+    const touch = document.body.classList.contains('touch');
+    if (ptr.rightButtonDown() || (touch && !(m instanceof Villager && this.commandable(m)))) { this.wandOrder(ptr, m); return; }
+    if (m instanceof Villager && this.commandable(m)) { this.selectSquad([m], (ptr.event as MouseEvent).shiftKey || touch); return; }
+    this.drag = { x0: ptr.worldX, y0: ptr.worldY, x1: ptr.worldX, y1: ptr.worldY };
+  }
+  private wandUp(ptr: Phaser.Input.Pointer): void {
+    const d = this.drag;
+    if (!d) return;
+    this.drag = null;
+    const add = (ptr.event as MouseEvent).shiftKey;
+    if (Math.hypot(d.x1 - d.x0, d.y1 - d.y0) > 6) this.selectBox(d.x0, d.y0, d.x1, d.y1, add);
+    else if (!add) this.clearSquad();
+  }
+  /** What the right button means: a raider = attack, a wall top = post, anywhere else = hold there. */
+  private wandOrder(ptr: { worldX: number; worldY: number }, m: Mover | null): void {
+    if (m instanceof Raider && !m.dead) { this.orderAttack(m); return; }
+    const top = World.toTile(ptr.worldX, ptr.worldY + WALL_HEIGHT);
+    if (this.world.get(top.tx, top.ty)?.defense?.kind === 'wall') { this.orderPost(top); return; }
+    const q = World.toTile(ptr.worldX, ptr.worldY);
+    const spot = !this.world.isBlocked(q.tx, q.ty) ? q : this.world.nearest(ptr.worldX, ptr.worldY, (_t, tx, ty) => !this.world.isBlocked(tx, ty));
+    if (spot) this.orderHold(spot.tx, spot.ty);
+  }
+
   rescueFallenGuards(): void {
     for (const m of this.agents as Mover[]) if (m.elevated && !this.world.get(m.tile.tx, m.tile.ty)?.defense) {
       const q = this.world.nearest(m.x, m.y, (_t, tx, ty) => !this.world.isBlocked(tx, ty));
@@ -1846,7 +1959,7 @@ export class VillageScene extends SimScene {
     const kind = t?.kind;
     const need = (tool: string) => `need the ${tool}`;
     const b = t?.building;
-    if (b && pl.tool !== 'hammer' && pl.tool !== 'sword') return `${this.buildingTitle(b)} — ${this.buildingBlurb(b)}`;
+    if (b && pl.tool !== 'hammer' && pl.tool !== 'sword' && pl.tool !== 'wand') return `${this.buildingTitle(b)} — ${this.buildingBlurb(b)}`;
     switch (pl.tool) {
       case 'bow': return `E: shoot arrow (${this.arrows} left · craft 10 for 2 wood in the barracks)`;
       case 'wall': case 'gate': case 'stairs': {
@@ -1861,6 +1974,11 @@ export class VillageScene extends SimScene {
       case 'pen': {
         const r = this.penReport(pl.penKind), where = t?.pen ? (t.pen === pl.penKind ? 'E: erase' : `E: repaint as ${PEN_NAME[pl.penKind]}`) : `E: paint ${PEN_NAME[pl.penKind]}`;
         return `${where} · F: next pen kind · ${r.kids} training here, ${r.piles || 'nothing'} on the ground`;
+      }
+      case 'wand': {
+        const n = this.squad.length, all = this.fighters().length;
+        if (!all) return 'wand: nobody to command — soldiers and grown gnomes answer it';
+        return `${n ? `${n} picked` : `no one picked — orders go to all ${all}`} · left click / drag: pick fighters · right click: ground = hold there, raider = attack, wall top = archer post · F: follow me`;
       }
       case 'basket': {
         const why = this.tossProblem();

@@ -124,6 +124,8 @@ export const TOWER = {
 
 /** Every kind of building on the map (world.ts re-exports this; the per-kind tables below key on it so a new kind can't be forgotten). */
 export type BuildingKind = 'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern' | 'lair' | 'gnomehouse';
+/** The shaman wand's orders, in tiles: how far a holding squad engages from its spot, how close followers keep to the head, and the ring a squad spreads over when sent somewhere. */
+export const ORDER = { leash: 5, followGap: 2.5, spread: 1 } as const;
 export const COST = { house: 20, barracks: 30, tavern: 50, gnomehouse: 25 } as const;
 export const DEFENSE_COST = { wall: 4, gate: 12, stairs: 10 } as const;
 export const WALL_HEIGHT = 64;
