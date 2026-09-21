@@ -575,6 +575,9 @@ function tileFrames(t: Tile, cropDays: number, dayTime: number, oldDays: number,
     case 'crop': return { ground: F + FLORA.tilled, object: F + cropFrames(t)[cropPhase(t, cropDays, dayTime)] };
     case 'bush': return { ground: grass, object: F + FLORA.bush[wildRipe ? 1 : 0] };
     case 'mushroom': return { ground: grass, object: F + FLORA.mushroom[wildRipe ? 1 : 0] };
+    case 'hazel': return { ground: grass, object: F + FLORA.hazel[wildRipe ? 1 : 0] };
+    case 'garlic': return { ground: grass, object: F + FLORA.garlic[wildRipe ? 1 : 0] };
+    case 'burdock': return { ground: grass, object: F + FLORA.burdock[wildRipe ? 1 : 0] };
     case 'sapling': return { ground: grass, object: F + (t.stage < 2 ? FLORA.stump : t.stage === 2 ? FLORA.sprout : FLORA.sapling) };
     case 'house':
     case 'barracks':

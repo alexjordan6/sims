@@ -52,7 +52,7 @@ export class VillageScene extends SimScene {
   world!: World;
   player!: Player;
   /** the granary, by kind of food; `food` is the total (its setter keeps the old callers working: gains land in wheat, spending drains the fullest kind first) */
-  pantry: Record<FoodKind, number> = { wheat: 0, carrot: 0, tomato: 0, berry: 0, mushroom: 0 };
+  pantry: Record<FoodKind, number> = { wheat: 0, carrot: 0, tomato: 0, berry: 0, mushroom: 0, hazelnut: 0, garlic: 0, burdock: 0 };
   get food(): number { let n = 0; for (const k of FOOD_KINDS) n += this.pantry[k]; return n; }
   set food(v: number) {
     let delta = v - this.food;
@@ -149,6 +149,18 @@ export class VillageScene extends SimScene {
   cropYieldOf(kind: FoodKind): number { return Math.max(1, this.mods.cropYield + FOODS[kind].yield); }
   /** Days a picked bush / mushroom patch takes to bear again. */
   regrowDays(kind: FoodKind): number { return Math.max(1, Math.round(FOODS[kind].days * p.wildRegrowMul)); }
+  /** Units still on a wild plant: the full yield once regrown, less what gnomes have taken; 0 while bare. */
+  wildLeft(t: { kind: string; stage: number; left?: number }): number { const k = WILD_FOOD[t.kind as keyof typeof WILD_FOOD]; return k && this.wildRipe(t) ? t.left ?? FOODS[k].yield : 0; }
+  /** Take up to `n` units off the plant at (tx, ty); when it is bare it starts regrowing. Returns what was taken. */
+  pickWild(tx: number, ty: number, n: number): number {
+    const t = this.world.get(tx, ty);
+    if (!t) return 0;
+    const left = this.wildLeft(t), take = Math.min(n, left);
+    if (take <= 0) return 0;
+    if (take >= left) { t.stage = 0; delete t.left; } else t.left = left - take;
+    this.world.markDirty(tx, ty);
+    return take;
+  }
   wildRipe(t: { kind: string; stage: number }): boolean { const k = WILD_FOOD[t.kind as keyof typeof WILD_FOOD]; return !!k && t.stage >= this.regrowDays(k); }
 
   /** Next raid day; the warlord's day caps the schedule. */
@@ -681,7 +693,7 @@ export class VillageScene extends SimScene {
       case 'crop': { const fk = t.food ?? 'wheat'; html = `<div class="t">${this.isRipe(t) ? 'Ripe' : 'Growing'} ${FOODS[fk].name.toLowerCase()}</div><div class="d">${Math.min(t.stage, this.cropDaysOf(t))}/${this.cropDaysOf(t)} days · yields ${this.cropYieldOf(fk)} · ${FOODS[fk].blurb}</div>`; break; }
       case 'grass': if (lying) html = `<div class="t">On the ground</div><div class="d">${lying} · walk over it (hands for food and wood)</div>`; break;
       case 'tilled': html = `<div class="t">Tilled soil</div><div class="d">${t.food ? `farmers will replant ${FOODS[t.food].name.toLowerCase()}; seeds sow something else` : 'plant with seeds, or a farmer will'}</div>`; break;
-      case 'bush': case 'mushroom': { const fk = WILD_FOOD[t.kind]!; html = `<div class="t">${FOODS[fk].name}${this.wildRipe(t) ? '' : ' (picked)'}</div><div class="d">${this.wildRipe(t) ? `ripe · pick by hand for ${FOODS[fk].yield}` : `regrows in ${this.regrowDays(fk) - t.stage} days`} · ${FOODS[fk].blurb}</div>`; break; }
+      case 'bush': case 'mushroom': case 'hazel': case 'garlic': case 'burdock': { const fk = WILD_FOOD[t.kind]!; html = `<div class="t">${FOODS[fk].name}${this.wildRipe(t) ? '' : ' (picked)'}</div><div class="d">${this.wildRipe(t) ? `ripe · ${this.wildLeft(t)} left · pick by hand, or the gnomes will` : `regrows in ${this.regrowDays(fk) - t.stage} days`} · ${FOODS[fk].blurb}</div>`; break; }
       case 'tree': {
         const old = this.isOldGrowth(t), grove = this.world.groveSize(tx, ty);
         const left = this.oldGrowthDays - t.stage;
@@ -761,15 +773,15 @@ export class VillageScene extends SimScene {
       const tx = i % COLS, ty = (i / COLS) | 0;
       if (t.kind === 'sapling') {
         if (++t.stage >= this.saplingDays(tx, ty)) this.world.set(tx, ty, 'tree'); else this.world.dirty.add(i);
-      } else if (t.kind === 'bush' || t.kind === 'mushroom') {
+      } else if (WILD_FOOD[t.kind]) {
         if (++t.stage === this.regrowDays(WILD_FOOD[t.kind]!)) this.world.dirty.add(i); // bears again
       } else if (t.kind === 'tree') {
         if (++t.stage === this.oldGrowthDays) this.world.dirty.add(i); // grows tall
-        // old growth shelters berries and mushrooms
+        // old growth shelters berries, mushrooms and hazels
         if (t.stage >= this.oldGrowthDays && this.rng.chance(p.wildSprout)) {
           const [dx, dy] = this.rng.pick([[1, 0], [-1, 0], [0, 1], [0, -1]]);
           const n = this.world.get(tx + dx, ty + dy);
-          if (n?.kind === 'grass' && !n.trail && !this.nearBuilding(tx + dx, ty + dy, 2)) this.world.set(tx + dx, ty + dy, this.rng.chance(0.5) ? 'bush' : 'mushroom').stage = 0;
+          if (n?.kind === 'grass' && !n.trail && !this.nearBuilding(tx + dx, ty + dy, 2)) { const roll = this.rng.range(0, 1); this.world.set(tx + dx, ty + dy, roll < 0.4 ? 'bush' : roll < 0.75 ? 'mushroom' : 'hazel').stage = 0; }
         }
         if (this.rng.chance(this.seedChance(tx, ty))) {
           const [dx, dy] = this.rng.pick([[1, 0], [-1, 0], [0, 1], [0, -1]]);
@@ -1576,9 +1588,9 @@ export class VillageScene extends SimScene {
   }
   // ---- the shaman wand: a squad and its orders ------------------------------------------------
 
-  /** Everyone the wand can command: grown soldiers and gnomes on their feet. */
+  /** Everyone the wand can command: grown soldiers on their feet (gnomes forage; they don't fight). */
   fighters(): Villager[] { return this.villagers().filter((v) => this.commandable(v)); }
-  commandable(v: Villager): boolean { return !v.dead && v.isAdult && (v.role === 'soldier' || v.role === 'gnome'); }
+  commandable(v: Villager): boolean { return !v.dead && v.isAdult && v.role === 'soldier'; }
   /** Who an order goes to: the squad, or everyone when nobody is picked. */
   recipients(): Villager[] { return this.squad.length ? this.squad.filter((v) => this.commandable(v)) : this.fighters(); }
   selectSquad(list: Villager[], add = false): void {
@@ -1634,8 +1646,8 @@ export class VillageScene extends SimScene {
   }
   /** Man the wall: the clicked battlement to the nearest fighter, the rest to free connected wall tops nearby. */
   orderPost(q: TilePos): Villager[] {
-    const who = this.recipients().filter((v) => v.role === 'soldier'); // gnomes can't draw a bow
-    if (!who.length) { this.event('info', 'Only soldiers can take a wall post.'); return []; }
+    const who = this.recipients();
+    if (!who.length) return [];
     const taken = (t: TilePos) => this.villagers().some((o) => o.post?.tx === t.tx && o.post?.ty === t.ty);
     const tops = [...this.world.defenses.values()].filter((d) => d.kind === 'wall').sort((a, b) => Math.hypot(a.tx - q.tx, a.ty - q.ty) - Math.hypot(b.tx - q.tx, b.ty - q.ty));
     const sorted = [...who].sort((a, b) => a.dist(World.center(q.tx, q.ty)) - b.dist(World.center(q.tx, q.ty)));
@@ -1944,8 +1956,8 @@ export class VillageScene extends SimScene {
           if (!this.wildRipe(t)) { this.event('food', `Nothing to pick yet — ${FOODS[kind].name.toLowerCase()} in ${this.regrowDays(kind) - t.stage} day${this.regrowDays(kind) - t.stage === 1 ? '' : 's'}`); return; }
           const why = this.loadProblem('food', kind);
           if (why) { this.event('food', why + '.'); return; }
-          t.stage = 0; this.world.markDirty(tx, ty);
-          this.player.pickUp('food', FOODS[kind].yield, kind); this.fx.push({ kind: 'tool', tool: 'seed', tx, ty });
+          const got = this.pickWild(tx, ty, this.wildLeft(t));
+          this.player.pickUp('food', got, kind); this.fx.push({ kind: 'tool', tool: 'seed', tx, ty });
         }
         return;
     }
@@ -1987,8 +1999,8 @@ export class VillageScene extends SimScene {
       }
       case 'wand': {
         const n = this.squad.length, all = this.fighters().length;
-        if (!all) return 'wand: nobody to command — soldiers and grown gnomes answer it';
-        return `${n ? `${n} picked` : `no one picked — orders go to all ${all}`} · left click / drag: pick fighters · right click: ground = hold there, raider = attack, wall top = archer post · F: follow me`;
+        if (!all) return 'wand: nobody to command — grown soldiers answer it';
+        return `${n ? `${n} picked` : `no one picked — orders go to all ${all}`} · left click / drag: pick soldiers · right click: ground = hold there, raider = attack, wall top = archer post · F: follow me`;
       }
       case 'basket': {
         const why = this.tossProblem();
@@ -2037,7 +2049,7 @@ export class VillageScene extends SimScene {
         if (t?.defense?.kind === 'stairs' || this.world.get(pl.tile.tx, pl.tile.ty)?.kind === 'stairs') return `E: ${pl.elevated ? 'descend' : 'climb'} stairs`;
         if (t?.defense?.kind === 'gate') return `E: ${t.defense.open ? 'close' : 'open'} gate`;
         if (kind === 'crop') { const fk = t!.food ?? 'wheat', why = this.loadProblem('food', fk); return this.isRipe(t!) ? (why ?? `E: harvest ${FOODS[fk].name.toLowerCase()} (${this.cropYieldOf(fk)})${pl.load ? ` · carrying ${pl.load.n}/${HAUL.player.food} ${FOODS[pl.load.food ?? 'wheat'].one}` : ''}`) : `${FOODS[fk].name.toLowerCase()} growing (${t!.stage}/${this.cropDaysOf(t!)} days)`; }
-        if (kind === 'bush' || kind === 'mushroom') { const fk = WILD_FOOD[kind]!, why = this.loadProblem('food', fk); return this.wildRipe(t!) ? (why ?? `E: pick ${FOODS[fk].name.toLowerCase()} (${FOODS[fk].yield} · ${FOODS[fk].blurb})`) : `${FOODS[fk].name.toLowerCase()} picked — back in ${this.regrowDays(fk) - t!.stage} day${this.regrowDays(fk) - t!.stage === 1 ? '' : 's'}`; }
+        if (kind && WILD_FOOD[kind]) { const fk = WILD_FOOD[kind]!, why = this.loadProblem('food', fk); return this.wildRipe(t!) ? (why ?? `E: pick ${FOODS[fk].name.toLowerCase()} (${this.wildLeft(t!)} · ${FOODS[fk].blurb})`) : `${FOODS[fk].name.toLowerCase()} picked — back in ${this.regrowDays(fk) - t!.stage} day${this.regrowDays(fk) - t!.stage === 1 ? '' : 's'}`; }
         if (kind === 'grass') return `grass — ${need('hoe')} to till`;
         if (kind === 'tilled') return `tilled — ${need('seeds')}`;
         if (kind === 'tree') return `tree — ${need('axe')}`;

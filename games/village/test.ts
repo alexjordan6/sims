@@ -1,6 +1,6 @@
 import './main';
 import type { VillageScene } from './main';
-import { World, doorstep, hearthCost, BUILDINGS, type BuildingKind } from './world';
+import { World, WILD_FOOD, doorstep, hearthCost, BUILDINGS, type BuildingKind } from './world';
 import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, Wrecker, waveComposition } from './enemies';
@@ -424,7 +424,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     const eater = s.spawn(new Villager(World.center(123, 97).x, World.center(123, 97).y, s.world.houses[0], 'kid', 1, 'Eater', s.mods)); eater.pen = 'farmer'; eater.mealAt = 0; s.day = 9;
     const careWas = eater.care; step(s, 8);
     assert(eater.diet.carrot > 0 && eater.ateDay === 9, `bites go on the diet (${JSON.stringify(eater.diet)})`);
-    eater.update = () => {}; eater.diet = { wheat: 0, carrot: 0, tomato: 0, berry: 0, mushroom: 0 };
+    eater.update = () => {}; eater.diet = { wheat: 0, carrot: 0, tomato: 0, berry: 0, mushroom: 0, hazelnut: 0, garlic: 0, burdock: 0 };
     eater.eatBite('mushroom', 0.5); eater.eatBite('mushroom', 0.5); assert(eater.care === careWas + 1, 'a mushroom meal is worth one care point');
     eater.diet.carrot = p.dietFull; eater.diet.wheat = p.dietFull / 2;
     const live = eater.dietNow(); assert(Math.abs(live.speed - DIET_CAP.speed * p.dietMul) < 1e-9 && Math.abs(live.hp - DIET_CAP.hp * p.dietMul / 2) < 1e-9 && live.work === 0, `the diet projects its bonuses (${JSON.stringify(live)})`);
@@ -527,13 +527,28 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     sprout.age = s.adultAge; s.tickAges(0);
     assert(sprout.role === 'gnome' && sprout.gnome && sprout.home === den && sprout.isAdult, 'a gnome child comes of age a gnome and stays under the toadstool');
     const gfoe = s.spawn(new Raider(...Object.values(World.center(128, 102)) as [number, number])); gfoe.update = () => {};
-    step(s, 1.5); const fought = gma.task === 'fighting' || gpa.task === 'fighting' || sprout.task === 'fighting';
-    step(s, 4);
-    assert(fought && gfoe.hp < gfoe.maxHp, `grown gnomes go for a raider in sight (${Math.max(0, gfoe.hp)}/${gfoe.maxHp} hp left)`);
+    step(s, 1);
+    assert([gma, gpa, sprout].some((v) => v.task === 'fleeing' || v.hidden), 'grown gnomes run home from a raider instead of fighting');
     gfoe.dead = true; s.removeDead(); step(s, 1);
-    assert(gma.task === 'pottering about' || gma.task === 'fighting', 'with nothing to fight a gnome potters about the cottage');
+    // foraging: a grown gnome picks one unit off the nearest wild plant, carries it to the granary and goes again
+    for (const v of [gma, gpa, sprout]) { v.hidden = false; v.indoors = null; }
+    for (const v of [gpa, sprout]) v.update = () => {}; // one forager, so the plant isn't stripped before the first find lands
+    for (const q of [...s.world.find((t) => !!WILD_FOOD[t.kind])]) s.world.set(q.tx, q.ty, 'grass');
+    const hazel = s.world.set(128, 100, 'hazel'); hazel.stage = 99;
+    assert(s.wildLeft(hazel) === FOODS.hazelnut.yield && s.world.granary, 'a regrown hazel carries its full yield');
+    const nutsWas = s.pantry.hazelnut;
+    let carried = false;
+    for (let i = 0; i < 40 && s.pantry.hazelnut === nutsWas; i++) { step(s, 1); if (gma.load?.kind === 'food' && gma.load.food === 'hazelnut' && gma.load.n === 1) carried = true; }
+    assert(carried, 'a gnome carries exactly one hazelnut at a time');
+    assert(s.pantry.hazelnut === nutsWas + 1 && s.wildLeft(hazel) === FOODS.hazelnut.yield - 1 && hazel.stage >= 99, `the find reaches the granary and the plant keeps the rest (${s.wildLeft(hazel)} left)`);
+    gma.update = () => {};
+    const rest = s.wildLeft(hazel); Object.assign(s.player, World.center(127, 100)); s.player.tool = 'hands'; s.player.facing = { x: 1, y: 0 }; s.player.load = null; s.interact(); const got = s.player.load as { food?: string; n: number } | null;
+    assert(got?.food === 'hazelnut' && got.n === rest && hazel.stage === 0 && hazel.left === undefined, `hands take everything left (${rest}) and the plant starts regrowing`);
+    for (let d = 0; d < s.regrowDays('hazelnut'); d++) { s.day++; s.newDay(); }
+    assert(s.wildLeft(hazel) === FOODS.hazelnut.yield, 'a bare plant regrows to its full yield');
     // every child can starve: a gnome child with nothing thrown by the cottage, and an infant nobody fed can nurse
     for (const it of [...s.world.items]) s.world.removeItem(it);
+    for (const v of s.villagers()) if (v.role === 'infant') v.dead = true; s.removeDead(); den.firewood = 5; den.warm = true; // an empty, warm nursery
     den.nextBirth = 0; s.food = 100; assert(births(s, 40) > 0, 'another gnome infant for the nursery');
     const gtot = s.villagers().find((v) => v.role === 'infant')!; gtot.age = p.infantDays; s.tickAges(0); gtot.ateDay = s.day - 5;
     s.day++; s.newDay(); assert(gtot.hungerDays === 1 && !gtot.dead && gtot.task !== 'eating', 'a gnome child with nothing by the cottage goes hungry');
@@ -552,10 +567,10 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     const wf = s.spawn(new Villager(...Object.values(World.center(124, 100)) as [number, number], s.world.houses[0], 'farmer', 20, 'Wand farmer', s.mods));
     Object.assign(wg, World.center(125, 100));
     s.selectBox(121 * 16, 99 * 16, 126 * 16, 101 * 16);
-    assert(s.squad.length === 3 && s.squad.includes(wa) && s.squad.includes(wb) && s.squad.includes(wg) && !s.squad.includes(wf), `a box picks soldiers and gnomes, never a farmer (${s.squad.map((v) => v.name).join(', ')})`);
+    assert(s.squad.length === 2 && s.squad.includes(wa) && s.squad.includes(wb) && !s.squad.includes(wg) && !s.squad.includes(wf), `a box picks soldiers, never a farmer or a gnome (${s.squad.map((v) => v.name).join(', ')})`);
     s.orderHold(128, 98);
     const spots = new Set(s.squad.map((v) => v.order && v.order.kind === 'hold' ? `${v.order.tx},${v.order.ty}` : '?'));
-    assert(spots.size === 3 && [...spots].every((k) => Math.max(Math.abs(+k.split(',')[0] - 128), Math.abs(+k.split(',')[1] - 98)) <= 1), `a hold order spreads the squad over the spot (${[...spots].join(' ')})`);
+    assert(spots.size === 2 && [...spots].every((k) => Math.max(Math.abs(+k.split(',')[0] - 128), Math.abs(+k.split(',')[1] - 98)) <= 1), `a hold order spreads the squad over the spot (${[...spots].join(' ')})`);
     step(s, 8);
     assert(s.squad.every((v) => v.task === 'holding position' && v.order?.kind === 'hold' && v.tile.tx === v.order.tx && v.tile.ty === v.order.ty), `the squad walks there and holds (${s.squad.map((v) => v.task).join(', ')})`);
     const wfar = s.spawn(new Raider(...Object.values(World.center(121, 103)) as [number, number])); wfar.update = () => {}; wfar.hp = wfar.maxHp = 9999; // (the starting barracks tower would pick off a plain raider)
@@ -574,7 +589,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(s.squad.every((v) => v.order?.kind === 'follow' && v.dist(s.player) <= (ORDER.followGap + 1.5) * 16), `follow me keeps the squad at the head's heels (${s.squad.map((v) => Math.round(v.dist(s.player) / 16)).join(', ')} tiles)`);
     s.orderFollow(); assert(s.squad.every((v) => v.order?.kind === 'hold'), 'F again: they hold where they stand');
     const posted = s.orderPost({ tx: 124, ty: 95 });
-    assert(posted.length === 2 && posted.every((v) => v.post && !v.order && v.weapon === 'bow') && wg.order?.kind === 'hold', 'a wall top posts the soldiers (bows out) and leaves the gnome holding');
+    assert(posted.length === 2 && posted.every((v) => v.post && !v.order && v.weapon === 'bow') && !wg.order, 'a wall top posts the soldiers (bows out); the gnome was never asked');
     s.release(); assert(s.squad.every((v) => !v.order && !v.post), 'release: no orders, no posts');
     s.clearSquad(); s.orderHold(126, 99);
     assert(s.fighters().every((v) => v.order?.kind === 'hold'), 'with nobody picked an order goes to every fighter');
@@ -587,6 +602,8 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     step(s, 12);
     assert(sa.tile.tx === 130 && sb.tile.tx === 120, `soldiers walking through each other and the head both arrive (${sa.tile.tx},${sa.tile.ty} · ${sb.tile.tx},${sb.tile.ty})`);
     s.release(); s.clearSquad();
+    s = fresh();
+    assert(['hazel', 'garlic', 'burdock'].every((k) => [...s.world.find((t) => t.kind === k)].length > 0), 'a new map grows hazel, wild garlic and burdock');
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;
   } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); }

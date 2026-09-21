@@ -1,5 +1,5 @@
 import type { Agent } from '@shared/index';
-import { World, doorstep, buildingCenter, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
+import { World, WILD_FOOD, doorstep, buildingCenter, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
 import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, CALLINGS, ORDER, GNOME_YARD, ITEM, MASS, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
 import type { Mods } from './meta';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle } from './characters';
@@ -260,7 +260,7 @@ export class Villager extends Mover {
   ateDay = 0;
   mealAt = 0;
   /** what they ate as a child, by kind, and the bonuses it froze into at coming of age */
-  diet: Record<FoodKind, number> = { wheat: 0, carrot: 0, tomato: 0, berry: 0, mushroom: 0 };
+  diet: Record<FoodKind, number> = { wheat: 0, carrot: 0, tomato: 0, berry: 0, mushroom: 0, hazelnut: 0, garlic: 0, burdock: 0 };
   dietBonus: Record<Exclude<DietStat, 'care'>, number> = { hp: 0, speed: 0, work: 0, dmg: 0 };
   /** mushrooms counted toward today's care point (one per meal) */
   private shroomMeal = false;
@@ -405,15 +405,16 @@ export class Villager extends Mover {
         return;
       }
       this.task = 'hiding indoors';
-      if (!s.raidActive || this.role === 'soldier' || this.role === 'gnome') this.unhide(s);
+      if (!s.raidActive || this.role === 'soldier') this.unhide(s);
       return;
     }
     switch (this.role) {
       case 'infant': return;
       case 'kid': if (this.pen) this.penUpdate(dt, s); else this.kidUpdate(dt, s); break;
-      case 'farmer': this.civilUpdate(dt, s, true); break;
-      case 'woodcutter': this.civilUpdate(dt, s, this.helpingFarm(s)); break;
-      case 'soldier': case 'gnome': this.soldierUpdate(dt, s); break;
+      case 'farmer': this.civilUpdate(dt, s, 'farm'); break;
+      case 'woodcutter': this.civilUpdate(dt, s, this.helpingFarm(s) ? 'farm' : 'wood'); break;
+      case 'gnome': this.civilUpdate(dt, s, 'forage'); break;
+      case 'soldier': this.soldierUpdate(dt, s); break;
     }
   }
 
@@ -557,13 +558,18 @@ export class Villager extends Mover {
   private unreachable = new Map<number, number>();
   private failedPicks = 0;
 
-  private civilUpdate(dt: number, s: VillageScene, farmer: boolean): void {
+  /** How much of a kind these arms hold: a gnome brings home one find at a time. */
+  haul(kind: LoadKind): number { return this.gnome ? 1 : Math.round(HAUL.villager[kind] * p.haulMul); }
+
+  /** Farmers, woodcutters and foraging gnomes: find a job tile, walk there, work it, carry the take home. */
+  private civilUpdate(dt: number, s: VillageScene, job: 'farm' | 'wood' | 'forage'): void {
+    const farmer = job === 'farm';
     if (s.nearestRaider(this.x, this.y, 90)) { this.task = 'fleeing'; this.delivering = false; this.goHome(s, dt); return; }
 
     if (this.workTimer > 0) {
       this.workTimer -= dt;
       this.vx = this.vy = 0;
-      if (this.workTimer <= 0 && this.goal) this.finishWork(s, farmer);
+      if (this.workTimer <= 0 && this.goal) this.finishWork(s, job);
       return;
     }
 
@@ -574,37 +580,39 @@ export class Villager extends Mover {
       this.thinkTimer = 1;
       const w = s.world;
       // arms full: take it in before looking for more work
-      if (this.load && this.load.n >= Math.round(HAUL.villager[this.load.kind] * p.haulMul)) { this.delivering = true; this.deliver(dt, s); return; }
+      if (this.load && this.load.n >= this.haul(this.load.kind)) { this.delivering = true; this.deliver(dt, s); return; }
       const ok = (tx: number, ty: number) => (this.unreachable.get(ty * w.cols + tx) ?? 0) <= s.simTime;
-      const job = farmer
+      const spot = job === 'forage'
+        ? w.nearest(this.x, this.y, (t, tx, ty) => !!WILD_FOOD[t.kind] && s.wildLeft(t) > 0 && (!this.load || this.load.food === WILD_FOOD[t.kind]) && ok(tx, ty))
+        : farmer
         ? (this.load?.kind === 'food' ? w.nearest(this.x, this.y, (t, tx, ty) => t.kind === 'crop' && s.isRipe(t) && t.food === this.load!.food && ok(tx, ty)) : null) ??
           w.nearest(this.x, this.y, (t, tx, ty) => t.kind === 'crop' && s.isRipe(t) && ok(tx, ty)) ??
           w.nearest(this.x, this.y, (t, tx, ty) => t.kind === 'tilled' && ok(tx, ty))
         : s.mods.ignoreReserve || w.treeCount > TREE_RESERVE ? this.pickTree(s, ok) : null;
-      if (job) {
-        this.setGoal(s, job.tx, job.ty);
+      if (spot) {
+        this.setGoal(s, spot.tx, spot.ty);
         // no way there (walled in, or a tree buried in its grove): remember that for a while and pick again next
         // think — bringing the armful in first, so nobody stands about "looking for a tree" with wood on their back
-        if (!this.path.length && !this.adjacentTo(job)) {
-          this.unreachable.set(job.ty * w.cols + job.tx, s.simTime + 60); this.clearGoal();
-          if (++this.failedPicks >= 5) { this.failedPicks = 0; this.thinkTimer = 4; this.wanderNear(s, this.home); this.task = farmer ? 'no way to the field' : 'no way to the trees'; }
+        if (!this.path.length && !this.adjacentTo(spot)) {
+          this.unreachable.set(spot.ty * w.cols + spot.tx, s.simTime + 60); this.clearGoal();
+          if (++this.failedPicks >= 5) { this.failedPicks = 0; this.thinkTimer = 4; this.wanderNear(s, this.home); this.task = job === 'forage' ? 'no way to the plants' : farmer ? 'no way to the field' : 'no way to the trees'; }
           else if (this.load) { this.delivering = true; this.deliver(dt, s); }
           return;
         }
         this.failedPicks = 0;
-        this.task = farmer ? (this.role === 'woodcutter' ? 'helping in the field' : 'heading to the field') : 'looking for a tree';
+        this.task = job === 'forage' ? 'off foraging' : farmer ? (this.role === 'woodcutter' ? 'helping in the field' : 'heading to the field') : 'looking for a tree';
       }
       else if (this.load) { this.delivering = true; this.deliver(dt, s); return; } // nothing more to do: bring in what's carried
-      else { this.wanderNear(s, this.home); this.task = farmer ? 'no crops to tend' : 'leaving the last trees to regrow'; }
+      else { this.wanderNear(s, this.home); this.task = job === 'forage' ? 'nothing wild to pick' : farmer ? 'no crops to tend' : 'leaving the last trees to regrow'; }
       return;
     }
 
     if (this.goal && this.followPath(dt) && this.goal) { // (followPath drops the goal when the way is blocked)
       const t = s.world.get(this.goal.tx, this.goal.ty);
-      const isJob = farmer ? t?.kind === 'crop' || t?.kind === 'tilled' : t?.kind === 'tree';
+      const isJob = job === 'forage' ? !!t && !!WILD_FOOD[t.kind] && s.wildLeft(t) > 0 : farmer ? t?.kind === 'crop' || t?.kind === 'tilled' : t?.kind === 'tree';
       if (isJob && this.adjacentTo(this.goal)) {
-        this.workTimer = (farmer ? p.farmerWork : p.cutterWork) / (farmer ? s.mods.farmerSpeedMul : s.mods.cutterSpeedMul) / this.workMul;
-        this.task = farmer ? (t!.kind === 'crop' ? 'harvesting' : 'planting') : 'chopping';
+        this.workTimer = job === 'forage' ? p.forageWork / this.workMul : (farmer ? p.farmerWork : p.cutterWork) / (farmer ? s.mods.farmerSpeedMul : s.mods.cutterSpeedMul) / this.workMul;
+        this.task = job === 'forage' ? 'foraging' : farmer ? (t!.kind === 'crop' ? 'harvesting' : 'planting') : 'chopping';
       } else this.clearGoal();
     }
   }
@@ -633,7 +641,7 @@ export class Villager extends Mover {
     if (!b) { this.delivering = false; this.clearGoal(); return; }
     const door = doorstep(b);
     this.setGoal(s, door.tx, door.ty);
-    this.task = hearth ? `bringing firewood to the ${BUILDINGS[hearth.kind].name.toLowerCase()}` : load.kind === 'wood' ? 'hauling logs to the woodyard' : 'carrying the harvest to the granary';
+    this.task = hearth ? `bringing firewood to the ${BUILDINGS[hearth.kind].name.toLowerCase()}` : load.kind === 'wood' ? 'hauling logs to the woodyard' : this.gnome ? 'bringing the find to the granary' : 'carrying the harvest to the granary';
     const arrived = this.followPath(dt);
     if (arrived) {
       const there = this.adjacentTo(door) || this.dist(World.center(door.tx, door.ty)) < TILE;
@@ -648,10 +656,16 @@ export class Villager extends Mover {
   /** the hearth this armful is promised to (so a pile another cutter just filled doesn't send us elsewhere mid-walk) */
   private firewoodFor: Building | null = null;
 
-  private finishWork(s: VillageScene, farmer: boolean): void {
+  private finishWork(s: VillageScene, job: 'farm' | 'wood' | 'forage'): void {
+    const farmer = job === 'farm';
     const g = this.goal!;
     const t = s.world.get(g.tx, g.ty)!;
-    if (farmer && t.kind === 'crop' && s.isRipe(t)) {
+    if (job === 'forage') {
+      // one unit off the plant; the rest stays for the next trip (or the head's hands)
+      const kind = WILD_FOOD[t.kind];
+      if (kind && s.wildLeft(t) > 0 && s.food < s.foodCap && this.canCarry('food', kind) && s.pickWild(g.tx, g.ty, 1)) this.pickUp('food', 1, kind);
+    }
+    else if (farmer && t.kind === 'crop' && s.isRipe(t)) {
       // leave ripe crops standing while the granary is full or the arms hold wood / another crop
       const kind = t.food ?? 'wheat';
       if (s.food < s.foodCap && this.canCarry('food', kind)) {
@@ -667,9 +681,8 @@ export class Villager extends Mover {
 
   // --- soldiers -------------------------------------------------------------
 
-  /** Soldiers and grown gnomes: hunt whatever is in sight, otherwise patrol (a soldier round the barracks, a gnome round its cottage). Only soldiers take wall posts, bows, forged gear and barracks perks. */
+  /** Soldiers: hunt whatever is in sight (or whatever the wand says), otherwise patrol round the barracks. */
   private soldierUpdate(dt: number, s: VillageScene): void {
-    const gnome = this.role === 'gnome';
     if (this.post && !s.world.get(this.post.tx, this.post.ty)?.defense) { this.post = null; this.clearGoal(); }
     if (this.post && !this.elevated) {
       if (!this.stairsGoal || !s.world.get(this.stairsGoal.tx, this.stairsGoal.ty)?.defense) this.stairsGoal = s.reachableStairs(this, this.post);
@@ -695,15 +708,13 @@ export class Villager extends Mover {
       this.target = order?.kind === 'attack' ? (order.target as Raider)
         : order?.kind === 'hold' ? s.bestTarget((order.tx + 0.5) * TILE, (order.ty + 0.5) * TILE, leash)
         : order?.kind === 'follow' ? s.bestTarget(s.player.x, s.player.y, leash)
-        : s.bestTarget(this.x, this.y, !gnome && this.weapon === 'bow' ? 190 : 130);
+        : s.bestTarget(this.x, this.y, this.weapon === 'bow' ? 190 : 130);
     }
     if (this.target && !this.target.dead) {
       this.task = 'fighting';
       if (this.attackTick(dt, s)) return;
-      const dmg = gnome
-        ? p.gnomeDmg * (this.trait === 'brave' ? 1.2 : 1) * (1 + this.dietBonus.dmg)
-        : p.soldierDmg * weaponMul(this.weapons, this.weapon === 'bow' ? 'bow' : 'melee') * s.mods.soldierDmgMul * (s.world.barracksLevel >= 3 ? 1.2 : 1) * (this.skilled ? 1.15 : 1) * (this.trait === 'brave' ? 1.2 : 1) * (1 + this.dietBonus.dmg);
-      if (!gnome && this.weapon === 'bow') {
+      const dmg = p.soldierDmg * weaponMul(this.weapons, this.weapon === 'bow' ? 'bow' : 'melee') * s.mods.soldierDmgMul * (s.world.barracksLevel >= 3 ? 1.2 : 1) * (this.skilled ? 1.15 : 1) * (this.trait === 'brave' ? 1.2 : 1) * (1 + this.dietBonus.dmg);
+      if (this.weapon === 'bow') {
         const range = this.elevated ? 210 : 160;
         if (this.dist(this.target) <= range && s.world.lineClear(this, this.target, this.elevated)) {
           this.vx = this.vy = 0; this.task = this.post ? 'archer holding the wall' : 'firing arrows';
@@ -731,14 +742,14 @@ export class Villager extends Mover {
       else { this.vx = this.vy = 0; this.clearGoal(); }
       this.task = 'following you'; return;
     }
-    this.task = gnome ? 'pottering about' : 'on patrol';
-    // a cold barracks mends nobody (and no barracks mends a gnome)
-    const regen = !gnome && s.world.barracks.some((b) => b.warm) ? s.mods.soldierRegen + (s.world.barracksLevel >= 3 ? 1 : 0) : 0;
+    this.task = 'on patrol';
+    // a cold barracks mends nobody
+    const regen = s.world.barracks.some((b) => b.warm) ? s.mods.soldierRegen + (s.world.barracksLevel >= 3 ? 1 : 0) : 0;
     if (regen && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + regen * dt);
     this.thinkTimer -= dt;
     if (this.followPath(dt) && this.thinkTimer <= 0) {
       this.thinkTimer = s.rng.range(3, 7);
-      const post = buildingCenter(!gnome && s.world.barracks.length ? s.rng.pick(s.world.barracks) : this.home);
+      const post = buildingCenter(s.world.barracks.length ? s.rng.pick(s.world.barracks) : this.home);
       // a bigger garrison patrols a wider ring, so they aren't all shoulder to shoulder against the wall
       this.wanderNear(s, { tx: Math.round(post.tx), ty: Math.round(post.ty) }, 3 + Math.floor(s.fighters().length / 4));
     }

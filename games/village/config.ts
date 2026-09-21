@@ -35,6 +35,7 @@ export const p = live(
     playerTreeYield: [D.playerTreeYield, 0, 12, 1, 'What the head\'s own axe brings in per tree. 0 = the axe only clears ground.'],
     cutterWork: [D.cutterWork, 0.5, 8, 0.1, 'Seconds a woodcutter spends per chop.'],
     farmerWork: [D.farmerWork, 0.3, 5, 0.1, 'Seconds a farmer spends per field action (till, plant, harvest).'],
+    forageWork: [D.forageWork, 0.3, 8, 0.1, 'Seconds a gnome spends picking one unit from a wild plant.'],
     haulMul: [D.haulMul, 0.25, 3, 0.25, 'Villagers\' armfuls (16 wood / 12 food) scale by this. Bigger arms = fewer trips.'],
     cropYield: [D.cropYield, 1, 20, 1, 'Food per harvested crop before boons. Applies at NEW VILLAGE.'],
     cropDays: [D.cropDays, 1, 10, 1, 'Days from seed to harvest.'],
@@ -81,7 +82,6 @@ export const p = live(
     soldierHp: [D.soldierHp, 5, 100, 1, 'Soldiers\' base HP before barracks level, stars and armor.'],
     soldierDmg: [D.soldierDmg, 1, 30, 1, 'Soldiers\' base damage at a ×1 weapon.'],
     gnomeHp: [D.gnomeHp, 5, 100, 1, 'Grown gnomes\' base HP before stars and diet. Applies to gnomes coming of age.'],
-    gnomeDmg: [D.gnomeDmg, 1, 30, 1, 'Damage per blow from a grown gnome (no weapon tiers, no barracks bonus).'],
     gnomeSpeed: [D.gnomeSpeed, 10, 80, 1, 'Walking speed of a grown gnome (soldiers move at 45).'],
     weaponTier0Mul: [D.weaponTier0Mul, 0.1, 1, 0.05, 'Damage multiplier of the club and hunting bow everyone starts with. 1 = no weapon progression.'],
     forgeCostMul: [D.forgeCostMul, 0, 3, 0.25, 'Wood and scrap for forging armor and weapons scale by this.'],
@@ -207,8 +207,8 @@ export const GNOME_YARD = 4;
 
 // ---- food and diet --------------------------------------------------------------------------
 /** Every kind of food. Crops are sown on soil; wild food grows in the woods and is picked by hand. What a child eats decides the adult. */
-export type FoodKind = 'wheat' | 'carrot' | 'tomato' | 'berry' | 'mushroom';
-export const FOOD_KINDS: readonly FoodKind[] = ['wheat', 'carrot', 'tomato', 'berry', 'mushroom'];
+export type FoodKind = 'wheat' | 'carrot' | 'tomato' | 'berry' | 'mushroom' | 'hazelnut' | 'garlic' | 'burdock';
+export const FOOD_KINDS: readonly FoodKind[] = ['wheat', 'carrot', 'tomato', 'berry', 'mushroom', 'hazelnut', 'garlic', 'burdock'];
 export const CROP_KINDS: readonly FoodKind[] = ['wheat', 'carrot', 'tomato'];
 export type DietStat = 'hp' | 'speed' | 'work' | 'dmg' | 'care';
 export interface Food {
@@ -229,6 +229,10 @@ export const FOODS: Record<FoodKind, Food> = {
   tomato: { name: 'Tomatoes', one: 'tomato', source: 'crop', days: 1, yield: 1, stat: 'work', blurb: 'tireless workers', colour: '#c9564a' },
   berry: { name: 'Berries', one: 'berry', source: 'wild', days: 3, yield: 3, stat: 'dmg', blurb: 'fierce: soldiers hit harder', colour: '#8c4ab0' },
   mushroom: { name: 'Mushrooms', one: 'mushroom', source: 'wild', days: 4, yield: 2, stat: 'care', blurb: 'a care point with every meal', colour: '#a8765a' },
+  // what the gnomes forage: hazel at the wood's edge, garlic in the meadow, burdock along the trails
+  hazelnut: { name: 'Hazelnuts', one: 'hazelnut', source: 'wild', days: 5, yield: 3, stat: 'hp', blurb: 'hearty: +HP for life', colour: '#8a5a2a' },
+  garlic: { name: 'Wild garlic', one: 'garlic', source: 'wild', days: 3, yield: 2, stat: 'work', blurb: 'tireless workers', colour: '#e8e0d0' },
+  burdock: { name: 'Burdock', one: 'burdock root', source: 'wild', days: 4, yield: 2, stat: 'speed', blurb: 'quick on their feet', colour: '#7a5230' },
 };
 /** the most a full diet of one kind adds to its stat (× p.dietMul) */
 export const DIET_CAP: Record<Exclude<DietStat, 'care'>, number> = { hp: 0.25, speed: 0.15, work: 0.25, dmg: 0.25 };

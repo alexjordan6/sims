@@ -5,8 +5,8 @@ import { tickItem, hop, type Item, type ItemKind } from './items';
 
 export type DefenseKind = 'wall' | 'gate' | 'stairs';
 export interface Defense extends TilePos { kind: DefenseKind; hp: number; maxHp: number; open: boolean }
-/** 'bush' and 'mushroom' are wild food: they stay put, get picked by hand and regrow (see Tile.stage) */
-export type TileKind = 'grass' | 'tree' | 'sapling' | 'tilled' | 'crop' | 'bush' | 'mushroom' | BuildingKind | DefenseKind;
+/** 'bush', 'mushroom', 'hazel', 'garlic' and 'burdock' are wild food: they stay put, get picked (by hand, or unit by unit by gnomes) and regrow (see Tile.stage / Tile.left) */
+export type TileKind = 'grass' | 'tree' | 'sapling' | 'tilled' | 'crop' | 'bush' | 'mushroom' | 'hazel' | 'garlic' | 'burdock' | BuildingKind | DefenseKind;
 
 /** Footprint per building kind; (tx, ty) is the top-left, the door sits on the bottom row at `door`. */
 export const BUILDINGS: Record<BuildingKind, { w: number; h: number; door: number; name: string }> = {
@@ -20,11 +20,11 @@ export const BUILDINGS: Record<BuildingKind, { w: number; h: number; door: numbe
 };
 export const MAX_LEVEL = 3;
 /** ground a building can go on (flattened when it goes up) */
-export const BUILDABLE: ReadonlySet<TileKind> = new Set<TileKind>(['grass', 'sapling', 'tilled', 'bush', 'mushroom']);
+export const BUILDABLE: ReadonlySet<TileKind> = new Set<TileKind>(['grass', 'sapling', 'tilled', 'bush', 'mushroom', 'hazel', 'garlic', 'burdock']);
 /** tile kinds that remember which crop they carry (sown, or the last thing harvested) */
 export const CROP_GROUND: ReadonlySet<TileKind> = new Set<TileKind>(['crop', 'tilled']);
 /** what a wild tile yields, and the pile kind it makes */
-export const WILD_FOOD: Partial<Record<TileKind, FoodKind>> = { bush: 'berry', mushroom: 'mushroom' };
+export const WILD_FOOD: Partial<Record<TileKind, FoodKind>> = { bush: 'berry', mushroom: 'mushroom', hazel: 'hazelnut', garlic: 'garlic', burdock: 'burdock' };
 /** ground a training pen can be painted on */
 export const PEN_GROUND: ReadonlySet<TileKind> = new Set<TileKind>(['grass', 'tilled']);
 
@@ -80,8 +80,10 @@ export function yardOf(b: Building): TilePos[] {
 
 export interface Tile {
   kind: TileKind;
-  /** crops: growth 0..cropDays (mature when >=); saplings: days toward a tree; trees: age in days (old growth at OLD_GROWTH_DAYS); bushes/mushrooms: days since picked */
+  /** crops: growth 0..cropDays (mature when >=); saplings: days toward a tree; trees: age in days (old growth at OLD_GROWTH_DAYS); wild food: days since picked bare */
   stage: number;
+  /** wild food: units still on a ripe plant after gnomes took some (unset = the full yield) */
+  left?: number;
   /** crops and tilled soil: the crop sown here (soil keeps the memory so farmers replant the same) */
   food?: FoodKind;
   /** trees: chop progress accumulated by workers; buildings: upgrade hammering */
@@ -102,7 +104,7 @@ export interface Tile {
 export interface TilePos { tx: number; ty: number }
 
 export const BLOCKING: Record<TileKind, boolean> = {
-  grass: false, tilled: false, crop: false, sapling: false, bush: false, mushroom: false, tree: true, house: true, barracks: true, granary: true, woodyard: true,
+  grass: false, tilled: false, crop: false, sapling: false, bush: false, mushroom: false, hazel: false, garlic: false, burdock: false, tree: true, house: true, barracks: true, granary: true, woodyard: true,
   tavern: true, lair: true, gnomehouse: true, wall: true, gate: false, stairs: false,
 };
 
@@ -561,6 +563,15 @@ export class World {
       if (!near) continue;
       if (rng.chance(0.035)) this.set(tx, ty, 'bush').stage = 99;
       else if (near >= 3 && rng.chance(0.05)) this.set(tx, ty, 'mushroom').stage = 99;
+      else if (near <= 2 && rng.chance(0.02)) this.set(tx, ty, 'hazel').stage = 99;
+    }
+    // the gnomes' other finds: wild garlic dotted over the meadow, burdock along the trails
+    for (let ty = 1; ty < this.rows - 1; ty++) for (let tx = 1; tx < this.cols - 1; tx++) {
+      const t = this.get(tx, ty)!;
+      if (t.kind !== 'grass' || t.trail || Math.abs(tx - hx) < 14 && Math.abs(ty - hy) < 10) continue;
+      const byTrail = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => this.get(tx + dx, ty + dy)?.trail);
+      if (byTrail && rng.chance(0.08)) this.set(tx, ty, 'burdock').stage = 99;
+      else if (t.biome === 'meadow' && rng.chance(0.012)) this.set(tx, ty, 'garlic').stage = 99;
     }
   }
 }
