@@ -1,6 +1,6 @@
 import type { Agent } from '@shared/index';
 import { World, doorstep, buildingCenter, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
-import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, CALLINGS, ORDER, ITEM, MASS, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
+import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, CALLINGS, ORDER, GNOME_YARD, ITEM, MASS, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
 import type { Mods } from './meta';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle } from './characters';
 import type { VillageScene } from './main';
@@ -435,7 +435,16 @@ export class Villager extends Mover {
     const pen = this.gnome ? null : this.findPen(s);
     if (pen) { this.pen = pen; this.mealAt = s.simTime + p.dayLength / 4; this.ateDay = s.day; this.clearGoal(); return; }
 
-    this.task = this.gnome ? 'playing by the gnome house' : 'no pen to train in';
+    // gnome children eat what lies in the yard of their cottage — thrown from the basket, or nothing
+    if (this.gnome) {
+      const hungry = this.mealAt <= s.simTime && p.kidFood > 0;
+      if (hungry) {
+        const item = s.world.nearestYardItem(this.x, this.y, this.home, GNOME_YARD);
+        if (item) { this.eatFrom(dt, s, item); return; }
+      }
+      this.eatingFrom = null;
+      this.task = hungry ? 'hungry — nothing by the gnome house' : 'playing by the gnome house';
+    } else this.task = 'no pen to train in';
     this.thinkTimer -= dt;
     if (this.thinkTimer <= 0 || this.followPath(dt)) {
       this.thinkTimer = s.rng.range(2, 5);
@@ -469,26 +478,7 @@ export class Villager extends Mover {
     const hungry = this.mealAt <= s.simTime && p.kidFood > 0;
     if (hungry) {
       const item = w.nearestPenItem(this.x, this.y, kind);
-      if (item) {
-        const at = World.toTile(item.x, item.y);
-        if (!this.goal || this.goal.tx !== at.tx || this.goal.ty !== at.ty) this.setGoal(s, at.tx, at.ty, true);
-        // close enough to eat: at the pile, or in the ring around it when someone else already has the pile
-        const near = this.dist(item) <= ITEM.eatReach || (this.dist(item) <= ITEM.eatReach * 2 && s.someoneEating(item, this));
-        if (near) this.vx = this.vy = 0; else if (this.followPath(dt) && !near) { const d = this.dist(item) || 1; this.x += (item.x - this.x) / d * Math.min(d, this.speed * dt); this.y += (item.y - this.y) / d * Math.min(d, this.speed * dt); } // the last few pixels, off the tile grid
-        if (near) {
-          this.eatTimer -= dt;
-          this.task = 'eating'; this.eatingFrom = item;
-          if (this.eatTimer <= 0) {
-            this.eatTimer = 0.6;
-            // two meals a day, each half of p.kidFood
-            const bite = Math.min(1, p.kidFood / 2 - this.eaten, item.n);
-            if (bite > 0) { item.n -= bite; this.eaten += bite; this.eatBite(item.food ?? 'wheat', bite); s.fx.push({ kind: 'tool', tool: 'seed', tx: at.tx, ty: at.ty, who: this }); }
-            if (item.n <= 1e-9) w.removeItem(item);
-            if (this.eaten >= p.kidFood / 2 - 1e-9) { this.eaten = 0; this.shroomMeal = false; this.ateDay = s.day; this.mealAt = s.simTime + p.dayLength / 2; this.clearGoal(); }
-          }
-        } else { this.task = 'off to eat'; this.eatingFrom = null; }
-        return;
-      }
+      if (item) { this.eatFrom(dt, s, item); return; }
       this.task = 'hungry — nothing in the pen';
     }
     this.eatingFrom = null;
@@ -523,6 +513,25 @@ export class Villager extends Mover {
       this.trainTimer = s.rng.range(2, 4);
       if (kind === 'soldier') s.fx.push({ kind: 'swing', who: this, dx: this.dir, dy: 0, stage: 0 });
       else s.fx.push({ kind: 'tool', tool: kind === 'farmer' ? 'hoe' : 'axe', tx: here.tx, ty: here.ty, who: this });
+    }
+  }
+
+  /** Walk to a pile lying on the ground and eat from it: two meals a day, each half of p.kidFood (children eat nothing else). */
+  private eatFrom(dt: number, s: VillageScene, item: Item): void {
+    const w = s.world, at = World.toTile(item.x, item.y);
+    if (!this.goal || this.goal.tx !== at.tx || this.goal.ty !== at.ty) this.setGoal(s, at.tx, at.ty, true);
+    // close enough to eat: at the pile, or in the ring around it when someone else already has the pile
+    const near = this.dist(item) <= ITEM.eatReach || (this.dist(item) <= ITEM.eatReach * 2 && s.someoneEating(item, this));
+    if (near) this.vx = this.vy = 0; else if (this.followPath(dt) && !near) { const d = this.dist(item) || 1; this.x += (item.x - this.x) / d * Math.min(d, this.speed * dt); this.y += (item.y - this.y) / d * Math.min(d, this.speed * dt); } // the last few pixels, off the tile grid
+    if (!near) { this.task = 'off to eat'; this.eatingFrom = null; return; }
+    this.eatTimer -= dt;
+    this.task = 'eating'; this.eatingFrom = item;
+    if (this.eatTimer <= 0) {
+      this.eatTimer = 0.6;
+      const bite = Math.min(1, p.kidFood / 2 - this.eaten, item.n);
+      if (bite > 0) { item.n -= bite; this.eaten += bite; this.eatBite(item.food ?? 'wheat', bite); s.fx.push({ kind: 'tool', tool: 'seed', tx: at.tx, ty: at.ty, who: this }); }
+      if (item.n <= 1e-9) w.removeItem(item);
+      if (this.eaten >= p.kidFood / 2 - 1e-9) { this.eaten = 0; this.shroomMeal = false; this.ateDay = s.day; this.mealAt = s.simTime + p.dayLength / 2; this.clearGoal(); }
     }
   }
   /** the pile this child is eating from right now (so others can crowd round it) */

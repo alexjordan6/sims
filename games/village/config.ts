@@ -202,6 +202,8 @@ export const TRAITS: Record<Trait, { name: string; blurb: string }> = {
 export const HOUSE_BEDS = [0, 4, 6, 8] as const;
 /** beds in a gnome house by level; a gnome family breeds like a human one (cribs are p.cribs + level - 1) */
 export const GNOME_BEDS = [0, 3, 4, 6] as const;
+/** tiles from a gnome house's centre that count as its yard: food lying there feeds its children */
+export const GNOME_YARD = 4;
 
 // ---- food and diet --------------------------------------------------------------------------
 /** Every kind of food. Crops are sown on soil; wild food grows in the woods and is picked by hand. What a child eats decides the adult. */

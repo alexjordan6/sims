@@ -520,8 +520,10 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(sprout.gnome && sprout.home === den && sprout.parents.includes(gma), 'a gnome infant is born a gnome, at home in the gnome house');
     sprout.age = p.infantDays; s.tickAges(0);
     assert(sprout.role === 'kid' && sprout.pen === null && !sprout.hidden && sprout.outlook(s).role === 'gnome', 'a gnome child leaves the nursery without looking for a pen');
-    assert(s.rationOf(sprout) === p.foodPerDay * s.mods.foodPerDayMul, 'a gnome child eats at the granary, not from a pen');
+    assert(s.rationOf(sprout) === 0, 'a gnome child takes nothing from the granary');
     step(s, 2); assert(sprout.pen === null && sprout.task === 'playing by the gnome house', 'a gnome child plays by the cottage');
+    s.world.dropItem('food', 4, 126 * 16, 103 * 16, 'carrot'); settle(s); sprout.mealAt = 0; step(s, 8);
+    assert(sprout.ateDay === s.day && sprout.diet.carrot > 0, `a hungry gnome child eats what lies by the cottage (ate day ${sprout.ateDay}, day ${s.day})`);
     sprout.age = s.adultAge; s.tickAges(0);
     assert(sprout.role === 'gnome' && sprout.gnome && sprout.home === den && sprout.isAdult, 'a gnome child comes of age a gnome and stays under the toadstool');
     const gfoe = s.spawn(new Raider(...Object.values(World.center(128, 102)) as [number, number])); gfoe.update = () => {};
@@ -530,6 +532,18 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(fought && gfoe.hp < gfoe.maxHp, `grown gnomes go for a raider in sight (${Math.max(0, gfoe.hp)}/${gfoe.maxHp} hp left)`);
     gfoe.dead = true; s.removeDead(); step(s, 1);
     assert(gma.task === 'pottering about' || gma.task === 'fighting', 'with nothing to fight a gnome potters about the cottage');
+    // every child can starve: a gnome child with nothing thrown by the cottage, and an infant nobody fed can nurse
+    for (const it of [...s.world.items]) s.world.removeItem(it);
+    den.nextBirth = 0; s.food = 100; assert(births(s, 40) > 0, 'another gnome infant for the nursery');
+    const gtot = s.villagers().find((v) => v.role === 'infant')!; gtot.age = p.infantDays; s.tickAges(0); gtot.ateDay = s.day - 5;
+    s.day++; s.newDay(); assert(gtot.hungerDays === 1 && !gtot.dead && gtot.task !== 'eating', 'a gnome child with nothing by the cottage goes hungry');
+    s.day++; s.newDay(); assert(gtot.dead && gtot.starved, `${p.kidStarveDays} hungry days starve a gnome child`);
+    den.nextBirth = 0; den.firewood = 5; den.warm = true; assert(births(s, 40) > 0, 'an infant for the nursery');
+    const babe = s.villagers().find((v) => v.role === 'infant')!;
+    s.food = 100; s.day++; s.newDay(); assert(babe.hungerDays === 0 && gma.hungerDays === 0, 'an infant is nursed while a grown-up at home is fed');
+    s.food = 0; s.day++; s.newDay(); assert(gma.hungerDays === 1 && babe.hungerDays === 1 && !babe.dead, 'when nobody at home eats, the infant goes hungry too');
+    s.day++; s.newDay(); assert(babe.dead && babe.starved && !gma.dead, `${p.kidStarveDays} unfed dawns starve an infant before the grown-ups`);
+    s.food = 100;
     // the shaman wand: pick a squad, send it, hunt, follow, man the wall, release
     s = fresh(); fort(s); s.agents = [s.player]; s.food = 100;
     const wden = s.world.place('gnomehouse', 127, 102), [wg] = s.foundGnomes(wden);

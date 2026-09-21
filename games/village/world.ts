@@ -226,6 +226,22 @@ export class World {
     }
     return best;
   }
+  /** The nearest resting food item within `r` tiles of a building's centre (a gnome house's yard). */
+  nearestYardItem(x: number, y: number, b: Building, r: number): Item | null {
+    const c = buildingCenter(b), cx = c.tx * TILE, cy = c.ty * TILE, rr = (r * TILE) ** 2;
+    let best: Item | null = null, bd = Infinity;
+    for (const it of this.items) {
+      if (!it.rest || it.kind !== 'food' || (it.x - cx) ** 2 + (it.y - cy) ** 2 > rr) continue;
+      const d = (it.x - x) ** 2 + (it.y - y) ** 2;
+      if (d < bd) { bd = d; best = it; }
+    }
+    return best;
+  }
+  /** Resting food lying in a building's yard, in units. */
+  yardFoodTotal(b: Building, r: number): number {
+    const c = buildingCenter(b), cx = c.tx * TILE, cy = c.ty * TILE, rr = (r * TILE) ** 2;
+    return this.items.reduce((n, it) => n + (it.rest && it.kind === 'food' && (it.x - cx) ** 2 + (it.y - cy) ** 2 <= rr ? it.n : 0), 0);
+  }
   /** The whole pen this tile belongs to: every same-kind pen tile reachable through neighbours (4-connected). */
   penRegion(tx: number, ty: number): number[] {
     const kind = this.get(tx, ty)?.pen;

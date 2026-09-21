@@ -7,7 +7,7 @@ import { DEFENSE_COST, WALL_HEIGHT } from './config';
 import { Interior } from './interior';
 import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, Bolt, waveComposition } from './enemies';
 import { Fog } from './fog';
-import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, type LoadKind, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, GNOME_BEDS, ORDER, LEVEL_PERKS, PEN_NAME, ITEM, FOODS, FOOD_KINDS, DIET_STAT_NAME, type FoodKind, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, type LoadKind, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, GNOME_BEDS, GNOME_YARD, ORDER, LEVEL_PERKS, PEN_NAME, ITEM, FOODS, FOOD_KINDS, DIET_STAT_NAME, type FoodKind, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
@@ -802,13 +802,14 @@ export class VillageScene extends SimScene {
     // villagers: eat (pen children from their pile, everyone else from the granary), tally the children's day
     const villagers = this.villagers(), warnedPens = new Set<Calling>();
     for (const v of villagers) {
-      if (v.role === 'infant') continue; // nursed
+      if (v.role === 'infant') continue; // nursed: judged after the grown have eaten, below
       const ration = this.rationOf(v);
       let wellFed = false;
-      if (v.role === 'kid' && !v.gnome) {
+      if (v.role === 'kid') {
         // children eat nothing but what lands in a pen: yesterday's meal came off a pile, or it didn't
         if (p.kidFood <= 0 || v.ateDay >= this.day - 1) { v.hungerDays = 0; wellFed = true; }
-        else if (++v.hungerDays >= p.kidStarveDays) { v.dead = true; v.hp = 0; v.starved = true; this.event('death', `${v.name} starved${v.pen ? ` in the ${PEN_NAME[v.pen]}` : ' with no pen to eat in'}`, true); continue; }
+        else if (++v.hungerDays >= p.kidStarveDays) { v.dead = true; v.hp = 0; v.starved = true; this.event('death', `${v.name} starved${v.gnome ? ' by the gnome house' : v.pen ? ` in the ${PEN_NAME[v.pen]}` : ' with no pen to eat in'}`, true); continue; }
+        else if (v.gnome && !warnedPens.has('gnome' as Calling)) { warnedPens.add('gnome' as Calling); this.event('food', 'Gnome children are going hungry — throw food by their cottage', true); }
         else if (v.pen && !warnedPens.has(v.pen)) { warnedPens.add(v.pen); this.event('food', `Children in the ${PEN_NAME[v.pen]} are going hungry — toss food in`, true); }
         else if (!v.pen && !warnedPens.has('none' as Calling)) { warnedPens.add('none' as Calling); this.event('food', 'Children with no pen are going hungry — paint one and throw food in', true); }
       }
@@ -825,6 +826,16 @@ export class VillageScene extends SimScene {
         v.stars = v.starsNow();
       }
       if (this.mods.dawnHeal) v.hp = v.maxHp; // Second Wind: a night's rest heals everything
+    }
+
+    // infants are nursed: they eat only if a grown-up at home ate. A house where nobody was fed (or nobody is left) starves its nursery.
+    let nurseryWarned = false;
+    for (const v of villagers) {
+      if (v.role !== 'infant' || v.dead) continue;
+      const nursed = villagers.some((o) => o !== v && o.home === v.home && o.isAdult && !o.dead && o.hungerDays === 0);
+      if (nursed) { v.hungerDays = 0; continue; }
+      if (++v.hungerDays >= p.kidStarveDays) { v.dead = true; v.hp = 0; v.starved = true; this.event('death', `${v.name} starved in the nursery — nobody at home was fed`, true); continue; }
+      if (!nurseryWarned) { nurseryWarned = true; this.event('food', `${v.name} goes hungry in the nursery — a fed grown-up at home nurses the infants`, true); }
     }
 
     // move-ins: adults from crowded houses take a spare room elsewhere
@@ -1197,8 +1208,7 @@ export class VillageScene extends SimScene {
 
   /** What one villager eats from the granary at dawn: grown villagers only (infants are nursed, children eat from the pens). */
   rationOf(v: Villager): number {
-    if (v.gnome) return v.role === 'infant' ? 0 : p.foodPerDay * this.mods.foodPerDayMul; // gnome children have no pen: they eat at the granary like the grown
-    if (v.isChild) return 0;
+    if (v.isChild) return 0; // infants are nursed, children eat only what lies in a pen or by the gnome house
     return p.foodPerDay * this.mods.foodPerDayMul;
   }
   /** Everyone's rations for one dawn. */
@@ -1985,7 +1995,9 @@ export class VillageScene extends SimScene {
         const carry = pl.load?.kind === 'food' ? `basket ${pl.load.n}/${HAUL.player.food} ${FOODS[pl.load.food ?? 'wheat'].one}` : `basket empty · F: take ${FOODS[pl.basketKind].name.toLowerCase()} (${this.pantry[pl.basketKind] | 0} in store)`;
         if (why) return `${carry} — ${why}`;
         const aim = this.tossAim, pen = this.world.get(Math.floor(aim.x / TILE), Math.floor(aim.y / TILE))?.pen;
-        if (!pen) return `E: throw ${Math.min(pl.load!.n, p.tossSize)} ${FOODS[pl.load!.food ?? 'wheat'].one} — no pen there: children only eat what lies inside their pen (${carry})`;
+        const yard = !pen ? this.world.gnomeHouses.find((b) => { const c = buildingCenter(b); return Math.hypot(c.tx * TILE - aim.x, c.ty * TILE - aim.y) <= GNOME_YARD * TILE; }) : undefined;
+        if (yard) { const kids = this.villagers().filter((v) => v.role === 'kid' && v.home === yard && !v.dead); return `E: throw ${Math.min(pl.load!.n, p.tossSize)} ${FOODS[pl.load!.food ?? 'wheat'].one} by the gnome house (${carry} · ${kids.length} children, ${kids.filter((v) => v.hungerDays > 0 || v.task.startsWith('hungry')).length} hungry · ${this.world.yardFoodTotal(yard, GNOME_YARD) || 'nothing'} lying there)`; }
+        if (!pen) return `E: throw ${Math.min(pl.load!.n, p.tossSize)} ${FOODS[pl.load!.food ?? 'wheat'].one} — no pen there: children only eat what lies inside their pen or by a gnome house (${carry})`;
         const r = this.penReport(pen);
         return `E: throw ${Math.min(pl.load!.n, p.tossSize)} ${FOODS[pl.load!.food ?? 'wheat'].one} toward the ${PEN_NAME[pen]} (${carry} · ${r.kids} children, ${r.hungry} hungry · ${r.piles || 'nothing'} lying there)`;
       }
