@@ -81,7 +81,12 @@ export abstract class Mover implements Agent {
   clearGoal(): void {
     this.goal = null;
     this.path = [];
+    this.stallT = 0; this.lastGap = Infinity;
   }
+
+  /** seconds spent walking without getting closer to the next waypoint (a body in the way pushes back as fast as we walk), and how close we got */
+  private stallT = 0;
+  private lastGap = Infinity;
 
   /** Advance along the path. Returns true when there is nowhere left to go. */
   followPath(dt: number): boolean {
@@ -95,7 +100,23 @@ export abstract class Mover implements Agent {
     if (d <= step) {
       this.x = next.x; this.y = next.y;
       this.path.shift();
+      this.stallT = 0; this.lastGap = Infinity;
       return this.path.length === 0;
+    }
+    // Stalled: someone stands in the way and the collision push cancels every step. Bodies used to lock like this for
+    // good (two soldiers heading through each other, anyone walking into the head). After half a second, either
+    // settle for where we are when the last tile is the one taken, or hop half a tile to the side and try again.
+    this.stallT = d < this.lastGap - step * 0.25 ? Math.max(0, this.stallT - dt / 2) : this.stallT + dt;
+    this.lastGap = d;
+    if (this.stallT > 0.5) {
+      this.stallT = 0; this.lastGap = Infinity;
+      if (this.path.length === 1 && d < TILE) { this.path = []; this.vx = this.vy = 0; return true; }
+      const px = -dy / d, py = dx / d, hop = (this.id % 2 ? 1 : -1) * TILE * 0.6;
+      for (const side of [hop, -hop]) {
+        const nx = this.x + px * side, ny = this.y + py * side, t = World.toTile(nx, ny);
+        if (this.world && !this.world.isBlocked(t.tx, t.ty, this.hostile, this.elevated)) { this.x = nx; this.y = ny; break; }
+      }
+      return false;
     }
     this.vx = (dx / d) * this.speed; this.vy = (dy / d) * this.speed;
     this.x += this.vx * dt; this.y += this.vy * dt;
@@ -709,7 +730,8 @@ export class Villager extends Mover {
     if (this.followPath(dt) && this.thinkTimer <= 0) {
       this.thinkTimer = s.rng.range(3, 7);
       const post = buildingCenter(!gnome && s.world.barracks.length ? s.rng.pick(s.world.barracks) : this.home);
-      this.wanderNear(s, { tx: Math.round(post.tx), ty: Math.round(post.ty) }, 3);
+      // a bigger garrison patrols a wider ring, so they aren't all shoulder to shoulder against the wall
+      this.wanderNear(s, { tx: Math.round(post.tx), ty: Math.round(post.ty) }, 3 + Math.floor(s.fighters().length / 4));
     }
   }
 

@@ -565,6 +565,14 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     s.clearSquad(); s.orderHold(126, 99);
     assert(s.fighters().every((v) => v.order?.kind === 'hold'), 'with nobody picked an order goes to every fighter');
     s.release();
+    // bodies in the way: two soldiers sent through each other, and one sent through the head, get past instead of locking up
+    s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(125, 100));
+    const sa = s.spawn(new Villager(...Object.values(World.center(120, 100)) as [number, number], s.world.houses[0], 'soldier', 20, 'Stall A', s.mods));
+    const sb = s.spawn(new Villager(...Object.values(World.center(130, 100)) as [number, number], s.world.houses[0], 'soldier', 20, 'Stall B', s.mods));
+    s.selectSquad([sa]); s.orderHold(130, 100); s.selectSquad([sb]); s.orderHold(120, 100);
+    step(s, 12);
+    assert(sa.tile.tx === 130 && sb.tile.tx === 120, `soldiers walking through each other and the head both arrive (${sa.tile.tx},${sa.tile.ty} · ${sb.tile.tx},${sb.tile.ty})`);
+    s.release(); s.clearSquad();
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;
   } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); }
