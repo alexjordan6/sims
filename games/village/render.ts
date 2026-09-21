@@ -438,6 +438,22 @@ export class Renderer {
       u.lineStyle(1, 0xffe066, 0.9); u.strokeEllipse(m.x, m.y + 1, 16 + 4 * pulse, 8 + 2 * pulse);
       this.marker(m.x, top);
     }
+    const st = s.selectedTile;
+    if (st) {
+      const x0 = st.tx * TILE, y0 = st.ty * TILE, arm = 5;
+      b.lineStyle(1, 0xffe066, 0.25 + 0.2 * pulse); b.strokeRect(x0 + 0.5, y0 + 0.5, TILE - 1, TILE - 1);
+      b.lineStyle(2, 0xffe066, 0.95);
+      for (const [cx, cy, sx, sy] of [[x0 - 2, y0 - 2, 1, 1], [x0 + TILE + 2, y0 - 2, -1, 1], [x0 - 2, y0 + TILE + 2, 1, -1], [x0 + TILE + 2, y0 + TILE + 2, -1, -1]] as const) {
+        b.lineBetween(cx, cy, cx + sx * arm, cy); b.lineBetween(cx, cy, cx, cy + sy * arm);
+      }
+      this.marker(x0 + TILE / 2, y0 - 12 + bob);
+    }
+    const si = s.selectedItem;
+    if (si) {
+      u.fillStyle(0xffe066, 0.12 + 0.1 * pulse); u.fillEllipse(si.x, si.y + 1, 16 + 4 * pulse, 8 + 2 * pulse);
+      u.lineStyle(1, 0xffe066, 0.9); u.strokeEllipse(si.x, si.y + 1, 12 + 4 * pulse, 6 + 2 * pulse);
+      this.marker(si.x, si.y - si.z - 14 + bob);
+    }
     const sb = s.selectedBuilding;
     if (sb && !s.interior.active) {
       const f = BUILDINGS[sb.kind], x0 = sb.tx * TILE, y0 = sb.ty * TILE, w = f.w * TILE, h = f.h * TILE, arm = 6;
@@ -512,6 +528,14 @@ function cropPhase(t: Tile, cropDays: number, dayTime: number): number {
 
 /** Ground + object gids for a tile (and the crown-top for the tile above, for tall trees). */
 const PEN_INDEX: Record<string, number> = { farmer: 0, woodcutter: 1, soldier: 2 };
+/** The picture the map draws for a tile, for the inspector's portrait: a flora frame (object over ground), the fort sheet for defences, or a town grass frame. */
+export function tileArt(t: Tile, s: VillageScene): { key: string; frame: number } {
+  if (t.defense) return { key: 'fort', frame: t.defense.kind === 'stairs' ? 3 : t.defense.kind === 'gate' ? (t.defense.open ? 2 : 1) : 0 };
+  const f = tileFrames(t, s.cropDaysOf(t), s.dayTime, s.oldGrowthDays, s.wildRipe(t));
+  const pick = f.object !== EMPTY ? f.object : f.ground;
+  if (pick >= GID.flora) return { key: 'flora', frame: pick - GID.flora };
+  return { key: 'town', frame: pick - GID.town };
+}
 function penGround(kind: string): number { return GID.flora + FLORA.pen[PEN_INDEX[kind] ?? 0]; }
 /** the five growth frames of the crop sown on a tile */
 function cropFrames(t: Tile): readonly number[] {

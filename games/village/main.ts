@@ -85,6 +85,9 @@ export class VillageScene extends SimScene {
   selected: Mover | null = null;
   /** a building picked with X / right-click / tap (houses can be sworn from its card) */
   selectedBuilding: Building | null = null;
+  /** the inspector can also show a tile (crop, tree, pen, wall…) or a thing lying on the ground */
+  selectedTile: TilePos | null = null;
+  selectedItem: Item | null = null;
   journal: GameEvent[] = [];
   fx: FxEvent[] = [];
   private static buttonsMade = false;
@@ -399,21 +402,81 @@ export class VillageScene extends SimScene {
 
   select(m: Mover | null): void {
     this.selected = m;
-    if (m) this.selectedBuilding = null;
+    if (m) { this.selectedBuilding = null; this.selectedTile = null; this.selectedItem = null; }
     // picking a child you're standing next to is how you encourage them
     if (m instanceof Villager && m.role === 'kid' && this.screen === 'playing' && !this.encourageProblem(m)) this.encourage(m);
   }
   selectBuilding(b: Building | null): void {
     this.selectedBuilding = b;
-    if (b) this.selected = null;
+    if (b) { this.selected = null; this.selectedTile = null; this.selectedItem = null; }
   }
-  /** Pick whatever is under the pointer: an agent first, else a building tile. */
-  private pick(ptr: Phaser.Input.Pointer, objs: Phaser.GameObjects.GameObject[]): void {
+  selectTile(q: TilePos | null): void {
+    this.selectedTile = q && this.world.inBounds(q.tx, q.ty) ? { tx: q.tx, ty: q.ty } : null;
+    if (this.selectedTile) { this.selected = null; this.selectedBuilding = null; this.selectedItem = null; }
+  }
+  selectItem(it: Item | null): void {
+    this.selectedItem = it;
+    if (it) { this.selected = null; this.selectedBuilding = null; this.selectedTile = null; }
+  }
+  /** Clear the inspector when what it showed is gone. */
+  private tidySelection(): void {
+    if (this.selectedItem && !this.world.items.includes(this.selectedItem)) this.selectedItem = null;
+    if (this.selectedTile && this.world.get(this.selectedTile.tx, this.selectedTile.ty)?.building) { this.selectedBuilding = this.world.get(this.selectedTile.tx, this.selectedTile.ty)!.building!; this.selectedTile = null; }
+  }
+  /** Pick whatever is under the pointer: a person, else a thing on the ground, else a building, else the tile itself. */
+  pick(ptr: { worldX: number; worldY: number }, objs: Phaser.GameObjects.GameObject[] = []): void {
     if (this.checkNearby(World.toTile(ptr.worldX, ptr.worldY))) return;
     const m = (objs[0]?.getData('agent') as Mover) ?? null;
     if (m) { this.select(m); return; }
-    const b = this.world.get(Math.floor(ptr.worldX / TILE), Math.floor(ptr.worldY / TILE))?.building ?? null;
-    if (b) this.selectBuilding(b); else this.select(null);
+    const near = this.world.itemsNear(ptr.worldX, ptr.worldY, 8).sort((a, b) => (a.x - ptr.worldX) ** 2 + (a.y - ptr.worldY) ** 2 - ((b.x - ptr.worldX) ** 2 + (b.y - ptr.worldY) ** 2))[0]
+      ?? this.world.items.find((it) => !it.rest && Math.hypot(it.x - ptr.worldX, it.y - it.z - ptr.worldY) <= 8);
+    if (near) { this.selectItem(near); return; }
+    const q = World.toTile(ptr.worldX, ptr.worldY);
+    const b = this.world.get(q.tx, q.ty)?.building ?? null;
+    if (b) this.selectBuilding(b); else this.selectTile(q);
+  }
+
+  // ---- the inspector's take on tiles, pens and things on the ground -------------------------
+
+  /** The connected pen a tile belongs to, and who is in it. */
+  penCard(q: TilePos): { kind: Calling; tiles: number[]; kids: Villager[]; hungry: number; piles: string; houses: number } | null {
+    const kind = this.world.get(q.tx, q.ty)?.pen;
+    if (!kind) return null;
+    const tiles = this.world.penRegion(q.tx, q.ty), inRegion = new Set(tiles);
+    const kids = this.villagers().filter((v) => v.role === 'kid' && v.pen === kind && !v.dead && inRegion.has(v.tile.ty * this.world.cols + v.tile.tx));
+    const piles = FOOD_KINDS.map((k) => [k, this.world.items.filter((it) => it.rest && it.kind === 'food' && it.food === k && inRegion.has(Math.floor(it.y / TILE) * this.world.cols + Math.floor(it.x / TILE))).reduce((n, it) => n + it.n, 0)] as const)
+      .filter(([, n]) => n > 0).map(([k, n]) => `${n % 1 ? n.toFixed(1) : n} ${FOODS[k].one}`).join(', ');
+    return { kind, tiles, kids, hungry: kids.filter((v) => v.hungerDays > 0 || v.task.startsWith('hungry')).length, piles, houses: this.world.houses.filter((h) => (h.calling ?? 'farmer') === kind && !h.ruined).length };
+  }
+  /** Repaint a whole pen as another kind (children there switch with it). */
+  repaintPen(tiles: number[], kind: Calling): void {
+    const cols = this.world.cols;
+    for (const i of tiles) { const tx = i % cols, ty = (i / cols) | 0, t = this.world.get(tx, ty); if (t?.pen && t.pen !== kind) this.world.paintPen(tx, ty, kind); }
+    for (const v of this.villagers()) if (v.role === 'kid' && v.pen && !this.world.pens.get(v.pen)?.size) v.pen = v.findPen(this);
+    this.event('build', `The pen is now a ${PEN_NAME[kind]}`);
+  }
+  /** Erase a whole pen; its children go looking for another. */
+  erasePen(tiles: number[]): void {
+    const cols = this.world.cols;
+    for (const i of tiles) { const tx = i % cols, ty = (i / cols) | 0; if (this.world.get(tx, ty)?.pen) this.world.paintPen(tx, ty, null); }
+    this.event('build', 'Pen erased');
+  }
+  /** What farmers will sow on this soil next (the crop's plan for the tile). */
+  setFieldPlan(q: TilePos, kind: FoodKind): void {
+    const t = this.world.get(q.tx, q.ty);
+    if (!t || (t.kind !== 'crop' && t.kind !== 'tilled')) return;
+    t.food = kind; this.world.markDirty(q.tx, q.ty);
+  }
+  /** Connected battlements a set of stairs reaches (how much wall it serves). */
+  stairsReach(q: TilePos): number {
+    const w = this.world, d = w.get(q.tx, q.ty)?.defense;
+    if (!d || d.kind !== 'stairs') return 0;
+    const start = q.ty * w.cols + q.tx, seen = new Set<number>([start]), queue = [start];
+    for (let qi = 0; qi < queue.length; qi++) {
+      const i = queue[qi], cx = i % w.cols, cy = (i / w.cols) | 0;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const k = (cy + dy) * w.cols + cx + dx; if (!seen.has(k) && w.get(cx + dx, cy + dy)?.defense) { seen.add(k); queue.push(k); } }
+    }
+    return seen.size - 1;
   }
 
   /** F: the held tool's variant — the pen's kind, the crop the seeds sow, the food the basket takes; any other tool picks up the pen. */
@@ -667,6 +730,7 @@ export class VillageScene extends SimScene {
     this.tickBirths();
     this.world.tickItems(dt);
     this.pickUpItems();
+    this.tidySelection();
     this.tickTowers(dt);
     for (const a of this.agents) if (a.dead) this.onDeath(a as Mover);
     this.removeDead();

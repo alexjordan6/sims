@@ -1,15 +1,16 @@
 import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type Tool } from '../agents';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
-import { OGRE, HAUL, COST, p, TOWER, HEARTH_WOOD, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, CALLING_NAME, TRAITS, HEARTY_RATION, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, PEN_NAME, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, DIET_STAT_NAME, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS } from '../config';
+import { OGRE, HAUL, COST, p, TOWER, HEARTH_WOOD, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, CALLING_NAME, TRAITS, HEARTY_RATION, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, PEN_NAME, FOODS, FOOD_KINDS, CROP_KINDS, CALLINGS, DISMANTLE, DIET_CAP, DIET_STAT_NAME, type FoodKind, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS } from '../config';
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
 import { skyAt } from '../night';
-import { frameDataUrl, BUILDING_TEXTURE } from '../pixelart';
+import { frameDataUrl, BUILDING_TEXTURE, FLORA } from '../pixelart';
 import { charImg, armorStats, weaponMul } from '../characters';
-import { lookFor } from '../render';
-import { BUILDINGS, MAX_LEVEL, hasHearth, hearthCost, type BuildingKind } from '../world';
+import { lookFor, tileArt } from '../render';
+import { BUILDINGS, MAX_LEVEL, hasHearth, hearthCost, WILD_FOOD, type BuildingKind, type TilePos } from '../world';
+import type { Item } from '../items';
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -404,6 +405,8 @@ export class UI {
       this.lastSelected = s.selected;
       if (s.selected) { this.showTab('inspector'); this.side.classList.add('open'); }
     }
+    const pickKey = s.selectedItem ? `item${s.selectedItem.id}` : s.selectedTile ? `tile${s.selectedTile.tx},${s.selectedTile.ty}` : '';
+    if (pickKey !== this.lastPick) { this.lastPick = pickKey; this.confirmErase = null; this.renderInspector(true); if (this.touch && pickKey) { this.showTab('inspector'); this.side.classList.add('open'); } }
     this.topT += dt; this.rosterT += dt;
     this.minimap.render(dt, s.tilesChanged);
     if (this.topT > 0.1) {
@@ -498,11 +501,102 @@ export class UI {
     return { TILL: 'TILL', PLANT: 'PLANT', HARVEST: 'HARVEST', CHOP: 'CHOP', ATTACK: 'FIGHT', SWING: 'SWING', BUILD: 'BUILD', UPGRADE: 'UPGRADE', CLEAR: 'CLEAR', DIG: 'DIG', FLATTEN: 'FLATTEN', CUT: 'CUT' }[w] ?? 'USE';
   }
 
+  private lastPick = '';
+  private confirmErase: string | null = null;
+  /** Portrait for a tile or a thing on the ground, from the same art the map draws. */
+  private tilePortrait(art: { key: string; frame: number }): string {
+    if (art.key === 'flora' || art.key === 'fort') return `<img class="art" src="${frameDataUrl(this.scene, art.key, art.frame)}" alt="" style="image-rendering:pixelated;width:48px;height:${art.key === 'fort' ? 'auto' : '48px'}">`;
+    return spr(art.key, art.frame, 48);
+  }
+  /** A card for something lying on the ground. */
+  private renderItemCard(it: Item, head: string): void {
+    const s = this.scene;
+    const art = it.kind === 'wood' ? spr('town', TOWN.iconWood, 48) : this.tilePortrait({ key: 'flora', frame: it.kind === 'scrap' ? FLORA.scrap : FLORA.pile[it.food ?? 'wheat'][Math.min(2, Math.max(0, Math.ceil(it.n / Math.max(1, p.tossSize)) - 1))] });
+    const name = it.kind === 'scrap' ? 'Scrap iron' : it.kind === 'wood' ? 'Wood' : FOODS[it.food ?? 'wheat'].name;
+    const amount = it.n % 1 ? it.n.toFixed(1) : String(it.n);
+    const q = { tx: Math.floor(it.x / 16), ty: Math.floor(it.y / 16) }, t = s.world.get(q.tx, q.ty);
+    const where = !it.rest ? 'in the air' : t?.pen ? `in the ${PEN_NAME[t.pen]}` : t?.kind === 'crop' || t?.kind === 'tilled' ? 'on the field' : 'on open ground';
+    const eaters = it.kind === 'food' ? s.villagers().filter((v) => v.eatingFrom === it && !v.dead).length : 0;
+    let html = `${head}<div class="head">${art}<div><div class="name">${amount} ${name.toLowerCase()}</div><span class="badge ${it.kind === 'scrap' ? 'soldier' : 'farmer'}">${it.kind === 'scrap' ? 'loot' : it.kind === 'wood' ? 'an armful' : 'food on the ground'}</span></div><button class="btn small close">x</button></div><div class="rows">`;
+    html += `<b>Where</b><span>${where} · tile ${q.tx}, ${q.ty}${it.rest ? '' : ' <em>· still moving</em>'}</span>`;
+    if (it.kind === 'food') html += `<b>Feeds</b><span>${FOODS[it.food ?? 'wheat'].blurb}${t?.pen ? ` · ${eaters ? `${eaters} eating from it now` : 'children here will eat it'}` : ' · <em class="warn">not in a pen — children only eat inside their pen</em>'}</span>`;
+    html += `<b>Pick up</b><span>${it.kind === 'scrap' ? 'walk over it' : 'walk over it with HANDS out (one kind per armful)'}</span></div>`;
+    html += `<p class="d">Thrown things fly where you point, bounce off walls and trees, and lie where they stop.</p>`;
+    this.inspector.innerHTML = html;
+    this.inspector.querySelector('.close')?.addEventListener('click', () => s.selectItem(null));
+  }
+  /** A card for a tile: crop, soil, tree, wild food, pen, wall, gate, stairs, or plain grass. */
+  private renderTileCard(q: TilePos, head: string): void {
+    const s = this.scene, w = s.world, t = w.get(q.tx, q.ty);
+    if (!t) { s.selectTile(null); return; }
+    const art = this.tilePortrait(tileArt(t, s));
+    const close = `<button class="btn small close">x</button>`;
+    const lying = w.itemsOn(q.tx, q.ty);
+    const lyingRow = lying.length ? `<b>Lying here</b><span>${lying.map((it) => `<a href="#" class="pick-item" data-id="${it.id}">${it.n % 1 ? it.n.toFixed(1) : it.n} ${it.kind === 'scrap' ? 'scrap' : it.kind === 'wood' ? 'wood' : FOODS[it.food ?? 'wheat'].one}</a>`).join(', ')}</span>` : '';
+    const plan = (kind: FoodKind | undefined, cap: string) => `<div class="raise"><div class="cap">${cap}</div><div class="seg">${CROP_KINDS.map((k) => `<button class="btn small ${kind === k ? 'on' : ''}" data-plan="${k}">${FOODS[k].name.toUpperCase()}</button>`).join('')}</div><div class="d">Farmers replant what the soil remembers; pick what this tile should grow next. ${kind ? FOODS[kind].blurb : ''}</div></div>`;
+    let title = '', badge = '', badgeCls = 'farmer', rows = '', extra = '';
+    if (t.defense) {
+      const d = t.defense, pct = Math.round(100 * d.hp / d.maxHp);
+      title = d.kind === 'wall' ? 'Wall' : d.kind === 'gate' ? 'Gate' : 'Stairs'; badge = d.kind === 'gate' ? (d.open ? 'open to everyone' : 'guarded — allies pass') : d.kind === 'stairs' ? 'up to the battlements' : 'stone rampart'; badgeCls = 'soldier';
+      rows += `<b>Structure</b><span>${Math.ceil(d.hp)} / ${d.maxHp} HP${d.hp < d.maxHp ? ` <em>· hammer mends ${p.wallRepair} per wood</em>` : ''}<div class="bar hp ${pct <= 40 ? 'low' : ''}"><i style="width:${pct}%"></i></div></span>`;
+      if (d.kind === 'stairs') { const reach = s.stairsReach(q); rows += `<b>Serves</b><span>${reach} connected battlement${reach === 1 ? '' : 's'} · ${s.villagers().filter((v) => v.post && Math.abs(v.post.tx - q.tx) + Math.abs(v.post.ty - q.ty) <= 12).length} soldiers posted along it</span>`; }
+      if (d.kind === 'gate') extra = `<div class="raise"><div class="cap">GATE</div><div class="seg"><button class="btn small ${d.open ? '' : 'on'}" data-gate="closed">GUARDED</button><button class="btn small ${d.open ? 'on' : ''}" data-gate="open">OPEN</button></div><div class="d">Guarded: allies pass, enemies must break it. Open: everyone walks through.</div></div>`;
+      rows += `<b>Take down</b><span>${DISMANTLE.hits} hammer hits for half the wood back</span>`;
+    } else if (t.pen) {
+      const pc = s.penCard(q)!;
+      title = `Training pen · ${PEN_NAME[pc.kind]}`; badge = `${pc.tiles.length} tile${pc.tiles.length === 1 ? '' : 's'}`; badgeCls = pc.kind === 'soldier' ? 'soldier' : 'farmer';
+      rows += `<b>Children</b><span>${pc.kids.length} training here${pc.hungry ? ` · <em class="warn">${pc.hungry} hungry</em>` : ''}</span>`;
+      rows += `<b>Food lying</b><span>${pc.piles || '<em class="warn">nothing — throw some in with the BASKET</em>'}</span>`;
+      rows += `<b>Fed by</b><span>${pc.houses} house${pc.houses === 1 ? '' : 's'} raising ${CALLING_NAME[pc.kind]}${pc.kind === 'soldier' ? (s.world.barracks.some((b) => b.warm) ? ' · a warm barracks drills them' : ' · <em class="warn">needs a warm barracks to drill anyone</em>') : ''}</span>`;
+      rows += `<b>Teaches</b><span>${pc.kind === 'soldier' ? 'soldiering — a skilled soldier after' : pc.kind === 'farmer' ? 'farming — a skilled farmer after' : 'the axe — a skilled woodcutter after'} ${Villager.drillNeeded(s)} fed days</span>`;
+      const arming = this.confirmErase === `${q.tx},${q.ty}`;
+      extra = `<div class="raise"><div class="cap">REPAINT AS</div><div class="seg">${CALLINGS.map((c) => `<button class="btn small ${pc.kind === c ? 'on' : ''}" data-repaint="${c}">${PEN_NAME[c].toUpperCase()}</button>`).join('')}</div><div class="d">Repaints the whole pen; its children switch with it.</div></div>
+        <div class="raise"><button class="btn small ${arming ? 'danger' : ''} erase-pen">${arming ? 'ERASE — SURE?' : 'ERASE PEN'}</button><div class="d">Removes every tile of this pen; the children look for another.</div></div>`;
+    } else if (t.kind === 'crop' || t.kind === 'tilled') {
+      const fk = t.food ?? 'wheat', days = s.cropDaysOf(t), ripe = s.isRipe(t);
+      title = t.kind === 'crop' ? `${ripe ? 'Ripe' : 'Growing'} ${FOODS[fk].name.toLowerCase()}` : 'Tilled soil'; badge = t.kind === 'crop' ? (ripe ? 'harvest with hands' : `ripens in ${Math.max(0, days - t.stage)} day${days - t.stage === 1 ? '' : 's'}`) : t.food ? `farmers will sow ${FOODS[t.food].name.toLowerCase()}` : 'sow with seeds';
+      if (t.kind === 'crop') rows += `<b>Growth</b><span>${Math.min(t.stage, days)} / ${days} days<div class="bar grow"><i style="width:${Math.round(100 * Math.min(1, t.stage / days))}%"></i></div></span><b>Yield</b><span>${s.cropYieldOf(fk)} ${FOODS[fk].one} · ${FOODS[fk].blurb}</span>`;
+      else rows += `<b>Soil</b><span>${t.work ? `${t.work}/3 flattened` : 'ready for seed'}</span>`;
+      extra = plan(t.food, 'REPLANT AS');
+    } else if (t.kind === 'tree' || t.kind === 'sapling') {
+      if (t.kind === 'tree') {
+        const old = s.isOldGrowth(t), grove = w.groveSize(q.tx, q.ty), left = s.oldGrowthDays - t.stage;
+        title = old ? 'Old growth' : 'Tree'; badge = old ? `yields ${s.treeYield(t)} wood` : `old growth in ${left} day${left === 1 ? '' : 's'}`;
+        rows += `<b>Wood</b><span>${s.treeYield(t)} to a woodcutter · ${p.playerTreeYield} to your own axe${t.work ? ` · ${t.work}/3 chopped` : ''}</span><b>Grove</b><span>${grove}${grove >= 200 ? '+' : ''} trees together · spreads ${Math.round(s.seedChance(q.tx, q.ty) * 100)}% a day</span><b>Shelters</b><span>${old ? 'berries and mushrooms may sprout beside it' : 'nothing yet — old growth seeds wild food'}</span>`;
+      } else {
+        const days = s.saplingDays(q.tx, q.ty) - t.stage;
+        title = t.stage < 2 ? 'Stump' : 'Sapling'; badge = `a tree in ${days} day${days === 1 ? '' : 's'}`;
+        rows += `<b>Growth</b><span>${t.stage} / ${s.saplingDays(q.tx, q.ty)} days${w.treeNeighbours(q.tx, q.ty) >= 2 ? ' · sheltered by the grove' : ''}</span><b>Clear</b><span>the hoe or axe removes it</span>`;
+      }
+    } else if (t.kind === 'bush' || t.kind === 'mushroom') {
+      const fk = WILD_FOOD[t.kind]!, ripe = s.wildRipe(t), left = s.regrowDays(fk) - t.stage;
+      title = FOODS[fk].name; badge = ripe ? 'ripe — pick with hands' : `back in ${left} day${left === 1 ? '' : 's'}`;
+      rows += `<b>Yield</b><span>${FOODS[fk].yield} ${FOODS[fk].one} a picking · ${FOODS[fk].blurb}</span><b>Regrows</b><span>every ${s.regrowDays(fk)} days${ripe ? '' : ` · ${t.stage} so far`}</span>`;
+    } else {
+      title = t.trail ? 'Trail' : 'Grass'; badge = t.biome === 'deepwood' ? 'deep woodland' : t.biome === 'woodland' ? 'woodland' : 'meadow';
+      rows += `<b>Ground</b><span>${t.trail ? 'a woodland trail — trees never grow over it' : 'open ground'}</span><b>Could be</b><span>tilled with the hoe · a tree with seeds · a pen with the PEN tool · a building</span>`;
+    }
+    let html = `${head}<div class="head">${art}<div><div class="name">${title}</div><span class="badge ${badgeCls}">${badge}</span></div>${close}</div><div class="rows">${rows}${lyingRow}<b>Tile</b><span>${q.tx}, ${q.ty}</span></div>${extra}`;
+    this.inspector.innerHTML = html;
+    this.inspector.querySelector('.close')?.addEventListener('click', () => s.selectTile(null));
+    this.inspector.querySelectorAll<HTMLElement>('.pick-item').forEach((el) => el.addEventListener('click', (e) => { e.preventDefault(); const it = w.items.find((i) => i.id === Number(el.dataset.id)); if (it) s.selectItem(it); }));
+    this.inspector.querySelectorAll<HTMLButtonElement>('[data-plan]').forEach((el) => el.addEventListener('click', () => { s.setFieldPlan(q, el.dataset.plan as FoodKind); this.renderInspector(true); }));
+    this.inspector.querySelectorAll<HTMLButtonElement>('[data-gate]').forEach((el) => el.addEventListener('click', () => { if (t.defense) w.setGateOpen(t.defense, el.dataset.gate === 'open'); this.renderInspector(true); }));
+    this.inspector.querySelectorAll<HTMLButtonElement>('[data-repaint]').forEach((el) => el.addEventListener('click', () => { const pc = s.penCard(q); if (pc) s.repaintPen(pc.tiles, el.dataset.repaint as Calling); this.renderInspector(true); }));
+    this.inspector.querySelector('.erase-pen')?.addEventListener('click', () => {
+      const key = `${q.tx},${q.ty}`;
+      if (this.confirmErase !== key) { this.confirmErase = key; this.renderInspector(true); return; }
+      this.confirmErase = null; const pc = s.penCard(q); if (pc) s.erasePen(pc.tiles); s.selectTile(null);
+    });
+  }
+
   private renderInspector(force = false): void {
     const s = this.scene;
     const m = s.selected;
     const head = `<div class="ph">${spr('town', TOWN.sign, 24)}<h2>Inspector</h2></div>`;
     const b = s.selectedBuilding;
+    if (!m && !b && s.selectedItem) { this.renderItemCard(s.selectedItem, head); return; }
+    if (!m && !b && s.selectedTile) { this.renderTileCard(s.selectedTile, head); return; }
     if (!m && b && b.kind === 'lair') {
       const dead = b.level >= 3;
       const html = `${head}<div class="head"><img class="art" src="${frameDataUrl(s, BUILDING_TEXTURE.lair, dead ? 2 : 0)}" alt=""><div><div class="name">${BUILDINGS.lair.name}</div><span class="badge ${dead ? 'farmer' : 'soldier'}">${dead ? 'silent — the fire is out' : 'the Ogre sleeps here by day'}</span></div><button class="btn small close">x</button></div>
@@ -578,7 +672,7 @@ export class UI {
       return;
     }
     if (!m || m.dead) {
-      const html = `${head}<p class="empty">Click or tap a villager or a building.<br>Children are the point: pick each house's <b>calling</b>, feed them well, keep them safe, and <b>encourage</b> them — how they're raised is who they become.</p>`;
+      const html = `${head}<p class="empty">Click or tap anything: a villager, a building, a crop, a tree, a pen, a wall, or something lying on the ground.<br>Children are the point: pick each house's <b>calling</b>, feed them well, keep them safe, and <b>encourage</b> them — how they're raised is who they become.</p>`;
       if (force || this.lastInspector !== html) { this.inspector.innerHTML = html; this.lastInspector = html; }
       return;
     }

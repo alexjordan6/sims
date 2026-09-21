@@ -123,6 +123,9 @@ h3 { font-size: 9px; color: var(--ink-dim); margin-bottom: 6px; }
 .upbring .lbl { display: flex; justify-content: space-between; font-size: 12px; color: var(--ink-dim); }
 .upbring .lean { text-align: center; font-size: 13px; margin-top: 2px; }
 .upbring.diet .bar { height: 6px; margin-bottom: 3px; }
+.bar.grow { height: 6px; margin-top: 3px; }
+.bar.grow i { background: var(--civil); }
+.inspector a.pick-item { color: var(--accent); }
 .upbring .lean.m { color: var(--martial); }
 .upbring .lean.c { color: var(--civil); }
 .empty { color: var(--ink-dim); font-size: 13px; }

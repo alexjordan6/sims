@@ -482,6 +482,29 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     for (let i = 0; i < 10 * 60; i++) { s.tick(1 / 60); if (i % 60 === 59) crowd.forEach((k, j) => { legs.push(Math.hypot(k.x - last[j].x, k.y - last[j].y)); last[j] = { x: k.x, y: k.y }; }); }
     const avg = legs.reduce((n, d) => n + d, 0) / legs.length;
     assert(avg >= 16, `children keep running about the pen (${avg.toFixed(0)} px a second on average)`);
+    // the inspector picks anything: a thing on the ground beats the tile, a building beats the tile; pens are managed as a whole
+    s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(124, 104)); s.world.items.length = 0;
+    const pickAt = (tx: number, ty: number, dx = 0, dy = 0) => s.pick({ worldX: World.center(tx, ty).x + dx, worldY: World.center(tx, ty).y + dy });
+    pickAt(126, 100); assert(!!s.selectedTile && s.selectedTile.tx === 126 && s.selectedTile.ty === 100 && !s.selected && !s.selectedBuilding, 'picking open ground selects the tile');
+    const lump = s.world.dropItem('wood', 5, World.center(126, 100).x + 3, World.center(126, 100).y, undefined);
+    pickAt(126, 100, 2); assert(s.selectedItem === lump && !s.selectedTile, 'a thing on the ground under the pointer beats the tile');
+    const hut = s.world.houses[0]; pickAt(hut.tx + 1, hut.ty + 1); assert(s.selectedBuilding === hut && !s.selectedItem && !s.selectedTile, 'a building beats the tile');
+    s.selectItem(lump); s.world.removeItem(lump); s.tick(1 / 60); assert(!s.selectedItem, 'a vanished thing leaves the inspector');
+    for (let y = 95; y <= 97; y++) for (let x = 121; x <= 123; x++) if (s.world.get(x, y)!.pen !== 'farmer') s.world.paintPen(x, y, 'farmer');
+    for (let y = 95; y <= 96; y++) for (let x = 126; x <= 127; x++) if (s.world.get(x, y)!.pen !== 'farmer') s.world.paintPen(x, y, 'farmer');
+    const region = s.world.penRegion(122, 96);
+    assert(region.length === 9 && !region.includes(95 * s.world.cols + 126), 'a pen region is the connected pen, not every pen of the kind');
+    const card = s.penCard({ tx: 122, ty: 96 })!; assert(card.kind === 'farmer' && card.tiles.length === 9, 'the pen card describes the connected pen');
+    s.repaintPen(region, 'soldier');
+    assert(region.every((i) => s.world.get(i % s.world.cols, (i / s.world.cols) | 0)!.pen === 'soldier') && s.world.get(126, 95)!.pen === 'farmer', 'repainting changes every tile of the pen and nothing outside it');
+    s.erasePen(region); assert(region.every((i) => !s.world.get(i % s.world.cols, (i / s.world.cols) | 0)!.pen) && s.world.get(126, 95)!.pen === 'farmer', 'erasing clears the whole pen and leaves the other alone');
+    s.world.set(120, 100, 'tilled'); s.setFieldPlan({ tx: 120, ty: 100 }, 'tomato');
+    const planter = s.spawn(new Villager(World.center(120, 101).x, World.center(120, 101).y, hut, 'farmer', 20, 'Planter', s.mods));
+    for (const q of s.world.find((t) => t.kind === 'crop' || t.kind === 'tilled')) if (q.tx !== 120 || q.ty !== 100) s.world.set(q.tx, q.ty, 'grass');
+    step(s, 6); assert(s.world.get(120, 100)!.kind === 'crop' && s.world.get(120, 100)!.food === 'tomato', 'the field plan decides what a farmer sows');
+    planter.dead = true; s.removeDead();
+    s.world.placeDefense('stairs', 130, 100); for (let x = 131; x <= 134; x++) s.world.placeDefense('wall', x, 100);
+    assert(s.stairsReach({ tx: 130, ty: 100 }) === 4, 'stairs report the battlements they serve');
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;
   } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); }

@@ -228,6 +228,21 @@ export class World {
     }
     return best;
   }
+  /** The whole pen this tile belongs to: every same-kind pen tile reachable through neighbours (4-connected). */
+  penRegion(tx: number, ty: number): number[] {
+    const kind = this.get(tx, ty)?.pen;
+    if (!kind) return [];
+    const start = ty * this.cols + tx, seen = new Set<number>([start]), out = [start];
+    for (let qi = 0; qi < out.length; qi++) {
+      const i = out[qi], cx = i % this.cols, cy = (i / this.cols) | 0;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = cx + dx, ny = cy + dy, k = ny * this.cols + nx;
+        if (seen.has(k) || this.get(nx, ny)?.pen !== kind) continue;
+        seen.add(k); out.push(k);
+      }
+    }
+    return out;
+  }
   /** Resting items within r px of a point. */
   itemsNear(x: number, y: number, r: number): Item[] { return this.items.filter((it) => it.rest && (it.x - x) ** 2 + (it.y - y) ** 2 <= r * r); }
   /** Items lying on a tile. */
