@@ -259,7 +259,7 @@ export class Renderer {
       const hurt = m.hp < m.maxHp * 0.4;
       const bob = moving ? Math.abs(Math.sin(this.t * (hurt ? 9 : 14) + m.id)) * 1.5 : 0;
       const a = this.fx.anims.get(m.id);
-      const base = m instanceof Villager && m.role === 'kid' ? 0.85 : m instanceof Raider ? ENEMY_SCALE[m.kind] : m instanceof Bolt ? 3 : 1;
+      const base = m instanceof Villager && m.gnome ? (m.role === 'kid' ? 0.6 : 0.75) : m instanceof Villager && m.role === 'kid' ? 0.85 : m instanceof Raider ? ENEMY_SCALE[m.kind] : m instanceof Bolt ? 3 : 1;
       const height = m instanceof Arrow ? (m.elevated ? WALL_HEIGHT * Math.max(0, 1 - m.travelled / m.dropDistance) : 0) : m.elevated ? WALL_HEIGHT : 0;
       sp.setPosition(Math.round(m.x + (a?.ox ?? 0)), Math.round(m.y - height - bob + (a?.oy ?? 0)));
       sp.setFlipX(m.dir < 0);
@@ -554,7 +554,7 @@ function tileFrames(t: Tile, cropDays: number, dayTime: number, oldDays: number,
     case 'house':
     case 'barracks':
     case 'granary':
-    case 'woodyard': case 'tavern': case 'lair': case 'wall': case 'gate': case 'stairs': return { ground: grass, object: EMPTY }; // the building sprite sits on top
+    case 'woodyard': case 'tavern': case 'lair': case 'gnomehouse': case 'wall': case 'gate': case 'stairs': return { ground: grass, object: EMPTY }; // the building sprite sits on top
   }
 }
 
@@ -568,6 +568,7 @@ export function lookFor(m: Mover): Look | null {
   const blade = m.weapons.melee > 0 ? 'sword' : 'club';
   if (m instanceof Player) return { ...base, skin: 1, hair: 0, hairStyle: 0, body: 'adult', outfit: 'head', held: m.tool === 'sword' ? blade : m.tool === 'bow' ? 'bow' : m.tool === 'axe' ? 'axe' : m.tool === 'hoe' ? 'hoe' : 'none' };
   if (m instanceof Villager) {
+    if (m.gnome) return { ...base, body: m.isChild ? 'gnomekid' : 'gnome', outfit: 'gnome', held: m.isAdult ? 'club' : 'none' };
     if (m.role === 'kid' || m.role === 'infant') return { ...base, body: 'kid', outfit: 'kid', held: 'none' };
     if (m.elder) base.hair = 6; // grey
     const held = m.role === 'farmer' ? 'hoe' : m.role === 'woodcutter' ? 'axe' : m.weapon === 'bow' ? 'bow' : blade;

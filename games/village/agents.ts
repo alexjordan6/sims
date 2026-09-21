@@ -213,8 +213,8 @@ export abstract class Mover implements Agent {
 // ---------------------------------------------------------------------------
 // villagers
 
-/** 'infant' lives unseen in the house nursery; 'kid' trains in a pen; the rest are grown (an elder keeps their role, see Villager.elder) */
-export type Role = 'infant' | 'kid' | 'farmer' | 'woodcutter' | 'soldier';
+/** 'infant' lives unseen in the house nursery; 'kid' trains in a pen; the rest are grown (an elder keeps their role, see Villager.elder). 'gnome' is a grown gnome: no calling, fights like a soldier (see Villager.gnome) */
+export type Role = 'infant' | 'kid' | 'farmer' | 'woodcutter' | 'soldier' | 'gnome';
 
 export class Villager extends Mover {
   weapon: 'sword' | 'bow' = 'sword';
@@ -227,6 +227,8 @@ export class Villager extends Mover {
   hungerDays = 0;
   /** grown old: slower, grey, and living on borrowed time (see p.elderDays) */
   elder = false;
+  /** born in a gnome house: a little person who never takes a pen or a calling, eats at the granary as a child and fights when grown */
+  gnome = false;
   /** the pen kind a child trains in (null: no pen painted — they play near home and eat at home) */
   pen: Calling | null = null;
   /** pen children: the day they last ate from the pile, and sim time their next meal is due */
@@ -292,7 +294,8 @@ export class Villager extends Mover {
   /** Training days needed to come of age skilled (War Drums lowers it). */
   static drillNeeded(s: VillageScene): number { return Math.max(1, p.cadetDays + s.mods.cadetDaysDelta); }
   /** What this child will become as things stand — shown in the UI so nothing is a surprise. The pen decides; without one, nothing is decided yet. */
-  outlook(s: VillageScene): { role: Calling | null; skilled: boolean } {
+  outlook(s: VillageScene): { role: Calling | 'gnome' | null; skilled: boolean } {
+    if (this.gnome) return { role: 'gnome', skilled: false }; // a gnome grows into a gnome; no pen has a say
     const daysLeft = Math.max(0, s.adultAge - this.age); // training days still possible, if fed all the way
     const skilled = s.mods.fullDrill || (!!this.pen && this.trained + daysLeft >= Villager.drillNeeded(s));
     return { role: this.pen, skilled };
@@ -326,6 +329,7 @@ export class Villager extends Mover {
       case 'kid': this.radius = 2; this.color = 0xf5d8a8; this.maxHp = 10; this.speed = 30; break;
       case 'farmer': this.radius = 3; this.color = 0x7fd37f; this.maxHp = 20; this.speed = 35; break;
       case 'woodcutter': this.radius = 3; this.color = 0xc9a26b; this.maxHp = 20; this.speed = 35; break;
+      case 'gnome': this.radius = 2; this.color = 0xd94a3a; this.maxHp = p.gnomeHp; this.speed = p.gnomeSpeed; break;
       case 'soldier': this.radius = 3; this.color = 0x6f9bff; this.maxHp = p.soldierHp + mods.soldierHpBonus + this.barracksHp + (this.skilled ? 15 : 0) + armorStats(this.armor).hp; this.speed = 45 * armorStats(this.armor).speedMul; break;
     }
     // how they were raised follows them for life
@@ -354,7 +358,7 @@ export class Villager extends Mover {
     this.hp = this.maxHp;
     const star = '★'.repeat(this.stars) + '☆'.repeat(5 - this.stars);
     // with a breeding program running, only the gifted are worth a toast; the rest go to the journal
-    s.event(this.role === 'soldier' ? 'soldier' : 'grow', `${this.name} came of age — ${skilled ? 'a skilled ' : 'a '}${this.role}, ${star}${this.trait ? ` (${TRAITS[this.trait].name})` : ''}`);
+    s.event(this.role === 'soldier' ? 'soldier' : 'grow', `${this.name} came of age — ${this.role === 'gnome' ? 'a grown gnome' : `${skilled ? 'a skilled ' : 'a '}${this.role}`}, ${star}${this.trait ? ` (${TRAITS[this.trait].name})` : ''}`);
     s.stats.childrenRaised++;
     s.stats.starsTotal += this.stars;
     if (this.role === 'soldier') s.stats.soldiersRaised++;
@@ -376,7 +380,7 @@ export class Villager extends Mover {
         return;
       }
       this.task = 'hiding indoors';
-      if (!s.raidActive || this.role === 'soldier') this.unhide(s);
+      if (!s.raidActive || this.role === 'soldier' || this.role === 'gnome') this.unhide(s);
       return;
     }
     switch (this.role) {
@@ -384,7 +388,7 @@ export class Villager extends Mover {
       case 'kid': if (this.pen) this.penUpdate(dt, s); else this.kidUpdate(dt, s); break;
       case 'farmer': this.civilUpdate(dt, s, true); break;
       case 'woodcutter': this.civilUpdate(dt, s, this.helpingFarm(s)); break;
-      case 'soldier': this.soldierUpdate(dt, s); break;
+      case 'soldier': case 'gnome': this.soldierUpdate(dt, s); break;
     }
   }
 
@@ -402,11 +406,11 @@ export class Villager extends Mover {
     // bedtime: home to sleep
     if (s.dayTime > BEDTIME.start || s.dayTime < BEDTIME.end) { this.task = 'off to bed'; this.goHome(s, dt); return; }
 
-    // a pen painted since they left the nursery: off they go
-    const pen = this.findPen(s);
+    // a pen painted since they left the nursery: off they go (gnome children never go: no pen has anything to teach them)
+    const pen = this.gnome ? null : this.findPen(s);
     if (pen) { this.pen = pen; this.mealAt = s.simTime + p.dayLength / 4; this.ateDay = s.day; this.clearGoal(); return; }
 
-    this.task = 'no pen to train in';
+    this.task = this.gnome ? 'playing by the gnome house' : 'no pen to train in';
     this.thinkTimer -= dt;
     if (this.thinkTimer <= 0 || this.followPath(dt)) {
       this.thinkTimer = s.rng.range(2, 5);
@@ -629,7 +633,9 @@ export class Villager extends Mover {
 
   // --- soldiers -------------------------------------------------------------
 
+  /** Soldiers and grown gnomes: hunt whatever is in sight, otherwise patrol (a soldier round the barracks, a gnome round its cottage). Only soldiers take wall posts, bows, forged gear and barracks perks. */
   private soldierUpdate(dt: number, s: VillageScene): void {
+    const gnome = this.role === 'gnome';
     if (this.post && !s.world.get(this.post.tx, this.post.ty)?.defense) { this.post = null; this.clearGoal(); }
     if (this.post && !this.elevated) {
       if (!this.stairsGoal || !s.world.get(this.stairsGoal.tx, this.stairsGoal.ty)?.defense) this.stairsGoal = s.reachableStairs(this, this.post);
@@ -648,13 +654,15 @@ export class Villager extends Mover {
     this.retarget -= dt;
     if (this.retarget <= 0) {
       this.retarget = 0.4;
-      this.target = s.bestTarget(this.x, this.y, this.weapon === 'bow' ? 190 : 130);
+      this.target = s.bestTarget(this.x, this.y, !gnome && this.weapon === 'bow' ? 190 : 130);
     }
     if (this.target && !this.target.dead) {
       this.task = 'fighting';
       if (this.attackTick(dt, s)) return;
-      const dmg = p.soldierDmg * weaponMul(this.weapons, this.weapon === 'bow' ? 'bow' : 'melee') * s.mods.soldierDmgMul * (s.world.barracksLevel >= 3 ? 1.2 : 1) * (this.skilled ? 1.15 : 1) * (this.trait === 'brave' ? 1.2 : 1) * (1 + this.dietBonus.dmg);
-      if (this.weapon === 'bow') {
+      const dmg = gnome
+        ? p.gnomeDmg * (this.trait === 'brave' ? 1.2 : 1) * (1 + this.dietBonus.dmg)
+        : p.soldierDmg * weaponMul(this.weapons, this.weapon === 'bow' ? 'bow' : 'melee') * s.mods.soldierDmgMul * (s.world.barracksLevel >= 3 ? 1.2 : 1) * (this.skilled ? 1.15 : 1) * (this.trait === 'brave' ? 1.2 : 1) * (1 + this.dietBonus.dmg);
+      if (!gnome && this.weapon === 'bow') {
         const range = this.elevated ? 210 : 160;
         if (this.dist(this.target) <= range && s.world.lineClear(this, this.target, this.elevated)) {
           this.vx = this.vy = 0; this.task = this.post ? 'archer holding the wall' : 'firing arrows';
@@ -670,14 +678,14 @@ export class Villager extends Mover {
     }
     this.target = null;
     if (this.post) { this.setGoal(s, this.post.tx, this.post.ty); this.followPath(dt); this.task = 'watching from the wall'; return; }
-    this.task = 'on patrol';
-    // a cold barracks mends nobody
-    const regen = s.world.barracks.some((b) => b.warm) ? s.mods.soldierRegen + (s.world.barracksLevel >= 3 ? 1 : 0) : 0;
+    this.task = gnome ? 'pottering about' : 'on patrol';
+    // a cold barracks mends nobody (and no barracks mends a gnome)
+    const regen = !gnome && s.world.barracks.some((b) => b.warm) ? s.mods.soldierRegen + (s.world.barracksLevel >= 3 ? 1 : 0) : 0;
     if (regen && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + regen * dt);
     this.thinkTimer -= dt;
     if (this.followPath(dt) && this.thinkTimer <= 0) {
       this.thinkTimer = s.rng.range(3, 7);
-      const post = buildingCenter(s.world.barracks.length ? s.rng.pick(s.world.barracks) : this.home);
+      const post = buildingCenter(!gnome && s.world.barracks.length ? s.rng.pick(s.world.barracks) : this.home);
       this.wanderNear(s, { tx: Math.round(post.tx), ty: Math.round(post.ty) }, 3);
     }
   }
@@ -867,8 +875,8 @@ export class Arrow extends Mover {
 // player
 
 /** What the player holds. The equipped tool decides what E does. */
-export type Tool = 'hands' | 'hoe' | 'seeds' | 'axe' | 'sword' | 'house' | 'barracks' | 'hammer' | 'bow' | 'tavern' | 'wall' | 'gate' | 'stairs' | 'pen' | 'basket';
-export const TOOLS: Tool[] = ['hands', 'hoe', 'seeds', 'axe', 'sword', 'house', 'barracks', 'hammer', 'bow', 'tavern', 'wall', 'gate', 'stairs', 'pen', 'basket'];
+export type Tool = 'hands' | 'hoe' | 'seeds' | 'axe' | 'sword' | 'house' | 'barracks' | 'hammer' | 'bow' | 'tavern' | 'wall' | 'gate' | 'stairs' | 'pen' | 'basket' | 'gnomehouse';
+export const TOOLS: Tool[] = ['hands', 'hoe', 'seeds', 'axe', 'sword', 'house', 'barracks', 'hammer', 'bow', 'tavern', 'wall', 'gate', 'stairs', 'pen', 'basket', 'gnomehouse'];
 
 /** A sword swing in progress: an arc in front of the player that connects during its active window. */
 /** A sword swing in progress: an arc in front of the player that connects during its active window. */
@@ -935,7 +943,7 @@ export class Player extends Mover {
 
   /** The building the tool would place, if it's a building tool. */
   get build(): BuildingKind | 'none' {
-    return this.tool === 'house' || this.tool === 'barracks' || this.tool === 'tavern' ? this.tool : 'none';
+    return this.tool === 'house' || this.tool === 'barracks' || this.tool === 'tavern' || this.tool === 'gnomehouse' ? this.tool : 'none';
   }
 
   /** The tile just in front of the player. */

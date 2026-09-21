@@ -91,6 +91,7 @@ export const CHAR = {
   kid: { key: 'dungeon', frame: DUNGEON.villager },
   infant: { key: 'dungeon', frame: DUNGEON.villager },
   soldier: { key: 'dungeon', frame: DUNGEON.knight },
+  gnome: { key: 'dungeon', frame: DUNGEON.villager },
   raider: { key: 'dungeon', frame: DUNGEON.orc },
   warlord: { key: 'dungeon', frame: DUNGEON.orc },
   rat: { key: 'dungeon', frame: 123 },

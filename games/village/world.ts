@@ -1,12 +1,12 @@
 import type { Rng } from '@shared/index';
-import { TILE, COLS, ROWS, BUILDING_HP, HEARTH_WOOD, ITEM, p, CROP_KINDS, type Calling, type FoodKind } from './config';
+import { TILE, COLS, ROWS, BUILDING_HP, HEARTH_WOOD, ITEM, p, CROP_KINDS, type Calling, type FoodKind, type BuildingKind } from './config';
+export type { BuildingKind } from './config';
 import { tickItem, hop, type Item, type ItemKind } from './items';
 
 export type DefenseKind = 'wall' | 'gate' | 'stairs';
 export interface Defense extends TilePos { kind: DefenseKind; hp: number; maxHp: number; open: boolean }
 /** 'bush' and 'mushroom' are wild food: they stay put, get picked by hand and regrow (see Tile.stage) */
 export type TileKind = 'grass' | 'tree' | 'sapling' | 'tilled' | 'crop' | 'bush' | 'mushroom' | BuildingKind | DefenseKind;
-export type BuildingKind = 'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern' | 'lair';
 
 /** Footprint per building kind; (tx, ty) is the top-left, the door sits on the bottom row at `door`. */
 export const BUILDINGS: Record<BuildingKind, { w: number; h: number; door: number; name: string }> = {
@@ -16,6 +16,7 @@ export const BUILDINGS: Record<BuildingKind, { w: number; h: number; door: numbe
   woodyard: { w: 3, h: 2, door: 1, name: 'Woodyard' },
   tavern: { w: 4, h: 4, door: 1, name: 'The Copper Acorn' },
   lair: { w: 5, h: 4, door: 2, name: "The Ogre's Lair" },
+  gnomehouse: { w: 2, h: 2, door: 0, name: 'Gnome House' },
 };
 export const MAX_LEVEL = 3;
 /** ground a building can go on (flattened when it goes up) */
@@ -102,7 +103,7 @@ export interface TilePos { tx: number; ty: number }
 
 export const BLOCKING: Record<TileKind, boolean> = {
   grass: false, tilled: false, crop: false, sapling: false, bush: false, mushroom: false, tree: true, house: true, barracks: true, granary: true, woodyard: true,
-  tavern: true, lair: true, wall: true, gate: false, stairs: false,
+  tavern: true, lair: true, gnomehouse: true, wall: true, gate: false, stairs: false,
 };
 
 export class World {
@@ -127,6 +128,10 @@ export class World {
   }
 
   get houses(): Building[] { return this.buildings.filter((b) => b.kind === 'house'); }
+  /** gnome families live apart: their own cottages, never a human house */
+  get gnomeHouses(): Building[] { return this.buildings.filter((b) => b.kind === 'gnomehouse'); }
+  /** every roof a family can be raised under: houses and gnome houses */
+  get familyHouses(): Building[] { return this.buildings.filter((b) => b.kind === 'house' || b.kind === 'gnomehouse'); }
   /** buildings the village can use (everything but the Ogre's lair) */
   get villageBuildings(): Building[] { return this.buildings.filter((b) => b.kind !== 'lair'); }
   /** standing barracks: a ruined one sponsors nothing, fires nothing and forges nothing */

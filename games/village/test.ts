@@ -124,8 +124,8 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     }
     // buildings take damage; a ruin keeps its footprint and does nothing until the hammer rebuilds it
     s = fresh(); clearing(s);
-    for (const kind of ['house', 'barracks', 'granary', 'woodyard', 'tavern'] as BuildingKind[]) {
-      const b = s.world.buildings.find(q => q.kind === kind) ?? s.world.place(kind, 135, 95);
+    for (const kind of ['house', 'barracks', 'granary', 'woodyard', 'tavern', 'gnomehouse'] as BuildingKind[]) {
+      const b = s.world.buildings.find(q => q.kind === kind) ?? s.world.place(kind, kind === 'gnomehouse' ? 130 : 135, 95);
       assert(b.hp === BUILDING_HP[kind][1] && b.maxHp === b.hp && b.hp > 0, `${kind}: starts at its Lv1 hit points`);
     }
     assert(s.world.lair && !s.damageBuilding(s.world.lair, 999) && !s.world.lair.ruined, 'the lair cannot be hurt');
@@ -508,6 +508,28 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     planter.dead = true; s.removeDead();
     s.world.placeDefense('stairs', 130, 100); for (let x = 131; x <= 134; x++) s.world.placeDefense('wall', x, 100);
     assert(s.stairsReach({ tx: 130, ty: 100 }) === 4, 'stairs report the battlements they serve');
+    // gnome house: a founding couple, a family raised without a pen, grown gnomes who fight
+    s = fresh(); clearing(s); s.agents = [s.player]; s.food = 100;
+    const den = s.world.place('gnomehouse', 125, 100), [gma, gpa] = s.foundGnomes(den);
+    assert(gma.gnome && gpa.gnome && gma.role === 'gnome' && gma.isAdult && den.residents === 2 && gma.home === den, 'a new gnome house comes with a grown gnome couple');
+    { const hp0 = gma.maxHp, was = p.gnomeHp; p.gnomeHp = was * 2; gma.applyRole(s.mods); assert(gma.maxHp > hp0 && gma.speed === p.gnomeSpeed, 'grown gnomes take their stats from the sliders'); p.gnomeHp = was; gma.applyRole(s.mods); gma.hp = gma.maxHp; }
+    assert(s.beds(den) === 3 && s.rationOf(gma) === p.foodPerDay * s.mods.foodPerDayMul, 'a Lv1 gnome house has 3 beds and its gnomes eat a full ration');
+    den.nextBirth = 0;
+    assert(births(s, 40) > 0, 'a gnome couple in a warm cottage has children');
+    const sprout = s.villagers().find((v) => v.role === 'infant')!;
+    assert(sprout.gnome && sprout.home === den && sprout.parents.includes(gma), 'a gnome infant is born a gnome, at home in the gnome house');
+    sprout.age = p.infantDays; s.tickAges(0);
+    assert(sprout.role === 'kid' && sprout.pen === null && !sprout.hidden && sprout.outlook(s).role === 'gnome', 'a gnome child leaves the nursery without looking for a pen');
+    assert(s.rationOf(sprout) === p.foodPerDay * s.mods.foodPerDayMul, 'a gnome child eats at the granary, not from a pen');
+    step(s, 2); assert(sprout.pen === null && sprout.task === 'playing by the gnome house', 'a gnome child plays by the cottage');
+    sprout.age = s.adultAge; s.tickAges(0);
+    assert(sprout.role === 'gnome' && sprout.gnome && sprout.home === den && sprout.isAdult, 'a gnome child comes of age a gnome and stays under the toadstool');
+    const gfoe = s.spawn(new Raider(...Object.values(World.center(128, 102)) as [number, number])); gfoe.update = () => {};
+    step(s, 1.5); const fought = gma.task === 'fighting' || gpa.task === 'fighting' || sprout.task === 'fighting';
+    step(s, 4);
+    assert(fought && gfoe.hp < gfoe.maxHp, `grown gnomes go for a raider in sight (${Math.max(0, gfoe.hp)}/${gfoe.maxHp} hp left)`);
+    gfoe.dead = true; s.removeDead(); step(s, 1);
+    assert(gma.task === 'pottering about' || gma.task === 'fighting', 'with nothing to fight a gnome potters about the cottage');
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;
   } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); }

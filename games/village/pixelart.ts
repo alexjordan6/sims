@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import type { BuildingKind } from './config';
 
 // Hand-drawn (procedurally, pixel by pixel) art that the Kenney sheets don't have: the village's
 // buildings and their stockpiles. One visual language throughout — steep plank gable roofs with
@@ -35,6 +36,8 @@ export const PALETTES = {
   barracks: { roof: '#6f7d8c', roofDark: '#4f5b68', roofLight: '#8b99a8', wall: '#7a7e86', wallDark: '#5a5e66', wallLight: '#969aa2', frame: '#b7a27a', stone: true },
   granary: { roof: '#b8463a', roofDark: '#8f3229', roofLight: '#d3675a', wall: '#8a4632', wallDark: '#61301f', wallLight: '#a85a3e', frame: '#e0b078' },
   woodyard: { roof: '#c48a4c', roofDark: '#a06c38', roofLight: '#dba566', wall: '#6e3d2c', wallDark: '#4e2a1f', wallLight: '#8a4d36', frame: '#d19a5a' },
+  // the toadstool's stem: cream plaster with a pale-wood frame (the red cap is drawn by hand)
+  gnomehouse: { roof: '#c23b3b', roofDark: '#7d2424', roofLight: '#e06a5a', wall: '#e8dcc4', wallDark: '#c9b895', wallLight: '#f6efe0', frame: '#b07a4a' },
 } satisfies Record<string, Palette>;
 
 // ---- primitives -----------------------------------------------------------------------------
@@ -297,6 +300,49 @@ function drawCabin(ctx: Ctx, ox: number, level: number): void {
   plaque(ctx, ox + 17, 27, level, p);
 }
 
+
+/**
+ * The gnome house, 32x48 (2x2 footprint + roof row): a toadstool cottage — a red cap with white
+ * spots overhanging a cream stem with a round door on the left tile. Lv2 hangs a lantern and grows
+ * a small cap beside it; Lv3 adds a chimney through the cap and a fairy ring at the foot.
+ */
+function drawGnomeHouse(ctx: Ctx, ox: number, level: number): void {
+  const p = PALETTES.gnomehouse;
+  const CAP = RED, CAP_DARK = RED_DARK, CAP_LIGHT = '#e06a5a', SPOT = '#f4efe2', GILL = '#d9b48a';
+  // rows of the cap as (x0, width), top to bottom, inside the ink outline
+  const cap: [number, number][] = [[12, 8], [10, 12], [8, 16], [6, 20], [5, 22], [4, 24], [3, 26], [2, 28], [1, 30], [0, 32], [0, 32], [0, 32], [0, 32], [0, 32], [0, 32], [1, 30], [2, 28]];
+  const capY = 4;
+  // --- the stem: a rounded wall the cap overhangs
+  wall(ctx, ox + 4, 19, 22, CABIN_H - 19, p);
+  px(ctx, ox + 5, 20, p.wallLight, 20, 1);
+  archDoor(ctx, ox + 5, 33, 8, 15, p);
+  px(ctx, ox + 6, 32, INK, 6, 1); // a rounder top to the door
+  windowAt(ctx, ox + 16, 30, 7, 7, p);
+  px(ctx, ox + 17, 30, p.frame, 5, 1); px(ctx, ox + 16, 31, p.frame, 1, 1); px(ctx, ox + 22, 31, p.frame, 1, 1); // round it off
+  if (level >= 2) lantern(ctx, ox + 25, 34);
+  if (level >= 3) { windowAt(ctx, ox + 16, 40, 7, 6, p); px(ctx, ox + 5, 46, HAY, 20, 1); }
+  // --- the cap: ink outline, red dome, a dark band under the rim, white spots, a highlight
+  cap.forEach(([x0, w], k) => px(ctx, ox + x0 - 1, capY + k, INK, w + 2, 1));
+  px(ctx, ox + cap[0][0], capY - 1, INK, cap[0][1], 1);
+  px(ctx, ox + 1, capY + cap.length, INK, 30, 1); px(ctx, ox + 3, capY + cap.length + 1, INK, 26, 1);
+  cap.forEach(([x0, w], k) => px(ctx, ox + x0, capY + k, k >= cap.length - 3 ? CAP_DARK : CAP, w, 1));
+  px(ctx, ox + 10, capY + 1, CAP_LIGHT, 8, 1); px(ctx, ox + 7, capY + 2, CAP_LIGHT, 5, 1); px(ctx, ox + 5, capY + 3, CAP_LIGHT, 3, 1);
+  for (const [sx, sy, w] of [[8, 9, 3], [17, 6, 4], [24, 11, 3], [5, 14, 3], [14, 13, 4], [23, 16, 3], [1, 17, 2]] as const) { px(ctx, ox + sx, capY + sy, SPOT, w, 2); px(ctx, ox + sx + 1, capY + sy + 2, SPOT, w - 2, 1); }
+  px(ctx, ox + 2, capY + cap.length - 1, GILL, 28, 1); // the gills under the rim
+  if (level >= 3) chimney(ctx, ox + 21, 2, 9);
+  // --- Lv2: a small cap by the door step; Lv3: a fairy ring along the foot
+  if (level >= 2) toadstool(ctx, ox + 26, 40, 6);
+  if (level >= 3) { toadstool(ctx, ox, 41, 5); toadstool(ctx, ox + 27, 30, 4); toadstool(ctx, ox + 1, 33, 4); }
+  plaque(ctx, ox + 14, 22, level, p);
+}
+/** A little mushroom w wide at (x, y): ink-edged red cap over a pale stalk. */
+function toadstool(ctx: Ctx, x: number, y: number, w: number): void {
+  const h = Math.max(4, w + 1);
+  px(ctx, x + 1, y + h - 3, INK, w - 2, 3); px(ctx, x + 2, y + h - 2, '#f4efe2', w - 4, 2);
+  px(ctx, x, y, INK, w, h - 3); px(ctx, x + 1, y + 1, RED, w - 2, h - 4); px(ctx, x + 1, y, INK, w - 2, 1);
+  px(ctx, x + 1, y + 1, '#f4efe2', 1, 1);
+}
+
 /** The Ogre's lair, 80x80 (5x4 footprint + roof row): an earthen mound with a cave mouth, bones, a fire pit. Level 0 = fire out. */
 function drawLair(ctx: Ctx, ox: number, level: number): void {
   const EARTH = '#5a4a3e', EARTH_DARK = '#3e3128', EARTH_LIGHT = '#7a6a58', MOSS = '#4f6b2e', MOSS_DARK = '#3a5222', BONE = '#e8e0d0', BONE_DARK = '#b8ae9a', ROCK = '#6e6a66', ROCK_LIGHT = '#8c8884', ROCK_DARK = '#4a4744';
@@ -409,7 +455,8 @@ function buildingTexture(scene: Phaser.Scene, key: string, w: number, h: number,
  * Where each building gives off light at night (window centres, lanterns, torches), in texture
  * pixels from the sprite's top-left, per level (index = level). `warm` = firelight (torches).
  */
-export const LIGHTS: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern' | 'lair', readonly (readonly { x: number; y: number; r: number; warm?: boolean }[])[]> = {
+export const LIGHTS: Record<BuildingKind, readonly (readonly { x: number; y: number; r: number; warm?: boolean }[])[]> = {
+  gnomehouse: [[], [{ x: 19, y: 33, r: 12 }], [{ x: 19, y: 33, r: 12 }, { x: 26, y: 36, r: 10 }], [{ x: 19, y: 33, r: 12 }, { x: 26, y: 36, r: 10 }, { x: 19, y: 43, r: 12 }, { x: 9, y: 46, r: 14, warm: true }]],
   tavern: [[], [{ x: 14, y: 48, r: 22 }, { x: 45, y: 48, r: 22 }], [{ x: 14, y: 48, r: 24 }, { x: 45, y: 48, r: 24 }], [{ x: 14, y: 48, r: 24 }, { x: 45, y: 48, r: 24 }, { x: 31, y: 19, r: 16 }, { x: 7, y: 65, r: 20, warm: true }]],
   // the lair's fire pit (level 0 = the Ogre is dead and the fire is out)
   lair: [[], [{ x: 66, y: 66, r: 26, warm: true }], [{ x: 66, y: 66, r: 26, warm: true }], []],
@@ -434,7 +481,8 @@ export const LIGHTS: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tav
   ],
 };
 /** Chimney tops (smoke rises from here), per level. */
-export const CHIMNEYS: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern' | 'lair', readonly (readonly { x: number; y: number }[])[]> = {
+export const CHIMNEYS: Record<BuildingKind, readonly (readonly { x: number; y: number }[])[]> = {
+  gnomehouse: [[], [], [], [{ x: 23, y: 1 }]],
   tavern: [[], [{ x: 50, y: 7 }], [{ x: 50, y: 7 }, { x: 11, y: 15 }], [{ x: 50, y: 7 }, { x: 11, y: 15 }]],
   lair: [[], [{ x: 66, y: 60 }], [{ x: 66, y: 60 }], []],
   house: [[], [], [{ x: 48, y: 9 }], [{ x: 48, y: 5 }]],
@@ -466,9 +514,9 @@ export function ensureGlowTexture(scene: Phaser.Scene): void {
 }
 
 /** Texture key for a building kind; frame = level - 1. */
-export const BUILDING_TEXTURE = { house: 'bld-house', barracks: 'bld-barracks', granary: 'bld-granary', woodyard: 'cabin', tavern: 'bld-tavern', lair: 'bld-lair' } as const;
+export const BUILDING_TEXTURE = { house: 'bld-house', barracks: 'bld-barracks', granary: 'bld-granary', woodyard: 'cabin', tavern: 'bld-tavern', lair: 'bld-lair', gnomehouse: 'bld-gnomehouse' } as const;
 /** The same buildings' windows, lanterns and torches alone — laid over the body at night. */
-export const LIT_TEXTURE = { house: 'bld-house-lit', barracks: 'bld-barracks-lit', granary: 'bld-granary-lit', woodyard: 'cabin-lit', tavern: 'bld-tavern-lit', lair: 'bld-lair-lit' } as const;
+export const LIT_TEXTURE = { house: 'bld-house-lit', barracks: 'bld-barracks-lit', granary: 'bld-granary-lit', woodyard: 'cabin-lit', tavern: 'bld-tavern-lit', lair: 'bld-lair-lit', gnomehouse: 'bld-gnomehouse-lit' } as const;
 
 /** Create every building and stock texture (safe to call more than once). */
 /** What people carry: a bundle of logs on the shoulder, a basket of produce. 14x8 each. */
@@ -494,6 +542,8 @@ export function ensureBuildingArt(scene: Phaser.Scene): void {
   buildingTexture(scene, 'bld-lair', 80, 80, (ctx, ox, level) => drawLair(ctx, ox, level < 3 ? 1 : 0));
   buildingTexture(scene, 'bld-lair-lit', 80, 80, (ctx, ox, level) => drawLair(ctx, ox, level < 3 ? 1 : 0), true);
   buildingTexture(scene, 'bld-tavern-lit', BIG_W, BIG_H, drawTavern, true);
+  buildingTexture(scene, 'bld-gnomehouse', CABIN_W, CABIN_H, drawGnomeHouse);
+  buildingTexture(scene, 'bld-gnomehouse-lit', CABIN_W, CABIN_H, drawGnomeHouse, true);
   buildingTexture(scene, 'bld-house', BIG_W, BIG_H, drawHouse);
   buildingTexture(scene, 'bld-barracks', BIG_W, BIG_H, drawBarracks);
   buildingTexture(scene, 'bld-granary', CABIN_W, CABIN_H, drawGranary);

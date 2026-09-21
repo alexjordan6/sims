@@ -29,7 +29,9 @@ export function spr(key: string, frame: number, size = 32, extra = ''): string {
   return `<span class="spr ${key} ${cls} ${extra}" style="background-position:${framePos(frame, scale)}"></span>`;
 }
 
-const ROLE_LABEL: Record<string, string> = { infant: 'Infant', kid: 'Child', farmer: 'Farmer', woodcutter: 'Woodcutter', soldier: 'Soldier' };
+const ROLE_LABEL: Record<string, string> = { infant: 'Infant', kid: 'Child', farmer: 'Farmer', woodcutter: 'Woodcutter', soldier: 'Soldier', gnome: 'Gnome' };
+/** a grown gnome's portrait, for chips and outlooks */
+const GNOME_LOOK = { body: 'gnome', skin: 0, hair: 0, hairStyle: 0, outfit: 'gnome', held: 'club', armor: { helmet: 0, chest: 0, legs: 0, shield: 0 }, dye: 0, helmetStyle: 0, plume: 0 } as const;
 const ENEMY_LABEL: Record<string, string> = { raider: 'Raider', warlord: 'Warlord', rat: 'Rat — eats crops', snatcher: 'Snatcher — steals children', brute: 'Brute — heavy', shaman: 'Shaman — ranged', wrecker: 'Wrecker — tears down buildings' };
 
 const EVENT_ICON: Record<EventKind, { key: string; frame: number }> = {
@@ -129,6 +131,7 @@ export class UI {
         ${slot('stairs', 'town', TOWN.iconHammer, 'STAIRS', 'Connect stairs to your walls. Use hands or X to climb and descend', 10)}
         ${slot('tavern', 'town', TOWN.wallWoodDoor, 'TAVERN', 'A cozy place to eat, rest and gather', COST.tavern)}
         ${slot('pen', 'farm', FARM.grassTuft, 'PEN', 'Paint a training pen on open ground: children leave the nursery for it and train there until they come of age. F cycles farm / wood / drill; painting the same kind again erases')}
+        ${slot('gnomehouse', 'town', TOWN.wallWoodDoor, 'GNOME HOUSE', 'A toadstool cottage: a gnome couple moves in and raises a family like any house. Gnomes take no pen or calling, eat at the granary, and every grown one fights anything in sight', COST.gnomehouse)}
         ${slot('basket', 'farm', FARM.crate, 'BASKET', 'F picks a kind of food; walk up to the granary to fill the basket with it, then throw toward a pen. It flies where you point, bounces and rolls; children only eat what lies inside their pen, and what they eat is who they become')}
       </div>
       <div class="hint"><kbd>click / C</kbd><span class="hint-text"></span></div>
@@ -432,7 +435,7 @@ export class UI {
     const night = s.dayTime < 0.22 || s.dayTime > 0.8;
     const raidIn = s.nextRaidDay - s.day;
     const held = s.player.load ? `${s.player.load.kind}${s.player.load.n}` : '';
-    const key = `${s.day}|${hour}|${held}|${s.food | 0}/${s.foodCap}|${s.surplusDays().toFixed(1)}|${s.feverActive()}|${s.wood | 0}/${s.woodCap}|${s.scrap}|${count('farmer')}|${count('woodcutter')}|${count('infant')}|${count('kid')}|${count('soldier')}|${count('elder')}|${s.player.hp}|${s.raidActive}|${s.boss?.hp ?? ''}|${raidIn}|${s.speed}|${s.paused}|${night}`;
+    const key = `${s.day}|${hour}|${held}|${s.food | 0}/${s.foodCap}|${s.surplusDays().toFixed(1)}|${s.feverActive()}|${s.wood | 0}/${s.woodCap}|${s.scrap}|${count('farmer')}|${count('woodcutter')}|${count('infant')}|${count('kid')}|${count('soldier')}|${count('gnome')}|${count('elder')}|${s.player.hp}|${s.raidActive}|${s.boss?.hp ?? ''}|${raidIn}|${s.speed}|${s.paused}|${night}`;
     if (key === this.lastTop) return;
     this.lastTop = key;
 
@@ -451,7 +454,7 @@ export class UI {
     q('.t-food').title = `${FOOD_KINDS.map((k) => `${s.pantry[k] | 0} ${FOODS[k].one}`).join(' · ')} — each villager eats 1 a day; the small number is how many days the larder would last. Pen children eat only what the basket tosses in.`;
     q('.scrap').textContent = String(s.scrap);
     q('.pop').innerHTML = ([
-      ['farmer', CHAR.farmer, 'FARM'], ['woodcutter', CHAR.woodcutter, 'WOOD'], ['infant', CHAR.kid, 'CRIBS'], ['kid', CHAR.kid, 'KIDS'], ['soldier', CHAR.soldier, 'ARMY'], ['elder', CHAR.woodcutter, 'OLD'],
+      ['farmer', CHAR.farmer, 'FARM'], ['woodcutter', CHAR.woodcutter, 'WOOD'], ['infant', CHAR.kid, 'CRIBS'], ['kid', CHAR.kid, 'KIDS'], ['soldier', CHAR.soldier, 'ARMY'], ['gnome', CHAR.gnome, 'GNOMES'], ['elder', CHAR.woodcutter, 'OLD'],
     ] as [string, { key: string; frame: number }, string][]).map(([r, c, lbl]) => `<span class="chip ${r}" title="${r === 'elder' ? 'Elders' : ROLE_LABEL[r] + 's'} · ${vs.length} villagers in all">${spr(c.key, c.frame, 24)}<b>${count(r)}</b><i>${lbl}</i></span>`).join('');
     const raid = q('.raid');
     const bossNext = s.nextRaidDay === p.bossDay;
@@ -619,7 +622,7 @@ export class UI {
         const why = s.stockProblem(b);
         html += `<b>Hearth</b><span>${b.warm ? 'warm' : '<em class="warn">COLD</em>'} · ${b.firewood} / ${p.hearthNights} night${b.firewood === 1 ? '' : 's'} stocked · burns ${hearthCost(b)} wood a night <button class="btn small ${why ? '' : 'ok'} stock-hearth" ${why ? 'disabled' : ''} title="${why ? esc(why) : 'from the village pile; woodcutters stock it on their own'}">STOCK +1 NIGHT · ${hearthCost(b)} WOOD</button>${!b.warm ? `<em class="d"> ${b.firewood ? 'lit again at dawn' : 'empty — no births, drill, regen or meals until it burns'}</em>` : ''}</span>`;
       }
-      if (b.kind === 'house') {
+      if (b.kind === 'house' || b.kind === 'gnomehouse') {
         const infants = s.infantsOf(b).length, why = s.birthProblem(b);
         html += `<b>Beds</b><span>${s.bedsTaken(b)} / ${s.beds(b)}${s.bedsTaken(b) > s.beds(b) ? ' <em class="warn">· crowded</em>' : ''}</span>`;
         html += `<b>Nursery</b><span>${infants} / ${s.cribs(b)} cribs${b.ruined ? '' : why ? ` · <em class="warn">no births: ${esc(why)}</em>` : ` · ${Math.round(100 * s.birthChance(b))}% every ${p.birthEvery}s · next roll in ${Math.ceil(s.birthIn(b))}s${s.feverActive() ? ' <em class="fever-txt">· baby fever</em>' : ''}`}<em class="d"> infants walk out to a pen after ${p.infantDays} days</em></span>`;
@@ -630,6 +633,7 @@ export class UI {
         html += `<b>Arrows</b><span>${ammo ? `${ammo} / ${cap}` : `<em class="warn">OUT OF ARROWS</em> · 0 / ${cap}`} · range ${s.towerRange(b)} px<div class="bar ammo ${ammo / cap <= 0.25 ? 'low' : ''}"><i style="width:${Math.round(100 * ammo / cap)}%"></i></div></span>`;
       }
       html += `<b>Next</b><span>${b.level < MAX_LEVEL ? `Lv${b.level + 1}: ${LEVEL_PERKS[b.kind][b.level + 1]} <em>· ${cost} wood with the hammer</em>` : 'max level'}</span></div>`;
+      if (b.kind === 'gnomehouse') html += `<p class="d">Too small to go inside. A gnome couple raises children here; grown gnomes potter about it and fight whatever comes.</p>`;
       if (['house', 'barracks', 'tavern'].includes(b.kind)) {
         const onStep = s.doorAt() === b;
         html += `<p class="d">${onStep ? '<b>Walk up into the door</b> to go inside.' : 'To go inside, stand on the doorstep and walk up into the door.'}</p>`;
@@ -639,7 +643,7 @@ export class UI {
         html += `<p>The tower shoots raiders inside the ring while the chest has arrows.</p><button class="btn small ${why ? '' : 'ok'} restock" ${why ? 'disabled' : ''} title="${why ? esc(why) : ''}">RESTOCK ${TOWER.restockArrows} ARROWS · ${TOWER.restockWood} WOOD</button>${why ? `<span class="d"> ${esc(why)}</span>` : ''}`;
         html += `<p>Equip soldiers with bows in their cards. SET WALL POST, then tap a connected battlement. Stairs are required.</p><button class="btn small craft-arrows">FLETCH 10 ARROWS · 2 WOOD</button> <button class="btn small ok open-armory" title="The chest inside: armor and tower arrows">ARMOR CHEST</button><p class="d">Forges leather now, iron at Lv2, steel at Lv3. Scrap iron drops where a raider falls — walk over it.</p>`;
       }
-      if (b.kind === 'house' || b.kind === 'barracks' || b.kind === 'tavern') {
+      if (b.kind === 'house' || b.kind === 'barracks' || b.kind === 'tavern' || b.kind === 'gnomehouse') {
         const why = s.demolishProblem(b), refund = s.demolishRefund(b), arming = this.confirmDemolish === b;
         html += `<p class="d"><button class="btn small ${arming ? 'danger' : ''} demolish" ${why ? 'disabled' : ''} title="${why ? esc(why) : 'Take it down'}">${arming ? `REALLY TAKE IT DOWN? · ${refund} WOOD BACK` : `DEMOLISH · ${refund} WOOD BACK`}</button>${why ? ` ${esc(why)}` : arming ? ' <em class="warn">tenants move out, anyone inside steps out</em>' : b.ruined ? ' rubble is worth nothing' : ''}</p>`;
       }
@@ -675,11 +679,11 @@ export class UI {
     html += `<b>Health</b><div class="bar hp ${hpPct < 40 ? 'low' : ''}"><i style="width:${hpPct}%"></i><span class="bar-txt">${Math.max(0, m.hp | 0)} / ${m.maxHp}</span></div>`;
     if (m instanceof Villager) {
       const stage = m.role === 'infant' ? ` <em>· infant, leaves the nursery in ${Math.max(0, p.infantDays - m.age).toFixed(1)} days</em>`
-        : m.role === 'kid' ? ` <em>· child, comes of age in ${Math.max(0, s.adultAge - m.age).toFixed(1)} days${m.pen ? ` at the ${PEN_NAME[m.pen]}` : ' — no pen to train in'}</em>`
+        : m.role === 'kid' ? ` <em>· child, comes of age in ${Math.max(0, s.adultAge - m.age).toFixed(1)} days${m.gnome ? ' by the gnome house' : m.pen ? ` at the ${PEN_NAME[m.pen]}` : ' — no pen to train in'}</em>`
         : m.elder ? ` <em>· elder</em>` : ` <em>· grows old at ${Math.round(s.elderAge)}</em>`;
       html += `<b>Age</b><span>${m.age.toFixed(1)} days${stage}</span>`;
       html += `<b>Home</b><span>${s.bedsTaken(m.home)} of ${s.beds(m.home)} beds</span>`;
-      html += `<b>Fed</b><span>${m.role === 'infant' ? 'nursed' : m.role === 'kid' ? (m.ateDay >= s.day ? 'ate today from a pen pile' : m.hungerDays ? `<em class="warn">hungry for ${m.hungerDays} days — ${m.pen ? `throw food into the ${PEN_NAME[m.pen]}` : 'paint a pen and throw food in'}</em>` : 'not yet today') : m.hungerDays === 0 ? 'yes' : `<em class="warn">hungry for ${m.hungerDays} days</em>`}</span>`;
+      html += `<b>Fed</b><span>${m.role === 'infant' ? 'nursed' : m.role === 'kid' && !m.gnome ? (m.ateDay >= s.day ? 'ate today from a pen pile' : m.hungerDays ? `<em class="warn">hungry for ${m.hungerDays} days — ${m.pen ? `throw food into the ${PEN_NAME[m.pen]}` : 'paint a pen and throw food in'}</em>` : 'not yet today') : m.hungerDays === 0 ? 'yes' : `<em class="warn">hungry for ${m.hungerDays} days</em>`}</span>`;
     }
     if (m.load) html += `<b>Carrying</b><span>${m.load.n} ${m.load.kind}</span>`;
     html += `<b>Doing</b><span>${esc(m.task || '—')}${m instanceof Villager && m.carriedBy ? ` <em class="warn">— kill the ${esc(m.carriedBy.name.toLowerCase())} to free them</em>` : ''}</span></div>`;
@@ -728,6 +732,7 @@ export class UI {
       ['Infants', 'kid', vs.filter((v) => v.role === 'infant').sort((a, b) => b.age - a.age)],
       ['Children', 'kid', vs.filter((v) => v.role === 'kid').sort((a, b) => b.age - a.age)],
       ['Soldiers', 'soldier', vs.filter((v) => v.role === 'soldier')],
+      ['Gnomes', 'gnome', vs.filter((v) => v.role === 'gnome')],
       ['Workers', 'farmer', vs.filter((v) => v.role === 'farmer' || v.role === 'woodcutter')],
     ];
     let html = '';
@@ -739,7 +744,7 @@ export class UI {
         let bar = '';
         if (v.role === 'kid') {
           const o = v.outlook(s);
-          const icon = o.role === 'soldier' ? spr('dungeon', DUNGEON.sword, 16) : o.role === 'woodcutter' ? spr('town', TOWN.iconAxe, 16) : o.role === 'farmer' ? spr('town', TOWN.iconHoe, 16) : '?';
+          const icon = o.role === 'soldier' ? spr('dungeon', DUNGEON.sword, 16) : o.role === 'woodcutter' ? spr('town', TOWN.iconAxe, 16) : o.role === 'farmer' ? spr('town', TOWN.iconHoe, 16) : o.role === 'gnome' ? `<img class="art" src="${charImg(GNOME_LOOK)}" alt="" style="height:16px">` : '?';
           bar = `<span class="outlook ${o.role === 'soldier' ? 'm' : 'c'}">${icon}${v.apprenticeAt(s) ? ` ${v.trained.toFixed(1)}/${Villager.drillNeeded(s)}` : ''} <span class="rstars">${'★'.repeat(v.starsNow())}</span></span>`;
         } else {
           const pct = Math.max(0, v.hp / v.maxHp * 100);
@@ -998,6 +1003,7 @@ export class UI {
           <h3>BUILDINGS</h3>
           <p>Every building can be wrecked. The <b>HAMMER</b> mends a damaged one (1 wood = 60 HP) and raises a ruin again for half its build cost; on a sound building, 3 hits upgrade it for wood. Every building has three levels — the brass studs on the sign by the door count them, and each level changes the building itself:</p>
           ${building('house', 'House · ' + COST.house + ' wood', 'A couple here has children.')}
+          ${building('gnomehouse', 'Gnome House · ' + COST.gnomehouse + ' wood', 'Comes with a gnome couple, who raise a family like any house (cribs, a hearth, food to spare). Gnome children need no pen: they play by the cottage, eat at the granary and grow into gnomes. Grown gnomes take no calling and fight like soldiers — anything they can see, anywhere — with no barracks perks, bows or armor.')}
           ${building('barracks', 'Barracks · ' + COST.barracks + ' wood', 'Drills the drill yard; its tower shoots raiders.')}
           ${building('granary', 'Granary', 'Holds your food; the harvest is carried here. The crate stack beside it climbs as the store fills.')}
           ${building('woodyard', 'Woodyard', 'Holds your wood; chopped logs are carried here. The log stack beside the cabin climbs as it fills.')}

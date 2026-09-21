@@ -4,8 +4,8 @@ import { ARMOR, DYES, PLUMES, WEAPONS, p, type ArmorSlot, type WeaponSlot } from
 // Modular pixel people: every villager, the head and every raider is drawn from layers (body,
 // hair, outfit, then armor pieces) into a cached 16x20 texture, so what someone wears shows.
 
-export type Body = 'adult' | 'kid' | 'orc' | 'imp' | 'rat' | 'shaman' | 'boss' | 'brute' | 'ogre';
-export type Outfit = 'farmer' | 'woodcutter' | 'soldier' | 'kid' | 'head' | 'none';
+export type Body = 'adult' | 'kid' | 'orc' | 'imp' | 'rat' | 'shaman' | 'boss' | 'brute' | 'ogre' | 'gnome' | 'gnomekid';
+export type Outfit = 'farmer' | 'woodcutter' | 'soldier' | 'kid' | 'head' | 'none' | 'gnome';
 export type Held = 'none' | 'hoe' | 'axe' | 'sword' | 'club' | 'bow';
 export type HelmetStyle = 0 | 1 | 2;
 
@@ -52,6 +52,7 @@ const OUTFIT: Record<Outfit, { cloth: string; clothDark: string; hat?: 'straw' |
   woodcutter: { cloth: '#c9a26b', clothDark: '#8f6a3a', hat: 'cap' },
   soldier: { cloth: '#3f6fd1', clothDark: '#274a9c' },
   kid: { cloth: '#e8b4c8', clothDark: '#b07a92' },
+  gnome: { cloth: '#3f6fd1', clothDark: '#274a9c' },
   head: { cloth: '#2f7d4e', clothDark: '#1f5a3a', hat: 'hood' },
   none: { cloth: '#7a5a3a', clothDark: '#4e3a22' },
 };
@@ -72,6 +73,7 @@ export function drawCharacter(ctx: Ctx, ox: number, oy: number, l: Look, walk = 
   const monster = l.body !== 'adult' && l.body !== 'kid';
 
   if (l.body === 'kid') { drawKid(ctx, ox, oy, l, walk); return; }
+  if (l.body === 'gnome' || l.body === 'gnomekid') { drawGnome(ctx, ox, oy, l, walk, l.body === 'gnomekid'); return; }
   if (l.body === 'rat') { drawRat(ctx, ox, oy, walk); return; }
   if (l.body === 'ogre') { drawOgre(ctx, ox, oy, walk); return; }
 
@@ -145,6 +147,46 @@ function drawHeld(ctx: Ctx, ox: number, oy: number, held: Held): void {
   else if (held === 'sword') { P(13, 5, '#c9d3de', 1, 7); P(12, 12, '#e0b04a', 3, 1); P(13, 13, '#6b4226', 1, 2); }
   else if (held === 'club') { P(13, 8, '#8f5c34', 1, 7); P(12, 5, '#6b4226', 3, 4); P(13, 5, '#a8733f', 1, 3); } // a knotted stick with a fat head
   else if (held === 'bow') { P(14, 5, '#8f5c34', 1, 9); P(13, 5, '#8f5c34', 1, 1); P(13, 13, '#8f5c34', 1, 1); }
+}
+
+
+/**
+ * Gnomes, in the same 16x20 frame as everyone else but half the height: a tall red cap, a big nose,
+ * a white beard on the grown (a club at the hip when armed), a tunic and boots. Children are a cap
+ * on legs. `walk` opens the legs like the other bodies.
+ */
+function drawGnome(ctx: Ctx, ox: number, oy: number, l: Look, walk: boolean, kid: boolean): void {
+  const skin = SKINS[l.skin], o = OUTFIT[l.outfit];
+  const P = (x: number, y: number, c: string, w = 1, h = 1) => px(ctx, ox + x, oy + y, c, w, h);
+  const HAT = '#c23b3b', HAT_LIGHT = '#e06a5a', BEARD = '#f4efe2', BEARD_DARK = '#c9c1b0', BOOT = '#3b2314', NOSE = '#e0907a';
+  // a cone hat: rows of (x0, width) top to bottom, the last row the brim; ink outline, then red, then a light edge
+  const hat = (rows: [number, number][], y0: number) => {
+    P(rows[0][0], y0 - 1, INK, rows[0][1]);
+    rows.forEach(([x0, w], k) => P(x0 - 1, y0 + k, INK, w + 2));
+    rows.forEach(([x0, w], k) => P(x0, y0 + k, HAT, w));
+    rows.forEach(([x0], k) => { if (k < rows.length - 1) P(x0, y0 + k, HAT_LIGHT, 1); });
+  };
+  if (kid) {
+    const lx = walk ? 5 : 6, rx = walk ? 9 : 8;
+    P(lx, 18, INK, 2, 2); P(rx, 18, INK, 2, 2); P(lx, 18, BOOT, 1, 1); P(rx + 1, 18, BOOT, 1, 1);
+    P(5, 15, INK, 6, 4); P(6, 16, o.cloth, 4, 2); P(6, 17, o.clothDark, 4, 1);
+    P(5, 11, INK, 6, 5); P(6, 12, skin, 4, 3); P(6, 12, INK, 1, 1); P(9, 12, INK, 1, 1); P(7, 13, NOSE, 2, 1);
+    hat([[7, 2], [7, 2], [6, 4], [6, 4], [5, 6], [4, 8]], 6);
+    return;
+  }
+  // legs and boots
+  const lx = walk ? 4 : 5, rx = walk ? 10 : 9;
+  P(lx, 16, INK, 3, 4); P(rx, 16, INK, 3, 4); P(lx + 1, 17, o.clothDark, 1, 1); P(rx + 1, 17, o.clothDark, 1, 1); P(lx + 1, 18, BOOT, 1, 1); P(rx + 1, 18, BOOT, 1, 1);
+  // tunic with a belt, arms at the sides
+  P(4, 11, INK, 8, 6); P(5, 12, o.cloth, 6, 4); P(5, 14, INK, 6, 1); P(7, 14, '#e0b04a', 2, 1); P(5, 15, o.clothDark, 6, 1);
+  P(3, 12, INK, 1, 4); P(12, 12, INK, 1, 4); P(3, 14, skin, 1, 1); P(12, 14, skin, 1, 1);
+  // face: eyes either side of a big nose
+  P(4, 6, INK, 8, 5); P(5, 7, skin, 6, 3); P(6, 7, INK, 1, 1); P(9, 7, INK, 1, 1); P(7, 8, NOSE, 2, 2);
+  // the beard, narrowing to a point over the tunic
+  P(4, 9, INK, 8, 3); P(5, 12, INK, 6, 1); P(6, 13, INK, 4, 1);
+  P(5, 10, BEARD, 6, 2); P(6, 12, BEARD, 4, 1); P(5, 11, BEARD_DARK, 1, 1); P(9, 11, BEARD_DARK, 1, 1); P(7, 12, BEARD_DARK, 2, 1);
+  hat([[7, 2], [7, 2], [6, 4], [6, 4], [5, 6], [5, 6], [4, 8], [3, 10]], 0);
+  drawHeld(ctx, ox, oy, l.held);
 }
 
 function drawKid(ctx: Ctx, ox: number, oy: number, l: Look, walk: boolean): void {

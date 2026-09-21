@@ -80,6 +80,9 @@ export const p = live(
     playerDmg: [D.playerDmg, 1, 40, 1, 'The head\'s sword damage at a ×1 weapon (the starting club is ×weaponTier0Mul).'],
     soldierHp: [D.soldierHp, 5, 100, 1, 'Soldiers\' base HP before barracks level, stars and armor.'],
     soldierDmg: [D.soldierDmg, 1, 30, 1, 'Soldiers\' base damage at a ×1 weapon.'],
+    gnomeHp: [D.gnomeHp, 5, 100, 1, 'Grown gnomes\' base HP before stars and diet. Applies to gnomes coming of age.'],
+    gnomeDmg: [D.gnomeDmg, 1, 30, 1, 'Damage per blow from a grown gnome (no weapon tiers, no barracks bonus).'],
+    gnomeSpeed: [D.gnomeSpeed, 10, 80, 1, 'Walking speed of a grown gnome (soldiers move at 45).'],
     weaponTier0Mul: [D.weaponTier0Mul, 0.1, 1, 0.05, 'Damage multiplier of the club and hunting bow everyone starts with. 1 = no weapon progression.'],
     forgeCostMul: [D.forgeCostMul, 0, 3, 0.25, 'Wood and scrap for forging armor and weapons scale by this.'],
     wallHp: [D.wallHp, 50, 1500, 10, 'HP of a new wall segment.'],
@@ -119,7 +122,9 @@ export const TOWER = {
   capPerLevel: 10, rangePerLevel: 16, dmgPerLevel: 1.5,
 } as const;
 
-export const COST = { house: 20, barracks: 30, tavern: 50 } as const;
+/** Every kind of building on the map (world.ts re-exports this; the per-kind tables below key on it so a new kind can't be forgotten). */
+export type BuildingKind = 'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern' | 'lair' | 'gnomehouse';
+export const COST = { house: 20, barracks: 30, tavern: 50, gnomehouse: 25 } as const;
 export const DEFENSE_COST = { wall: 4, gate: 12, stairs: 10 } as const;
 export const WALL_HEIGHT = 64;
 
@@ -142,14 +147,16 @@ export const CAPS = [0, 150, 300, 600] as const;
 /** Playtest switch: every Legacy node unlocked and a slot per branch. Flip to false to restore progression (saved progress is untouched either way). */
 export const LEGACY_TEST_MODE = true;
 /** wood to upgrade a building to level 2 / 3 (index = current level) */
-export const UPGRADE_COST: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern' | 'lair', readonly number[]> = {
+export const UPGRADE_COST: Record<BuildingKind, readonly number[]> = {
   lair: [0, 0, 0],
+  gnomehouse: [0, 20, 40],
   tavern: [0, 40, 80],
   house: [0, 30, 60], barracks: [0, 40, 80], granary: [0, 30, 60], woodyard: [0, 30, 60],
 };
 /** what each level of a building gives, in a few words (index = level); shown in tooltips, hints and help */
-export const LEVEL_PERKS: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern' | 'lair', readonly [string, string, string, string]> = {
+export const LEVEL_PERKS: Record<BuildingKind, readonly [string, string, string, string]> = {
   lair: ['', 'the Ogre sleeps here by day', '', ''],
+  gnomehouse: ['', '3 beds', '4 beds', '6 beds'],
   tavern: ['', 'hearth meals restore 20 HP', 'hearth meals restore 35 HP', 'hearth meals restore 50 HP · family hall'],
   house: ['', '4 beds', '6 beds', '8 beds · births +15%'],
   barracks: ['', 'fires arrows at raiders · drills the drill yard', 'soldiers +15 HP · iron forge · tower +1.5 dmg', 'soldiers +30 HP · +20% dmg · regen · steel forge · tower +3 dmg'],
@@ -157,8 +164,9 @@ export const LEVEL_PERKS: Record<'house' | 'barracks' | 'granary' | 'woodyard' |
   woodyard: ['', 'holds 150 wood', 'holds 300 wood', 'holds 600 wood'],
 };
 /** what changes on the building itself at each level, for the help screen */
-export const LEVEL_LOOKS: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern' | 'lair', readonly [string, string, string, string]> = {
+export const LEVEL_LOOKS: Record<BuildingKind, readonly [string, string, string, string]> = {
   lair: ['', 'a cave mouth, bones, a fire', '', ''],
+  gnomehouse: ['', 'a toadstool cottage', 'a lantern and a second cap', 'a chimney and a fairy ring'],
   tavern: ['', 'green roof, hanging mug sign', 'flower boxes and second chimney', 'guest loft and lanterns'],
   house: ['', 'cottage', 'chimney, flower boxes, porch', 'second storey'],
   barracks: ['', 'stone keep', 'shields and stakes', 'tower and torches'],
@@ -190,6 +198,8 @@ export const TRAITS: Record<Trait, { name: string; blurb: string }> = {
 };
 /** beds per house level (index = level); overridden upward by the Big Families boon */
 export const HOUSE_BEDS = [0, 4, 6, 8] as const;
+/** beds in a gnome house by level; a gnome family breeds like a human one (cribs are p.cribs + level - 1) */
+export const GNOME_BEDS = [0, 3, 4, 6] as const;
 
 // ---- food and diet --------------------------------------------------------------------------
 /** Every kind of food. Crops are sown on soil; wild food grows in the woods and is picked by hand. What a child eats decides the adult. */
@@ -329,26 +339,28 @@ export const WEAPON_SLOTS: readonly WeaponSlot[] = ['melee', 'bow'];
 
 // ---- hearths --------------------------------------------------------------------------------
 /** Wood a building's hearth burns each night, by level (index = level); 0 means it has no hearth. Woodcutters keep the piles stocked. */
-export const HEARTH_WOOD: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern' | 'lair', readonly [number, number, number, number]> = {
+export const HEARTH_WOOD: Record<BuildingKind, readonly [number, number, number, number]> = {
   house: [0, 2, 2, 3],
   barracks: [0, 3, 3, 4],
   tavern: [0, 3, 3, 4],
   granary: [0, 0, 0, 0],
   woodyard: [0, 0, 0, 0],
   lair: [0, 0, 0, 0],
+  gnomehouse: [0, 1, 1, 2],
 };
 /** scrap iron looted from slain raiders */
 export const SCRAP_DROP = { raider: 2, brute: 4, warlord: 10, snatcher: 1, shaman: 2, rat: 0, ogre: 30, wrecker: 3 } as const;
 
 // ---- building damage ------------------------------------------------------------------------
 /** Hit points per building level (index = level). Every kind must appear here, so new buildings are destructible by default; 0 means it can't be hurt (the Ogre's lair). */
-export const BUILDING_HP: Record<'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern' | 'lair', readonly [number, number, number, number]> = {
+export const BUILDING_HP: Record<BuildingKind, readonly [number, number, number, number]> = {
   house: [0, 240, 360, 480],
   tavern: [0, 300, 420, 540],
   granary: [0, 300, 420, 540],
   woodyard: [0, 300, 420, 540],
   barracks: [0, 400, 560, 720],
   lair: [0, 0, 0, 0],
+  gnomehouse: [0, 180, 260, 340],
 };
 /** hammer on a damaged building: HP per wood; rebuilding a ruin costs this share of the build cost (buildings without a shop price use `rebuildDefault`) */
 export const REPAIR = { perWood: 60, rebuildFraction: 0.5, rebuildDefault: 15 } as const;
