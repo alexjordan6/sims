@@ -4,14 +4,16 @@ import { World, WILD_FOOD, doorstep, hearthCost, BUILDINGS, type BuildingKind } 
 import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, Wrecker, waveComposition } from './enemies';
-import { COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP } from './config';
+import { Boar } from './wildlife';
+import { COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, BOAR } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
 const output = document.getElementById('test-results')!, summary = document.getElementById('test-summary')!;
 const assert = (ok: unknown, message: string) => { if (!ok) throw new Error(message); output.textContent += `PASS ${message}\n`; };
-function fresh(): VillageScene {
+function fresh(wild = false): VillageScene {
   const s = scene(); s.reset(42); s.screen = 'playing'; s.paused = true; s.wood = 150; s.food = 150; s.fx.length = 0;
   for (const t of s.world.tiles) t.tall = undefined; // mown: the checks below time walks; the long grass checks raise it where they need it
+  if (!wild) { for (const a of s.agents) if (a instanceof Boar) a.dead = true; s.removeDead(); s.sounders = []; } // no stray sounder wanders into a check
   (s as unknown as { ui: { showScreen(v: null): void } }).ui.showScreen(null);
   document.querySelector('.ctrl-panel')?.classList.remove('open');
   return s;
@@ -425,7 +427,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     const eater = s.spawn(new Villager(World.center(123, 97).x, World.center(123, 97).y, s.world.houses[0], 'kid', 1, 'Eater', s.mods)); eater.pen = 'farmer'; eater.mealAt = 0; s.day = 9;
     const careWas = eater.care; step(s, 8);
     assert(eater.diet.carrot > 0 && eater.ateDay === 9, `bites go on the diet (${JSON.stringify(eater.diet)})`);
-    eater.update = () => {}; eater.diet = { wheat: 0, carrot: 0, tomato: 0, berry: 0, mushroom: 0, hazelnut: 0, garlic: 0, burdock: 0 };
+    eater.update = () => {}; eater.diet = { wheat: 0, carrot: 0, tomato: 0, berry: 0, mushroom: 0, hazelnut: 0, garlic: 0, burdock: 0, meat: 0 };
     eater.eatBite('mushroom', 0.5); eater.eatBite('mushroom', 0.5); assert(eater.care === careWas + 1, 'a mushroom meal is worth one care point');
     eater.diet.carrot = p.dietFull; eater.diet.wheat = p.dietFull / 2;
     const live = eater.dietNow(); assert(Math.abs(live.speed - DIET_CAP.speed * p.dietMul) < 1e-9 && Math.abs(live.hp - DIET_CAP.hp * p.dietMul / 2) < 1e-9 && live.work === 0, `the diet projects its bonuses (${JSON.stringify(live)})`);
@@ -636,6 +638,60 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       s.world.paintPen(125, 100, 'farmer');
       const before = s.world.count((t) => !!t.tall); for (let d = 0; d < 5; d++) s.newDay();
       assert(s.world.count((t) => !!t.tall) <= before, 'mown grass never grows back');
+    }
+    // boars: sounders in the woods that mind their own business until struck, and drop meat the gnomes fetch
+    {
+      s = fresh(true);
+      const boars = s.agents.filter((a): a is Boar => a instanceof Boar);
+      assert(s.sounders.length >= 4 && s.sounders.every((sd) => sd.members.length >= BOAR.sounderSize[0] && sd.members.length <= BOAR.sounderSize[1]), `the woods hold ${s.sounders.length} sounders of ${BOAR.sounderSize[0]}–${BOAR.sounderSize[1]} boars (${boars.length} boars)`);
+      assert(s.sounders.every((sd) => Math.hypot(sd.home.tx - COLS / 2, sd.home.ty - ROWS / 2) >= BOAR.minDist), 'every sounder is well away from the village');
+      assert(boars.every((b) => b.harmless && b.wild && b.lairBound) && !s.raidActive, 'boars start calm, are no raid, and count toward none');
+      s = fresh(); clearing(s); s.agents = [s.player]; s.food = 0;
+      const sd = s.foundSounder(126, 100, 2), [b1, b2] = sd.members;
+      Object.assign(b1, World.center(126, 100)); Object.assign(b2, World.center(127, 100));
+      const guard = s.spawn(new Villager(...Object.values(World.center(122, 100)) as [number, number], s.world.houses[0], 'soldier', 20, 'Boar guard', s.mods));
+      const hand = s.spawn(new Villager(...Object.values(World.center(124, 101)) as [number, number], s.world.houses[0], 'farmer', 20, 'Boar hand', s.mods));
+      s.grid.rebuild(s.agents);
+      assert(!s.bestTarget(guard.x, guard.y, 130) && !s.nearestRaider(hand.x, hand.y, 90), 'a calm boar is no target for a soldier and scares no farmer');
+      step(s, 2);
+      assert(b1.harmless && !b1.provoked && hand.task !== 'fleeing' && !guard.attack, 'two seconds later nobody has bothered anybody');
+      Object.assign(s.player, World.center(125, 100)); s.player.facing = { x: 1, y: 0 }; s.player.tool = 'sword'; s.player.hp = s.player.maxHp = 200;
+      Object.assign(b1, World.center(126, 100)); Object.assign(b2, World.center(128, 100)); b1.calm(); b2.calm();
+      guard.dead = true; hand.dead = true; s.removeDead();
+      s.player.pressAttack(); step(s, 0.3);
+      assert(b1.provoked && !b1.harmless && b1.prey === s.player, 'a struck boar turns on the head');
+      assert(b2.provoked && b2.prey === s.player, 'and its sounder-mate charges too');
+      step(s, 3);
+      assert(s.player.hp < 200, `the boars land blows (${s.player.hp}/200)`);
+      s.grid.rebuild(s.agents);
+      assert(s.bestTarget(s.player.x, s.player.y, 130) instanceof Boar, 'a provoked boar is fair game for soldiers');
+      Object.assign(s.player, World.center(105, 100)); step(s, BOAR.calmAfter + 2);
+      assert(!b1.provoked && b1.harmless && !b2.provoked, 'out of reach, the boars calm down');
+      Object.assign(s.player, World.center(125, 100)); Object.assign(b1, World.center(126, 100)); Object.assign(b2, World.center(133, 106));
+      b1.hp = 1; const killed = s.stats.raidersKilled, scrapBefore = s.scrap;
+      s.player.pressAttack(); for (let i = 0; i < 15; i++) s.tick(1 / 60); // the scene's own tick fires onDeath (the loot); step() would just drop the body
+      const meat = s.world.items.find((it) => it.kind === 'food' && it.food === 'meat');
+      assert(b1.dead && !!meat && meat.n === BOAR.meat && Math.hypot(meat.x - 126 * 16 - 8, meat.y - 100 * 16 - 8) < 24, `a hunted boar drops ${BOAR.meat} meat where it fell`);
+      assert(s.stats.raidersKilled === killed && s.scrap === scrapBefore && s.stats.boarsHunted === 1 && sd.members.length === 1, 'a boar is game, not a raider: no scrap, no kill count');
+      b2.calm(); Object.assign(s.player, World.center(118, 92)); s.player.tool = 'hoe';
+      const bden = s.world.place('gnomehouse', 129, 96), [bg, bg2] = s.foundGnomes(bden); bg2.dead = true; s.removeDead();
+      Object.assign(bg, World.center(129, 98)); bg.load = null;
+      settle(s, 2); step(s, 6);
+      const held = bg.load as { food?: string; n: number } | null;
+      assert(held?.food === 'meat' && held.n === BOAR.meat && !s.world.items.includes(meat!), `a gnome fetches the whole piece (${bg.task})`);
+      step(s, 40);
+      assert(s.pantry.meat === BOAR.meat && !bg.load, `and carries it to the granary (${s.pantry.meat} meat stored · ${bg.task})`);
+      const eater = s.spawn(new Villager(...Object.values(World.center(120, 100)) as [number, number], s.world.houses[0], 'kid', 1, 'Meat eater', s.mods));
+      eater.diet.meat = p.dietFull;
+      assert(Math.abs(eater.dietNow().dmg - DIET_CAP.dmg * 2 * p.dietMul) < 1e-9 && eater.dietNow().hp === 0, 'children raised on meat get twice the damage bonus berries give, and nothing else');
+      // breeding: a sounder of two or more grows, one alone does not, none past the cap
+      s = fresh(); s.agents = [s.player];
+      const pair = s.foundSounder(126, 100, 2), lone = s.foundSounder(134, 106, 1);
+      const breed = p.boarBreed; p.boarBreed = 1; s.newDay();
+      assert(pair.members.length === 3 && pair.members[2].young && lone.members.length === 1, 'at dawn a pair gains a young boar; a lone boar never breeds');
+      for (let d = 0; d < 6; d++) s.newDay();
+      assert(pair.members.length === BOAR.sounderCap && pair.members[2].age >= BOAR.youngDays && !pair.members[2].young, `a sounder grows to ${BOAR.sounderCap} and no further; the young grow up`);
+      p.boarBreed = breed;
     }
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;

@@ -585,6 +585,7 @@ const CARROT = '#e8772c', CARROT_HI = '#f7a25a';
 const BERRY = '#8c4ab0', BERRY_HI = '#c98fe0';
 const NUT = '#8a5a2a', NUT_HI = '#c48a4c', GARLIC = '#e8e0d0', BURR = '#7a4a9a', BURR_HI = '#b08ad0';
 const SHROOM = '#a8765a', SHROOM_HI = '#d9b39a', SHROOM_STEM = '#d8cbb4';
+const MEAT = '#a8402c', MEAT_HI = '#d9563a', MEAT_DARK = '#7a2a1e', BONE = '#e8e0d0';
 const TOMATO = '#d9382f', TOMATO_HI = '#f06a5a', FRUIT_GREEN = '#8bc34a', FLOWER = '#ffe27a', STAKE = '#a67b4a';
 
 /** Frame indices into the `flora` tileset (a single row of 16x16 tiles). */
@@ -605,7 +606,7 @@ export const FLORA = {
   carrot: [36, 37, 38, 39, 40] as const,
   bush: [41, 42] as const,
   mushroom: [43, 44] as const,
-  pile: { wheat: [45, 46, 47], carrot: [48, 49, 50], tomato: [28, 29, 30], berry: [51, 52, 53], mushroom: [54, 55, 56], hazelnut: [64, 65, 66], garlic: [67, 68, 69], burdock: [70, 71, 72] } as const,
+  pile: { wheat: [45, 46, 47], carrot: [48, 49, 50], tomato: [28, 29, 30], berry: [51, 52, 53], mushroom: [54, 55, 56], hazelnut: [64, 65, 66], garlic: [67, 68, 69], burdock: [70, 71, 72], meat: [76, 77, 78] } as const,
   /** scrap iron a raider dropped */
   scrap: 57,
   /** the gnomes' plants, picked / ripe */
@@ -614,7 +615,7 @@ export const FLORA = {
   burdock: [62, 63] as const,
   /** long grass, three variants so a field doesn't tile visibly */
   tallGrass: [73, 74, 75] as const,
-  count: 76,
+  count: 79,
 } as const;
 
 /** Filled ellipse, pixel by pixel. */
@@ -731,7 +732,7 @@ export function ensureFlora(scene: Phaser.Scene): void {
   drawHazel(ctx, at(FLORA.hazel[0]), false); drawHazel(ctx, at(FLORA.hazel[1]), true);
   drawGarlic(ctx, at(FLORA.garlic[0]), false); drawGarlic(ctx, at(FLORA.garlic[1]), true);
   drawBurdock(ctx, at(FLORA.burdock[0]), false); drawBurdock(ctx, at(FLORA.burdock[1]), true);
-  for (let i = 0; i < 3; i++) { drawPile(ctx, at(FLORA.pile.hazelnut[i]), i, 'hazelnut'); drawPile(ctx, at(FLORA.pile.garlic[i]), i, 'garlic'); drawPile(ctx, at(FLORA.pile.burdock[i]), i, 'burdock'); }
+  for (let i = 0; i < 3; i++) { drawPile(ctx, at(FLORA.pile.hazelnut[i]), i, 'hazelnut'); drawPile(ctx, at(FLORA.pile.garlic[i]), i, 'garlic'); drawPile(ctx, at(FLORA.pile.burdock[i]), i, 'burdock'); drawPile(ctx, at(FLORA.pile.meat[i]), i, 'meat'); }
   for (let i = 0; i < 3; i++) { drawPile(ctx, at(FLORA.pile.wheat[i]), i, 'wheat'); drawPile(ctx, at(FLORA.pile.carrot[i]), i, 'carrot'); drawPile(ctx, at(FLORA.pile.berry[i]), i, 'berry'); drawPile(ctx, at(FLORA.pile.mushroom[i]), i, 'mushroom'); }
   for (let i = 0; i < 3; i++) drawTallGrass(ctx, at(FLORA.tallGrass[i]), i);
   tex.refresh();
@@ -818,7 +819,7 @@ function drawBurdock(ctx: Ctx, ox: number, ripe: boolean): void {
   else { px(ctx, ox + 6, 13, SOIL_DARK, 5, 2); px(ctx, ox + 7, 12, SOIL, 3, 1); }
 }
 /** Piles of a kind: sheaves of wheat, heaps of carrots, berries, mushrooms, nuts, garlic bulbs, roots (tomatoes use the loaves-and-roots frames). */
-function drawPile(ctx: Ctx, ox: number, size: number, kind: 'wheat' | 'carrot' | 'berry' | 'mushroom' | 'hazelnut' | 'garlic' | 'burdock'): void {
+function drawPile(ctx: Ctx, ox: number, size: number, kind: 'wheat' | 'carrot' | 'berry' | 'mushroom' | 'hazelnut' | 'garlic' | 'burdock' | 'meat'): void {
   const item = (x: number, y: number) => {
     if (kind === 'wheat') { px(ctx, ox + x, y, HAY_DARK, 5, 3); px(ctx, ox + x + 1, y, HAY, 3, 2); px(ctx, ox + x + 2, y - 1, HAY, 1, 1); }
     else if (kind === 'hazelnut') { px(ctx, ox + x, y, NUT, 3, 3); px(ctx, ox + x + 3, y + 1, NUT, 2, 2); px(ctx, ox + x, y, NUT_HI, 1, 1); px(ctx, ox + x + 1, y - 1, LEAF_DARK, 2, 1); }
@@ -826,6 +827,7 @@ function drawPile(ctx: Ctx, ox: number, size: number, kind: 'wheat' | 'carrot' |
     else if (kind === 'burdock') { px(ctx, ox + x, y + 1, TRUNK_LIGHT, 5, 2); px(ctx, ox + x + 1, y, TRUNK_LIGHT, 3, 1); px(ctx, ox + x + 1, y + 1, '#a8733f', 3, 1); px(ctx, ox + x + 4, y, LEAF_DARK, 1, 1); }
     else if (kind === 'carrot') { px(ctx, ox + x, y, CARROT, 5, 2); px(ctx, ox + x, y, CARROT_HI, 2, 1); px(ctx, ox + x + 5, y, LEAF, 1, 2); }
     else if (kind === 'berry') { px(ctx, ox + x, y, BERRY, 3, 3); px(ctx, ox + x + 2, y - 1, BERRY, 2, 2); px(ctx, ox + x, y, BERRY_HI, 1, 1); }
+    else if (kind === 'meat') { px(ctx, ox + x, y, MEAT, 5, 3); px(ctx, ox + x + 1, y, MEAT_HI, 2, 1); px(ctx, ox + x + 4, y + 1, BONE, 2, 1); px(ctx, ox + x, y + 2, MEAT_DARK, 3, 1); }
     else { px(ctx, ox + x + 1, y + 1, SHROOM_STEM, 2, 2); px(ctx, ox + x, y, SHROOM, 4, 2); px(ctx, ox + x + 1, y, SHROOM_HI, 1, 1); }
   };
   item(3, 10); item(9, 10);

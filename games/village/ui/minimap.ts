@@ -74,7 +74,7 @@ export class Minimap {
       if (a.hostile && s.fog && s.fog.visibleAt(a.x, a.y) <= 0.35) continue; // unseen threats stay unseen
       let colour: string | null = null, size = 1;
       if (a instanceof Player) { colour = '#ffffff'; size = 2; }
-      else if (a instanceof Raider) { colour = a.boss || a.huge ? '#ffcc33' : '#ff4a3d'; size = a.boss || a.huge ? 2 : 1; }
+      else if (a instanceof Raider) { colour = a.boss || a.huge ? '#ffcc33' : a.wild && a.harmless ? '#c9a26b' : '#ff4a3d'; size = a.boss || a.huge ? 2 : 1; }
       else if (a instanceof Villager) colour = ROLE[a.role];
       if (!colour) continue;
       c.fillStyle = colour;

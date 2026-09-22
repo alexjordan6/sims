@@ -102,6 +102,8 @@ export const p = live(
     wreckerDmg: [D.wreckerDmg, 1, 60, 1, 'Building damage per wrecker swing (a Lv1 house is 240 HP).'],
     wreckerWallDmg: [D.wreckerWallDmg, 1, 30, 1, 'What a wrecker does to a wall segment per swing when walled off.'],
     bruteWallMul: [D.bruteWallMul, 1, 6, 0.5, 'A brute\'s wall damage as a multiple of its 24-damage blow.'],
+    boarBreed: [D.boarBreed, 0, 1, 0.05, 'Daily chance a sounder of two or more boars gains a young one (up to 5 a sounder). Wipe a sounder out and it is gone.'],
+    boarDmg: [D.boarDmg, 1, 30, 1, 'Damage per blow from a provoked boar. Boars never raid; they charge whoever strikes them.'],
   }, 'enemies'),
   params({
     fog: [D.fog, 'Fog of war. Off lifts it everywhere; on drops it back over the unexplored.'],
@@ -208,18 +210,20 @@ export const GNOME_YARD = 4;
 
 // ---- food and diet --------------------------------------------------------------------------
 /** Every kind of food. Crops are sown on soil; wild food grows in the woods and is picked by hand. What a child eats decides the adult. */
-export type FoodKind = 'wheat' | 'carrot' | 'tomato' | 'berry' | 'mushroom' | 'hazelnut' | 'garlic' | 'burdock';
-export const FOOD_KINDS: readonly FoodKind[] = ['wheat', 'carrot', 'tomato', 'berry', 'mushroom', 'hazelnut', 'garlic', 'burdock'];
+export type FoodKind = 'wheat' | 'carrot' | 'tomato' | 'berry' | 'mushroom' | 'hazelnut' | 'garlic' | 'burdock' | 'meat';
+export const FOOD_KINDS: readonly FoodKind[] = ['wheat', 'carrot', 'tomato', 'berry', 'mushroom', 'hazelnut', 'garlic', 'burdock', 'meat'];
 export const CROP_KINDS: readonly FoodKind[] = ['wheat', 'carrot', 'tomato'];
 export type DietStat = 'hp' | 'speed' | 'work' | 'dmg' | 'care';
 export interface Food {
   name: string; one: string;
-  source: 'crop' | 'wild';
+  source: 'crop' | 'wild' | 'hunt';
   /** crops: days to ripen on top of p.cropDays; wild: days to regrow after picking (× p.wildRegrowMul) */
   days: number;
   /** crops: yield on top of the cropYield slider; wild: what one picking gives */
   yield: number;
   stat: DietStat;
+  /** how much of the stat's DIET_CAP a full diet of this gives (1 unless set; meat gives double) */
+  power?: number;
   blurb: string;
   /** pile / label colour */
   colour: string;
@@ -234,6 +238,8 @@ export const FOODS: Record<FoodKind, Food> = {
   hazelnut: { name: 'Hazelnuts', one: 'hazelnut', source: 'wild', days: 5, yield: 3, stat: 'hp', blurb: 'hearty: +HP for life', colour: '#8a5a2a' },
   garlic: { name: 'Wild garlic', one: 'garlic', source: 'wild', days: 3, yield: 2, stat: 'work', blurb: 'tireless workers', colour: '#e8e0d0' },
   burdock: { name: 'Burdock', one: 'burdock root', source: 'wild', days: 4, yield: 2, stat: 'speed', blurb: 'quick on their feet', colour: '#7a5230' },
+  // hunted: a boar drops it where it falls (see BOAR.meat); gnomes carry it home
+  meat: { name: 'Boar meat', one: 'meat', source: 'hunt', days: 0, yield: 0, stat: 'dmg', power: 2, blurb: 'a hunter\'s diet: the fiercest fighters', colour: '#c9564a' },
 };
 /** the most a full diet of one kind adds to its stat (× p.dietMul) */
 export const DIET_CAP: Record<Exclude<DietStat, 'care'>, number> = { hp: 0.25, speed: 0.15, work: 0.25, dmg: 0.25 };
@@ -241,7 +247,7 @@ export const DIET_STAT_NAME: Record<DietStat, string> = { hp: 'HP', speed: 'spee
 
 // ---- bodies ---------------------------------------------------------------------------------
 /** How hard a body is to push aside when two overlap: the lighter one gives way (see VillageScene.separate). */
-export const MASS = { kid: 0.5, villager: 1, player: 2, raider: 1, brute: 2, ogre: 10, warlord: 3, rat: 0.3, snatcher: 0.8 } as const;
+export const MASS = { kid: 0.5, villager: 1, player: 2, raider: 1, brute: 2, ogre: 10, warlord: 3, rat: 0.3, snatcher: 0.8, boar: 1.5 } as const;
 
 // ---- items on the ground --------------------------------------------------------------------
 /** Thrown food, dropped armfuls and raider loot are free items with a pixel position and a little physics (see items.ts). */
@@ -289,6 +295,29 @@ export const OGRE = {
   smash: { dmg: 35, radius: 56, windup: 0.9, recover: 1.4, cooldown: 7, push: 40, freeze: 0.25, buildingDmg: 60, defenseDmg: 90, minVictims: 2 },
   /** charge: a straight rush at where the target stands, through anyone in the way, into whatever stops him */
   charge: { dmg: 30, minTiles: 5, maxTiles: 12, overshootTiles: 1.5, speedMul: 3, sweep: 14, windup: 0.5, recover: 0.8, stun: 1.6, cooldown: 9, push: 55, freeze: 0.2, buildingDmg: 120, defenseDmg: 180 },
+} as const;
+
+// ---- wild boars -----------------------------------------------------------------------------
+/**
+ * Boars live in sounders (family groups) out in the woods and never raid. Strike one and it — and every
+ * mate within packRange — charges the attacker until it calms (calmAfter seconds, or the attacker gets
+ * further than leash tiles from the sounder's home). A dead boar drops meat where it fell (see wildlife.ts).
+ * Damage is a slider (p.boarDmg); breeding is p.boarBreed.
+ */
+export const BOAR = {
+  hp: 45, speed: 40, angrySpeed: 66, radius: 3,
+  /** the blow: reach in px, wind-up and recovery in seconds */
+  reach: 12, windup: 0.25, recover: 0.5,
+  /** tiles: how far from home a calm boar roams, how far a chase goes, how far a provoked boar's mates hear it */
+  roam: 7, leash: 16, packRange: 6,
+  /** seconds a provoked boar stays angry without landing a blow; share of max HP a calm boar heals each dawn */
+  calmAfter: 10, regen: 0.15,
+  /** meat units a grown boar drops (a young one drops half) */
+  meat: 4,
+  /** days before a young boar is grown (drawn small until then) */
+  youngDays: 2, youngScale: 0.65,
+  /** map: sounders placed at generation, boars per sounder, most a sounder grows to, least tiles from the village centre */
+  sounders: 6, sounderSize: [2, 4] as const, sounderCap: 5, minDist: 30,
 } as const;
 
 // ---- armor ----------------------------------------------------------------------------------
@@ -358,7 +387,7 @@ export const HEARTH_WOOD: Record<BuildingKind, readonly [number, number, number,
   gnomehouse: [0, 1, 1, 2],
 };
 /** scrap iron looted from slain raiders */
-export const SCRAP_DROP = { raider: 2, brute: 4, warlord: 10, snatcher: 1, shaman: 2, rat: 0, ogre: 30, wrecker: 3 } as const;
+export const SCRAP_DROP = { raider: 2, brute: 4, warlord: 10, snatcher: 1, shaman: 2, rat: 0, ogre: 30, wrecker: 3, boar: 0 } as const;
 
 // ---- building damage ------------------------------------------------------------------------
 /** Hit points per building level (index = level). Every kind must appear here, so new buildings are destructible by default; 0 means it can't be hurt (the Ogre's lair). */

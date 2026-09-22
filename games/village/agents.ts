@@ -1,6 +1,6 @@
 import type { Agent } from '@shared/index';
 import { World, WILD_FOOD, doorstep, buildingCenter, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
-import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, CALLINGS, ORDER, GNOME_YARD, ITEM, MASS, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
+import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, CALLINGS, ORDER, GNOME_YARD, ITEM, MASS, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, BOAR, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
 import type { Mods } from './meta';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle } from './characters';
 import type { VillageScene } from './main';
@@ -145,7 +145,9 @@ export abstract class Mover implements Agent {
   attack: { target: Mover; t: number; windup: number; recover: number; dmg: number; reach: number; struck: boolean } | null = null;
 
   /** Take a blow. Chest armor shaves it; a shield can turn a melee hit away entirely (`melee` = not an arrow/bolt). */
-  hit(dmg: number, melee = true): void {
+  /** Take a blow. `by` is whoever struck (a wild boar turns on them); arrows pass their archer, towers nobody. */
+  hit(dmg: number, melee = true, by?: Mover): void {
+    void by;
     const st = armorStats(this.armor);
     this.blocked = false;
     if (melee && st.block > 0 && Math.random() < st.block) { this.blocked = true; this.hurtT = 0.2; return; }
@@ -184,7 +186,7 @@ export abstract class Mover implements Agent {
       s.fx.push({ kind: 'melee', who: this, x: t.x, y: t.y });
       if (!t.dead && !t.hidden && this.elevated === t.elevated && this.dist(t) <= a.reach && s.world.lineClear(this, t, this.elevated)) {
         this.dir = t.x < this.x ? -1 : 1;
-        t.hit(a.dmg);
+        t.hit(a.dmg, true, this);
         const d = this.dist(t) || 1;
         t.shove((t.x - this.x) / d, (t.y - this.y) / d, 3);
         s.fx.push({ kind: 'hit', attacker: this, target: t, dmg: a.dmg, crit: false, killed: !!t.dead });
@@ -201,7 +203,7 @@ export abstract class Mover implements Agent {
   tryAttack(s: VillageScene, target: Mover, dmg: number, reach = 13, cooldown = 0.8): boolean {
     if (this.attackCd > 0 || this.dist(target) > reach) return false;
     this.dir = target.x < this.x ? -1 : 1;
-    target.hit(dmg);
+    target.hit(dmg, true, this);
     this.attackCd = cooldown;
     s.fx.push({ kind: 'hit', attacker: this, target, dmg, crit: false, killed: !!target.dead });
     return true;
@@ -261,7 +263,7 @@ export class Villager extends Mover {
   ateDay = 0;
   mealAt = 0;
   /** what they ate as a child, by kind, and the bonuses it froze into at coming of age */
-  diet: Record<FoodKind, number> = { wheat: 0, carrot: 0, tomato: 0, berry: 0, mushroom: 0, hazelnut: 0, garlic: 0, burdock: 0 };
+  diet: Record<FoodKind, number> = { wheat: 0, carrot: 0, tomato: 0, berry: 0, mushroom: 0, hazelnut: 0, garlic: 0, burdock: 0, meat: 0 };
   dietBonus: Record<Exclude<DietStat, 'care'>, number> = { hp: 0, speed: 0, work: 0, dmg: 0 };
   /** mushrooms counted toward today's care point (one per meal) */
   private shroomMeal = false;
@@ -336,7 +338,7 @@ export class Villager extends Mover {
   dietNow(): Record<Exclude<DietStat, 'care'>, number> {
     if (this.isAdult) return this.dietBonus;
     const out = { hp: 0, speed: 0, work: 0, dmg: 0 };
-    for (const k of FOOD_KINDS) { const stat = FOODS[k].stat; if (stat !== 'care') out[stat] += DIET_CAP[stat] * p.dietMul * Math.min(1, this.diet[k] / Math.max(1, p.dietFull)); }
+    for (const k of FOOD_KINDS) { const stat = FOODS[k].stat; if (stat !== 'care') out[stat] += DIET_CAP[stat] * (FOODS[k].power ?? 1) * p.dietMul * Math.min(1, this.diet[k] / Math.max(1, p.dietFull)); }
     return out;
   }
   /** A bite from a pen pile: it goes on the diet; mushrooms also earn a care point (once per meal). */
@@ -559,13 +561,37 @@ export class Villager extends Mover {
   private unreachable = new Map<number, number>();
   private failedPicks = 0;
 
-  /** How much of a kind these arms hold: a gnome brings home one find at a time. */
-  haul(kind: LoadKind): number { return this.gnome ? 1 : Math.round(HAUL.villager[kind] * p.haulMul); }
+  /** How much of a kind these arms hold: a gnome brings home one find at a time — but drags a whole boar's meat in one go. */
+  haul(kind: LoadKind): number { return this.gnome ? (kind === 'food' && this.load?.food === 'meat' ? BOAR.meat : 1) : Math.round(HAUL.villager[kind] * p.haulMul); }
+  /** the meat lying in the wild this gnome is on its way to (claimed in `VillageScene.meatClaims`, so two never chase one ham) */
+  private fetching: Item | null = null;
+
+  /** Gnomes: walk to a claimed piece of meat and take it. Returns true while busy with it. */
+  private fetchMeat(dt: number, s: VillageScene): boolean {
+    const it = this.fetching;
+    if (!it) return false;
+    // gone (the head walked over it, or someone else took it): let it go and think again
+    if (!s.world.items.includes(it) || it.n <= 0 || !it.rest) { this.dropFetch(s); return false; }
+    const at = World.toTile(it.x, it.y);
+    if (!this.goal || this.goal.tx !== at.tx || this.goal.ty !== at.ty) this.setGoal(s, at.tx, at.ty, true);
+    this.task = 'off to fetch the meat';
+    const near = this.dist(it) <= ITEM.eatReach;
+    if (!near && this.followPath(dt) && !near) { const d = this.dist(it) || 1; this.x += (it.x - this.x) / d * Math.min(d, this.speed * dt); this.y += (it.y - this.y) / d * Math.min(d, this.speed * dt); }
+    if (!near && !this.path.length && this.dist(it) > TILE * 1.5) { this.dropFetch(s); this.unreachable.set(at.ty * s.world.cols + at.tx, s.simTime + 60); return false; } // no way there
+    if (!near) return true;
+    const take = Math.min(it.n, BOAR.meat);
+    this.pickUp('food', take, 'meat'); it.n -= take;
+    if (it.n <= 1e-9) s.world.removeItem(it);
+    this.dropFetch(s);
+    this.delivering = true; this.clearGoal();
+    return true;
+  }
+  private dropFetch(s: VillageScene): void { if (this.fetching) s.meatClaims.delete(this.fetching.id); this.fetching = null; this.clearGoal(); }
 
   /** Farmers, woodcutters and foraging gnomes: find a job tile, walk there, work it, carry the take home. */
   private civilUpdate(dt: number, s: VillageScene, job: 'farm' | 'wood' | 'forage'): void {
     const farmer = job === 'farm';
-    if (s.nearestRaider(this.x, this.y, 90)) { this.task = 'fleeing'; this.delivering = false; this.goHome(s, dt); return; }
+    if (s.nearestRaider(this.x, this.y, 90)) { this.task = 'fleeing'; this.delivering = false; if (this.fetching) this.dropFetch(s); this.goHome(s, dt); return; }
 
     if (this.workTimer > 0) {
       this.workTimer -= dt;
@@ -575,6 +601,7 @@ export class Villager extends Mover {
     }
 
     if (this.delivering) { this.deliver(dt, s); return; }
+    if (job === 'forage' && this.fetchMeat(dt, s)) return;
 
     this.thinkTimer -= dt;
     if (!this.goal && this.thinkTimer <= 0) {
@@ -583,6 +610,11 @@ export class Villager extends Mover {
       // arms full: take it in before looking for more work
       if (this.load && this.load.n >= this.haul(this.load.kind)) { this.delivering = true; this.deliver(dt, s); return; }
       const ok = (tx: number, ty: number) => (this.unreachable.get(ty * w.cols + tx) ?? 0) <= s.simTime;
+      // meat lying in the wild comes before any plant: a gnome claims the nearest unclaimed piece and goes for it
+      if (job === 'forage' && (!this.load || this.load.food === 'meat') && s.food < s.foodCap) {
+        const it = w.nearestWildMeat(this.x, this.y, (m) => !s.meatClaims.has(m.id) && ok(Math.floor(m.x / TILE), Math.floor(m.y / TILE)));
+        if (it) { s.meatClaims.add(it.id); this.fetching = it; this.fetchMeat(dt, s); return; }
+      }
       const spot = job === 'forage'
         ? w.nearest(this.x, this.y, (t, tx, ty) => !!WILD_FOOD[t.kind] && s.wildLeft(t) > 0 && (!this.load || this.load.food === WILD_FOOD[t.kind]) && ok(tx, ty))
         : farmer
@@ -802,7 +834,7 @@ export class Villager extends Mover {
 // ---------------------------------------------------------------------------
 // raiders
 
-export type EnemyKind = 'raider' | 'warlord' | 'rat' | 'snatcher' | 'brute' | 'shaman' | 'ogre' | 'wrecker';
+export type EnemyKind = 'raider' | 'warlord' | 'rat' | 'snatcher' | 'brute' | 'shaman' | 'ogre' | 'wrecker' | 'boar';
 
 export interface RaiderOpts {
   /** the warlord: big, tough, and the run ends when he falls */
@@ -866,6 +898,8 @@ export class Raider extends Mover {
   huge = false;
   /** lives out in the world rather than arriving with a raid: doesn't start or end one */
   lairBound = false;
+  /** lives wild (boars): not the village's enemy — soldiers and towers leave it be — until it's provoked (`harmless` drops) */
+  wild = false;
   /** a child being carried off (snatchers) */
   carrying: Villager | null = null;
 
@@ -929,7 +963,7 @@ export class Arrow extends Mover {
       let target: Raider | null = null;
       s.grid.forEachInRadius(this.x, this.y, 8, o => { if (o instanceof Raider && !o.dead && this.dist(o) <= o.radius + 2) target = o; });
       if (target) {
-        const hit = target as Raider; hit.hit(this.dmg); hit.shove(this.ux, this.uy, 6);
+        const hit = target as Raider; hit.hit(this.dmg, false, this.owner ?? undefined); hit.shove(this.ux, this.uy, 6);
         s.fx.push({ kind: 'hit', attacker: this, target: hit, dmg: this.dmg, crit: false, killed: !!hit.dead });
         this.dead = true;
       }
@@ -1090,7 +1124,7 @@ export class Player extends Mover {
         const ux = (o.x - this.x) / d, uy = (o.y - this.y) / d;
         if (!c.spin && d > 6 && ux * sw.dx + uy * sw.dy < SWING.halfAngleCos) return; // outside the arc
         sw.hit.add(o.id);
-        o.hit(dmg);
+        o.hit(dmg, true, this);
         o.shove(ux, uy, c.push);
         const crit = c.spin;
         const stop = o.dead ? 0.1 : crit ? 0.12 : 0.06;

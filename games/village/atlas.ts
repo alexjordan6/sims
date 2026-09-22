@@ -100,6 +100,7 @@ export const CHAR = {
   ogre: { key: 'dungeon', frame: DUNGEON.orc },
   shaman: { key: 'dungeon', frame: DUNGEON.wizard },
   wrecker: { key: 'dungeon', frame: DUNGEON.orc },
+  boar: { key: 'farm', frame: FARM.cow },
 } as const;
 
 /** CSS background-position for a frame in a 12-col sheet, at a given scale. */

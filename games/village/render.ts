@@ -2,9 +2,10 @@ import Phaser from 'phaser';
 import { World, BUILDINGS, doorstep, type Tile, type Building, type BuildingKind } from './world';
 import { Mover, Villager, Raider, Player, Arrow } from './agents';
 import { Bolt } from './enemies';
+import { Boar } from './wildlife';
 import { TOWN, CHAR } from './atlas';
 import { ensureCharacter, seedLook, type Look } from './characters';
-import { p, TILE, COLS, ROWS, CAPS, WALL_HEIGHT, OGRE, PEN_COLOUR } from './config';
+import { p, TILE, COLS, ROWS, CAPS, WALL_HEIGHT, OGRE, BOAR, PEN_COLOUR } from './config';
 import type { VillageScene } from './main';
 import { Fx } from './fx';
 import { ensureBuildingArt, ensureFlora, FLORA, BUILDING_TEXTURE, LIT_TEXTURE, STACK_ROWS } from './pixelart';
@@ -259,7 +260,7 @@ export class Renderer {
       const hurt = m.hp < m.maxHp * 0.4;
       const bob = moving ? Math.abs(Math.sin(this.t * (hurt ? 9 : 14) + m.id)) * 1.5 : 0;
       const a = this.fx.anims.get(m.id);
-      const base = m instanceof Villager && m.gnome ? (m.role === 'kid' ? 0.6 : 0.75) : m instanceof Villager && m.role === 'kid' ? 0.85 : m instanceof Raider ? ENEMY_SCALE[m.kind] : m instanceof Bolt ? 3 : 1;
+      const base = m instanceof Villager && m.gnome ? (m.role === 'kid' ? 0.6 : 0.75) : m instanceof Villager && m.role === 'kid' ? 0.85 : m instanceof Boar ? (m.young ? BOAR.youngScale : 1) : m instanceof Raider ? ENEMY_SCALE[m.kind] : m instanceof Bolt ? 3 : 1;
       const height = m instanceof Arrow ? (m.elevated ? WALL_HEIGHT * Math.max(0, 1 - m.travelled / m.dropDistance) : 0) : m.elevated ? WALL_HEIGHT : 0;
       sp.setPosition(Math.round(m.x + (a?.ox ?? 0)), Math.round(m.y - height - bob + (a?.oy ?? 0)));
       sp.setFlipX(m.dir < 0);
@@ -283,7 +284,7 @@ export class Renderer {
         carry.setPosition(sp.x - m.dir * 2, sp.y - 11 + (a?.oy ?? 0)).setFlipX(m.dir < 0).setScale(base).setDepth(sp.depth + 0.01).setVisible(!!m.load && !m.hidden && sp.visible).setTint(this.tint);
       }
       if (m.hurtT < 0.15 && !m.blocked) sp.setTintFill(0xffffff);
-      else if (m instanceof Raider) sp.setTint(mulColor(m.boss ? 0xff6a6a : m.kind === 'brute' ? 0xb07070 : 0xffd0d0, this.tint));
+      else if (m instanceof Raider && !(m.wild && m.harmless)) sp.setTint(mulColor(m.boss ? 0xff6a6a : m.kind === 'brute' ? 0xb07070 : 0xffd0d0, this.tint)); // a calm boar reads as an animal, not a foe
       else if (m instanceof Bolt) sp.setTint(0xb46bff);
       else if (hurt) sp.setTint(mulColor(0xffb0a0, this.tint));
       else sp.setTint(this.tint);
@@ -586,7 +587,7 @@ function tileFrames(t: Tile, cropDays: number, dayTime: number, oldDays: number,
   }
 }
 
-const ENEMY_SCALE: Record<string, number> = { raider: 1, warlord: 1.5, rat: 0.8, snatcher: 0.9, brute: 1.3, shaman: 1, ogre: OGRE.scale, wrecker: 1.1 };
+const ENEMY_SCALE: Record<string, number> = { raider: 1, warlord: 1.5, rat: 0.8, snatcher: 0.9, brute: 1.3, shaman: 1, ogre: OGRE.scale, wrecker: 1.1, boar: 1 };
 
 /** The layered look for an agent — role outfit, held tool, worn armor, dye — or null for things that aren't people. */
 export function lookFor(m: Mover): Look | null {
@@ -603,7 +604,7 @@ export function lookFor(m: Mover): Look | null {
     return { ...base, body: 'adult', outfit: m.role, held };
   }
   if (m instanceof Raider) {
-    const body = m.boss ? 'boss' : m.kind === 'ogre' ? 'ogre' : m.kind === 'brute' ? 'brute' : m.kind === 'rat' ? 'rat' : m.kind === 'snatcher' ? 'imp' : m.kind === 'shaman' ? 'shaman' : 'orc';
+    const body = m.boss ? 'boss' : m.kind === 'ogre' ? 'ogre' : m.kind === 'brute' ? 'brute' : m.kind === 'rat' ? 'rat' : m.kind === 'boar' ? 'boar' : m.kind === 'snatcher' ? 'imp' : m.kind === 'shaman' ? 'shaman' : 'orc';
     return { ...base, body, outfit: 'none', held: body === 'orc' || body === 'boss' ? 'sword' : body === 'brute' ? 'axe' : 'none', armor: { helmet: 0, chest: 0, legs: 0, shield: 0 } };
   }
   return null;

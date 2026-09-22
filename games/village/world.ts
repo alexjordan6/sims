@@ -243,6 +243,17 @@ export class World {
     }
     return best;
   }
+  /** The nearest resting meat lying outside any pen (what a gnome goes to fetch), among those `ok` allows. */
+  nearestWildMeat(x: number, y: number, ok: (it: Item) => boolean = () => true): Item | null {
+    let best: Item | null = null, bd = Infinity;
+    for (const it of this.items) {
+      if (!it.rest || it.kind !== 'food' || it.food !== 'meat' || it.n <= 0 || !ok(it)) continue;
+      if (this.get(Math.floor(it.x / TILE), Math.floor(it.y / TILE))?.pen) continue;
+      const d = (it.x - x) ** 2 + (it.y - y) ** 2;
+      if (d < bd) { bd = d; best = it; }
+    }
+    return best;
+  }
   /** The nearest resting food item within `r` tiles of a building's centre (a gnome house's yard). */
   nearestYardItem(x: number, y: number, b: Building, r: number): Item | null {
     const c = buildingCenter(b), cx = c.tx * TILE, cy = c.ty * TILE, rr = (r * TILE) ** 2;

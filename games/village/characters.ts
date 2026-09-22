@@ -4,7 +4,7 @@ import { ARMOR, DYES, PLUMES, WEAPONS, p, type ArmorSlot, type WeaponSlot } from
 // Modular pixel people: every villager, the head and every raider is drawn from layers (body,
 // hair, outfit, then armor pieces) into a cached 16x20 texture, so what someone wears shows.
 
-export type Body = 'adult' | 'kid' | 'orc' | 'imp' | 'rat' | 'shaman' | 'boss' | 'brute' | 'ogre' | 'gnome' | 'gnomekid';
+export type Body = 'adult' | 'kid' | 'orc' | 'imp' | 'rat' | 'shaman' | 'boss' | 'brute' | 'ogre' | 'gnome' | 'gnomekid' | 'boar';
 export type Outfit = 'farmer' | 'woodcutter' | 'soldier' | 'kid' | 'head' | 'none' | 'gnome';
 export type Held = 'none' | 'hoe' | 'axe' | 'sword' | 'club' | 'bow' | 'wand';
 export type HelmetStyle = 0 | 1 | 2;
@@ -75,6 +75,7 @@ export function drawCharacter(ctx: Ctx, ox: number, oy: number, l: Look, walk = 
   if (l.body === 'kid') { drawKid(ctx, ox, oy, l, walk); return; }
   if (l.body === 'gnome' || l.body === 'gnomekid') { drawGnome(ctx, ox, oy, l, walk, l.body === 'gnomekid'); return; }
   if (l.body === 'rat') { drawRat(ctx, ox, oy, walk); return; }
+  if (l.body === 'boar') { drawBoar(ctx, ox, oy, walk); return; }
   if (l.body === 'ogre') { drawOgre(ctx, ox, oy, walk); return; }
 
   const big = l.body === 'boss' || l.body === 'brute';
@@ -268,6 +269,25 @@ function drawRat(ctx: Ctx, ox: number, oy: number, walk: boolean): void {
   P(3, 12, INK, 10, 6); P(4, 13, '#8a7a6a', 8, 4); P(4, 13, '#a89888', 8, 1);
   P(11, 11, INK, 4, 4); P(12, 12, '#8a7a6a', 2, 2); P(13, 12, '#2a1a16', 1, 1); P(14, 10, '#c88a8a', 1, 2);
   P(0, 15, '#c88a8a', 3, 1); if (walk) { P(5, 18, INK, 2, 2); P(9, 18, INK, 2, 2); } else { P(4, 18, INK, 2, 2); P(10, 18, INK, 2, 2); }
+}
+
+/** A wild boar, facing right: a low bristled barrel of a body, a wedge of a head with tusks, thin legs, a tail curl. */
+function drawBoar(ctx: Ctx, ox: number, oy: number, walk: boolean): void {
+  const P = (x: number, y: number, c: string, w = 1, h = 1) => px(ctx, ox + x, oy + y, c, w, h);
+  const HIDE = '#5a3a22', HIDE_DARK = '#3b2314', BRISTLE = '#8a5a34', BELLY = '#7a5a3e', TUSK = '#e8e0d0', NOSE = '#c88a8a';
+  // body: outline, fill, a paler belly, a bristled ridge along the back
+  P(2, 8, INK, 11, 8); P(3, 9, HIDE, 9, 6); P(4, 13, BELLY, 7, 2);
+  P(3, 8, BRISTLE, 9, 1); P(4, 7, INK, 2, 1); P(7, 7, INK, 2, 1); P(10, 7, INK, 1, 1); // the ridge
+  // head: forward and low, ear, eye, snout with the nose and two tusks
+  P(10, 9, INK, 5, 6); P(11, 10, HIDE_DARK, 3, 4); P(11, 8, INK, 2, 2); P(11, 9, HIDE, 1, 1); // ear
+  P(12, 11, '#f0d060', 1, 1); // eye
+  P(13, 12, INK, 3, 3); P(14, 13, HIDE_DARK, 2, 1); P(15, 13, NOSE, 1, 2); // snout
+  P(13, 15, TUSK, 1, 2); P(15, 15, TUSK, 1, 1); // tusks
+  // tail
+  P(1, 9, INK, 1, 3); P(0, 8, INK, 1, 1);
+  // legs: two pairs, the walk frame swings them apart
+  if (walk) { P(3, 16, INK, 2, 3); P(7, 16, INK, 2, 3); P(5, 16, INK, 1, 2); P(10, 16, INK, 2, 3); }
+  else { P(4, 16, INK, 2, 3); P(9, 16, INK, 2, 3); P(6, 16, HIDE_DARK, 1, 2); P(11, 16, HIDE_DARK, 1, 2); }
 }
 
 /** Ensure the texture for a look exists (two frames: idle 0, walk 1) and return its key. */

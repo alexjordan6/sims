@@ -6,8 +6,9 @@ import { Villager, Raider, Player, Mover, Arrow, TOOLS, type Role, type Tool, ty
 import { DEFENSE_COST, WALL_HEIGHT } from './config';
 import { Interior } from './interior';
 import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, Bolt, waveComposition } from './enemies';
+import { Boar, type Sounder } from './wildlife';
 import { Fog } from './fog';
-import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, type LoadKind, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, GNOME_BEDS, GNOME_YARD, ORDER, LEVEL_PERKS, PEN_NAME, ITEM, FOODS, FOOD_KINDS, DIET_STAT_NAME, type FoodKind, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, BOAR, type LoadKind, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, GNOME_BEDS, GNOME_YARD, ORDER, LEVEL_PERKS, PEN_NAME, ITEM, FOODS, FOOD_KINDS, DIET_STAT_NAME, type FoodKind, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
@@ -54,7 +55,7 @@ export class VillageScene extends SimScene {
   world!: World;
   player!: Player;
   /** the granary, by kind of food; `food` is the total (its setter keeps the old callers working: gains land in wheat, spending drains the fullest kind first) */
-  pantry: Record<FoodKind, number> = { wheat: 0, carrot: 0, tomato: 0, berry: 0, mushroom: 0, hazelnut: 0, garlic: 0, burdock: 0 };
+  pantry: Record<FoodKind, number> = { wheat: 0, carrot: 0, tomato: 0, berry: 0, mushroom: 0, hazelnut: 0, garlic: 0, burdock: 0, meat: 0 };
   get food(): number { let n = 0; for (const k of FOOD_KINDS) n += this.pantry[k]; return n; }
   set food(v: number) {
     let delta = v - this.food;
@@ -97,7 +98,7 @@ export class VillageScene extends SimScene {
   journal: GameEvent[] = [];
   fx: FxEvent[] = [];
   private static buttonsMade = false;
-  stats = { peakPop: 0, soldiersRaised: 0, childrenRaised: 0, starsTotal: 0, raidsRepelled: 0, raidersKilled: 0, bossesSlain: 0, buildingsLost: 0 };
+  stats = { peakPop: 0, soldiersRaised: 0, childrenRaised: 0, starsTotal: 0, raidsRepelled: 0, raidersKilled: 0, bossesSlain: 0, buildingsLost: 0, boarsHunted: 0 };
   /** persists across runs (localStorage) */
   meta = new Meta();
   /** this run's modifiers, compiled from the equipped boons */
@@ -105,6 +106,10 @@ export class VillageScene extends SimScene {
   boss: Raider | null = null;
   /** the Ogre, asleep in his lair until night */
   ogre: Ogre | null = null;
+  /** the boar families out in the woods (wildlife.ts) */
+  sounders: Sounder[] = [];
+  /** ids of meat items a gnome is already on its way to */
+  meatClaims = new Set<number>();
   /** the fog of war: what has been seen */
   fog!: Fog;
   lairFound = false;
@@ -204,9 +209,11 @@ export class VillageScene extends SimScene {
     this.fx = [];
     if (this.slowUntil) { clearTimeout(this.slowUntil); this.slowUntil = 0; }
     if (this.speed < 1) this.speed = 1;
-    this.stats = { peakPop: 0, soldiersRaised: 0, childrenRaised: 0, starsTotal: 0, raidsRepelled: 0, raidersKilled: 0, bossesSlain: 0, buildingsLost: 0 };
+    this.stats = { peakPop: 0, soldiersRaised: 0, childrenRaised: 0, starsTotal: 0, raidsRepelled: 0, raidersKilled: 0, bossesSlain: 0, buildingsLost: 0, boarsHunted: 0 };
     this.boss = null;
     this.ogre = this.world.lair ? this.spawn(new Ogre(this.world.lair)) : null;
+    this.sounders = []; this.meatClaims.clear();
+    this.spawnSounders();
     this.lairFound = false;
     this.fog?.reset();
     this.result = null;
@@ -233,6 +240,46 @@ export class VillageScene extends SimScene {
       for (let i = 0; i < this.mods.extraAdults; i++) this.addVillager(h2, i % 2 ? 'woodcutter' : 'farmer', grown);
     }
     this.event('info', `A new village in ${this.world.denseForests ? 'the deep woodland' : 'the open meadows'}. Follow trails to explore. Build walls and stairs, then station archers.`);
+  }
+
+  /** Settle a boar family at (tx, ty): `n` boars on the free tiles around it. */
+  foundSounder(tx: number, ty: number, n: number, young = false): Sounder {
+    const sd: Sounder = { id: this.sounders.length + 1, home: { tx, ty }, members: [] };
+    this.sounders.push(sd);
+    for (let i = 0; i < n; i++) {
+      let spot: TilePos = { tx, ty };
+      for (let tries = 0; tries < 10; tries++) { const q = { tx: tx + this.rng.int(-2, 2), ty: ty + this.rng.int(-2, 2) }; if (!this.world.isBlocked(q.tx, q.ty, true)) { spot = q; break; } }
+      const c = World.center(spot.tx, spot.ty);
+      this.spawn(new Boar(c.x, c.y, sd, young));
+    }
+    return sd;
+  }
+  /** The map's sounders: BOAR.sounders families in the woods and meadows, well away from the village and each other. */
+  private spawnSounders(): void {
+    const hx = COLS / 2, hy = ROWS / 2;
+    for (let k = 0; k < BOAR.sounders; k++) {
+      for (let tries = 0; tries < 60; tries++) {
+        const tx = this.rng.int(6, COLS - 7), ty = this.rng.int(6, ROWS - 7), t = this.world.get(tx, ty)!;
+        if (t.kind !== 'grass' || t.trail || t.building || Math.hypot(tx - hx, ty - hy) < BOAR.minDist) continue;
+        if (this.sounders.some((sd) => Math.hypot(sd.home.tx - tx, sd.home.ty - ty) < 20)) continue;
+        if (this.world.lair && Math.hypot(this.world.lair.tx - tx, this.world.lair.ty - ty) < 14) continue;
+        if (!this.world.bfs({ tx, ty }, { tx: hx, ty: hy }, true).length) continue;
+        this.foundSounder(tx, ty, this.rng.int(BOAR.sounderSize[0], BOAR.sounderSize[1]));
+        break;
+      }
+    }
+  }
+  /** Dawn in the sounders: the young grow, the calm heal, and a family of two or more may gain a young one. */
+  private tickSounders(): void {
+    for (const sd of this.sounders) {
+      sd.members = sd.members.filter((b) => !b.dead);
+      for (const b of sd.members) { b.grow(); if (!b.provoked) b.hp = Math.min(b.maxHp, b.hp + Math.round(b.maxHp * BOAR.regen)); }
+      const grown = sd.members.filter((b) => !b.young).length;
+      if (grown >= 2 && sd.members.length < BOAR.sounderCap && this.rng.chance(p.boarBreed)) {
+        const c = World.center(sd.home.tx, sd.home.ty);
+        this.spawn(new Boar(c.x + this.rng.range(-8, 8), c.y + this.rng.range(-8, 8), sd, true));
+      }
+    }
   }
 
   /** A new gnome house comes with its founders: a grown couple, who breed like any family. */
@@ -803,6 +850,7 @@ export class VillageScene extends SimScene {
       trees++;
     }
     this.warnedFull = false;
+    this.tickSounders();
     // the rumour: a direction to explore
     if (this.day === 2 && this.world.lair && !this.lairFound) {
       const l = this.world.lair, dx = l.tx + 2 - COLS / 2, dy = l.ty + 2 - ROWS / 2;
@@ -1132,6 +1180,14 @@ export class VillageScene extends SimScene {
       a.home.residents--;
       for (const k of this.villagers()) if (k.isChild && k.parents.includes(a)) k.care -= 1; // losing a parent
       if (a.hp <= 0 && !a.starved && a.age < a.deathAt(this)) this.event('death', `${a.name} the ${a.role} was killed`, true);
+    } else if (a instanceof Boar) {
+      // game, not an enemy: the meat lies where it fell for the head's hands or a gnome
+      a.sounder.members = a.sounder.members.filter((b) => b !== a);
+      if (a.hp <= 0) {
+        this.stats.boarsHunted++;
+        this.world.dropItem('food', a.meat, a.x, a.y, 'meat', this.rng);
+        this.event('food', `A ${a.name.toLowerCase()} falls — ${a.meat} meat lies where it fell${a.sounder.members.length ? '' : '; the sounder is no more'}`);
+      }
     } else if (a instanceof Raider) {
       if (a.carrying && !a.carrying.dead) { const kid = a.carrying; kid.carriedBy = null; a.carrying = null; this.event('grow', `${kid.name} was rescued!`, true); }
       if (a.hp <= 0) {
@@ -1167,7 +1223,7 @@ export class VillageScene extends SimScene {
     return best;
   }
 
-  /** What a soldier should go for: a snatcher carrying a child first (seen from further away), then real threats, rats last. */
+  /** What a soldier should go for: a snatcher carrying a child first (seen from further away), then real threats, rats last. Calm wild animals are nobody's business. */
   bestTarget(x: number, y: number, r: number): Raider | null {
     let best: Raider | null = null, bs = Infinity;
     this.grid.forEachInRadius(x, y, r * 2.5, (o, d2) => {
@@ -1175,7 +1231,7 @@ export class VillageScene extends SimScene {
     });
     if (best) return best;
     this.grid.forEachInRadius(x, y, r, (o, d2) => {
-      if (!(o instanceof Raider) || o.dead) return;
+      if (!(o instanceof Raider) || o.dead || (o.wild && o.harmless)) return;
       const score = Math.sqrt(d2) - (o.carrying ? 120 : o.harmless ? -60 : 0);
       if (score < bs) { bs = score; best = o; }
     });
@@ -1996,7 +2052,10 @@ export class VillageScene extends SimScene {
       }
       case 'sword': {
         const near = this.nearestRaider(pl.x, pl.y, 40);
-        return near ? 'E: attack!' : t?.tall ? 'E: mow the long grass (a swing clears its arc)' : 'E: swing sword';
+        if (near) return 'E: attack!';
+        const game = this.nearestRaider(pl.x, pl.y, 40, true);
+        if (game?.wild) return `E: strike the ${game.name.toLowerCase()} — it and its sounder will charge you (${game instanceof Boar ? game.meat : 0} meat)`;
+        return t?.tall ? 'E: mow the long grass (a swing clears its arc)' : 'E: swing sword';
       }
       case 'pen': {
         const r = this.penReport(pl.penKind), where = t?.pen ? (t.pen === pl.penKind ? 'E: erase' : `E: repaint as ${PEN_NAME[pl.penKind]}`) : `E: paint ${PEN_NAME[pl.penKind]}`;

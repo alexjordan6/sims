@@ -1,0 +1,101 @@
+import { Mover, Raider } from './agents';
+import { World, type TilePos } from './world';
+import { BOAR, TILE, p } from './config';
+import type { VillageScene } from './main';
+
+// Wild animals. Like enemies.ts this imports agents, never the reverse.
+
+/** A family of boars: where they live and who is still alive. */
+export interface Sounder { id: number; home: TilePos; members: Boar[] }
+
+/**
+ * A boar roots about near its sounder's home and is nobody's enemy — soldiers and towers leave it be, nobody
+ * flees from it — until something strikes it. Then it (and every mate in earshot) charges the attacker until
+ * it calms: BOAR.calmAfter seconds without landing a blow, the attacker gone, or the chase past BOAR.leash tiles
+ * from home. Dead, it drops meat where it fell (VillageScene.onDeath).
+ */
+export class Boar extends Raider {
+  /** days old; drawn small and dropping half meat until BOAR.youngDays */
+  age: number;
+  /** seconds of anger left; 0 = calm */
+  anger = 0;
+  private grazeT = 0;
+
+  constructor(x: number, y: number, public readonly sounder: Sounder, young = false) {
+    super(x, y);
+    this.kind = 'boar';
+    this.name = young ? 'Young boar' : 'Boar';
+    this.wild = true;
+    this.harmless = true;
+    this.lairBound = true;
+    this.age = young ? 0 : BOAR.youngDays;
+    this.hp = this.maxHp = young ? Math.round(BOAR.hp / 2) : BOAR.hp;
+    this.dmg = p.boarDmg;
+    this.speed = BOAR.speed;
+    this.radius = BOAR.radius;
+    this.color = 0x8a5a34;
+    this.task = 'rooting about';
+    sounder.members.push(this);
+  }
+
+  get young(): boolean { return this.age < BOAR.youngDays; }
+  get provoked(): boolean { return this.anger > 0; }
+  /** whoever it is charging (for the inspector and tests) */
+  get prey(): Mover | null { return this.provoked ? this.target : null; }
+  /** meat this body drops */
+  get meat(): number { return this.young ? BOAR.meat / 2 : BOAR.meat; }
+
+  override hit(dmg: number, melee = true, by?: Mover): void {
+    super.hit(dmg, melee, by);
+    if (!this.dead && by && !by.dead) this.rouse(by);
+  }
+
+  /** Turn on an attacker; calm mates within earshot join in. */
+  rouse(by: Mover): void {
+    const wasCalm = !this.provoked;
+    this.target = by; this.anger = BOAR.calmAfter; this.harmless = false; this.task = 'charging';
+    this.clearGoal();
+    if (!wasCalm) return;
+    for (const m of this.sounder.members) if (m !== this && !m.dead && !m.provoked && m.dist(this) <= BOAR.packRange * TILE) m.rouse(by);
+  }
+
+  calm(): void {
+    this.anger = 0; this.harmless = true; this.target = null; this.speed = BOAR.speed;
+    this.clearGoal(); this.grazeT = 0; this.task = 'rooting about';
+  }
+
+  /** A grown boar's name once it has grown up (called at dawn). */
+  grow(): void { if (++this.age >= BOAR.youngDays && this.name === 'Young boar') { this.name = 'Boar'; this.maxHp = BOAR.hp; this.hp = Math.min(this.maxHp, this.hp + BOAR.hp / 2); } }
+
+  update(dt: number, s: VillageScene): void {
+    this.tickTimers(dt);
+    if (this.frozen(dt)) return;
+    if (this.attackTick(dt, s)) { if (this.attack?.struck) this.anger = BOAR.calmAfter; return; }
+    const home = World.center(this.sounder.home.tx, this.sounder.home.ty);
+    if (this.provoked) {
+      this.anger -= dt;
+      const t = this.target;
+      if (!t || t.dead || t.hidden || this.anger <= 0 || this.dist(home) > BOAR.leash * TILE) { this.calm(); return; }
+      this.speed = BOAR.angrySpeed;
+      this.task = 'charging';
+      if (this.startAttack(s, t, this.dmg, BOAR.reach, BOAR.windup, BOAR.recover)) { this.anger = BOAR.calmAfter; return; }
+      this.setGoal(s, t.tile.tx, t.tile.ty);
+      this.followPath(dt); // walled off: no path, the anger runs out and it wanders home
+      return;
+    }
+    // calm: graze around home
+    this.grazeT -= dt;
+    if (this.grazeT <= 0 || this.followPath(dt)) {
+      this.grazeT = s.rng.range(2, 6);
+      this.vx = this.vy = 0;
+      this.task = s.rng.chance(0.5) ? 'rooting about' : 'grazing';
+      const ht = this.sounder.home;
+      for (let i = 0; i < 12; i++) {
+        const tx = ht.tx + s.rng.int(-BOAR.roam, BOAR.roam), ty = ht.ty + s.rng.int(-BOAR.roam, BOAR.roam);
+        if (!s.world.inBounds(tx, ty) || s.world.isBlocked(tx, ty, true)) continue;
+        this.setGoal(s, tx, ty, true);
+        if (this.path.length) break;
+      }
+    }
+  }
+}

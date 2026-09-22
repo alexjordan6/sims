@@ -452,7 +452,7 @@ export class Ogre extends Raider {
   }
 
   private strike(s: VillageScene, o: Mover, dmg: number, ux: number, uy: number, push: number, freeze: number, melee: boolean): void {
-    o.hit(dmg, melee);
+    o.hit(dmg, melee, this);
     o.shove(ux, uy, push);
     o.freeze = Math.max(o.freeze, freeze);
     s.fx.push({ kind: 'hit', attacker: this, target: o, dmg, crit: false, killed: !!o.dead, ux, uy, push });

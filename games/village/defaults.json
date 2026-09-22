@@ -67,6 +67,8 @@
   "wreckerDmg": 15,
   "wreckerWallDmg": 6,
   "bruteWallMul": 3,
+  "boarBreed": 0.35,
+  "boarDmg": 8,
   "fog": true,
   "hearths": true,
   "towerFires": true,
