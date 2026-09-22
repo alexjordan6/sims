@@ -1,4 +1,4 @@
-import { Mover, Raider } from './agents';
+import { Mover, Raider, Villager, Player } from './agents';
 import { World, type TilePos } from './world';
 import { BOAR, TILE, p } from './config';
 import type { VillageScene } from './main';
@@ -20,6 +20,7 @@ export class Boar extends Raider {
   /** seconds of anger left; 0 = calm */
   anger = 0;
   private grazeT = 0;
+  private rustleT = 0;
 
   constructor(x: number, y: number, public readonly sounder: Sounder, young = false) {
     super(x, y);
@@ -28,6 +29,7 @@ export class Boar extends Raider {
     this.wild = true;
     this.harmless = true;
     this.lairBound = true;
+    this.lurker = true; // unseen in long grass until it moves, or someone treads on it
     this.age = young ? 0 : BOAR.youngDays;
     this.hp = this.maxHp = young ? Math.round(BOAR.hp / 2) : BOAR.hp;
     this.dmg = p.boarDmg;
@@ -60,7 +62,7 @@ export class Boar extends Raider {
   }
 
   calm(): void {
-    this.anger = 0; this.harmless = true; this.target = null; this.speed = BOAR.speed;
+    this.anger = 0; this.harmless = true; this.target = null; this.attack = null; this.speed = BOAR.speed;
     this.clearGoal(); this.grazeT = 0; this.task = 'rooting about';
   }
 
@@ -83,7 +85,22 @@ export class Boar extends Raider {
       this.followPath(dt); // walled off: no path, the anger runs out and it wanders home
       return;
     }
-    // calm: graze around home
+    // calm: graze around home. Hidden in the long grass, a body treading on it startles it; moving, it stirs the grass.
+    if (this.lurking) {
+      let trod: Mover | null = null;
+      s.grid.forEachInRadius(this.x, this.y, BOAR.startle, (o) => {
+        if (trod || !(o instanceof Mover) || o.dead || o.hidden || o.elevated) return;
+        if (o instanceof Player || (o instanceof Villager && !o.carriedBy && o.role !== 'infant')) trod = o;
+      });
+      const who = trod as Mover | null;
+      if (who) {
+        this.rouse(who);
+        if (who instanceof Player) s.event('raid', `A ${this.name.toLowerCase()} bursts out of the long grass!`, true);
+        return;
+      }
+      this.rustleT -= dt;
+      if ((this.vx || this.vy) && this.rustleT <= 0) { this.rustleT = s.rng.range(BOAR.rustleEvery[0], BOAR.rustleEvery[1]); s.fx.push({ kind: 'rustle', x: this.x, y: this.y }); }
+    }
     this.grazeT -= dt;
     if (this.grazeT <= 0 || this.followPath(dt)) {
       this.grazeT = s.rng.range(2, 6);

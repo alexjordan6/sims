@@ -222,6 +222,7 @@ export class Fx {
       case 'death': break; // handled by die() when the renderer hands over the sprite
       case 'deposit': this.dust.explode(6, ev.x, ev.y); this.word(ev.text, ev.x, ev.y - 10, ev.colour, 7, 0.9); this.sfx.dig(); break;
       case 'cut': this.clippings.explode(6, ev.x, ev.y - 2); break;
+      case 'rustle': if (!this.scene.fog || this.scene.fog.visibleAt(ev.x, ev.y) > 0.35) this.clippings.explode(3, ev.x, ev.y - 3); break; // fog-gated: unexplored grass keeps its secrets
       case 'ruin': {
         // the roof comes down: a shudder, a thud, dust and smoke across the whole footprint
         const b = ev.building, f = BUILDINGS[b.kind], x0 = b.tx * TILE, y0 = b.ty * TILE, w = f.w * TILE, h = f.h * TILE;

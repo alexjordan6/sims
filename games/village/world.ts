@@ -206,11 +206,13 @@ export class World {
     t.tall = undefined; this.dirty.add(ty * this.cols + tx);
     return true;
   }
-  /** Speed multiplier for a body at a pixel position: p.grassSlow in long grass, 1 anywhere else. */
-  slowAt(x: number, y: number): number {
+  /** Is the tile under a pixel position long grass? */
+  tallAt(x: number, y: number): boolean {
     const t = this.get(Math.floor(x / TILE), Math.floor(y / TILE));
-    return t?.kind === 'grass' && t.tall ? p.grassSlow : 1;
+    return t?.kind === 'grass' && !!t.tall;
   }
+  /** Speed multiplier for a body at a pixel position: p.grassSlow in long grass, 1 anywhere else. */
+  slowAt(x: number, y: number): number { return this.tallAt(x, y) ? p.grassSlow : 1; }
   // ---- items on the ground ------------------------------------------------------------------
   /** Put an item in the world at a pixel position (resting, unless it is launched or hopped afterwards). */
   dropItem(kind: ItemKind, n: number, x: number, y: number, food?: FoodKind, rng?: Rng): Item {

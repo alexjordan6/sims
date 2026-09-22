@@ -684,6 +684,39 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       const eater = s.spawn(new Villager(...Object.values(World.center(120, 100)) as [number, number], s.world.houses[0], 'kid', 1, 'Meat eater', s.mods));
       eater.diet.meat = p.dietFull;
       assert(Math.abs(eater.dietNow().dmg - DIET_CAP.dmg * 2 * p.dietMul) < 1e-9 && eater.dietNow().hp === 0, 'children raised on meat get twice the damage bonus berries give, and nothing else');
+      // lurkers: a calm boar in long grass is unseen; treading on it finds it
+      s = fresh(); clearing(s); s.agents = [s.player]; s.hoverTile = null;
+      const lsd = s.foundSounder(130, 100, 1), [lb] = lsd.members;
+      lb.update = () => {}; Object.assign(lb, World.center(130, 100)); s.grid.rebuild(s.agents);
+      assert(lb.lurker && !lb.lurking, 'a boar on mown grass is in plain sight');
+      for (let x = 128; x <= 132; x++) for (let y = 98; y <= 102; y++) s.world.get(x, y)!.tall = true;
+      assert(lb.lurking, 'the same boar standing in long grass is hidden');
+      Object.assign(s.player, World.center(129, 100)); s.player.facing = { x: 1, y: 0 }; s.player.tool = 'sword';
+      assert(!s.hint().includes('boar'), `the sword hint gives nothing away (${s.hint()})`);
+      s.world.cutGrass(130, 100); assert(!lb.lurking && s.hint().includes('boar'), 'mow its tile and it shows — and the hint names it');
+      s.world.get(130, 100)!.tall = true; lb.rouse(s.player);
+      assert(!lb.lurking && lb.provoked, 'a provoked boar cannot hide, grass or no grass');
+      lb.calm(); delete (lb as unknown as { update?: unknown }).update; // back to the real update
+      Object.assign(s.player, World.center(126, 100)); s.player.tool = 'hands'; s.fx.length = 0;
+      step(s, 0.5);
+      assert(lb.lurking && !lb.provoked, 'with nobody near it stays hidden and calm');
+      Object.assign(s.player, { x: lb.x + 4, y: lb.y }); step(s, 0.2);
+      assert(lb.provoked && lb.prey === s.player && s.journal.some((j) => /bursts out of the long grass/.test(j.text)), 'treading on it, the head startles it and it charges');
+      lb.calm(); Object.assign(lb, World.center(130, 100)); Object.assign(s.player, World.center(118, 92));
+      const hand2 = s.spawn(new Villager(...Object.values(World.center(130, 100)) as [number, number], s.world.houses[0], 'farmer', 20, 'Trodden hand', s.mods));
+      step(s, 0.2);
+      assert(lb.provoked && lb.prey === hand2, 'a villager blundering onto it is charged just the same');
+      hand2.dead = true; s.removeDead(); lb.calm(); Object.assign(lb, World.center(130, 100));
+      for (let x = 128; x <= 132; x++) for (let y = 98; y <= 102; y++) s.world.cutGrass(x, y);
+      Object.assign(s.player, { x: lb.x + 4, y: lb.y }); step(s, 0.3);
+      assert(!lb.provoked, 'a boar in plain sight is not startled by company');
+      Object.assign(s.player, World.center(118, 92));
+      for (let x = 126; x <= 134; x++) for (let y = 96; y <= 104; y++) s.world.get(x, y)!.tall = true;
+      s.fx.length = 0; lb.setGoal(s, 133, 103, true); step(s, 2);
+      assert(s.fx.some((e) => e.kind === 'rustle'), 'moving through long grass, the hidden boar stirs it');
+      for (let x = 126; x <= 134; x++) for (let y = 96; y <= 104; y++) s.world.cutGrass(x, y);
+      s.fx.length = 0; Object.assign(lb, World.center(130, 100)); lb.setGoal(s, 133, 103, true); step(s, 2);
+      assert(!s.fx.some((e) => e.kind === 'rustle'), 'on mown grass there is nothing to stir');
       // breeding: a sounder of two or more grows, one alone does not, none past the cap
       s = fresh(); s.agents = [s.player];
       const pair = s.foundSounder(126, 100, 2), lone = s.foundSounder(134, 106, 1);

@@ -900,6 +900,10 @@ export class Raider extends Mover {
   lairBound = false;
   /** lives wild (boars): not the village's enemy — soldiers and towers leave it be — until it's provoked (`harmless` drops) */
   wild = false;
+  /** hides in long grass while calm: not drawn, not hoverable, no bar or minimap dot; a body walking onto it finds it the hard way */
+  lurker = false;
+  /** unseen right now: a calm lurker standing in long grass */
+  get lurking(): boolean { return this.lurker && this.harmless && !this.dead && !!this.world?.tallAt(this.x, this.y); }
   /** a child being carried off (snatchers) */
   carrying: Villager | null = null;
 

@@ -264,8 +264,8 @@ export class Renderer {
       const height = m instanceof Arrow ? (m.elevated ? WALL_HEIGHT * Math.max(0, 1 - m.travelled / m.dropDistance) : 0) : m.elevated ? WALL_HEIGHT : 0;
       sp.setPosition(Math.round(m.x + (a?.ox ?? 0)), Math.round(m.y - height - bob + (a?.oy ?? 0)));
       sp.setFlipX(m.dir < 0);
-      // the fog hides hostiles (and their bolts) until someone can see them
-      sp.setVisible(!m.hidden && (!m.hostile || !this.scene.fog || this.scene.fog.visibleAt(m.x, m.y) > 0.35));
+      // the fog hides hostiles until someone can see them; a lurker in long grass is unseen full stop (no sprite = no hover, no pick)
+      sp.setVisible(!m.hidden && !(m instanceof Raider && m.lurking) && (!m.hostile || !this.scene.fog || this.scene.fog.visibleAt(m.x, m.y) > 0.35));
       sp.setScale(base * (a?.sx ?? 1), base * (a?.sy ?? 1));
       sp.setRotation(a?.rot ?? 0);
       sp.setDepth(DEPTH.agents + m.y / 1000);
@@ -451,7 +451,7 @@ export class Renderer {
     // whatever the inspector shows is marked in the world: a breathing ring and a bobbing marker over a person,
     // a bracketed footprint over a building, so the card and the thing it describes read as one
     const pulse = 0.5 + 0.5 * Math.sin(s.time.now / 220), bob = Math.round(2 * Math.sin(s.time.now / 180));
-    if (s.selected && !s.selected.dead && !s.selected.hidden) {
+    if (s.selected && !s.selected.dead && !s.selected.hidden && !(s.selected instanceof Raider && s.selected.lurking)) {
       const m = s.selected, top = m.y - (m.elevated ? WALL_HEIGHT : 0) - 22 + bob;
       u.fillStyle(0xffe066, 0.12 + 0.1 * pulse); u.fillEllipse(m.x, m.y + 1, 22 + 4 * pulse, 11 + 2 * pulse);
       u.lineStyle(1, 0xffe066, 0.9); u.strokeEllipse(m.x, m.y + 1, 16 + 4 * pulse, 8 + 2 * pulse);
@@ -488,7 +488,7 @@ export class Renderer {
     }
     for (const a of s.agents) {
       const m = a as Mover;
-      if (m.hidden || m.hp >= m.maxHp) continue;
+      if (m.hidden || m.hp >= m.maxHp || (m instanceof Raider && m.lurking)) continue;
       if (m.hostile && this.scene.fog && this.scene.fog.visibleAt(m.x, m.y) <= 0.35) continue;
       const huge = m instanceof Raider && m.huge, big = huge || (m instanceof Raider && m.boss);
       const bw = huge ? 32 : big ? 20 : 10, x = Math.round(m.x - bw / 2), y = Math.round(m.y - (m.elevated ? WALL_HEIGHT : 0) - (huge ? 64 : big ? 20 : 14));

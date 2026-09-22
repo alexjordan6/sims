@@ -40,6 +40,8 @@ export type FxEvent =
   | { kind: 'deposit'; x: number; y: number; text: string; colour: string }
   /** a tile of long grass mown by the sword: clippings fly */
   | { kind: 'cut'; x: number; y: number }
+  /** the long grass stirs where something unseen moves */
+  | { kind: 'rustle'; x: number; y: number }
   | { kind: 'ruin'; building: Building }
   | { kind: 'demolish'; building: Building }
   /** the Ogre's ground slam (also his crash into a wall): shockwave of radius r */
@@ -2054,7 +2056,7 @@ export class VillageScene extends SimScene {
         const near = this.nearestRaider(pl.x, pl.y, 40);
         if (near) return 'E: attack!';
         const game = this.nearestRaider(pl.x, pl.y, 40, true);
-        if (game?.wild) return `E: strike the ${game.name.toLowerCase()} — it and its sounder will charge you (${game instanceof Boar ? game.meat : 0} meat)`;
+        if (game?.wild && !game.lurking) return `E: strike the ${game.name.toLowerCase()} — it and its sounder will charge you (${game instanceof Boar ? game.meat : 0} meat)`;
         return t?.tall ? 'E: mow the long grass (a swing clears its arc)' : 'E: swing sword';
       }
       case 'pen': {

@@ -70,7 +70,7 @@ export class Minimap {
       c.fillStyle = '#1a1014'; c.fillRect(lx - 1, ly - 1, 1, 1); c.fillRect(lx + 1, ly - 1, 1, 1);
     }
     for (const a of s.agents as Mover[]) {
-      if (a.dead || a.hidden) continue;
+      if (a.dead || a.hidden || (a instanceof Raider && a.lurking)) continue;
       if (a.hostile && s.fog && s.fog.visibleAt(a.x, a.y) <= 0.35) continue; // unseen threats stay unseen
       let colour: string | null = null, size = 1;
       if (a instanceof Player) { colour = '#ffffff'; size = 2; }

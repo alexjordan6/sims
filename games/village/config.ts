@@ -312,6 +312,8 @@ export const BOAR = {
   roam: 7, leash: 16, packRange: 6,
   /** seconds a provoked boar stays angry without landing a blow; share of max HP a calm boar heals each dawn */
   calmAfter: 10, regen: 0.15,
+  /** hidden in long grass: px at which a body walking onto it startles it, and how often the grass stirs as it moves (seconds) */
+  startle: 9, rustleEvery: [0.35, 0.7] as const,
   /** meat units a grown boar drops (a young one drops half) */
   meat: 4,
   /** days before a young boar is grown (drawn small until then) */
