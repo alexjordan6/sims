@@ -2,8 +2,8 @@ import Phaser from 'phaser';
 import { Mover, Villager, Raider, Player, Arrow, COMBO } from './agents';
 import { Bolt } from './enemies';
 import { DUNGEON, TOWN } from './atlas';
-import { TILE, OGRE } from './config';
-import { buildingCenter, BUILDINGS } from './world';
+import { TILE, OGRE, GNOME_HOME } from './config';
+import { buildingCenter, BUILDINGS, type Building } from './world';
 import { Sfx } from './sfx';
 import type { VillageScene, FxEvent } from './main';
 
@@ -71,6 +71,13 @@ export class Fx {
   /** how strong the wind is where the player stands, 0..1 (smoothed) */
   windLevel = 0;
   private windWarned = false;
+  /** the gnomes' glade: warm motes drifting in around their hidden cottage, and a soft chime that rises as you near it */
+  private motes: Phaser.GameObjects.Particles.ParticleEmitter;
+  private warm: Phaser.GameObjects.Image | null = null;
+  private gladeAcc = 0;
+  gladeLevel = 0;
+  private gladeWarned = false;
+  private gladeHome: Building | null = null;
   /** how the player's last hit on each target went, so the death can launch them that way */
   private lastBlow = new Map<number, { ux: number; uy: number; push: number; crit: boolean }>();
 
@@ -92,6 +99,8 @@ export class Fx {
     const fade = (v: number) => ({ onEmit: () => 0, onUpdate: (_p: Phaser.GameObjects.Particles.Particle, _k: string, t: number) => Math.sin(t * Math.PI) * v });
     this.wisps = scene.add.particles(0, 0, 'wisp', { emitting: false, lifespan: { min: 1400, max: 2400 }, tint: [0xd8d0f0, 0xb0b8d8, 0x9aa0c8], alpha: fade(0.85), scale: { start: 0.8, end: 1.8 } }).setDepth(43); // under the fog (45): the wind is only seen where the ground is
     this.leaves = scene.add.particles(0, 0, 'px', { emitting: false, lifespan: { min: 1600, max: 2600 }, tint: [0x4a3a50, 0x5a4a3a, 0x3a3a48], alpha: fade(0.9), rotate: { onEmit: () => Math.random() * 360, onUpdate: (_p: Phaser.GameObjects.Particles.Particle, _k: string, _t: number, v: number) => v + 6 } }).setDepth(43);
+    // the glade's motes: slow, warm, fading in and out as they drift
+    this.motes = scene.add.particles(0, 0, 'px', { emitting: false, lifespan: { min: 1800, max: 3200 }, tint: [0xffe9a0, 0xd9f0a0, 0xfff6d0], alpha: fade(0.95), scale: { start: 0.8, end: 1.4 } }).setDepth(43);
   }
 
   /**
@@ -145,6 +154,49 @@ export class Fx {
     }
   }
 
+  /**
+   * The gnomes' glade, the warm twin of the lair's wind: inside GNOME_HOME.ringRadius tiles of their
+   * cottage, motes drift inward and up — thickest at the door, nothing at the edge — over a patch of
+   * warm ground, with a soft chime that rises as the player walks in. The fog hides it like everything
+   * else, so you find the cottage by walking into its light. It stays after the cottage is claimed.
+   */
+  private glade(dt: number): void {
+    const s = this.scene;
+    // pinned to the cottage that was wild at the start: building your own near the village must not move the glade
+    const den = (this.gladeHome ??= s.world.wildGnomeHouse ?? null);
+    if (!den) { this.sfx.glade(0); return; }
+    const c = buildingCenter(den), gx = c.tx * TILE, gy = c.ty * TILE, R = GNOME_HOME.ringRadius * TILE;
+    if (!this.warm) {
+      if (!s.textures.exists('gladering')) {
+        const tex = s.textures.createCanvas('gladering', 256, 256)!, g = tex.context;
+        const grad = g.createRadialGradient(128, 128, 0, 128, 128, 128);
+        grad.addColorStop(0, 'rgba(255,215,120,0.30)'); grad.addColorStop(0.55, 'rgba(230,200,110,0.15)'); grad.addColorStop(1, 'rgba(255,215,120,0)');
+        g.fillStyle = grad; g.fillRect(0, 0, 256, 256); tex.refresh();
+      }
+      this.warm = s.add.image(gx, gy, 'gladering').setScale((R * 2) / 256).setDepth(43).setBlendMode(Phaser.BlendModes.ADD);
+    }
+    const pd = s.interior.active ? Infinity : Math.hypot(s.player.x - gx, s.player.y - gy) / TILE;
+    const target = Math.max(0, Math.min(1, 1 - pd / GNOME_HOME.ringRadius));
+    this.gladeLevel += (target - this.gladeLevel) * Math.min(1, dt * 2);
+    this.sfx.glade(this.sfx.muted ? 0 : this.gladeLevel);
+    if (target > 0.03 && !this.gladeWarned) { this.gladeWarned = true; s.event('info', 'Warm motes drift on the air — something small and friendly keeps house out here.', true); }
+    const v = s.cameras.main.worldView;
+    const x0 = Math.max(v.x - 24, gx - R), x1 = Math.min(v.right + 24, gx + R), y0 = Math.max(v.y - 24, gy - R), y1 = Math.min(v.bottom + 24, gy + R);
+    if (x1 <= x0 || y1 <= y0) return;
+    const area = (x1 - x0) * (y1 - y0) / (TILE * TILE);
+    this.gladeAcc += dt * area * 0.1; // far sparser than the wind: a glade, not a gale
+    while (this.gladeAcc >= 1) {
+      this.gladeAcc -= 1;
+      const x = x0 + Math.random() * (x1 - x0), y = y0 + Math.random() * (y1 - y0);
+      const dx = x - gx, dy = y - gy, d = Math.hypot(dx, dy) || 1;
+      const k = 1 - d / R;
+      if (k <= 0 || Math.random() > Math.pow(k, 1.5)) continue;
+      const spd = 4 + Math.random() * 10; // barely moving: they hang in the air
+      this.motes.setParticleSpeed(-dx / d * spd, -dy / d * spd - 8 - Math.random() * 10); // inward, and always up
+      this.motes.emitParticleAt(x, y, 1);
+    }
+  }
+
   anim(id: number): AnimState {
     let a = this.anims.get(id);
     if (!a) this.anims.set(id, (a = { ...REST }));
@@ -157,8 +209,9 @@ export class Fx {
       this.wasPaused = this.scene.paused;
       if (this.wasPaused) this.scene.tweens.pauseAll(); else this.scene.tweens.resumeAll();
     }
-    if (this.wasPaused) { this.sfx.wind(0); return; }
+    if (this.wasPaused) { this.sfx.wind(0); this.sfx.glade(0); return; }
     this.wind(dt);
+    this.glade(dt);
     for (const [id, sw] of this.swings) {
       const owner = sprites.get(id);
       sw.t += dt;
@@ -571,6 +624,7 @@ export class Fx {
   /** Clear everything after a reset. */
   clear(): void {
     this.windWarned = false; this.windLevel = 0; this.sfx.wind(0); this.cold?.destroy(); this.cold = null;
+    this.gladeWarned = false; this.gladeLevel = 0; this.gladeAcc = 0; this.gladeHome = null; this.sfx.glade(0); this.warm?.destroy(); this.warm = null;
     this.scene.tweens.killAll();
     this.anims.clear();
     this.lastBlow.clear();

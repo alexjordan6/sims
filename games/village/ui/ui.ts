@@ -33,6 +33,9 @@ export function spr(key: string, frame: number, size = 32, extra = ''): string {
 const ROLE_LABEL: Record<string, string> = { infant: 'Infant', kid: 'Child', farmer: 'Farmer', woodcutter: 'Woodcutter', soldier: 'Soldier', gnome: 'Gnome' };
 /** a grown gnome's portrait, for chips and outlooks */
 const GNOME_LOOK = { body: 'gnome', skin: 0, hair: 0, hairStyle: 0, outfit: 'gnome', held: 'club', armor: { helmet: 0, chest: 0, legs: 0, shield: 0 }, dye: 0, helmetStyle: 0, plume: 0 } as const;
+/** the GNOME HOUSE slot's tooltip once the craft is learned (locked, it says how to learn it) */
+const GNOME_TITLE = 'A toadstool cottage: a gnome couple moves in and raises a family like any house. Gnomes take no pen or calling; the grown ones forage wild plants for the granary, one find at a time';
+
 const ENEMY_LABEL: Record<string, string> = { raider: 'Raider', warlord: 'Warlord', rat: 'Rat — eats crops', snatcher: 'Snatcher — steals children', brute: 'Brute — heavy', shaman: 'Shaman — ranged', wrecker: 'Wrecker — tears down buildings', boar: 'Boar — wild game, fights back' };
 
 const EVENT_ICON: Record<EventKind, { key: string; frame: number }> = {
@@ -132,7 +135,7 @@ export class UI {
         ${slot('stairs', 'town', TOWN.iconHammer, 'STAIRS', 'Connect stairs to your walls. Use hands or X to climb and descend', 10)}
         ${slot('tavern', 'town', TOWN.wallWoodDoor, 'TAVERN', 'A cozy place to eat, rest and gather', COST.tavern)}
         ${slot('pen', 'farm', FARM.grassTuft, 'PEN', 'Paint a training pen on open ground: children leave the nursery for it and train there until they come of age. F cycles farm / wood / drill; painting the same kind again erases')}
-        ${slot('gnomehouse', 'town', TOWN.wallWoodDoor, 'GNOME HOUSE', 'A toadstool cottage: a gnome couple moves in and raises a family like any house. Gnomes take no pen or calling; the grown ones forage wild plants for the granary, one find at a time', COST.gnomehouse)}
+        ${slot('gnomehouse', 'town', TOWN.wallWoodDoor, 'GNOME HOUSE', GNOME_TITLE, COST.gnomehouse)}
         ${slot('wand', 'dungeon', DUNGEON.wizard, 'WAND', 'Shaman wand: left click or drag a box to pick soldiers, right click to send them — open ground = go there and hold, a raider = attack it, a wall top = take that archer post. F = follow me (again to stop). With no one picked, orders go to everyone')}
         ${slot('basket', 'farm', FARM.crate, 'BASKET', 'F picks a kind of food; walk up to the granary to fill the basket with it, then throw toward a pen. It flies where you point, bounces and rolls; children only eat what lies inside their pen, and what they eat is who they become')}
       </div>
@@ -480,7 +483,8 @@ export class UI {
     this.hotbar.querySelectorAll<HTMLElement>('.slot').forEach((el) => {
       const tool = el.dataset.tool as Tool;
       el.classList.toggle('on', s.player.tool === tool);
-      el.classList.toggle('off', (tool === 'house' || tool === 'barracks') && s.wood < COST[tool]);
+      el.classList.toggle('off', !!s.toolLocked(tool) || ((tool === 'house' || tool === 'barracks') && s.wood < COST[tool]));
+      if (tool === 'gnomehouse') { const want = s.toolLocked(tool) ? 'Somewhere in these woods a gnome family keeps house. Warm motes drift over their glade — walk into it and they will teach you the craft.' : GNOME_TITLE; if (el.title !== want) el.title = want; }
       if (tool === 'pen') { const lbl = el.querySelector('.lbl')!, want = s.player.penKind === 'farmer' ? 'FARM PEN' : s.player.penKind === 'woodcutter' ? 'WOOD PEN' : 'DRILL PEN'; if (lbl.textContent !== want) lbl.textContent = want; }
       if (tool === 'basket') { const lbl = el.querySelector('.lbl')!, want = s.player.load?.kind === 'food' ? `${s.player.load.n} ${FOODS[s.player.load.food ?? 'wheat'].name.toUpperCase()}` : `BASKET · ${FOODS[s.player.basketKind].name.toUpperCase()}`; if (lbl.textContent !== want) lbl.textContent = want; }
       if (tool === 'seeds') { const lbl = el.querySelector('.lbl')!, want = FOODS[s.player.cropKind].name.toUpperCase(); if (lbl.textContent !== want) lbl.textContent = want; }
@@ -1012,7 +1016,7 @@ export class UI {
           <h3>BUILDINGS</h3>
           <p>Every building can be wrecked. The <b>HAMMER</b> mends a damaged one (1 wood = 60 HP) and raises a ruin again for half its build cost; on a sound building, 3 hits upgrade it for wood. Every building has three levels — the brass studs on the sign by the door count them, and each level changes the building itself:</p>
           ${building('house', 'House · ' + COST.house + ' wood', 'A couple here has children.')}
-          ${building('gnomehouse', 'Gnome House · ' + COST.gnomehouse + ' wood', 'Comes with a gnome couple, who raise a family like any house (cribs, a hearth, food to spare). Gnome children need no pen: they play by the cottage, eat only what you throw within a few tiles of it (BASKET), and grow into gnomes. Grown gnomes forage: they walk to the nearest ripe wild plant, pick one unit, carry it to the granary and go again. They never fight — raiders send them running home like anyone else.')}
+          ${building('gnomehouse', 'Gnome House · ' + COST.gnomehouse + ' wood', 'Comes with a gnome couple, who raise a family like any house (cribs, a hearth, food to spare). Gnome children need no pen: they play by the cottage, eat only what you throw within a few tiles of it (BASKET), and grow into gnomes. Grown gnomes forage: they walk to the nearest ripe wild plant, pick one unit, carry it to the granary and go again. They never fight — raiders send them running home like anyone else. <b>You start without the craft:</b> one cottage stands out in the woods, ringed by mushrooms, with a glade of warm motes drifting over it. Walk into the glade and keep going until the cottage itself comes into sight — the family is yours, and they teach you to raise more.')}
           ${building('barracks', 'Barracks · ' + COST.barracks + ' wood', 'Drills the drill yard; its tower shoots raiders.')}
           ${building('granary', 'Granary', 'Holds your food; the harvest is carried here. The crate stack beside it climbs as the store fills.')}
           ${building('woodyard', 'Woodyard', 'Holds your wood; chopped logs are carried here. The log stack beside the cabin climbs as it fills.')}

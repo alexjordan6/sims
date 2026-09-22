@@ -9,6 +9,9 @@ export class Sfx {
   /** the looping wind around the lair: a low moaning noise whose level follows how close you are */
   private windGain: GainNode | null = null;
   private windLevel = 0;
+  /** the gnome glade's warm hum, level following how close the player is */
+  private gladeGain: GainNode | null = null;
+  private gladeLevel = 0;
   muted = false;
 
   constructor() {
@@ -63,6 +66,34 @@ export class Sfx {
     if (Math.abs(level - this.windLevel) < 0.01) return;
     this.windLevel = level;
     this.windGain.gain.setTargetAtTime(level * 0.12, c.currentTime, 0.6);
+  }
+
+  /**
+   * Set the gnome glade's level (0 = silent, 1 = at the cottage door). Two sines a fifth apart, one
+   * detuned, under a slow tremolo — a warm hum where the wind is a moan. Built on first use, like wind().
+   */
+  glade(level: number): void {
+    level = Math.max(0, Math.min(1, level));
+    if (level === 0 && !this.gladeGain) return;
+    const c = this.ensure(); if (!c || !this.master) return;
+    if (!this.gladeGain) {
+      const g = c.createGain(); g.gain.value = 0;
+      const trem = c.createGain(); trem.gain.value = 0.7;
+      const lfo = c.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 0.22;
+      const depth = c.createGain(); depth.gain.value = 0.3;
+      lfo.connect(depth).connect(trem.gain);
+      for (const [f, vol] of [[392, 1], [588, 0.55], [394.5, 0.4]] as const) {
+        const o = c.createOscillator(); o.type = 'sine'; o.frequency.value = f;
+        const og = c.createGain(); og.gain.value = vol;
+        o.connect(og).connect(trem); o.start();
+      }
+      trem.connect(g).connect(this.master);
+      lfo.start();
+      this.gladeGain = g;
+    }
+    if (Math.abs(level - this.gladeLevel) < 0.01) return;
+    this.gladeLevel = level;
+    this.gladeGain.gain.setTargetAtTime(level * 0.05, c.currentTime, 0.8);
   }
 
   /** A short tone: frequency glides from f0 to f1 over `dur` seconds. */

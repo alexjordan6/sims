@@ -98,7 +98,7 @@ export class Fog {
   private sources(): { tx: number; ty: number; r: number }[] {
     const s = this.scene;
     const out: { tx: number; ty: number; r: number }[] = [];
-    for (const b of s.world.buildings) if (b.kind !== 'lair') { const c = buildingCenter(b); out.push({ tx: c.tx, ty: c.ty, r: SIGHT.building }); }
+    for (const b of s.world.buildings) if (b.kind !== 'lair' && !b.wild) { const c = buildingCenter(b); out.push({ tx: c.tx, ty: c.ty, r: SIGHT.building }); } // a wild place lights nothing
     for (const a of s.agents as Mover[]) {
       if (a.dead) continue;
       if (a instanceof Player) out.push({ tx: a.x / TILE, ty: a.y / TILE, r: SIGHT.player });

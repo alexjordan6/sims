@@ -297,6 +297,21 @@ export const OGRE = {
   charge: { dmg: 30, minTiles: 5, maxTiles: 12, overshootTiles: 1.5, speedMul: 3, sweep: 14, windup: 0.5, recover: 0.8, stun: 1.6, cooldown: 9, push: 55, freeze: 0.2, buildingDmg: 120, defenseDmg: 180 },
 } as const;
 
+// ---- the hidden gnome cottage ---------------------------------------------------------------
+/**
+ * One toadstool cottage stands out in the woods, fogged and unclaimed. Its glade — warm motes and a
+ * soft chime inside `ringRadius` tiles — is the clue, the way the lair's cold wind is the Ogre's.
+ * Walk into it and the family is yours, along with the craft (the GNOME HOUSE tool is locked until then).
+ */
+export const GNOME_HOME = {
+  /** tiles: the glade's radius. The player sees 10, so the motes show before the cottage lifts out of the fog. */
+  ringRadius: 14,
+  /** tiles from the village centre it hides, and how far it keeps from the Ogre's lair */
+  minDist: 30, maxDist: 58, clear: 12,
+  /** mushrooms ringing the cottage: the fairy ring */
+  ringTiles: 10,
+} as const;
+
 // ---- wild boars -----------------------------------------------------------------------------
 /**
  * Boars live in sounders (family groups) out in the woods and never raid. Strike one and it — and every

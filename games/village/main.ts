@@ -115,6 +115,8 @@ export class VillageScene extends SimScene {
   /** the fog of war: what has been seen */
   fog!: Fog;
   lairFound = false;
+  /** the gnomes' cottage has been found: their family is yours and the GNOME HOUSE tool is unlocked */
+  gnomesFound = false;
   /** set when the run ends */
   result: { won: boolean; renown: RenownBreakdown } | null = null;
 
@@ -217,6 +219,7 @@ export class VillageScene extends SimScene {
     this.sounders = []; this.meatClaims.clear();
     this.spawnSounders();
     this.lairFound = false;
+    this.gnomesFound = false;
     this.fog?.reset();
     this.result = null;
     this.nameIdx = this.rng.int(0, NAMES.length - 1);
@@ -284,6 +287,16 @@ export class VillageScene extends SimScene {
     }
   }
 
+  /** The head walks into the glade: the cottage joins the village, its family comes out, and the craft is learned. */
+  findGnomes(b: Building): void {
+    b.wild = undefined;
+    this.gnomesFound = true;
+    this.foundGnomes(b);
+    this.world.refresh(b);
+    this.fx.push({ kind: 'upgrade', building: b });
+    this.event('grow', 'You found the gnomes! Their cottage is yours — and they will show you how to raise another.', true);
+  }
+
   /** A new gnome house comes with its founders: a grown couple, who breed like any family. */
   foundGnomes(b: Building): [Villager, Villager] {
     const grown = this.adultAge + 3;
@@ -331,8 +344,8 @@ export class VillageScene extends SimScene {
     kb.on('keydown-E', () => { if (this.armoryFor) this.openArmory(null); else this.togglePause(); });
     kb.on('keydown-ESC', () => { if (this.armoryFor) this.openArmory(null); else this.togglePause(); });
     kb.on('keydown-V', () => this.openArmory(this.armoryFor ? null : this.player));
-    kb.on('keydown-TAB', (e: KeyboardEvent) => { e.preventDefault?.(); this.player.cycleTool(e.shiftKey ? -1 : 1); });
-    kb.on('keydown-Q', () => this.player.cycleTool());
+    kb.on('keydown-TAB', (e: KeyboardEvent) => { e.preventDefault?.(); this.player.cycleTool(e.shiftKey ? -1 : 1, this.locked); });
+    kb.on('keydown-Q', () => this.player.cycleTool(1, this.locked));
     kb.on('keydown-F', () => this.cycleVariant());
     kb.on('keydown-M', () => this.toggleMute());
     kb.on('keydown-Z', () => this.cycleZoom());
@@ -343,7 +356,7 @@ export class VillageScene extends SimScene {
     kb.removeAllListeners('keydown-ONE'); kb.removeAllListeners('keydown-TWO'); kb.removeAllListeners('keydown-THREE');
     kb.on('keydown-MINUS', () => (this.speed = this.speed > 4 ? 4 : 1));
     kb.on('keydown-PLUS', () => (this.speed = this.speed < 4 ? 4 : 16));
-    ['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE'].forEach((k, i) => kb.on(`keydown-${k}`, () => (this.player.tool = TOOLS[i])));
+    ['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE'].forEach((k, i) => kb.on(`keydown-${k}`, () => this.setTool(TOOLS[i])));
     // the kernel's R (restart) / N (new seed) are far too easy to hit mid-run: restart lives in the pause menu,
     // and R only works on the end screens where it means "new run"
     kb.removeAllListeners('keydown-R');
@@ -373,7 +386,7 @@ export class VillageScene extends SimScene {
       this.interact();
     });
     this.input.on('pointerup', (ptr: Phaser.Input.Pointer) => this.wandUp(ptr));
-    this.input.on('wheel', (_p: unknown, _o: unknown, _dx: number, dy: number) => this.player.cycleTool(dy > 0 ? 1 : -1));
+    this.input.on('wheel', (_p: unknown, _o: unknown, _dx: number, dy: number) => this.player.cycleTool(dy > 0 ? 1 : -1, this.locked));
     this.input.on('gameout', () => { this.hovered = null; this.hoverTile = null; this.hoverPoint = null; this.ui?.tooltip(null); });
 
     this.scale.on('resize', () => this.fitCamera());
@@ -474,7 +487,15 @@ export class VillageScene extends SimScene {
     return this.view?.fx.sfx.muted ?? true;
   }
 
+  /** for cycleTool: skip what the head cannot yet make */
+  private locked = (t: Tool) => !!this.toolLocked(t);
+  /** Why a tool can't be picked up yet, or null. The gnomes' craft is learned by finding them. */
+  toolLocked(tool: Tool): string | null {
+    return tool === 'gnomehouse' && !this.gnomesFound ? 'You have never seen how a toadstool cottage is built' : null;
+  }
   setTool(tool: Tool): void {
+    const why = this.toolLocked(tool);
+    if (why) { this.event('build', why); return; }
     this.player.tool = tool;
   }
 
@@ -798,6 +819,12 @@ export class VillageScene extends SimScene {
       const c = buildingCenter(this.world.lair);
       if (this.fog.visibleAt(c.tx * TILE, c.ty * TILE) > 0.5) { this.lairFound = true; this.event('raid', "You found the Ogre's lair. He sleeps by day."); }
     }
+    // finding the gnomes: walk into their glade until the cottage itself comes into sight
+    const den = this.world.wildGnomeHouse;
+    if (den && this.fog) {
+      const c = buildingCenter(den);
+      if (this.fog.visibleAt(c.tx * TILE, c.ty * TILE) > 0.5) this.findGnomes(den);
+    }
     if (this.raidActive && !this.agents.some((a) => a instanceof Raider && !a.lairBound)) {
       this.raidActive = false;
       this.stats.raidsRepelled++;
@@ -859,6 +886,8 @@ export class VillageScene extends SimScene {
       const ns = Math.abs(dy) > Math.abs(dx) * 0.4 ? (dy < 0 ? 'north' : 'south') : '', ew = Math.abs(dx) > Math.abs(dy) * 0.4 ? (dx < 0 ? 'west' : 'east') : '';
       this.event('info', `The woodcutters whisper of a giant in the forest to the ${ns}${ns && ew ? '-' : ''}${ew}. He only walks at night.`);
     }
+    // the gnomes: that they exist, never where. Their glade is the clue — walk into it.
+    if (this.day === 3 && this.world.wildGnomeHouse) this.event('info', 'The children swear they saw a little red cap watching from the ferns.');
 
     this.burnHearths();
     // Baby Fever is judged on the larder as the day breaks, before anyone eats
@@ -1478,7 +1507,7 @@ export class VillageScene extends SimScene {
     const fx = (from.tx + 0.5) * TILE, fy = (from.ty + 0.5) * TILE;
     const out: { b: Building; d: number }[] = [];
     for (const b of this.world.buildings) {
-      if (b.kind === 'lair' || b.ruined || (kinds && !kinds.includes(b.kind))) continue;
+      if (b.kind === 'lair' || b.wild || b.ruined || (kinds && !kinds.includes(b.kind))) continue;
       const f = BUILDINGS[b.kind];
       const adjacent = from.tx >= b.tx - 1 && from.tx <= b.tx + f.w && from.ty >= b.ty - 1 && from.ty <= b.ty + f.h;
       if (!adjacent && !this.world.bfs(from, doorstep(b), true).length) continue;
@@ -1572,7 +1601,7 @@ export class VillageScene extends SimScene {
   // a pile that runs dry leaves the building cold for the day: no births, no drill, no regen, no meals.
 
   /** standing buildings with a hearth */
-  hearthBuildings(): Building[] { return this.world.buildings.filter((b) => hasHearth(b) && !b.ruined); }
+  hearthBuildings(): Building[] { return this.world.buildings.filter((b) => hasHearth(b) && !b.ruined && !b.wild); }
   /** Dawn: every hearth burns one night, or goes cold. */
   private burnHearths(): void {
     let burned = 0; const cold: string[] = [];
@@ -1847,6 +1876,8 @@ export class VillageScene extends SimScene {
   /** Why a building can't go at `a`, or null if it can. */
   buildProblem(a: { tx: number; ty: number }, kind: BuildingKind = this.player.build === 'none' ? 'house' : this.player.build): string | null {
     const { w, h } = BUILDINGS[kind];
+    const locked = this.toolLocked(kind as Tool);
+    if (locked) return locked;
     if (!this.world.canBuild(kind, a.tx, a.ty)) return `Need ${w}x${h} of open ground (no trees, crops or buildings)`;
     if (this.agents.some((m) => m instanceof Raider && !m.dead && this.insideFootprint(m, a, kind))) return 'A raider is in the way';
     return null;

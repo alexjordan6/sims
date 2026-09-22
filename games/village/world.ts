@@ -1,5 +1,5 @@
 import type { Rng } from '@shared/index';
-import { TILE, COLS, ROWS, BUILDING_HP, HEARTH_WOOD, ITEM, p, CROP_KINDS, type Calling, type FoodKind, type BuildingKind } from './config';
+import { TILE, COLS, ROWS, BUILDING_HP, HEARTH_WOOD, ITEM, GNOME_HOME, p, CROP_KINDS, type Calling, type FoodKind, type BuildingKind } from './config';
 export type { BuildingKind } from './config';
 import { tickItem, hop, type Item, type ItemKind } from './items';
 
@@ -52,6 +52,8 @@ export interface Building {
   alarmed?: boolean;
   /** nights of firewood stacked by the hearth (buildings without a hearth keep 0) */
   firewood: number;
+  /** a wild place, not the village's: no hearth, no fog sight, no raider cares, until it is found */
+  wild?: boolean;
   /** the hearth burned last night; a cold building stalls births, drill, regen and meals */
   warm: boolean;
 }
@@ -133,11 +135,13 @@ export class World {
 
   get houses(): Building[] { return this.buildings.filter((b) => b.kind === 'house'); }
   /** gnome families live apart: their own cottages, never a human house */
-  get gnomeHouses(): Building[] { return this.buildings.filter((b) => b.kind === 'gnomehouse'); }
+  get gnomeHouses(): Building[] { return this.buildings.filter((b) => b.kind === 'gnomehouse' && !b.wild); }
+  /** the toadstool cottage out in the woods, until the head walks into its glade and claims it */
+  get wildGnomeHouse(): Building | undefined { return this.buildings.find((b) => b.kind === 'gnomehouse' && b.wild); }
   /** every roof a family can be raised under: houses and gnome houses */
-  get familyHouses(): Building[] { return this.buildings.filter((b) => b.kind === 'house' || b.kind === 'gnomehouse'); }
+  get familyHouses(): Building[] { return this.buildings.filter((b) => (b.kind === 'house' || b.kind === 'gnomehouse') && !b.wild); }
   /** buildings the village can use (everything but the Ogre's lair) */
-  get villageBuildings(): Building[] { return this.buildings.filter((b) => b.kind !== 'lair'); }
+  get villageBuildings(): Building[] { return this.buildings.filter((b) => b.kind !== 'lair' && !b.wild); }
   /** standing barracks: a ruined one sponsors nothing, fires nothing and forges nothing */
   get barracks(): Building[] { return this.buildings.filter((b) => b.kind === 'barracks' && !b.ruined); }
   get allBarracks(): Building[] { return this.buildings.filter((b) => b.kind === 'barracks'); }
@@ -583,6 +587,29 @@ export class World {
       if (!this.bfs({ tx: tx + f.door, ty: ty + f.h }, { tx: hx, ty: hy }).length) continue;
       this.lair = this.place('lair', tx, ty);
     }
+    // The gnomes' toadstool cottage: hidden out in the woods, well away from the lair, with a clearing and a fairy
+    // ring of mushrooms. It stays `wild` — no hearth, no fog sight, nobody's business — until the head finds it.
+    const gf = BUILDINGS.gnomehouse;
+    let den: Building | null = null;
+    for (let attempt = 0; attempt < 400; attempt++) {
+      const ang = rng.range(0, Math.PI * 2), dist = rng.range(GNOME_HOME.minDist, GNOME_HOME.maxDist);
+      const tx = Math.round(hx + Math.cos(ang) * dist), ty = Math.round(hy + Math.sin(ang) * dist * 0.75);
+      if (tx < 5 || ty < 5 || tx + gf.w > this.cols - 5 || ty + gf.h + 2 > this.rows - 5) continue;
+      if (this.lair && Math.hypot(this.lair.tx - tx, this.lair.ty - ty) < GNOME_HOME.clear) continue;
+      // a little clearing for the cottage and its ring
+      for (let dy = -2; dy <= gf.h + 2; dy++) for (let dx = -2; dx <= gf.w + 1; dx++) this.set(tx + dx, ty + dy, 'grass');
+      if (!this.bfs({ tx: tx + gf.door, ty: ty + gf.h }, { tx: hx, ty: hy }).length) continue;
+      den = this.place('gnomehouse', tx, ty);
+      den.wild = true;
+      // the fairy ring: mushrooms scattered on the grass around the cottage, ripe from the first day
+      for (let n = 0, tries = 0; n < GNOME_HOME.ringTiles && tries < 60; tries++) {
+        const a = rng.range(0, Math.PI * 2), r = rng.range(2.2, 3.4);
+        const mx = Math.round(tx + gf.w / 2 + Math.cos(a) * r), my = Math.round(ty + gf.h / 2 + Math.sin(a) * r * 0.8);
+        if (this.get(mx, my)?.kind !== 'grass') continue;
+        this.set(mx, my, 'mushroom').stage = 99; n++;
+      }
+      break;
+    }
     // Wild food in the woods (after the lair, so older seeds keep their layout): berry bushes at the forest edge, mushrooms in the shade of old growth
     for (let ty = 1; ty < this.rows - 1; ty++) for (let tx = 1; tx < this.cols - 1; tx++) {
       const t = this.get(tx, ty)!;
@@ -609,6 +636,7 @@ export class World {
       if (t.kind !== 'grass' || t.trail) continue;
       if (tx >= hx - 11 && tx <= hx + 10 && ty >= hy - 7 && ty <= hy + 4) continue;
       if (l && tx >= l.tx - 1 && tx <= l.tx + f.w && ty >= l.ty - 1 && ty <= l.ty + f.h + 1) continue;
+      if (den && tx >= den.tx - 2 && tx <= den.tx + gf.w + 1 && ty >= den.ty - 2 && ty <= den.ty + gf.h + 2) continue; // the gnomes keep their glade trimmed
       if (rng.chance(0.06)) continue;
       t.tall = true; this.dirty.add(ty * this.cols + tx);
     }

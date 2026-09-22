@@ -1,11 +1,11 @@
 import './main';
 import type { VillageScene } from './main';
-import { World, WILD_FOOD, doorstep, hearthCost, BUILDINGS, type BuildingKind } from './world';
+import { World, WILD_FOOD, doorstep, buildingCenter, hearthCost, BUILDINGS, type BuildingKind } from './world';
 import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, Wrecker, waveComposition } from './enemies';
 import { Boar } from './wildlife';
-import { COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, BOAR } from './config';
+import { COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, BOAR, GNOME_HOME } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
 const output = document.getElementById('test-results')!, summary = document.getElementById('test-summary')!;
@@ -725,6 +725,47 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       for (let d = 0; d < 6; d++) s.newDay();
       assert(pair.members.length === BOAR.sounderCap && pair.members[2].age >= BOAR.youngDays && !pair.members[2].young, `a sounder grows to ${BOAR.sounderCap} and no further; the young grow up`);
       p.boarBreed = breed;
+    }
+    // the hidden gnome cottage: out in the woods, nobody's business until the head walks into its glade
+    {
+      s = fresh();
+      const den = s.world.wildGnomeHouse!;
+      const c = buildingCenter(den), away = Math.hypot(c.tx - COLS / 2, c.ty - ROWS / 2);
+      assert(!!den && den.kind === 'gnomehouse' && den.wild, 'one toadstool cottage stands wild in the world');
+      assert(away >= GNOME_HOME.minDist * 0.7 && away <= GNOME_HOME.maxDist + 2, `it hides ${away.toFixed(0)} tiles out`);
+      assert(!s.world.lair || Math.hypot(s.world.lair.tx - den.tx, s.world.lair.ty - den.ty) >= GNOME_HOME.clear, 'it keeps its distance from the Ogre');
+      assert(s.world.bfs(doorstep(den), { tx: COLS / 2, ty: ROWS / 2 }).length > 0, 'and there is a way there on foot');
+      const ring = [...s.world.find((t, tx, ty) => t.kind === 'mushroom' && Math.hypot(tx - c.tx, ty - c.ty) < 5)].length;
+      assert(ring >= 4, `a fairy ring of mushrooms grows around it (${ring})`);
+      assert(!s.world.get(den.tx, den.ty + BUILDINGS.gnomehouse.h)!.tall, 'the gnomes keep their glade mown');
+      // wild: in none of the village's books
+      assert(!s.world.gnomeHouses.includes(den) && !s.world.familyHouses.includes(den) && !s.world.villageBuildings.includes(den), 'a wild cottage is in none of the village lists');
+      assert(!s.hearthBuildings().includes(den) && !s.reachableBuildings({ tx: COLS / 2, ty: ROWS / 2 }).includes(den), 'no woodcutter stocks it and no wrecker goes for it');
+      assert(!s.fog!.isExplored(den.tx, den.ty) && !s.villagers().some((v) => v.gnome), 'it lights no fog of its own, and its family is not out yet');
+      // the craft is locked until they teach it
+      assert(typeof s.toolLocked('gnomehouse') === 'string' && !s.gnomesFound, 'the GNOME HOUSE tool starts locked');
+      s.player.tool = 'hands'; s.setTool('gnomehouse');
+      assert(s.player.tool === 'hands', 'picking it up does nothing');
+      s.player.tool = 'basket'; s.player.cycleTool(1, (t) => !!s.toolLocked(t));
+      assert((s.player.tool as string) === 'wand', 'and cycling the belt skips over it');
+      assert(s.buildProblem({ tx: 120, ty: 100 }, 'gnomehouse') === s.toolLocked('gnomehouse'), 'building one says why not');
+      // walking in: the glade, then the cottage itself
+      const door = doorstep(den);
+      Object.assign(s.player, World.center(door.tx, door.ty));
+      s.cameras.main.centerOn(s.player.x, s.player.y); s.cameras.main.preRender(); // worldView only refreshes on render, and the test never renders
+      s.fog!.update(1); s.tick(1 / 60);
+      assert(s.gnomesFound && !den.wild, 'walking into sight of the cottage finds the gnomes');
+      const pair = s.villagers().filter((v) => v.gnome);
+      assert(pair.length === 2 && pair.every((v) => v.home === den && v.isAdult), 'a grown gnome couple comes out of the door');
+      assert(s.world.gnomeHouses.includes(den) && s.hearthBuildings().includes(den) && !s.toolLocked('gnomehouse'), 'the cottage joins the village and the craft is learned');
+      assert(s.journal.some((j) => /found the gnomes/.test(j.text)), 'and the journal says so');
+      // taught: the tool builds as any other
+      clearing(s); s.wood = 100; Object.assign(s.player, World.center(120, 100)); s.player.facing = { x: 1, y: 0 }; s.hoverTile = null;
+      s.setTool('gnomehouse');
+      const before = s.world.gnomeHouses.length, wood = s.wood;
+      s.interact();
+      assert((s.player.tool as string) === 'gnomehouse' && s.world.gnomeHouses.length === before + 1 && s.wood === wood - COST.gnomehouse, 'and now you can raise your own');
+      assert(s.villagers().filter((v) => v.gnome).length === 4, 'which comes with a couple of its own');
     }
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;

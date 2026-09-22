@@ -1187,7 +1187,12 @@ export class Player extends Mover {
     if (stuck || this.fits(this.x, ny, w)) this.y = ny;
   }
 
-  cycleTool(dir = 1): void {
-    this.tool = TOOLS[(TOOLS.indexOf(this.tool) + dir + TOOLS.length) % TOOLS.length];
+  /** Next tool along the belt, skipping any the head has not learned yet (see VillageScene.toolLocked). */
+  cycleTool(dir = 1, locked: (t: Tool) => boolean = () => false): void {
+    let i = TOOLS.indexOf(this.tool);
+    for (let n = 0; n < TOOLS.length; n++) {
+      i = (i + dir + TOOLS.length) % TOOLS.length;
+      if (!locked(TOOLS[i])) { this.tool = TOOLS[i]; return; }
+    }
   }
 }
