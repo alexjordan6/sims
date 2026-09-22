@@ -37,6 +37,8 @@ export type FxEvent =
   | { kind: 'thud'; who: Mover }
   | { kind: 'snore'; x: number; y: number }
   | { kind: 'deposit'; x: number; y: number; text: string; colour: string }
+  /** a tile of long grass mown by the sword: clippings fly */
+  | { kind: 'cut'; x: number; y: number }
   | { kind: 'ruin'; building: Building }
   | { kind: 'demolish'; building: Building }
   /** the Ogre's ground slam (also his crash into a wall): shockwave of radius r */
@@ -691,7 +693,10 @@ export class VillageScene extends SimScene {
     const lying = this.itemsBlurb(tx, ty);
     switch (t?.kind) {
       case 'crop': { const fk = t.food ?? 'wheat'; html = `<div class="t">${this.isRipe(t) ? 'Ripe' : 'Growing'} ${FOODS[fk].name.toLowerCase()}</div><div class="d">${Math.min(t.stage, this.cropDaysOf(t))}/${this.cropDaysOf(t)} days · yields ${this.cropYieldOf(fk)} · ${FOODS[fk].blurb}</div>`; break; }
-      case 'grass': if (lying) html = `<div class="t">On the ground</div><div class="d">${lying} · walk over it (hands for food and wood)</div>`; break;
+      case 'grass':
+        if (lying) html = `<div class="t">On the ground</div><div class="d">${lying} · walk over it (hands for food and wood)</div>`;
+        else if (t.tall) html = `<div class="t">Long grass</div><div class="d">slows everyone to ${Math.round(p.grassSlow * 100)}% — raiders too · swing the sword to mow it</div>`;
+        break;
       case 'tilled': html = `<div class="t">Tilled soil</div><div class="d">${t.food ? `farmers will replant ${FOODS[t.food].name.toLowerCase()}; seeds sow something else` : 'plant with seeds, or a farmer will'}</div>`; break;
       case 'bush': case 'mushroom': case 'hazel': case 'garlic': case 'burdock': { const fk = WILD_FOOD[t.kind]!; html = `<div class="t">${FOODS[fk].name}${this.wildRipe(t) ? '' : ' (picked)'}</div><div class="d">${this.wildRipe(t) ? `ripe · ${this.wildLeft(t)} left · pick by hand, or the gnomes will` : `regrows in ${this.regrowDays(fk) - t.stage} days`} · ${FOODS[fk].blurb}</div>`; break; }
       case 'tree': {
@@ -1991,7 +1996,7 @@ export class VillageScene extends SimScene {
       }
       case 'sword': {
         const near = this.nearestRaider(pl.x, pl.y, 40);
-        return near ? 'E: attack!' : 'E: swing sword';
+        return near ? 'E: attack!' : t?.tall ? 'E: mow the long grass (a swing clears its arc)' : 'E: swing sword';
       }
       case 'pen': {
         const r = this.penReport(pl.penKind), where = t?.pen ? (t.pen === pl.penKind ? 'E: erase' : `E: repaint as ${PEN_NAME[pl.penKind]}`) : `E: paint ${PEN_NAME[pl.penKind]}`;
@@ -2050,7 +2055,7 @@ export class VillageScene extends SimScene {
         if (t?.defense?.kind === 'gate') return `E: ${t.defense.open ? 'close' : 'open'} gate`;
         if (kind === 'crop') { const fk = t!.food ?? 'wheat', why = this.loadProblem('food', fk); return this.isRipe(t!) ? (why ?? `E: harvest ${FOODS[fk].name.toLowerCase()} (${this.cropYieldOf(fk)})${pl.load ? ` · carrying ${pl.load.n}/${HAUL.player.food} ${FOODS[pl.load.food ?? 'wheat'].one}` : ''}`) : `${FOODS[fk].name.toLowerCase()} growing (${t!.stage}/${this.cropDaysOf(t!)} days)`; }
         if (kind && WILD_FOOD[kind]) { const fk = WILD_FOOD[kind]!, why = this.loadProblem('food', fk); return this.wildRipe(t!) ? (why ?? `E: pick ${FOODS[fk].name.toLowerCase()} (${this.wildLeft(t!)} · ${FOODS[fk].blurb})`) : `${FOODS[fk].name.toLowerCase()} picked — back in ${this.regrowDays(fk) - t!.stage} day${this.regrowDays(fk) - t!.stage === 1 ? '' : 's'}`; }
-        if (kind === 'grass') return `grass — ${need('hoe')} to till`;
+        if (kind === 'grass') return t!.tall ? `long grass — slows everyone to ${Math.round(p.grassSlow * 100)}% · ${need('sword')} to mow it` : `grass — ${need('hoe')} to till`;
         if (kind === 'tilled') return `tilled — ${need('seeds')}`;
         if (kind === 'tree') return `tree — ${need('axe')}`;
         if (kind === 'sapling') return `sapling — a tree in ${this.saplingDays(tg.tx, tg.ty) - t!.stage} days`;

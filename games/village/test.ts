@@ -11,6 +11,7 @@ const output = document.getElementById('test-results')!, summary = document.getE
 const assert = (ok: unknown, message: string) => { if (!ok) throw new Error(message); output.textContent += `PASS ${message}\n`; };
 function fresh(): VillageScene {
   const s = scene(); s.reset(42); s.screen = 'playing'; s.paused = true; s.wood = 150; s.food = 150; s.fx.length = 0;
+  for (const t of s.world.tiles) t.tall = undefined; // mown: the checks below time walks; the long grass checks raise it where they need it
   (s as unknown as { ui: { showScreen(v: null): void } }).ui.showScreen(null);
   document.querySelector('.ctrl-panel')?.classList.remove('open');
   return s;
@@ -604,6 +605,38 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     s.release(); s.clearSquad();
     s = fresh();
     assert(['hazel', 'garlic', 'burdock'].every((k) => [...s.world.find((t) => t.kind === k)].length > 0), 'a new map grows hazel, wild garlic and burdock');
+    // long grass: most of the wilderness, slows everyone, the sword mows an arc, it never grows back
+    {
+      const raw = new World(); raw.generate(new Rng(42));
+      const grass = raw.count((t) => t.kind === 'grass'), tall = raw.count((t) => t.kind === 'grass' && !!t.tall);
+      assert(tall > grass * 0.7, `most grass is long grass (${tall}/${grass})`);
+      assert(raw.count((t) => !!t.tall && (t.trail || t.kind !== 'grass')) === 0, 'trails and everything but grass stay short');
+      const hx = COLS / 2, hy = ROWS / 2;
+      assert(![...raw.find((t, tx, ty) => !!t.tall && tx >= hx - 11 && tx <= hx + 10 && ty >= hy - 7 && ty <= hy + 4)].length, 'the village clearing starts mown');
+      const l = raw.lair!; assert(!raw.get(l.tx + 2, l.ty + BUILDINGS.lair.h)!.tall, 'so does the Ogre\'s doorstep');
+      clearing(s); s.agents = [s.player];
+      const walk = (x: number, y: number) => { Object.assign(s.player, World.center(x, y)); const x0 = s.player.x; const keys = s.player.keys; s.player.keys = { W: { isDown: false }, A: { isDown: false }, S: { isDown: false }, D: { isDown: true } }; step(s, 0.3); s.player.keys = keys; return s.player.x - x0; };
+      const short = walk(120, 100);
+      for (let x = 120; x <= 126; x++) s.world.get(x, 100)!.tall = true;
+      const slow = walk(120, 100);
+      assert(slow > 0 && Math.abs(slow / short - p.grassSlow) < 0.05, `the head wades at ${p.grassSlow}× through long grass (${slow.toFixed(1)} vs ${short.toFixed(1)} px)`);
+      const runner = (y: number) => { const v = s.spawn(new Villager(...Object.values(World.center(120, y)) as [number, number], s.world.houses[0], 'soldier', 20, 'Runner', s.mods)); v.speed = 40; s.selectSquad([v]); s.orderHold(126, y); step(s, 0.5); s.release(); s.clearSquad(); const dx = v.x - World.center(120, y).x; v.dead = true; s.removeDead(); return dx; };
+      const openRun = runner(102), grassRun = runner(100);
+      assert(grassRun > 0 && Math.abs(grassRun / openRun - p.grassSlow) < 0.1, `villagers and raiders wade too (${grassRun.toFixed(1)} vs ${openRun.toFixed(1)} px)`);
+      for (let x = 118; x <= 126; x++) for (let y = 98; y <= 102; y++) s.world.get(x, y)!.tall = true;
+      Object.assign(s.player, World.center(121, 100)); s.player.facing = { x: 1, y: 0 }; s.player.tool = 'sword'; s.fx.length = 0;
+      s.player.pressAttack(); step(s, 0.35);
+      const cut = s.fx.filter((e) => e.kind === 'cut').length;
+      assert(!s.world.get(121, 100)!.tall && !s.world.get(122, 100)!.tall && !s.world.get(122, 99)!.tall && cut >= 3, `a swing mows the tiles in its arc (${cut} cut)`);
+      assert(s.world.get(119, 100)!.tall && s.world.get(121, 98)!.tall, 'the grass behind and out of reach stands');
+      s.world.get(124, 100)!.tall = true; s.world.set(124, 100, 'tilled');
+      assert(!s.world.get(124, 100)!.tall, 'tilling (or anything replacing the ground) clears the grass');
+      s.world.get(125, 100)!.tall = true; s.world.paintPen(125, 100, 'farmer');
+      assert(!s.world.get(125, 100)!.tall, 'painting a pen tramples it');
+      s.world.paintPen(125, 100, 'farmer');
+      const before = s.world.count((t) => !!t.tall); for (let d = 0; d < 5; d++) s.newDay();
+      assert(s.world.count((t) => !!t.tall) <= before, 'mown grass never grows back');
+    }
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;
   } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); }

@@ -36,6 +36,7 @@ export const p = live(
     cutterWork: [D.cutterWork, 0.5, 8, 0.1, 'Seconds a woodcutter spends per chop.'],
     farmerWork: [D.farmerWork, 0.3, 5, 0.1, 'Seconds a farmer spends per field action (till, plant, harvest).'],
     forageWork: [D.forageWork, 0.3, 8, 0.1, 'Seconds a gnome spends picking one unit from a wild plant.'],
+    grassSlow: [D.grassSlow, 0.1, 1, 0.05, 'Speed multiplier for anyone wading through long grass — the head, villagers and raiders alike (1 = no slowdown). The sword mows it; it never grows back.'],
     haulMul: [D.haulMul, 0.25, 3, 0.25, 'Villagers\' armfuls (16 wood / 12 food) scale by this. Bigger arms = fewer trips.'],
     cropYield: [D.cropYield, 1, 20, 1, 'Food per harvested crop before boons. Applies at NEW VILLAGE.'],
     cropDays: [D.cropDays, 1, 10, 1, 'Days from seed to harvest.'],

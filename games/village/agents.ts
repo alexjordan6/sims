@@ -95,7 +95,8 @@ export abstract class Mover implements Agent {
     const next = World.center(this.path[0].tx, this.path[0].ty);
     const dx = next.x - this.x, dy = next.y - this.y;
     const d = Math.hypot(dx, dy);
-    const step = this.speed * dt;
+    const pace = this.speed * (this.world?.slowAt(this.x, this.y) ?? 1); // long grass drags at everyone
+    const step = pace * dt;
     if (Math.abs(dx) > 0.5) this.dir = dx < 0 ? -1 : 1;
     if (d <= step) {
       this.x = next.x; this.y = next.y;
@@ -118,7 +119,7 @@ export abstract class Mover implements Agent {
       }
       return false;
     }
-    this.vx = (dx / d) * this.speed; this.vy = (dy / d) * this.speed;
+    this.vx = (dx / d) * pace; this.vy = (dy / d) * pace;
     this.x += this.vx * dt; this.y += this.vy * dt;
     return false;
   }
@@ -1040,7 +1041,7 @@ export class Player extends Mover {
     if (mx) this.dir = mx < 0 ? -1 : 1;
     // swinging plants your feet; the swing itself steps you forward
     const slow = this.swing ? 0.25 : this.recover > 0 ? 0.6 : 1;
-    const sp = this.speed * slow * this.armorSpeed;
+    const sp = this.speed * slow * this.armorSpeed * s.world.slowAt(this.x, this.y);
     this.vx = mx * sp; this.vy = my * sp;
     this.moveWithCollision(dt, s.world);
     // pushing up into a doorway walks you inside
@@ -1074,6 +1075,7 @@ export class Player extends Mover {
     const wasActive = sw.t >= c.activeFrom && sw.t <= c.activeTo;
     sw.t += dt;
     const active = sw.t >= c.activeFrom && sw.t <= c.activeTo;
+    if (active && !wasActive) this.mow(s, sw.dx, sw.dy, c.spin);
     // step into the swing
     if (active && !c.spin) {
       const nx = this.x + sw.dx * SWING.stepIn * (dt / (c.activeTo - c.activeFrom)), ny = this.y + sw.dy * SWING.stepIn * (dt / (c.activeTo - c.activeFrom));
@@ -1108,6 +1110,23 @@ export class Player extends Mover {
       this.sinceSwing = 0;
       if (c.spin) { this.recover = SWING.recoverAfterSpin; this.nextStage = 0; }
       else if (queued) { const st = this.beginSwing(this.nextStage); s.fx.push({ kind: 'swing', who: this, dx: this.facing.x, dy: this.facing.y, stage: st }); }
+    }
+  }
+
+  /**
+   * The swing doubles as a scythe: every long-grass tile in its arc (the same reach and cone the blade hits in,
+   * a full ring for the spin) plus the one underfoot is mown. Once per swing, on the first active frame.
+   */
+  private mow(s: VillageScene, dx: number, dy: number, spin: boolean): void {
+    const reach = SWING.reach + (spin ? 4 : 0), me = this.tile;
+    for (let oy = -2; oy <= 2; oy++) for (let ox = -2; ox <= 2; ox++) {
+      const tx = me.tx + ox, ty = me.ty + oy, c = World.center(tx, ty);
+      const cx = c.x - this.x, cy = c.y - this.y, d = Math.hypot(cx, cy);
+      if (ox || oy) {
+        if (d > reach) continue;
+        if (!spin && (cx * dx + cy * dy) / (d || 1) < SWING.halfAngleCos) continue;
+      }
+      if (s.world.cutGrass(tx, ty)) s.fx.push({ kind: 'cut', x: c.x, y: c.y });
     }
   }
 

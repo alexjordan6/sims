@@ -563,7 +563,7 @@ function tileFrames(t: Tile, cropDays: number, dayTime: number, oldDays: number,
   const grass = GID.town + TOWN.grass[t.v % TOWN.grass.length];
   const F = GID.flora;
   switch (t.kind) {
-    case 'grass': return { ground: t.pen ? penGround(t.pen) : grass, object: EMPTY };
+    case 'grass': return { ground: t.pen ? penGround(t.pen) : t.tall ? F + FLORA.tallGrass[t.v % 3] : grass, object: EMPTY };
     case 'tree': {
       if (t.work >= 2) return { ground: grass, object: F + FLORA.bare };
       const old = t.stage >= oldDays;

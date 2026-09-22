@@ -612,7 +612,9 @@ export const FLORA = {
   hazel: [58, 59] as const,
   garlic: [60, 61] as const,
   burdock: [62, 63] as const,
-  count: 73,
+  /** long grass, three variants so a field doesn't tile visibly */
+  tallGrass: [73, 74, 75] as const,
+  count: 76,
 } as const;
 
 /** Filled ellipse, pixel by pixel. */
@@ -731,9 +733,25 @@ export function ensureFlora(scene: Phaser.Scene): void {
   drawBurdock(ctx, at(FLORA.burdock[0]), false); drawBurdock(ctx, at(FLORA.burdock[1]), true);
   for (let i = 0; i < 3; i++) { drawPile(ctx, at(FLORA.pile.hazelnut[i]), i, 'hazelnut'); drawPile(ctx, at(FLORA.pile.garlic[i]), i, 'garlic'); drawPile(ctx, at(FLORA.pile.burdock[i]), i, 'burdock'); }
   for (let i = 0; i < 3; i++) { drawPile(ctx, at(FLORA.pile.wheat[i]), i, 'wheat'); drawPile(ctx, at(FLORA.pile.carrot[i]), i, 'carrot'); drawPile(ctx, at(FLORA.pile.berry[i]), i, 'berry'); drawPile(ctx, at(FLORA.pile.mushroom[i]), i, 'mushroom'); }
+  for (let i = 0; i < 3; i++) drawTallGrass(ctx, at(FLORA.tallGrass[i]), i);
   tex.refresh();
   drawScrap(ctx, at(FLORA.scrap));
   for (let i = 0; i < FLORA.count; i++) tex.add(i, 0, at(i), 0, 16, 16); // frames, so items and fx can draw one tile as an image
+}
+/** Long grass: a dense stand of blades over dark ground, each variant leaning and tufted differently. */
+function drawTallGrass(ctx: Ctx, ox: number, v: number): void {
+  px(ctx, ox, 0, '#5aa848', 16, 16);
+  // blades in most columns, staggered heights, a gap now and then so the ground shows; the odd tip leans over
+  for (let i = 0; i < 16; i++) {
+    if ((i * 7 + v * 5) % 5 === 0) continue;
+    const h = 5 + ((i * 5 + v * 3) % 9), lean = (i + v) % 3 === 0 ? 1 : 0;
+    const top = 15 - h;
+    px(ctx, ox + i, top + 1, (i + v) % 2 ? LEAF : LEAF_DARK, 1, h - 1);
+    px(ctx, ox + i + lean, top, (i * 3 + v) % 4 === 0 ? LEAF_HI : LEAF_LIGHT);
+  }
+  // a couple of seed heads catching the light
+  for (let k = 0; k < 2; k++) px(ctx, ox + ((k * 9 + v * 5) % 15), 3 + ((k * 3 + v) % 4), LEAF_HI);
+  px(ctx, ox, 15, LEAF_DARK, 16, 1);
 }
 /** rope colours of the three pens, in Calling order: farmer, woodcutter, soldier */
 const PEN_ROPES = ['#6fd36f', '#d6a35c', '#6f9bff'] as const;

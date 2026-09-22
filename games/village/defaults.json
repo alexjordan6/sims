@@ -11,6 +11,7 @@
   "cutterWork": 2.5,
   "forageWork": 1.5,
   "farmerWork": 1.2,
+  "grassSlow": 0.4,
   "haulMul": 1,
   "cropYield": 6,
   "cropDays": 2,

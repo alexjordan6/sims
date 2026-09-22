@@ -577,8 +577,8 @@ export class UI {
       title = FOODS[fk].name; badge = ripe ? `${s.wildLeft(t)} left — pick with hands, or a gnome will` : `back in ${left} day${left === 1 ? '' : 's'}`;
       rows += `<b>Yield</b><span>${FOODS[fk].yield} ${FOODS[fk].one} when regrown · ${FOODS[fk].blurb}</span><b>Regrows</b><span>every ${s.regrowDays(fk)} days${ripe ? '' : ` · ${t.stage} so far`}</span>`;
     } else {
-      title = t.trail ? 'Trail' : 'Grass'; badge = t.biome === 'deepwood' ? 'deep woodland' : t.biome === 'woodland' ? 'woodland' : 'meadow';
-      rows += `<b>Ground</b><span>${t.trail ? 'a woodland trail — trees never grow over it' : 'open ground'}</span><b>Could be</b><span>tilled with the hoe · a tree with seeds · a pen with the PEN tool · a building</span>`;
+      title = t.trail ? 'Trail' : t.tall ? 'Long grass' : 'Grass'; badge = t.biome === 'deepwood' ? 'deep woodland' : t.biome === 'woodland' ? 'woodland' : 'meadow';
+      rows += `<b>Ground</b><span>${t.trail ? 'a woodland trail — trees never grow over it' : t.tall ? `slows anyone wading through it to ${Math.round(p.grassSlow * 100)}% — raiders too · the sword mows an arc per swing; it never grows back` : 'open ground'}</span><b>Could be</b><span>tilled with the hoe · a tree with seeds · a pen with the PEN tool · a building</span>`;
     }
     let html = `${head}<div class="head">${art}<div><div class="name">${title}</div><span class="badge ${badgeCls}">${badge}</span></div>${close}</div><div class="rows">${rows}${lyingRow}<b>Tile</b><span>${q.tx}, ${q.ty}</span></div>${extra}`;
     this.inspector.innerHTML = html;
@@ -1035,6 +1035,7 @@ export class UI {
           <h3>GROVES</h3>
           <p>Trees spread onto neighbouring grass — but a lone tree barely does (about 1% a day) while a tree inside a grove seeds fast (up to 11%). A sapling with two or more trees beside it grows in ${SHELTERED_SAPLING_DAYS} days instead of ${SAPLING_DAYS}. So plant trees <b>together</b>, near the woodyard, and let the grove do the work.</p>
           <p>Trees age: after ${OLD_GROWTH_DAYS} days they become <b>old growth</b> — taller, and worth ${p.oldYield} wood instead of ${p.treeYield}. Woodcutters take old growth first and thin a grove from its edge.</p>
+          <p>Beyond the village clearing the wilderness is <b>long grass</b>: anyone wading through it — you, your villagers, raiders — crawls at a fraction of their pace. Trails stay short and make fast lanes. A <b>SWORD</b> swing mows every tile in its arc (the spin finisher clears a ring), and mown grass never grows back — so the lanes you cut are yours to keep, and the raiders' too.</p>
           <p>Seeds only land on grass, never next to buildings — a ring of tilled soil is a firebreak that stops a grove spreading. <b>SEEDS</b> on grass plants a tree; clear stumps and saplings with the <b>AXE</b> or <b>HOE</b> (the hoe also flattens soil back to grass). Buildings can go on grass, stumps or soil — not on trees, crops or other buildings. With a mouse, tools hit the tile you <b>point at</b> when it's next to you, otherwise the tile you face (the gold box). A building goes <b>where you point</b> (within 6 tiles; the pointer marks the door); otherwise straight ahead of you. Anyone standing in the footprint, you included, is stepped out onto the doorstep.</p>
         </section>
         <section>

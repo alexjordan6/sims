@@ -97,6 +97,8 @@ export interface Tile {
   defense?: Defense;
   biome?: 'meadow' | 'woodland' | 'deepwood';
   trail?: boolean;
+  /** long grass: slows anyone wading through it (see p.grassSlow) until the sword mows it; never grows back */
+  tall?: boolean;
   /** painted training pen this tile belongs to (grass or soil underneath) */
   pen?: Calling;
 }
@@ -161,7 +163,7 @@ export class World {
     // (fortifications always count: a closed gate blocks enemies even though the tile kind doesn't)
     const fort = (k: TileKind) => k === 'wall' || k === 'gate' || k === 'stairs';
     if (BLOCKING[t.kind] !== BLOCKING[kind] || fort(t.kind) || fort(kind)) this.revision++;
-    t.kind = kind; t.stage = 0; t.work = 0; t.building = undefined; t.part = undefined; t.v = (t.v + 31) % 97;
+    t.kind = kind; t.stage = 0; t.work = 0; t.building = undefined; t.part = undefined; t.tall = undefined; t.v = (t.v + 31) % 97;
     // a pen dies with its ground: a building, tree or crop on the tile takes it out of the pen (and its pile)
     if (t.pen && !PEN_GROUND.has(kind)) { this.pens.get(t.pen)?.delete(i); t.pen = undefined; }
     if (!CROP_GROUND.has(kind)) t.food = undefined;
@@ -176,7 +178,7 @@ export class World {
     if (!t || t.building || t.defense || !PEN_GROUND.has(t.kind)) return false;
     if (kind === t.pen) kind = null;
     if (t.pen) this.pens.get(t.pen)?.delete(i);
-    t.pen = kind ?? undefined;
+    t.pen = kind ?? undefined; t.tall = undefined; // the rope goes up over trampled earth
     if (kind) { if (!this.pens.has(kind)) this.pens.set(kind, new Set()); this.pens.get(kind)!.add(i); }
     this.dirty.add(i);
     return true;
@@ -196,6 +198,19 @@ export class World {
   }
   /** Nearest pen tile of a kind (any kind when omitted). */
   nearestPen(x: number, y: number, kind?: Calling): TilePos | null { return this.nearestOf(x, y, this.penTiles(kind)); }
+  // ---- long grass ---------------------------------------------------------------------------
+  /** Mow a tile of long grass. Walkability is unchanged, so no path goes stale. */
+  cutGrass(tx: number, ty: number): boolean {
+    const t = this.get(tx, ty);
+    if (!t || t.kind !== 'grass' || !t.tall) return false;
+    t.tall = undefined; this.dirty.add(ty * this.cols + tx);
+    return true;
+  }
+  /** Speed multiplier for a body at a pixel position: p.grassSlow in long grass, 1 anywhere else. */
+  slowAt(x: number, y: number): number {
+    const t = this.get(Math.floor(x / TILE), Math.floor(y / TILE));
+    return t?.kind === 'grass' && t.tall ? p.grassSlow : 1;
+  }
   // ---- items on the ground ------------------------------------------------------------------
   /** Put an item in the world at a pixel position (resting, unless it is launched or hopped afterwards). */
   dropItem(kind: ItemKind, n: number, x: number, y: number, food?: FoodKind, rng?: Rng): Item {
@@ -572,6 +587,17 @@ export class World {
       const byTrail = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => this.get(tx + dx, ty + dy)?.trail);
       if (byTrail && rng.chance(0.08)) this.set(tx, ty, 'burdock').stage = 99;
       else if (t.biome === 'meadow' && rng.chance(0.012)) this.set(tx, ty, 'garlic').stage = 99;
+    }
+    // Long grass over the whole wilderness (last, so older seeds keep their layouts): the village clearing, the
+    // trails and the lair's patch stay short, with a few short tiles scattered for texture. It never grows back.
+    const l = this.lair;
+    for (let ty = 0; ty < this.rows; ty++) for (let tx = 0; tx < this.cols; tx++) {
+      const t = this.get(tx, ty)!;
+      if (t.kind !== 'grass' || t.trail) continue;
+      if (tx >= hx - 11 && tx <= hx + 10 && ty >= hy - 7 && ty <= hy + 4) continue;
+      if (l && tx >= l.tx - 1 && tx <= l.tx + f.w && ty >= l.ty - 1 && ty <= l.ty + f.h + 1) continue;
+      if (rng.chance(0.06)) continue;
+      t.tall = true; this.dirty.add(ty * this.cols + tx);
     }
   }
 }

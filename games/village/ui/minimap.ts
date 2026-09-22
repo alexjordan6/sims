@@ -23,6 +23,9 @@ const TERRAIN: Record<TileKind, [number, number, number]> = {
   tavern: [210, 164, 88], lair: [70, 50, 40], gnomehouse: [200, 70, 60], wall: [163, 169, 178], gate: [209, 177, 113], stairs: [128, 194, 218],
 };
 
+/** long grass reads a shade deeper than mown ground, so cleared lanes show */
+const TALL_GRASS: [number, number, number] = [72, 138, 58];
+
 const ROLE = { infant: '#f5d8a8', kid: '#f5d8a8', farmer: '#7fd37f', woodcutter: '#c9a26b', soldier: '#6f9bff', gnome: '#d94a3a' } as const;
 
 export class Minimap {
@@ -91,7 +94,7 @@ export class Minimap {
     for (let i = 0; i < tiles.length; i++) {
       const o = i * 4;
       if (fog && !fog.explored[i]) { d[o] = 6; d[o + 1] = 5; d[o + 2] = 10; d[o + 3] = 255; continue; } // unseen: black
-      const [r, g, b] = TERRAIN[tiles[i].kind];
+      const t = tiles[i], [r, g, b] = t.kind === 'grass' && t.tall ? TALL_GRASS : TERRAIN[t.kind];
       d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
     }
     this.painted = true;
