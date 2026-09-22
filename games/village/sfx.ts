@@ -138,6 +138,8 @@ export class Sfx {
   bolt(): void { this.tone('sawtooth', 1200, 300, 0.18, 0.15); }
   grunt(): void { this.tone('sawtooth', 120, 90, 0.12, 0.12); }
   whiff(): void { this.noise(0.1, 800, 300, 0.1, 0.8); }
+  /** the dodge roll: a scuff of cloth on grass, then the shoulder landing */
+  roll(): void { this.noise(0.18, 520, 130, 0.16, 0.5); this.tone('sine', 95, 60, 0.09, 0.09, 0.14); }
   horn(): void { this.tone('sawtooth', 110, 165, 0.5, 0.2); this.tone('sawtooth', 165, 220, 0.5, 0.15, 0.25); }
   chop(): void { this.noise(0.06, 500, 150, 0.3, 0.7); this.tone('square', 200, 120, 0.06, 0.15); }
   dig(): void { this.noise(0.12, 300, 90, 0.2, 0.6); }

@@ -1031,6 +1031,10 @@ export class Player extends Mover {
   private recover = 0;
   /** kills within the last 1.2 s, for DOUBLE!/TRIPLE! pops */
   private recentKills: number[] = [];
+  /** dodge roll in progress: seconds elapsed and the unit direction it commits to */
+  roll: { t: number; ux: number; uy: number } | null = null;
+  /** seconds since the last roll ended, for the cooldown */
+  private sinceRoll = 99;
   /** set by the scene: W/A/S/D key objects */
   keys!: Record<'W' | 'A' | 'S' | 'D', { isDown: boolean }>;
   /** virtual joystick axis (-1..1), set by the touch UI */
@@ -1064,17 +1068,12 @@ export class Player extends Mover {
     if (s.interior.active) { s.interior.update(dt); return; }
     this.tickTimers(dt);
     this.sinceSwing += dt;
+    this.sinceRoll += dt;
     this.recover = Math.max(0, this.recover - dt);
     if (this.frozen(dt)) return;
     if (this.busy > 0) { this.busy -= dt; this.vx = this.vy = 0; return; }
-    let mx = (this.keys.D.isDown ? 1 : 0) - (this.keys.A.isDown ? 1 : 0);
-    let my = (this.keys.S.isDown ? 1 : 0) - (this.keys.W.isDown ? 1 : 0);
-    if (mx && my) { mx *= Math.SQRT1_2; my *= Math.SQRT1_2; }
-    if (!mx && !my && (this.touch.x || this.touch.y)) {
-      const len = Math.hypot(this.touch.x, this.touch.y);
-      const k = Math.min(1, len) / (len || 1);
-      mx = this.touch.x * k; my = this.touch.y * k;
-    }
+    if (this.roll) { this.updateRoll(dt, s); return; }
+    const { mx, my } = this.moveAxis();
     if (mx || my) this.facing = Math.abs(mx) >= Math.abs(my) ? { x: Math.sign(mx), y: 0 } : { x: 0, y: Math.sign(my) };
     if (mx) this.dir = mx < 0 ? -1 : 1;
     // swinging plants your feet; the swing itself steps you forward
@@ -1086,6 +1085,56 @@ export class Player extends Mover {
     s.pushDoor(dt, my < -0.5 && Math.abs(mx) < 0.5);
     this.updateSwing(dt, s);
     if (s.mods.playerRegen && this.hp < this.maxHp && !s.nearestRaider(this.x, this.y, 40)) this.hp = Math.min(this.maxHp, this.hp + s.mods.playerRegen * dt);
+  }
+
+  /** The movement axis this tick: WASD, or the virtual stick when no key is down. Diagonals are normalised. */
+  private moveAxis(): { mx: number; my: number } {
+    let mx = (this.keys.D.isDown ? 1 : 0) - (this.keys.A.isDown ? 1 : 0);
+    let my = (this.keys.S.isDown ? 1 : 0) - (this.keys.W.isDown ? 1 : 0);
+    if (mx && my) { mx *= Math.SQRT1_2; my *= Math.SQRT1_2; }
+    if (!mx && !my && (this.touch.x || this.touch.y)) {
+      const len = Math.hypot(this.touch.x, this.touch.y);
+      const k = Math.min(1, len) / (len || 1);
+      mx = this.touch.x * k; my = this.touch.y * k;
+    }
+    return { mx, my };
+  }
+
+  /**
+   * Begin a dodge roll along the movement input, or the way we face when standing still. A roll is a
+   * commitment: no steering, no swinging, and the cooldown only starts once it lands. Returns the
+   * direction it committed to, or null if the head was not free to take one.
+   */
+  pressRoll(): { ux: number; uy: number } | null {
+    if (this.roll || this.swing || this.recover > 0 || this.busy > 0 || this.freeze > 0) return null;
+    if (this.sinceRoll < p.rollCd) return null;
+    const { mx, my } = this.moveAxis();
+    const len = Math.hypot(mx, my);
+    const ux = len > 0.01 ? mx / len : this.facing.x, uy = len > 0.01 ? my / len : this.facing.y;
+    if (!ux && !uy) return null;
+    this.roll = { t: 0, ux, uy };
+    this.facing = Math.abs(ux) >= Math.abs(uy) ? { x: Math.sign(ux), y: 0 } : { x: 0, y: Math.sign(uy) };
+    if (ux) this.dir = ux < 0 ? -1 : 1;
+    return { ux, uy };
+  }
+
+  /**
+   * Advance the roll. It covers `rollDist` over `rollTime` on an ease-out curve — a burst that settles.
+   * The step is the difference of the curve between two ticks rather than a speed we integrate, so the
+   * distance is exactly what the slider says whatever the frame rate. Armor weight and long grass are
+   * ignored: a roll is a fixed commitment, and you go over the grass rather than through it.
+   */
+  private updateRoll(dt: number, s: VillageScene): void {
+    const r = this.roll!;
+    const T = Math.max(0.01, p.rollTime);
+    const ease = (u: number) => u * (2 - u);
+    const u0 = Math.min(1, r.t / T);
+    r.t += dt;
+    const u1 = Math.min(1, r.t / T);
+    const sp = (ease(u1) - ease(u0)) * p.rollDist / dt;
+    this.vx = r.ux * sp; this.vy = r.uy * sp;
+    this.moveWithCollision(dt, s.world);
+    if (r.t >= T) { this.roll = null; this.sinceRoll = 0; this.vx = this.vy = 0; }
   }
 
   /**

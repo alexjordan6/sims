@@ -321,6 +321,25 @@ export class Fx {
         for (let i = 0; i < 4; i++) this.dust.explode(3, ev.who.x - ev.ux * (6 + i * 5), ev.who.y + 6 - ev.uy * (6 + i * 5));
         break;
       }
+      case 'roll': {
+        // tuck and go: dust off the back foot, and the body turns over once along the way
+        this.sfx.roll();
+        for (let i = 0; i < 3; i++) this.dust.explode(3, ev.who.x - ev.ux * (4 + i * 5), ev.who.y + 5 - ev.uy * (4 + i * 5));
+        const a = this.anim(ev.who.id);
+        this.scene.tweens.killTweensOf(a);
+        if (this.reduced) { this.scene.tweens.chain({ targets: a, tweens: [
+          { sx: 1.15, sy: 0.8, duration: ev.ms * 0.35, ease: 'Sine.Out' },
+          { sx: 1, sy: 1, duration: ev.ms * 0.65, ease: 'Back.Out' },
+        ] }); break; }
+        a.rot = 0;
+        // a full turn lands back where it started, so rot only needs resetting once the chain is done
+        this.scene.tweens.chain({ targets: a, tweens: [
+          { rot: (ev.ux < 0 ? -1 : 1) * Math.PI * 2, sx: 0.85, sy: 1.15, duration: ev.ms * 0.8, ease: 'Sine.InOut' },
+          { sx: 1.1, sy: 0.9, duration: ev.ms * 0.2, ease: 'Sine.Out' },
+          { sx: 1, sy: 1, duration: 140, ease: 'Back.Out' },
+        ], onComplete: () => { a.rot = 0; } });
+        break;
+      }
       case 'thud': {
         // the Ogre's footsteps: felt within 30 tiles, louder and heavier the closer he is
         const d = Math.hypot(ev.who.x - this.scene.player.x, ev.who.y - this.scene.player.y) / TILE;

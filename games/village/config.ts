@@ -80,6 +80,9 @@ export const p = live(
   params({
     playerHp: [D.playerHp, 10, 200, 5, 'The head\'s base HP before armor and boons. Applies at NEW VILLAGE or the next armor change.'],
     playerDmg: [D.playerDmg, 1, 40, 1, 'The head\'s sword damage at a ×1 weapon (the starting club is ×weaponTier0Mul).'],
+    rollDist: [D.rollDist, 8, 80, 1, 'Pixels the head covers in one dodge roll (two tiles is 32). The roll goes through bodies but not walls.'],
+    rollTime: [D.rollTime, 0.1, 0.8, 0.02, 'Seconds the roll takes. Shorter = snappier, and a smaller window to be caught in.'],
+    rollCd: [D.rollCd, 0, 4, 0.05, 'Seconds after a roll ends before another can start.'],
     soldierHp: [D.soldierHp, 5, 100, 1, 'Soldiers\' base HP before barracks level, stars and armor.'],
     soldierDmg: [D.soldierDmg, 1, 30, 1, 'Soldiers\' base damage at a ×1 weapon.'],
     gnomeHp: [D.gnomeHp, 5, 100, 1, 'Grown gnomes\' base HP before stars and diet. Applies to gnomes coming of age.'],

@@ -47,7 +47,9 @@ export type FxEvent =
   /** the Ogre's ground slam (also his crash into a wall): shockwave of radius r */
   | { kind: 'smash'; who: Mover; x: number; y: number; r: number }
   /** the Ogre lowers his head and rushes along (ux, uy) */
-  | { kind: 'charge'; who: Mover; ux: number; uy: number };
+  | { kind: 'charge'; who: Mover; ux: number; uy: number }
+  /** the head tucks and rolls along (ux, uy) */
+  | { kind: 'roll'; who: Mover; ux: number; uy: number; ms: number };
 
 export type Screen = 'title' | 'playing' | 'paused' | 'over' | 'won';
 
@@ -351,7 +353,8 @@ export class VillageScene extends SimScene {
     kb.on('keydown-Z', () => this.cycleZoom());
 
     super.create(); // creates gfx + hud, then calls reset() -> setup()
-    kb.removeAllListeners('keydown-SPACE'); // Esc handles pause; Space is free for later
+    kb.removeAllListeners('keydown-SPACE'); // Esc handles pause; Space is the dodge roll
+    kb.on('keydown-SPACE', () => this.dodge());
     // number keys pick tools; game speed moves to - / =
     kb.removeAllListeners('keydown-ONE'); kb.removeAllListeners('keydown-TWO'); kb.removeAllListeners('keydown-THREE');
     kb.on('keydown-MINUS', () => (this.speed = this.speed > 4 ? 4 : 1));
@@ -1085,6 +1088,7 @@ export class VillageScene extends SimScene {
     for (const a of this.agents) {
       if (!(a instanceof Mover) || a.dead || a.hidden || a instanceof Arrow || a instanceof Bolt) continue;
       if (a instanceof Villager && (a.carriedBy || a.role === 'infant')) continue;
+      if (a instanceof Player && a.roll) continue; // a roll goes through bodies — walls still stop it
       solid.push(a);
     }
     this.bodies.rebuild(solid);
@@ -1946,6 +1950,13 @@ export class VillageScene extends SimScene {
   facedBuilding(): Building | null {
     const t = this.world.get(this.target.tx, this.target.ty);
     return t?.building ?? null;
+  }
+
+  /** Space: a dodge roll, whatever tool is held — it is movement, not a weapon. */
+  dodge(): void {
+    if (this.screen !== 'playing' || this.interior.active) return;
+    const r = this.player.pressRoll();
+    if (r) this.fx.push({ kind: 'roll', who: this.player, ux: r.ux, uy: r.uy, ms: p.rollTime * 1000 });
   }
 
   /** Use the equipped tool on the faced tile (or swing the sword). */

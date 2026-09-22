@@ -199,6 +199,7 @@ export class UI {
     const rows: [string, string][] = this.touch
       ? [
           ['MOVE stick', 'walk'],
+          ['ROLL', 'dodge roll — through bodies, not walls'],
           ['USE', 'use the tool you hold (the button says what)'],
           ['TOOL', 'next tool — or tap a slot'],
           ['tap a villager', 'inspect them'],
@@ -209,6 +210,7 @@ export class UI {
         ]
       : [
           ['W A S D', 'move'],
+          ['Space', 'dodge roll — through bodies, not walls'],
           ['click · C', 'use the held tool, toward the cursor'],
           ['right click · X', 'check a villager'],
           ['1 – 9', 'pick a tool'],
@@ -276,6 +278,7 @@ export class UI {
         <button class="mbtn small drawerbtn">${spr('dungeon', DUNGEON.villager, 24)}<span class="mlbl">FOLK</span></button>
         <button class="mbtn small pausebtn">II<span class="mlbl">PAUSE</span></button>
         <button class="mbtn small buildbtn">${spr('town', TOWN.iconHammer, 24)}<span class="mlbl">TOOL</span></button>
+        <button class="mbtn small rollbtn">↻<span class="mlbl">ROLL</span></button>
         <button class="mbtn act"><span class="verb">USE</span></button>
       </div>
     </div>`);
@@ -291,6 +294,7 @@ export class UI {
       ctl.querySelector<HTMLElement>(sel)!.addEventListener('pointerdown', (e) => { e.preventDefault(); fn(); });
     };
     press('.act', () => s.interact());
+    press('.rollbtn', () => s.dodge());
     press('.buildbtn', () => s.player.cycleTool());
     press('.pausebtn', () => s.togglePause());
     press('.drawerbtn', () => { this.showTab('roster'); this.side.classList.toggle('open'); });
@@ -912,7 +916,8 @@ export class UI {
           <p class="sub">Farm. Raise a family. Plan their upbringing. Train the next generation to defend your town.<br>
           Survive ${p.bossDay} days of raids and <b>beat the Warlord</b>.</p>
           <div class="controls">
-            <kbd>WASD</kbd><span>move</span><kbd>click / C</kbd><span>use the tool you hold, toward the cursor</span>
+            <kbd>WASD</kbd><span>move</span><kbd>Space</kbd><span>dodge roll</span>
+            <kbd>click / C</kbd><span>use the tool you hold, toward the cursor</span>
             <kbd>right click / X</kbd><span>check a villager</span><kbd>1-9 · Tab · wheel</kbd><span>pick a tool</span>
             <kbd>E / Esc</kbd><span>menu</span><kbd>- / =</kbd><span>game speed</span>
           </div>
@@ -1053,6 +1058,7 @@ export class UI {
           <h3>CONTROLS</h3>
           <div class="controls">
             <kbd>WASD</kbd><span>move (joystick on phone)</span>
+            <kbd>Space</kbd><span>dodge roll — a committed tumble the way you are moving (or facing). It goes clean through bodies but not through walls, and you cannot steer or swing until it lands. A raider's blow checks its reach at the moment it strikes, so rolling out of a wind-up beats it.</span>
             <kbd>click / C</kbd><span>use the tool you hold. A click also turns you toward the cursor. The bottom bar says what the tool will do. The sword swings an arc; it only hits what it reaches.</span>
             <kbd>right click / X</kbd><span>check a villager (opens the inspector)</span>
             <kbd>1-9 · Tab · wheel</kbd><span>pick a tool — hands, hoe, seeds, axe, sword, house, barracks, hammer</span>

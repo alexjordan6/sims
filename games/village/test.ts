@@ -176,6 +176,44 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     const sworn = s.spawn(new Villager(0, 0, s.world.houses[0], 'soldier', 20, 'Sworn', s.mods));
     assert(sworn.weapons.melee === 0 && s.craftWeapon(sworn, 'bow') && sworn.weapons.bow === 1, 'soldiers start crude and can be forged for too');
     assert(s.towerDmg(s.world.barracks[0]) === p.towerDmg && p.towerDmg === 5, 'a Lv1 tower fires light arrows');
+    // the dodge roll: a committed tumble on a cooldown, the way you are moving or facing
+    s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(121, 100));
+    const keysOff = () => ({ W: { isDown: false }, A: { isDown: false }, S: { isDown: false }, D: { isDown: false } });
+    const cooled = () => { step(s, p.rollCd + 0.05); };
+    s.player.keys = { ...keysOff(), D: { isDown: true } };
+    const rx = s.player.x, ry = s.player.y;
+    assert(!!s.player.pressRoll() && !!s.player.roll, 'the head takes a roll');
+    s.player.keys = keysOff(); // let go: the roll is committed, and walking on would muddy the measurement
+    step(s, p.rollTime + 0.05);
+    const rolled = s.player.x - rx;
+    assert(!s.player.roll && Math.abs(rolled - p.rollDist) < 0.5 && Math.abs(s.player.y - ry) < 0.01, `a roll carries exactly ${p.rollDist} px the way you press (${rolled.toFixed(1)})`);
+    assert(!s.player.pressRoll(), 'no second roll while the cooldown runs');
+    cooled();
+    assert(!!s.player.pressRoll(), 'the roll comes back once the cooldown is up');
+    step(s, p.rollTime + 0.05);
+    // standing still, it goes the way you face
+    cooled(); s.player.keys = keysOff(); s.player.facing = { x: 0, y: 1 };
+    const fy = s.player.y, fx = s.player.x;
+    s.player.pressRoll(); step(s, p.rollTime + 0.05);
+    assert(s.player.y - fy > p.rollDist * 0.8 && Math.abs(s.player.x - fx) < 0.01, 'standing still, the head rolls the way it faces');
+    // a swing is a commitment: no rolling out of it
+    cooled(); s.player.tool = 'sword'; s.player.pressAttack();
+    assert(!!s.player.swing && !s.player.pressRoll(), 'no rolling out of a swing');
+    step(s, 0.6); cooled();
+    // walls still stop it, and the head never ends up inside one
+    Object.assign(s.player, World.center(121, 100)); s.world.placeDefense('wall', 123, 100);
+    s.player.keys = { ...keysOff(), D: { isDown: true } };
+    s.player.pressRoll(); step(s, p.rollTime + 0.05);
+    assert(s.player.fits(s.player.x, s.player.y, s.world) && s.player.tile.tx < 123, `a roll stops at a wall instead of going through it (tx ${s.player.tile.tx})`);
+    // the payoff: rolling out of a wind-up beats the blow, because the strike re-checks its reach
+    s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(121, 100));
+    s.player.keys = { ...keysOff(), A: { isDown: true } }; // roll away from him, not past him
+    const ambush = s.spawn(new Brute(s.player.x + 10, s.player.y)); ambush.update = () => {};
+    ambush.startAttack(s, s.player, 24, 30, 0.3, 0.4);
+    const hpBeforeRoll = s.player.hp;
+    s.player.pressRoll(); step(s, p.rollTime + 0.02);
+    ambush.attackTick(0.31, s);
+    assert(s.player.hp === hpBeforeRoll && s.fx.some(e => e.kind === 'miss'), 'a roll out of the wind-up beats the brute\'s blow');
     s = fresh(); s.agents = [s.player]; s.day = 3; s.spawnRaid();
     const wave1 = s.agents.filter(a => a instanceof Raider && !a.lairBound);
     assert(wave1.length === Math.round(2 * p.raidSizeMul), `the first raid brings ${wave1.length} raiders`);
