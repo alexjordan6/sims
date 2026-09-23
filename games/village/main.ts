@@ -355,6 +355,7 @@ export class VillageScene extends SimScene {
     super.create(); // creates gfx + hud, then calls reset() -> setup()
     kb.removeAllListeners('keydown-SPACE'); // Esc handles pause; Space is the dodge roll
     kb.on('keydown-SPACE', () => this.dodge());
+    kb.on('keydown-G', () => this.tossLoad());
     // number keys pick tools; game speed moves to - / =
     kb.removeAllListeners('keydown-ONE'); kb.removeAllListeners('keydown-TWO'); kb.removeAllListeners('keydown-THREE');
     kb.on('keydown-MINUS', () => (this.speed = this.speed > 4 ? 4 : 1));
@@ -1046,16 +1047,36 @@ export class VillageScene extends SimScene {
     if (Math.hypot(aim.x - pl.x, aim.y - pl.y) > p.tossRange * TILE) return 'too far to throw';
     return null;
   }
+  /** Put `n` of a kind into the world with a throw from the head's hands toward `aim`. */
+  private hurl(kind: LoadKind, n: number, aim: { x: number; y: number }, food?: FoodKind): Item {
+    const pl = this.player;
+    const it = this.world.dropItem(kind, n, pl.x, pl.y, food);
+    throwItem(it, { x: pl.x, y: pl.y }, aim, this.rng);
+    if (pl.x !== aim.x) pl.dir = aim.x < pl.x ? -1 : 1;
+    return it;
+  }
   /** Throw a handful from the basket: it flies at the aim, bounces and rolls, and lies where it stops. */
   toss(): Item | null {
     const aim = this.tossAim, why = this.tossProblem(aim);
     if (why) { this.event('food', why); return null; }
     const pl = this.player, n = Math.min(pl.load!.n, p.tossSize), food = pl.load!.food ?? 'wheat';
     pl.load!.n -= n; if (pl.load!.n <= 0) pl.load = null;
-    const it = this.world.dropItem('food', n, pl.x, pl.y, food);
-    throwItem(it, { x: pl.x, y: pl.y }, aim, this.rng);
-    if (pl.x !== aim.x) pl.dir = aim.x < pl.x ? -1 : 1;
-    return it;
+    return this.hurl('food', n, aim, food);
+  }
+  /**
+   * G: throw the whole armful — wood or food — wherever you are aiming, with any tool in hand. The
+   * only other way to put a load down is to walk it to the woodyard or granary, and wood could not
+   * be thrown at all before this.
+   */
+  tossLoad(): Item | null {
+    if (this.screen !== 'playing' || this.interior.active) return null;
+    const pl = this.player;
+    if (!pl.load) { this.event('info', 'Your hands are empty — pick an armful up with HANDS out'); return null; }
+    const aim = this.tossAim;
+    if (Math.hypot(aim.x - pl.x, aim.y - pl.y) > p.tossRange * TILE) { this.event('info', 'Too far to throw — aim closer'); return null; }
+    const { kind, n, food } = pl.load;
+    pl.load = null;
+    return this.hurl(kind, n, aim, food);
   }
   /** Items lying at the head's feet come along: scrap always, an armful only with hands out (one kind at a time). */
   pickUpItems(): void {
@@ -2073,7 +2094,7 @@ export class VillageScene extends SimScene {
   carryHint(): string | null {
     const l = this.player.load;
     if (l?.kind === 'food' && this.player.tool === 'basket') return `basket ${l.n}/${HAUL.player.food} ${FOODS[l.food ?? 'wheat'].one} — aim at a pen and E to toss`;
-    return l ? `carrying ${l.n} ${l.kind === 'wood' ? 'wood' : FOODS[l.food ?? 'wheat'].one} — walk up to the ${l.kind === 'wood' ? 'woodyard' : 'granary'} to unload` : null;
+    return l ? `carrying ${l.n} ${l.kind === 'wood' ? 'wood' : FOODS[l.food ?? 'wheat'].one} — walk up to the ${l.kind === 'wood' ? 'woodyard' : 'granary'} to unload, or G to throw the lot` : null;
   }
   hint(): string {
     if (this.interior.active) return this.interior.hint();

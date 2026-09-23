@@ -287,9 +287,12 @@ body.touch .hint { font-size: 13px; padding: 1px 8px; min-height: 20px; }
 .mbtn { display: flex; align-items: center; justify-content: center; border: 3px solid #5a4636; border-radius: 50%; background: #241c16dd; color: var(--ink); font-family: var(--font-head); font-size: 11px; box-shadow: 2px 2px 0 #0008; touch-action: none; user-select: none; }
 .mbtn.small { width: 48px; height: 48px; }
 .mbtn.act { width: 88px; height: 88px; font-size: 22px; background: #ffcf5aee; color: #3a2a1a; border-color: #8a5a1a; right: 0; bottom: 0; }
+/* every small button needs its own spot: they are absolute, so an unplaced one piles onto the others */
 .cluster .buildbtn { left: 0; bottom: 10px; }
+.cluster .rollbtn { left: 0; top: 58px; }
+.cluster .tossbtn { left: 0; top: 0; }
+.cluster .drawerbtn { left: 58px; top: 0; }
 .cluster .pausebtn { right: 0; top: 0; }
-.cluster .drawerbtn { left: 18px; top: 18px; }
 .mbtn:active { transform: translate(1px, 1px); box-shadow: none; }
 
 /* full screens scroll on small viewports */
@@ -314,8 +317,9 @@ body.touch .tooltip { display: none; }
   body.touch .mbtn.act { width: 72px; height: 72px; }
   body.touch .mbtn.small { width: 42px; height: 42px; }
   body.touch .cluster { width: 134px; height: 134px; bottom: 12px; right: 10px; }
-  body.touch .cluster .buildbtn { bottom: 6px; }
-  body.touch .cluster .drawerbtn { left: 12px; top: 12px; }
+  body.touch .cluster .buildbtn { bottom: 4px; }
+  body.touch .cluster .rollbtn { top: 46px; }
+  body.touch .cluster .drawerbtn { left: 46px; top: 0; }
   body.touch .hotbar { bottom: 10px; }
 }
 .zoombtn { font-size: 18px; }

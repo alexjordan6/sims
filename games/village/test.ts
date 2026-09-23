@@ -399,6 +399,21 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(atWall.rest && atWall.y > 95 * 16 && !s.world.isBlocked(Math.floor(atWall.x / 16), Math.floor(atWall.y / 16), true), `a throw at a wall bounces back and never rests inside it (y ${(atWall.y / 16).toFixed(1)})`);
     for (let x = 121; x <= 125; x++) { const d = s.world.get(x, 94)!.defense; if (d) s.world.damageDefense(d, Infinity); }
     s.world.removeItem(atWall); s.hoverPoint = null;
+    // G: throw the whole armful, wood or food, with any tool in hand — the only way to put wood down away from the woodyard
+    s.player.tool = 'axe'; s.player.load = { kind: 'wood', n: 17 };
+    Object.assign(s.player, World.center(123, 100)); const logAim = World.center(123, 98); s.hoverPoint = logAim;
+    const logs = s.tossLoad()!;
+    assert(!!logs && logs.kind === 'wood' && logs.n === 17 && !s.player.load, 'G throws the whole armful of wood, axe in hand');
+    settle(s);
+    assert(logs.rest && Math.hypot(logs.x - logAim.x, logs.y - logAim.y) < 1.5 * 16, `the logs land near the aim and lie there (${Math.hypot(logs.x - logAim.x, logs.y - logAim.y).toFixed(0)} px off)`);
+    assert(s.tossLoad() === null, 'empty-handed, there is nothing to throw');
+    s.player.load = { kind: 'food', n: 9, food: 'carrot' };
+    s.hoverPoint = { x: logAim.x, y: logAim.y - (p.tossRange + 3) * 16 };
+    assert(s.tossLoad() === null && s.player.load!.n === 9, 'the armful stays in hand when the aim is out of range');
+    s.hoverPoint = null; s.player.facing = { x: 0, y: 1 };
+    const spill = s.tossLoad()!;
+    assert(spill.kind === 'food' && spill.food === 'carrot' && spill.n === 9 && !s.player.load, 'with no cursor it throws the way you face');
+    settle(s); s.world.removeItem(logs); s.world.removeItem(spill); s.player.tool = 'basket';
     // a pen child walks to food lying in the pen and eats; food stray the pen is not theirs
     s.world.removeItem(thrown);
     const stray = s.world.dropItem('food', 5, World.center(119, 99).x, World.center(119, 99).y, 'wheat');
