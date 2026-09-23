@@ -330,7 +330,9 @@ export const ITEM = {
   /** below this ground speed (px/s) an item on the ground comes to rest */
   restSpeed: 3,
   /** how close (px) the head must be to pick one up, and a child to eat from one */
-  reach: 10, eatReach: 12,
+  reach: 15, eatReach: 12,
+  /** px from the head at which a resting item lights up: a ring under it, a little bob, and no night tint */
+  highlight: 48,
   /** a throw's flight time in seconds: base + distance / speed; the scatter on its velocity */
   flightBase: 0.4, flightPerPx: 1 / 160, scatter: 0.06,
   /** the little hop a dropped armful or loot makes */

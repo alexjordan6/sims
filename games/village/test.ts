@@ -5,7 +5,7 @@ import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, Wrecker, Troll, waveComposition } from './enemies';
 import { Boar, Swarm } from './wildlife';
-import { COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, BOAR, GNOME_HOME, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE } from './config';
+import { COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
 const output = document.getElementById('test-results')!, summary = document.getElementById('test-summary')!;
@@ -508,10 +508,27 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(!!loot && loot.n > 0 && s.scrap === scrapWas, 'a slain raider drops scrap on the ground instead of into your pocket');
     Object.assign(s.player, { x: loot!.x, y: loot!.y }); s.player.tool = 'sword'; s.tick(1 / 60);
     assert(s.scrap === scrapWas + loot!.n && !s.world.items.includes(loot!), 'walking over scrap picks it up with any tool');
-    Object.assign(s.player, { x: dropped!.x, y: dropped!.y }); s.player.load = null; s.tick(1 / 60);
-    assert(s.world.items.includes(dropped!) && !s.player.load, 'an armful on the ground waits for hands');
-    s.player.tool = 'hands'; s.tick(1 / 60);
-    assert(held()?.kind === 'wood' && held()!.n === 9 && !s.world.items.includes(dropped!), 'with hands out the head picks the armful up');
+    Object.assign(s.player, { x: dropped!.x, y: dropped!.y }); s.player.load = null; s.player.tool = 'sword'; s.tick(1 / 60);
+    assert(held()?.kind === 'wood' && held()!.n === 9 && !s.world.items.includes(dropped!), 'an armful comes along with the sword out — whatever you are holding picks it up');
+    for (const tool of ['axe', 'hammer', 'basket', 'hands'] as const) {
+      s.player.load = null;
+      const armful = s.world.dropItem('wood', 4, s.player.x, s.player.y);
+      s.player.tool = tool; s.tick(1 / 60);
+      assert(held()?.kind === 'wood' && !s.world.items.includes(armful), `and with the ${tool} too`);
+    }
+    s.player.load = null;
+    const flying = s.world.dropItem('wood', 4, s.player.x, s.player.y);
+    flying.rest = false; flying.z = 8;
+    s.tick(1 / 60);
+    assert(!s.player.load && s.world.items.includes(flying), 'but nothing is caught in mid-air — a thrown armful gets away');
+    flying.rest = true; flying.z = 0; s.tick(1 / 60);
+    assert(held()?.kind === 'wood', 'once it comes to rest it is fair game');
+    s.player.load = null;
+    const outOfReach = s.world.dropItem('wood', 4, s.player.x + ITEM.reach + 6, s.player.y);
+    s.tick(1 / 60);
+    assert(!s.player.load && s.world.items.includes(outOfReach), `and one out of reach (${ITEM.reach}px) stays where it lies`);
+    s.world.removeItem(outOfReach);
+    s.player.load = { kind: 'wood', n: 9 };
     const snack = s.world.dropItem('food', 3, s.player.x, s.player.y, 'berry'); s.tick(1 / 60);
     assert(s.world.items.includes(snack) && held()?.kind === 'wood', 'arms full of wood leave food lying');
     // bodies: nobody stands inside anybody; the light give way to the heavy; walls are never entered

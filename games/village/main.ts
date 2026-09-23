@@ -963,7 +963,7 @@ export class VillageScene extends SimScene {
     switch (t?.kind) {
       case 'crop': { const fk = t.food ?? 'wheat'; html = `<div class="t">${this.isRipe(t) ? 'Ripe' : 'Growing'} ${FOODS[fk].name.toLowerCase()}</div><div class="d">${Math.min(t.stage, this.cropDaysOf(t))}/${this.cropDaysOf(t)} days · yields ${this.cropYieldOf(fk)} · ${FOODS[fk].blurb}</div>`; break; }
       case 'grass':
-        if (lying) html = `<div class="t">On the ground</div><div class="d">${lying} · walk over it (hands for food and wood)</div>`;
+        if (lying) html = `<div class="t">On the ground</div><div class="d">${lying} · walk over it to pick it up</div>`;
         else if (t.tall) html = `<div class="t">Long grass</div><div class="d">slows everyone to ${Math.round(p.grassSlow * 100)}% — raiders too · swing the sword to mow it</div>`;
         break;
       case 'tilled': html = `<div class="t">Tilled soil</div><div class="d">${t.food ? `farmers will replant ${FOODS[t.food].name.toLowerCase()}; seeds sow something else` : 'plant with seeds, or a farmer will'}</div>`; break;
@@ -1273,20 +1273,20 @@ export class VillageScene extends SimScene {
   tossLoad(): Item | null {
     if (this.screen !== 'playing' || this.interior.active) return null;
     const pl = this.player;
-    if (!pl.load) { this.event('info', 'Your hands are empty — pick an armful up with HANDS out'); return null; }
+    if (!pl.load) { this.event('info', 'Your hands are empty — walk over an armful to pick it up'); return null; }
     const aim = this.tossAim;
     if (Math.hypot(aim.x - pl.x, aim.y - pl.y) > p.tossRange * TILE) { this.event('info', 'Too far to throw — aim closer'); return null; }
     const { kind, n, food } = pl.load;
     pl.load = null;
     return this.hurl(kind, n, aim, food);
   }
-  /** Items lying at the head's feet come along: scrap always, an armful only with hands out (one kind at a time). */
+  /** Items lying at the head's feet come along, whatever tool is in hand: scrap always, an armful one kind at a time. */
   pickUpItems(): void {
     const pl = this.player;
     if (pl.hidden) return;
     for (const it of this.world.itemsNear(pl.x, pl.y, ITEM.reach)) {
       if (it.kind === 'scrap') { this.scrap += it.n; this.world.removeItem(it); this.fx.push({ kind: 'deposit', x: it.x, y: it.y - 4, text: `+${it.n} scrap`, colour: '#b0b3b9' }); continue; }
-      if (pl.tool !== 'hands' || !pl.canCarry(it.kind, it.food)) continue;
+      if (!pl.canCarry(it.kind, it.food)) continue;
       const room = HAUL.player[it.kind] - (pl.load?.n ?? 0);
       const take = Math.min(room, it.n);
       if (take <= 0) continue;
@@ -2409,7 +2409,7 @@ export class VillageScene extends SimScene {
         if (kind === 'tilled') return `tilled — ${need('seeds')}`;
         if (kind === 'tree') return `tree — ${need('axe')}`;
         if (kind === 'sapling') return `sapling — a tree in ${this.saplingDays(tg.tx, tg.ty) - t!.stage} days`;
-        { const on = this.itemsBlurb(tg.tx, tg.ty); if (on) return `${on} on the ground — walk over it with hands out`; }
+        { const on = this.itemsBlurb(tg.tx, tg.ty); if (on) return `${on} on the ground — walk over it to pick it up`; }
         return 'hands: harvest ripe crops, pick berries and mushrooms; walk over dropped things to pick them up';
     }
   }

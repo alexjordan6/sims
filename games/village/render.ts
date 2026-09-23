@@ -2,10 +2,11 @@ import Phaser from 'phaser';
 import { World, BUILDINGS, doorstep, type Tile, type Building, type BuildingKind } from './world';
 import { Mover, Villager, Raider, Player, Arrow, type EnemyKind } from './agents';
 import { Bolt } from './enemies';
+import type { Item } from './items';
 import { Boar, Swarm } from './wildlife';
 import { TOWN, CHAR } from './atlas';
 import { ensureCharacter, seedLook, type Look } from './characters';
-import { p, TILE, COLS, ROWS, CAPS, WALL_HEIGHT, OGRE, BOAR, PEN_COLOUR } from './config';
+import { p, TILE, COLS, ROWS, CAPS, WALL_HEIGHT, OGRE, BOAR, ITEM, HAUL, PEN_COLOUR } from './config';
 import type { VillageScene } from './main';
 import { Fx } from './fx';
 import { ensureBuildingArt, ensureFlora, FLORA, BUILDING_TEXTURE, LIT_TEXTURE, STACK_ROWS } from './pixelart';
@@ -388,6 +389,16 @@ export class Renderer {
   }
 
   /** One image per item: food as its pile (sized by how much is left), wood as a bundle, scrap as shards; lifted by its height, with a shadow while airborne. */
+  /**
+   * Loot close enough to the head to be worth noticing: it gets a ring on the ground, a little bob and
+   * its daylight colours, so a comb of honey in the dark still reads as something to walk over.
+   */
+  private lit(it: Item): boolean {
+    const pl = this.scene.player;
+    if (!it.rest || !pl || pl.hidden) return false;
+    return (it.x - pl.x) ** 2 + (it.y - pl.y) ** 2 <= ITEM.highlight * ITEM.highlight;
+  }
+
   private syncItems(): void {
     const s = this.scene, seen = new Set<number>();
     for (const it of s.world.items) {
@@ -399,7 +410,9 @@ export class Renderer {
         const frame = it.kind === 'scrap' ? FLORA.scrap : FLORA.pile[it.food ?? 'wheat'][Math.min(2, Math.max(0, Math.ceil(it.n / Math.max(1, p.tossSize)) - 1))];
         if (sp.texture.key !== 'flora' || sp.frame.name !== String(frame)) sp.setTexture('flora', frame);
       }
-      sp.setPosition(Math.round(it.x), Math.round(it.y - it.z)).setDepth(DEPTH.agents + it.y / 1000 - 0.0002).setTint(this.tint).setVisible(!s.fog || s.fog.visibleAt(it.x, it.y) > 0.3);
+      const lit = this.lit(it);
+      const bob = lit ? Math.sin(this.t * 3.4 + it.id) * 1.6 : 0;
+      sp.setPosition(Math.round(it.x), Math.round(it.y - it.z + bob)).setDepth(DEPTH.agents + it.y / 1000 - 0.0002).setTint(lit ? 0xffffff : this.tint).setVisible(!s.fog || s.fog.visibleAt(it.x, it.y) > 0.3);
       if (!it.rest) sp.setRotation(it.age * 6); else sp.setRotation(0);
     }
     for (const [id, sp] of this.items) if (!seen.has(id)) { sp.destroy(); this.items.delete(id); }
@@ -411,6 +424,19 @@ export class Renderer {
     u.clear();
     // shadows under anything in the air
     for (const it of s.world.items) if (it.z > 0.5) { u.fillStyle(0x000000, 0.25); u.fillEllipse(it.x, it.y + 2, Math.max(4, 8 - it.z / 6), Math.max(2, 4 - it.z / 12)); }
+    // a breathing ring under loot at the head's feet — dim when the arms are too full to take it
+    const loot = 0.5 + 0.5 * Math.sin(s.time.now / 220);
+    for (const it of s.world.items) {
+      if (!this.lit(it)) continue;
+      if (s.fog && s.fog.visibleAt(it.x, it.y) <= 0.3) continue;
+      // bright only when walking here would actually collect it: right kind, and room left for it
+      const room = it.kind === 'scrap' ? Infinity : HAUL.player[it.kind] - (s.player.load?.n ?? 0);
+      const a = it.kind === 'scrap' || (s.player.canCarry(it.kind, it.food) && room > 0) ? 1 : 0.3;
+      u.fillStyle(0xffe066, (0.1 + 0.08 * loot) * a);
+      u.fillEllipse(it.x, it.y + 1, 18 + 3 * loot, 9 + 1.5 * loot);
+      u.lineStyle(1, 0xffe066, 0.85 * a);
+      u.strokeEllipse(it.x, it.y + 1, 13 + 3 * loot, 6.5 + 1.5 * loot);
+    }
     const tool = s.player.tool;
     if (tool === 'wall' || tool === 'gate' || tool === 'stairs') {
       const q = s.defenseTarget();
