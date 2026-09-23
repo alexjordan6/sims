@@ -915,10 +915,11 @@ export class UI {
   }
 
   private cookEl: HTMLElement | null = null;
+  private lastCooking = '';
   /** The COOKING POT: what the gnomes can make from the granary, and what one serving does for the head. */
   renderCooking(): void {
     const s = this.scene, b = s.cookingAt;
-    if (!b) { this.cookEl?.remove(); this.cookEl = null; return; }
+    if (!b) { this.cookEl?.remove(); this.cookEl = null; this.lastCooking = ''; return; }
     const rows = DISHES.map((d) => {
       const r = RECIPES[d], why = s.cookProblem(r), have = s.pantry[d] | 0, food = FOODS[d];
       const needs = (Object.entries(r.needs) as [FoodKind, number][]).map(([k, n]) => `<span style="color:${FOODS[k].colour}">${foodCount(n, k)}</span> <small>(${Math.floor(s.pantry[k])})</small>`).join(' + ');
@@ -931,7 +932,8 @@ export class UI {
         <button class="btn small ${have < 1 ? '' : 'ok'} eat" data-eat="${d}" ${have < 1 ? 'disabled' : ''}>EAT ONE · ${eat}</button></div>`;
     }).join('');
     const warm = b.warm ? `the fire is lit · ${b.firewood} night${b.firewood === 1 ? '' : 's'} of wood` : '<em class="warn">COLD HEARTH</em>';
-    const on = s.buff && s.buffLeft() > 0 ? `<p class="sub small">Still warming you: <b>${FOODS[s.buff.dish].name}</b>, +${Math.round((s.buff.mul - 1) * 100)}% ${DIET_STAT_NAME[s.buff.stat]} for ${Math.ceil(s.buffLeft())}s more.</p>` : '';
+    const on = s.buff && s.buffLeft() > 0 ? `<p class="sub small">Still warming you: <b>${FOODS[s.buff.dish].name}</b>, +${Math.round((s.buff.mul - 1) * 100)}% ${DIET_STAT_NAME[s.buff.stat]} for <span class="warmleft">${Math.ceil(s.buffLeft())}</span>s more.</p>` : '';
+    const key = `${b.tx},${b.ty}|${b.warm}|${b.ruined}|${b.firewood}|${s.food | 0}/${s.foodCap}|${FOOD_KINDS.map((k) => s.pantry[k] | 0).join(',')}|${s.buff && s.buffLeft() > 0 ? s.buff.dish : ''}`;
     const html = `<div class="cooking panel">
       <div class="ph"><h2>Cooking pot</h2><span class="cap">${warm} · ${s.food | 0}/${s.foodCap} in store</span><button class="btn small close">CLOSE</button></div>
       <div class="aslots">${rows}</div>
@@ -939,12 +941,20 @@ export class UI {
       <p class="sub small">Dishes are food like any other: the granary holds them, the basket carries them (F), and a child fed on them grows far past one raised on raw. Cooking needs a lit hearth — woodcutters keep the pile stocked.</p>
     </div>`;
     if (!this.cookEl) this.cookEl = h('<div class="screen cooking-screen"></div>');
-    if (!this.cookEl.isConnected) this.screens.append(this.cookEl); // showScreen() empties #screens without asking
-    this.cookEl.innerHTML = html;
+    if (!this.cookEl.isConnected) { this.screens.append(this.cookEl); this.lastCooking = ''; } // showScreen() empties #screens without asking
     const el = this.cookEl;
-    el.querySelector('.close')!.addEventListener('click', () => s.openCooking(null));
-    el.querySelectorAll<HTMLElement>('[data-cook]').forEach((btn) => btn.addEventListener('click', () => { s.cook(RECIPES[btn.dataset.cook as DishKind]); this.renderCooking(); }));
-    el.querySelectorAll<HTMLElement>('[data-eat]').forEach((btn) => btn.addEventListener('click', () => { s.eatDish(btn.dataset.eat as FoodKind); this.renderCooking(); }));
+    // The panel is redrawn every frame. Replacing its DOM that often would swallow every click —
+    // a click needs the button it went down on to still be there when the mouse comes up — so the
+    // markup is rebuilt only when something in it actually changed, and the countdown is retexted.
+    if (key !== this.lastCooking) {
+      this.lastCooking = key;
+      el.innerHTML = html;
+      el.querySelector('.close')!.addEventListener('click', () => s.openCooking(null));
+      el.querySelectorAll<HTMLElement>('[data-cook]').forEach((btn) => btn.addEventListener('click', () => { s.cook(RECIPES[btn.dataset.cook as DishKind]); this.renderCooking(); }));
+      el.querySelectorAll<HTMLElement>('[data-eat]').forEach((btn) => btn.addEventListener('click', () => { s.eatDish(btn.dataset.eat as FoodKind); this.renderCooking(); }));
+    }
+    const left = el.querySelector('.warmleft');
+    if (left) left.textContent = String(Math.ceil(s.buffLeft()));
   }
 
   // ---- screens ---------------------------------------------------------------
