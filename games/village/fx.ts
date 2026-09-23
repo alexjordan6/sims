@@ -277,7 +277,6 @@ export class Fx {
       case 'ruin': {
         // the roof comes down: a shudder, a thud, dust and smoke across the whole footprint
         const b = ev.building, f = BUILDINGS[b.kind], x0 = b.tx * TILE, y0 = b.ty * TILE, w = f.w * TILE, h = f.h * TILE;
-        this.shake(250, 0.006);
         this.sfx.thud(1);
         for (let i = 0; i < 12; i++) { const x = x0 + Math.random() * w, y = y0 + Math.random() * h; this.dust.explode(4, x, y); this.puff.explode(2, x, y - 8); }
         this.word('RUINED', x0 + w / 2, y0 - 12, '#ff6a5a', 9, 1.6);
@@ -286,7 +285,6 @@ export class Fx {
       case 'demolish': {
         // taken down on purpose: a lighter shudder and dust, no alarm
         const b = ev.building, f = BUILDINGS[b.kind], x0 = b.tx * TILE, y0 = b.ty * TILE, w = f.w * TILE, h = f.h * TILE;
-        this.shake(140, 0.003);
         this.sfx.thud(0.6);
         for (let i = 0; i < 8; i++) { const x = x0 + Math.random() * w, y = y0 + Math.random() * h; this.dust.explode(4, x, y); this.puff.explode(1, x, y - 6); }
         break;
@@ -300,7 +298,6 @@ export class Fx {
           { ox: 0, rot: 0, sx: 1.3, sy: 0.7, duration: 70, ease: 'Quad.In' },
           { sx: 1, sy: 1, duration: 260, ease: 'Back.Out' },
         ] });
-        this.shake(big ? 280 : 180, big ? 0.009 : 0.006);
         if (big) this.sfx.slam(); else this.sfx.thud(1);
         const n = big ? 18 : 10;
         for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2; this.dust.explode(3, ev.x + Math.cos(a) * ev.r * 0.8, ev.y + 4 + Math.sin(a) * ev.r * 0.4); }
@@ -342,7 +339,6 @@ export class Fx {
         if (d > 30) break;
         const near = 1 - d / 30;
         this.sfx.thud(0.25 + 0.75 * near);
-        this.shake(70, 0.001 + 0.003 * near);
         this.dust.explode(3, ev.who.x + ev.who.dir * -8, ev.who.y + 6);
         break;
       }
@@ -401,7 +397,6 @@ export class Fx {
     if (old) old.swoosh.destroy();
     const swoosh = this.scene.add.graphics().setDepth(DEPTH.swoosh);
     this.swings.set(who.id, { sprite: w, ux, uy, t: 0, ttl: ms / 1000 + 0.05, a0, sweep, spin, swoosh, lastGhost: 0 });
-    if (who instanceof Raider && (who.boss || who.huge || who.kind === 'brute')) this.shake(who.huge ? 180 : who.boss ? 120 : 80, who.huge ? 0.009 : who.boss ? 0.006 : 0.004);
   }
 
   /** Wind-up pose: lean back, grow a little, "!" overhead. Snaps forward when the strike lands (the swing). */
@@ -451,12 +446,11 @@ export class Fx {
       this.lastBlow.set(target.id, { ux, uy, push: ev.push ?? 40, crit });
       this.sfx.hit(crit);
       // The third combo hit is a critical spin; keep its camera steady, even on impact.
-      if (!crit) this.shake(60, Math.min(0.012, 0.002 + dmg * 0.0003));
       if (killed && (ev.streak ?? 0) >= 2) {
         this.scene.time.delayedCall(120, () => this.sfx.streak(ev.streak!)); // a streak is heard, not shouted
       }
     } else {
-      if (target instanceof Player) { this.shake(90, 0.005); this.sfx.hurt(); }
+      if (target instanceof Player) this.sfx.hurt();
       else if (attacker instanceof Villager) this.sfx.hit(false);
     }
     void sprites;
@@ -486,7 +480,6 @@ export class Fx {
       if (boss) {
         this.blood.explode(24, sprite.x, sprite.y - 4);
         this.gold.explode(30, sprite.x, sprite.y - 8);
-        this.shake(400, 0.012);
         this.scene.slowMo();
         this.scene.tweens.add({ targets: sprite, scaleY: 0.15, scaleX: sprite.scaleX * 1.3, alpha: 0, y: sprite.y + 4, duration: 1000, ease: 'Quad.In', onComplete: () => { this.poof(sprite.x, sprite.y - 4, 2); done(); } });
         this.sfx.kill();
@@ -570,7 +563,6 @@ export class Fx {
     const a = this.anim(who.id);
     this.scene.tweens.add({ targets: a, sx: 1.3, sy: 1.3, duration: 220, yoyo: true, repeat: 1, ease: 'Sine.InOut' });
     this.blood.explode(16, who.x, who.y - 4);
-    this.shake(300, 0.008);
     const sp = sprites.get(who.id);
     if (sp && this.scene.following) {
       const cam = this.scene.cameras.main;
@@ -582,10 +574,6 @@ export class Fx {
 
   // ---- helpers -----------------------------------------------------------------
 
-  private shake(ms: number, intensity: number): void {
-    if (this.reduced) return;
-    this.scene.cameras.main.shake(ms, intensity);
-  }
 
   /** Quick camera zoom-in and back, for crits and big kills. */
   /**
