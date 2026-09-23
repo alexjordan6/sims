@@ -402,7 +402,6 @@ export class Fx {
     const swoosh = this.scene.add.graphics().setDepth(DEPTH.swoosh);
     this.swings.set(who.id, { sprite: w, ux, uy, t: 0, ttl: ms / 1000 + 0.05, a0, sweep, spin, swoosh, lastGhost: 0 });
     if (who instanceof Raider && (who.boss || who.huge || who.kind === 'brute')) this.shake(who.huge ? 180 : who.boss ? 120 : 80, who.huge ? 0.009 : who.boss ? 0.006 : 0.004);
-    if (spin) this.shake(120, 0.004);
   }
 
   /** Wind-up pose: lean back, grow a little, "!" overhead. Snaps forward when the strike lands (the swing). */
@@ -451,8 +450,8 @@ export class Fx {
     if (byPlayer) {
       this.lastBlow.set(target.id, { ux, uy, push: ev.push ?? 40, crit });
       this.sfx.hit(crit);
-      if (crit) this.zoomBump(0.06, 60, 160);
-      this.shake(crit ? 120 : 60, Math.min(0.012, 0.002 + dmg * 0.0003));
+      // The third combo hit is a critical spin; keep its camera steady, even on impact.
+      if (!crit) this.shake(60, Math.min(0.012, 0.002 + dmg * 0.0003));
       if (killed && (ev.streak ?? 0) >= 2) {
         this.scene.time.delayedCall(120, () => this.sfx.streak(ev.streak!)); // a streak is heard, not shouted
       }
