@@ -35,8 +35,8 @@ export function preloadArt(scene: Phaser.Scene): void {
 export class Renderer {
   private ground!: Phaser.Tilemaps.TilemapLayer;
   private objects!: Phaser.Tilemaps.TilemapLayer;
-  /** crown-tops of tall trees, painted into the tile above the trunk */
-  private canopy!: Phaser.Tilemaps.TilemapLayer;
+  /** Only trees overlapping the camera need sprites; their feet determine occlusion. */
+  private trees = new Map<number, { trunk: Phaser.GameObjects.Image; crown: Phaser.GameObjects.Image }>();
   private cropT = 0;
   private sprites = new Map<number, Phaser.GameObjects.Sprite>();
   private forts = new Map<number, Phaser.GameObjects.Image>();
@@ -72,7 +72,6 @@ export class Renderer {
     const sets = [town, farm, dungeon, flora];
     this.ground = map.createBlankLayer('ground', sets)!.setDepth(DEPTH.ground);
     this.objects = map.createBlankLayer('objects', sets)!.setDepth(DEPTH.objects);
-    this.canopy = map.createBlankLayer('canopy', sets)!.setDepth(DEPTH.objects + 0.5);
     this.under = scene.add.graphics().setDepth(DEPTH.under);
     this.bars = scene.add.graphics().setDepth(DEPTH.bars);
     this.arrows = scene.add.graphics().setDepth(DEPTH.arrows).setScrollFactor(0);
@@ -84,6 +83,8 @@ export class Renderer {
 
   /** Redraw every tile and drop all sprites (after a reset). */
   rebuild(): void {
+    for (const tree of this.trees.values()) { tree.trunk.destroy(); tree.crown.destroy(); }
+    this.trees.clear();
     for (const sp of this.forts.values()) sp.destroy(); this.forts.clear();
     for (const sp of this.bows.values()) sp.destroy(); this.bows.clear();
     for (const sp of this.carries.values()) sp.destroy(); this.carries.clear();
@@ -107,6 +108,7 @@ export class Renderer {
     this.growCrops(dt);
     this.drainDirty();
     this.tintTiles();
+    this.syncTrees();
     this.syncSprites();
     this.syncItems();
     for (const ev of this.scene.fx) {
@@ -197,7 +199,6 @@ export class Renderer {
     const c = q === 0xf0f0f0 ? 0xffffff : q;
     this.ground.forEachTile((t) => { t.tint = c; });
     this.objects.forEachTile((t) => { t.tint = c; });
-    this.canopy.forEachTile((t) => { t.tint = c; });
   }
 
   private drainDirty(): void {
@@ -211,12 +212,44 @@ export class Renderer {
   private paintTile(w: World, tx: number, ty: number): void {
     const t = w.get(tx, ty)!;
     const frames = tileFrames(t, this.scene.cropDaysOf(t), this.scene.dayTime, this.scene.oldGrowthDays, this.scene.wildRipe(t));
-    const { ground, canopy } = frames;
+    const { ground } = frames;
     const { object } = frames;
     this.ground.putTileAt(ground, tx, ty);
-    this.objects.putTileAt(object, tx, ty);
-    // a tall tree's crown-top lives in the tile above; anything else clears it
-    if (ty > 0) this.canopy.putTileAt(canopy ?? EMPTY, tx, ty - 1);
+    this.objects.putTileAt(t.kind === 'tree' || t.kind === 'sapling' ? EMPTY : object, tx, ty);
+  }
+
+  /** Double-size trees, including new growth and chopping stages, sorted alongside people. */
+  private syncTrees(): void {
+    const s = this.scene, w = s.world, view = s.cameras.main.worldView;
+    const seen = new Set<number>();
+    // Tall trees extend four tiles above their base and one tile sideways.
+    const left = Math.max(0, Math.floor(view.left / TILE) - 2);
+    const right = Math.min(w.cols - 1, Math.ceil(view.right / TILE) + 2);
+    const top = Math.max(0, Math.floor(view.top / TILE) - 1);
+    const bottom = Math.min(w.rows - 1, Math.ceil(view.bottom / TILE) + 4);
+    for (let ty = top; ty <= bottom; ty++) for (let tx = left; tx <= right; tx++) {
+      const t = w.get(tx, ty)!;
+      if (t.kind !== 'tree' && t.kind !== 'sapling') continue;
+      const id = ty * w.cols + tx;
+      seen.add(id);
+      let tree = this.trees.get(id);
+      if (!tree) {
+        tree = {
+          trunk: s.add.image(0, 0, 'flora', 0).setOrigin(0.5, 1).setScale(2),
+          crown: s.add.image(0, 0, 'flora', 0).setOrigin(0.5, 1).setScale(2),
+        };
+        this.trees.set(id, tree);
+      }
+      const frames = tileFrames(t, s.cropDaysOf(t), s.dayTime, s.oldGrowthDays);
+      const x = (tx + 0.5) * TILE, y = (ty + 1) * TILE;
+      const depth = DEPTH.agents + y / 1000;
+      tree.trunk.setFrame(frames.object - GID.flora).setPosition(x, y).setDepth(depth).setTint(this.tint);
+      tree.crown.setVisible(frames.canopy !== undefined);
+      if (frames.canopy !== undefined) tree.crown.setFrame(frames.canopy - GID.flora).setPosition(x, y - 2 * TILE).setDepth(depth + 0.0001).setTint(this.tint);
+    }
+    for (const [id, tree] of this.trees) if (!seen.has(id)) {
+      tree.trunk.destroy(); tree.crown.destroy(); this.trees.delete(id);
+    }
   }
 
   /** Crops grow through the day, not just at midnight: repaint the ones whose phase moved. */
