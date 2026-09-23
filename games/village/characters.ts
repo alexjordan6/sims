@@ -4,7 +4,7 @@ import { ARMOR, DYES, PLUMES, WEAPONS, p, type ArmorSlot, type WeaponSlot } from
 // Modular pixel people: every villager, the head and every raider is drawn from layers (body,
 // hair, outfit, then armor pieces) into a cached 16x20 texture, so what someone wears shows.
 
-export type Body = 'adult' | 'kid' | 'orc' | 'imp' | 'rat' | 'shaman' | 'boss' | 'brute' | 'ogre' | 'gnome' | 'gnomekid' | 'boar';
+export type Body = 'adult' | 'kid' | 'orc' | 'imp' | 'rat' | 'shaman' | 'boss' | 'brute' | 'ogre' | 'gnome' | 'gnomekid' | 'boar' | 'troll';
 export type Outfit = 'farmer' | 'woodcutter' | 'soldier' | 'kid' | 'head' | 'none' | 'gnome';
 export type Held = 'none' | 'hoe' | 'axe' | 'sword' | 'club' | 'bow' | 'wand';
 export type HelmetStyle = 0 | 1 | 2;
@@ -78,8 +78,8 @@ export function drawCharacter(ctx: Ctx, ox: number, oy: number, l: Look, walk = 
   if (l.body === 'boar') { drawBoar(ctx, ox, oy, walk); return; }
   if (l.body === 'ogre') { drawOgre(ctx, ox, oy, walk); return; }
 
-  const big = l.body === 'boss' || l.body === 'brute';
-  const mskin = l.body === 'orc' ? '#6f9a4a' : l.body === 'imp' ? '#c84a3a' : l.body === 'shaman' ? '#8c7ab0' : l.body === 'brute' ? '#7a8a4a' : l.body === 'boss' ? '#5f7f3a' : skin;
+  const big = l.body === 'boss' || l.body === 'brute' || l.body === 'troll';
+  const mskin = l.body === 'orc' ? '#6f9a4a' : l.body === 'imp' ? '#c84a3a' : l.body === 'shaman' ? '#8c7ab0' : l.body === 'brute' ? '#7a8a4a' : l.body === 'boss' ? '#5f7f3a' : l.body === 'troll' ? '#79857a' : skin;
   const legX = 5, legY = 13;
   // shield on the back arm
   if (l.armor.shield) {
@@ -109,6 +109,13 @@ export function drawCharacter(ctx: Ctx, ox: number, oy: number, l: Look, walk = 
   P(6, 5, INK, 1, 1); P(9, 5, INK, 1, 1); // eyes
   if (l.body === 'orc' || l.body === 'brute' || l.body === 'boss') { P(6, 7, '#f4f4f4', 1, 1); P(9, 7, '#f4f4f4', 1, 1); } // tusks
   if (l.body === 'imp') { P(5, 1, INK, 1, 2); P(10, 1, INK, 1, 2); P(5, 2, '#f0d060', 1, 1); P(10, 2, '#f0d060', 1, 1); }
+  if (l.body === 'troll') {
+    P(6, 4, INK, 4, 1);                                        // a heavy brow over sunken eyes
+    P(6, 5, '#e8d45a', 1, 1); P(9, 5, '#e8d45a', 1, 1);        // yellow eyes under it
+    P(9, 7, '#f4f4f4', 1, 1);                                  // one tusk; the other is long gone
+    P(4, 2, '#4a4a3e', 8, 2); P(4, 4, '#4a4a3e', 1, 3); P(11, 4, '#4a4a3e', 1, 3); // lank mane
+    P(3, 12, '#79857a', 1, 2); P(12, 12, '#79857a', 1, 2);     // long arms, knuckles near the knee
+  }
   if (l.body === 'shaman') { P(4, 1, '#3d2a30', 8, 2); P(4, 3, '#3d2a30', 1, 4); P(11, 3, '#3d2a30', 1, 4); P(5, 0, '#f0d060', 1, 1); P(10, 0, '#f0d060', 1, 1); }
   // hair, then a hat or a helmet on top
   if (!monster && !l.armor.helmet) drawHair(ctx, ox, oy, l.hairStyle, hair);

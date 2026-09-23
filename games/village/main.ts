@@ -1,14 +1,14 @@
 import Phaser from 'phaser';
-import { SimScene, launch, button, getGui, SpatialGrid } from '@shared/index';
+import { SimScene, launch, button, getGui, Rng, SpatialGrid } from '@shared/index';
 import { launch as throwItem, type Item } from './items';
 import { World, WILD_FOOD, doorstep, buildingCenter, buildingMaxHp, hasHearth, hearthCost, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos } from './world';
 import { Villager, Raider, Player, Mover, Arrow, TOOLS, type Role, type Tool, type Order } from './agents';
 import { DEFENSE_COST, WALL_HEIGHT } from './config';
 import { Interior } from './interior';
-import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, Bolt, waveComposition } from './enemies';
+import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, Bolt, Troll, waveComposition } from './enemies';
 import { Boar, type Sounder } from './wildlife';
 import { Fog } from './fog';
-import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, BOAR, type LoadKind, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, GNOME_BEDS, GNOME_YARD, ORDER, LEVEL_PERKS, PEN_NAME, ITEM, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, zeroFood, isDish, foodCount, hasInterior, type Recipe, type DishKind, DIET_STAT_NAME, type DietStat, type FoodKind, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, BOAR, type LoadKind, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, GNOME_BEDS, GNOME_YARD, ORDER, LEVEL_PERKS, PEN_NAME, TROLL, ITEM, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, zeroFood, isDish, foodCount, hasInterior, type Recipe, type DishKind, DIET_STAT_NAME, type DietStat, type FoodKind, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
@@ -237,6 +237,7 @@ export class VillageScene extends SimScene {
     this.ogre = this.world.lair ? this.spawn(new Ogre(this.world.lair)) : null;
     this.sounders = []; this.meatClaims.clear();
     this.spawnSounders();
+    this.spawnTrolls();
     this.lairFound = false;
     this.gnomesFound = p.gnomeStart; // you already keep a toadstool cottage: the craft needs no finding
     this.fog?.reset();
@@ -301,6 +302,32 @@ export class VillageScene extends SimScene {
         break;
       }
     }
+  }
+  /**
+   * Scatter p.trolls of them over the wilderness. Solitary: no families, no homes, no registry — each is
+   * simply an agent standing where it was put, and from there it prowls wherever it likes.
+   */
+  private spawnTrolls(): void {
+    const hx = COLS / 2, hy = ROWS / 2;
+    const rng = new Rng(this.seed ^ 0x7201);
+    const placed: TilePos[] = [];
+    for (let k = 0; k < p.trolls; k++) {
+      for (let tries = 0; tries < 40; tries++) {
+        const tx = rng.int(4, COLS - 5), ty = rng.int(4, ROWS - 5), t = this.world.get(tx, ty)!;
+        if (t.building || this.world.isBlocked(tx, ty, true) || Math.hypot(tx - hx, ty - hy) < TROLL.minDist) continue;
+        if (placed.some((q) => Math.hypot(q.tx - tx, q.ty - ty) < TROLL.spacing)) continue;
+        if (this.world.lair && Math.hypot(this.world.lair.tx - tx, this.world.lair.ty - ty) < 8) continue;
+        if (!this.world.bfs({ tx, ty }, { tx: hx, ty: hy }, true).length) continue; // one that can't reach you is no threat
+        const c = World.center(tx, ty);
+        this.spawn(new Troll(c.x, c.y));
+        placed.push({ tx, ty });
+        break;
+      }
+    }
+  }
+  /** Dawn among the trolls: one that is not hunting anybody licks its wounds. */
+  private tickTrolls(): void {
+    for (const a of this.agents) if (a instanceof Troll && !a.dead && !a.hunting) a.hp = Math.min(a.maxHp, a.hp + Math.round(a.maxHp * TROLL.regen));
   }
   /** Dawn in the sounders: the young grow, the calm heal, and a family of two or more may gain a young one. */
   private tickSounders(): void {
@@ -970,6 +997,7 @@ export class VillageScene extends SimScene {
     }
     this.warnedFull = false;
     this.tickSounders();
+    this.tickTrolls();
     // the rumour: a direction to explore
     if (this.day === 2 && this.world.lair && !this.lairFound) {
       const l = this.world.lair, dx = l.tx + 2 - COLS / 2, dy = l.ty + 2 - ROWS / 2;
@@ -1334,6 +1362,13 @@ export class VillageScene extends SimScene {
         this.stats.boarsHunted++;
         this.world.dropItem('food', a.meat, a.x, a.y, 'meat', this.rng);
         this.event('food', `A ${a.name.toLowerCase()} falls — ${a.meat} meat lies where it fell${a.sounder.members.length ? '' : '; the sounder is no more'}`);
+      }
+    } else if (a instanceof Troll) {
+      // a monster, but the meat is good: it lies where it fell for the head's hands or a gnome
+      if (a.hp <= 0) {
+        this.stats.raidersKilled++;
+        this.world.dropItem('food', a.meat, a.x, a.y, 'meat', this.rng);
+        this.event('raid', `A troll falls — ${a.meat} meat lies where it fell`);
       }
     } else if (a instanceof Raider) {
       if (a.carrying && !a.carrying.dead) { const kid = a.carrying; kid.carriedBy = null; a.carrying = null; this.event('grow', `${kid.name} was rescued!`, true); }
@@ -2210,7 +2245,9 @@ export class VillageScene extends SimScene {
         const near = this.nearestRaider(pl.x, pl.y, 40);
         if (near) return 'E: attack!';
         const game = this.nearestRaider(pl.x, pl.y, 40, true);
-        if (game?.wild && !game.lurking) return `E: strike the ${game.name.toLowerCase()} — it and its sounder will charge you (${game instanceof Boar ? game.meat : 0} meat)`;
+        if (game?.wild && !game.lurking) return game instanceof Boar
+          ? `E: strike the ${game.name.toLowerCase()} — it and its sounder will charge you (${game.meat} meat)`
+          : `E: attack the ${game.name.toLowerCase()} (${game instanceof Troll ? game.meat : 0} meat)`;
         return t?.tall ? 'E: mow the long grass (a swing clears its arc)' : 'E: swing sword';
       }
       case 'pen': {

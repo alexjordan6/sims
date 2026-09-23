@@ -107,6 +107,8 @@ export const p = live(
     bruteWallMul: [D.bruteWallMul, 1, 6, 0.5, 'A brute\'s wall damage as a multiple of its 24-damage blow.'],
     boarBreed: [D.boarBreed, 0, 1, 0.05, 'Daily chance a sounder of two or more boars gains a young one (up to 5 a sounder). Wipe a sounder out and it is gone.'],
     boarDmg: [D.boarDmg, 1, 30, 1, 'Damage per blow from a provoked boar. Boars never raid; they charge whoever strikes them.'],
+    trolls: [D.trolls, 0, 400, 5, 'Trolls scattered over the map at NEW VILLAGE. Solitary, hostile on sight and never leashed — a chase can carry one into the village. The count is the difficulty dial, not their stats.'],
+    trollDmg: [D.trollDmg, 1, 30, 1, 'Damage per blow from a troll.'],
   }, 'enemies'),
   params({
     fog: [D.fog, 'Fog of war. Off lifts it everywhere; on drops it back over the unexplored.'],
@@ -307,7 +309,7 @@ export function hasInterior(k: BuildingKind): k is InteriorKind { return (INTERI
 
 // ---- bodies ---------------------------------------------------------------------------------
 /** How hard a body is to push aside when two overlap: the lighter one gives way (see VillageScene.separate). */
-export const MASS = { kid: 0.5, villager: 1, player: 2, raider: 1, brute: 2, ogre: 10, warlord: 3, rat: 0.3, snatcher: 0.8, boar: 1.5 } as const;
+export const MASS = { kid: 0.5, villager: 1, player: 2, raider: 1, brute: 2, ogre: 10, warlord: 3, rat: 0.3, snatcher: 0.8, boar: 1.5, troll: 1.2 } as const;
 
 // ---- items on the ground --------------------------------------------------------------------
 /** Thrown food, dropped armfuls and raider loot are free items with a pixel position and a little physics (see items.ts). */
@@ -399,6 +401,28 @@ export const BOAR = {
   spacing: 14,
 } as const;
 
+// ---- trolls ---------------------------------------------------------------------------------
+/**
+ * Solitary monsters scattered over the map at generation — no families, no home, no leash. A troll
+ * wanders the wilderness, and anything it lays eyes on it hunts until that quarry is dead or indoors,
+ * however far the chase goes. How many there are is p.trolls; how hard they hit is p.trollDmg.
+ */
+export const TROLL = {
+  hp: 30, speed: 33, huntSpeed: 44, radius: 3,
+  /** the blow: reach in px, wind-up and recovery in seconds */
+  reach: 13, windup: 0.35, recover: 0.6,
+  /** tiles it can see prey at, and seconds between looking for a nearer quarry */
+  sight: 13, retarget: 1.5,
+  /** tiles it drifts per wandering leg */
+  roam: 9,
+  /** meat a slain troll leaves where it fell */
+  meat: 3,
+  /** share of max HP a troll that is not hunting heals each dawn */
+  regen: 0.15,
+  /** map: least tiles from the village centre one may start, and least between two of them */
+  minDist: 24, spacing: 4,
+} as const;
+
 // ---- armor ----------------------------------------------------------------------------------
 export type ArmorSlot = 'helmet' | 'chest' | 'legs' | 'shield';
 export interface ArmorTier { name: string; wood: number; scrap: number; hp: number; reduce: number; speed: number; block: number }
@@ -466,7 +490,7 @@ export const HEARTH_WOOD: Record<BuildingKind, readonly [number, number, number,
   gnomehouse: [0, 1, 1, 2],
 };
 /** scrap iron looted from slain raiders */
-export const SCRAP_DROP = { raider: 2, brute: 4, warlord: 10, snatcher: 1, shaman: 2, rat: 0, ogre: 30, wrecker: 3, boar: 0 } as const;
+export const SCRAP_DROP = { raider: 2, brute: 4, warlord: 10, snatcher: 1, shaman: 2, rat: 0, ogre: 30, wrecker: 3, boar: 0, troll: 0 } as const;
 
 // ---- building damage ------------------------------------------------------------------------
 /** Hit points per building level (index = level). Every kind must appear here, so new buildings are destructible by default; 0 means it can't be hurt (the Ogre's lair). */

@@ -1,6 +1,6 @@
 import { Mover, Raider, Villager, Player, type RaiderOpts } from './agents';
 import { World, BUILDINGS, type TilePos, type Building } from './world';
-import { COLS, ROWS, TILE, OGRE, BEDTIME, WRECKER, p, MASS } from './config';
+import { COLS, ROWS, TILE, OGRE, BEDTIME, WRECKER, TROLL, p, MASS } from './config';
 import type { VillageScene } from './main';
 
 // Enemy kinds beyond the plain raider. Each has a different job so raids need different answers.
@@ -733,5 +733,94 @@ export function waveComposition(w: number, boss = false): Record<'raider' | 'rat
     case 4: return { raider: 3, rat: 0, snatcher: 1, brute: 1, shaman: 0, wrecker: 2 };
     case 5: return { raider: 3, rat: 16, snatcher: 1, brute: 0, shaman: 1, wrecker: 2 };
     default: return { raider: 3, rat: 0, snatcher: 2, brute: 1, shaman: 1, wrecker: 3 };
+  }
+}
+
+/**
+ * A troll: one of p.trolls monsters strewn over the map when it is generated. Unlike boars they keep no
+ * families and no home — each one wanders the wilderness alone, and the moment it lays eyes on the head
+ * or a villager it hunts them. There is no leash and no calming down: it follows its quarry until that
+ * quarry is dead or safely indoors, which means a chase begun at the wood's edge can end in your square.
+ * It is `wild` (it arrives with no raid) and `lairBound` (it starts and ends none), but never `harmless`,
+ * so soldiers cut it down, towers shoot it and villagers run from it like any other foe.
+ */
+export class Troll extends Raider {
+  override get mass(): number { return MASS.troll; }
+  /** seconds until it looks around for a nearer quarry */
+  private lookT = 0;
+  /** seconds until it re-reads the path to a quarry that keeps moving */
+  private pathT = 0;
+  /** seconds until it picks somewhere new to wander */
+  private roamT = 0;
+
+  constructor(x: number, y: number) {
+    super(x, y);
+    this.kind = 'troll';
+    this.name = 'Troll';
+    this.wild = true;      // no raid brought it here
+    this.lairBound = true; // ...so it neither starts a raid nor holds one open
+    this.harmless = false; // but it is nobody's friend
+    this.hp = this.maxHp = TROLL.hp;
+    this.dmg = p.trollDmg;
+    this.speed = TROLL.speed;
+    this.radius = TROLL.radius;
+    this.color = 0x6f8a4a;
+    this.task = 'prowling';
+  }
+
+  /** whoever it is hunting (for the inspector and the tests) */
+  get quarry(): Mover | null { return this.target; }
+  get hunting(): boolean { return !!this.target && !this.target.dead && !this.target.hidden; }
+  /** meat this body drops */
+  get meat(): number { return TROLL.meat; }
+
+  /** The nearest person it can actually see: the head, or any villager who is out of doors. */
+  private spot(s: VillageScene): Mover | null {
+    let best: Mover | null = null, bd = Infinity;
+    s.grid.forEachInRadius(this.x, this.y, TROLL.sight * TILE, (o, d2) => {
+      if (!(o instanceof Mover) || o.dead || o.hidden || d2 >= bd) return;
+      if (o instanceof Player || (o instanceof Villager && !o.carriedBy && o.role !== 'infant')) { bd = d2; best = o; }
+    });
+    return best;
+  }
+
+  update(dt: number, s: VillageScene): void {
+    this.tickTimers(dt);
+    if (this.frozen(dt)) return;
+    if (this.siege && this.breach(dt, s)) return;
+    if (this.attackTick(dt, s)) return;
+
+    // look around now and then; a nearer quarry is worth switching to
+    this.lookT -= dt;
+    if (this.lookT <= 0) { this.lookT = TROLL.retarget; const seen = this.spot(s); if (seen) this.target = seen; }
+    if (this.target && (this.target.dead || this.target.hidden)) { this.target = null; this.clearGoal(); this.roamT = 0; }
+
+    if (this.target) {
+      this.speed = TROLL.huntSpeed;
+      this.task = 'hunting';
+      if (this.startAttack(s, this.target, this.dmg, TROLL.reach, TROLL.windup, TROLL.recover)) return;
+      // the quarry moves, so the path is re-read on a timer rather than every frame (there are a lot of trolls)
+      this.pathT -= dt;
+      if (this.pathT <= 0) { this.pathT = 0.5; this.setGoal(s, this.target.tile.tx, this.target.tile.ty); }
+      if (!this.path.length && (this.dist(this.target) > 14 || !s.world.lineClear(this, this.target) || this.target.elevated) && this.breach(dt, s)) return;
+      this.followPath(dt);
+      return;
+    }
+
+    // nothing in sight: prowl, drifting a few tiles at a time
+    this.speed = TROLL.speed;
+    this.task = 'prowling';
+    this.roamT -= dt;
+    if (this.roamT <= 0 || this.followPath(dt)) {
+      this.roamT = s.rng.range(3, 8);
+      this.vx = this.vy = 0;
+      const here = this.tile;
+      for (let i = 0; i < 12; i++) {
+        const tx = here.tx + s.rng.int(-TROLL.roam, TROLL.roam), ty = here.ty + s.rng.int(-TROLL.roam, TROLL.roam);
+        if (!s.world.inBounds(tx, ty) || s.world.isBlocked(tx, ty, true)) continue;
+        this.setGoal(s, tx, ty, true);
+        if (this.path.length) break;
+      }
+    }
   }
 }

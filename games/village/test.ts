@@ -3,17 +3,20 @@ import type { VillageScene } from './main';
 import { World, WILD_FOOD, doorstep, buildingCenter, hearthCost, BUILDINGS, type BuildingKind } from './world';
 import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
-import { Brute, Rat, Ogre, Wrecker, waveComposition } from './enemies';
+import { Brute, Rat, Ogre, Wrecker, Troll, waveComposition } from './enemies';
 import { Boar } from './wildlife';
-import { COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, BOAR, GNOME_HOME, RECIPES, DISHES, CROP_KINDS, zeroFood } from './config';
+import { COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, BOAR, GNOME_HOME, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
 const output = document.getElementById('test-results')!, summary = document.getElementById('test-summary')!;
 const assert = (ok: unknown, message: string) => { if (!ok) throw new Error(message); output.textContent += `PASS ${message}\n`; };
-function fresh(wild = false): VillageScene {
+/** `wild` keeps the boars, `trolls` keeps the trolls — both wander into timed checks otherwise, and a troll fights back. */
+function fresh(wild = false, trolls = false): VillageScene {
   const s = scene(); s.reset(42); s.screen = 'playing'; s.paused = true; s.wood = 150; s.food = 150; s.fx.length = 0;
   for (const t of s.world.tiles) t.tall = undefined; // mown: the checks below time walks; the long grass checks raise it where they need it
-  if (!wild) { for (const a of s.agents) if (a instanceof Boar) a.dead = true; s.removeDead(); s.sounders = []; } // no stray sounder wanders into a check
+  if (!wild) { for (const a of s.agents) if (a instanceof Boar) a.dead = true; s.sounders = []; } // no stray sounder wanders into a check
+  if (!trolls) for (const a of s.agents) if (a instanceof Troll) a.dead = true; // nor a troll, which would fight back
+  s.removeDead();
   (s as unknown as { ui: { showScreen(v: null): void } }).ui.showScreen(null);
   document.querySelector('.ctrl-panel')?.classList.remove('open');
   return s;
@@ -897,6 +900,56 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(s.pantry.stew === 6, 'but once the raw food is gone the dishes are eaten rather than nothing');
     p.gnomeStart = wasGnome; s = fresh();
     assert(s.world.houses.length > 0 && !!s.world.wildGnomeHouse && !s.gnomesFound, 'turning the gnome start off restores the founding family');
+
+    // ---- trolls ---------------------------------------------------------------------------
+    const wasTrolls = p.trolls;
+    p.trolls = 12; s = fresh(false, true);
+    const trolls = () => s.agents.filter((a) => a instanceof Troll && !a.dead) as Troll[];
+    assert(trolls().length === 12, `the map is stocked with p.trolls of them (${trolls().length})`);
+    p.trolls = 0; s = fresh(false, true);
+    assert(trolls().length === 0, 'and the slider can clear them off it entirely');
+    p.trolls = 8; s = fresh(false, true);
+    const hx = COLS / 2, hy = ROWS / 2;
+    assert(trolls().every((t) => Math.hypot(t.tile.tx - hx, t.tile.ty - hy) >= TROLL.minDist), 'none of them starts on top of the village');
+    assert(trolls().every((t) => s.world.bfs(t.tile, { tx: hx, ty: hy }, true).length > 0), 'and every one of them can reach it');
+    assert(!(trolls()[0] as unknown as { sounder?: unknown }).sounder, 'they keep no families');
+
+    const tr = trolls()[0];
+    assert(tr.wild && tr.lairBound && !tr.harmless && !s.raidActive, 'a troll is wild and no raid, but nobody\'s friend either');
+    assert(tr.hp === TROLL.hp && tr.dmg === p.trollDmg, 'it is raider-tier, and its blow is on a slider');
+
+    // hostile on sight: it hunts a villager it can see, with no provoking
+    s = fresh(); clearing(s);
+    const lone = s.spawn(new Troll(World.center(120, 100).x, World.center(120, 100).y));
+    const prey = s.spawn(new Villager(World.center(126, 100).x, World.center(126, 100).y, s.world.houses[0], 'farmer', 20, 'Bait', s.mods));
+    prey.update = () => {};
+    assert(!lone.hunting, 'a troll that has seen nobody is only prowling');
+    step(s, 2);
+    assert(lone.quarry === prey && lone.hunting && lone.task === 'hunting', 'it hunts a villager on sight, unprovoked');
+    const gap0 = lone.dist(prey); step(s, 3);
+    assert(lone.dist(prey) < gap0, `and closes on them (${gap0.toFixed(0)}px to ${lone.dist(prey).toFixed(0)}px)`);
+
+    // no leash: distance never calls it off, only losing the quarry does
+    s = fresh(); clearing(s);
+    const far = s.spawn(new Troll(World.center(120, 100).x, World.center(120, 100).y));
+    const runner = s.spawn(new Villager(World.center(125, 100).x, World.center(125, 100).y, s.world.houses[0], 'farmer', 20, 'Runner', s.mods));
+    runner.update = () => {};
+    step(s, 2); assert(far.quarry === runner, 'it picks up the scent');
+    Object.assign(runner, World.center(120, 60)); // bolt 40 tiles away, far past any boar's leash
+    step(s, 3);
+    assert(far.quarry === runner && far.hunting, 'and however far the quarry runs, it keeps coming');
+    runner.hidden = true; step(s, 2);
+    assert(far.quarry !== runner, 'only getting indoors shakes it off');
+
+    // a felled troll leaves meat, not scrap
+    s = fresh(); clearing(s);
+    const doomed = s.spawn(new Troll(World.center(122, 100).x, World.center(122, 100).y));
+    doomed.hp = 1; doomed.hit(99, true);
+    s.tick(1 / 60);
+    const meatLeft = s.world.items.filter((it) => it.kind === 'food' && it.food === 'meat');
+    assert(meatLeft.length === 1 && meatLeft[0].n === TROLL.meat, `it drops ${TROLL.meat} meat where it fell`);
+    assert(!s.world.items.some((it) => it.kind === 'scrap'), 'and no scrap iron — it carried none');
+    p.trolls = wasTrolls;
 
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;
