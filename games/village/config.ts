@@ -337,7 +337,9 @@ export const BOAR = {
   /** days before a young boar is grown (drawn small until then) */
   youngDays: 2, youngScale: 0.65,
   /** map: sounders placed at generation, boars per sounder, most a sounder grows to, least tiles from the village centre */
-  sounders: 6, sounderSize: [2, 4] as const, sounderCap: 5, minDist: 30,
+  sounders: 14, sounderSize: [3, 6] as const, sounderCap: 8, minDist: 30,
+  /** least tiles between two sounders' homes — the wilderness only holds so many families before they crowd */
+  spacing: 14,
 } as const;
 
 // ---- armor ----------------------------------------------------------------------------------

@@ -268,7 +268,7 @@ export class VillageScene extends SimScene {
       for (let tries = 0; tries < 60; tries++) {
         const tx = this.rng.int(6, COLS - 7), ty = this.rng.int(6, ROWS - 7), t = this.world.get(tx, ty)!;
         if (t.kind !== 'grass' || t.trail || t.building || Math.hypot(tx - hx, ty - hy) < BOAR.minDist) continue;
-        if (this.sounders.some((sd) => Math.hypot(sd.home.tx - tx, sd.home.ty - ty) < 20)) continue;
+        if (this.sounders.some((sd) => Math.hypot(sd.home.tx - tx, sd.home.ty - ty) < BOAR.spacing)) continue;
         if (this.world.lair && Math.hypot(this.world.lair.tx - tx, this.world.lair.ty - ty) < 14) continue;
         if (!this.world.bfs({ tx, ty }, { tx: hx, ty: hy }, true).length) continue;
         this.foundSounder(tx, ty, this.rng.int(BOAR.sounderSize[0], BOAR.sounderSize[1]));
