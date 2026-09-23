@@ -565,6 +565,19 @@ export class Villager extends Mover {
   haul(kind: LoadKind): number { return this.gnome ? (kind === 'food' && this.load?.food === 'meat' ? BOAR.meat : 1) : Math.round(HAUL.villager[kind] * p.haulMul); }
   /** the meat lying in the wild this gnome is on its way to (claimed in `VillageScene.meatClaims`, so two never chase one ham) */
   private fetching: Item | null = null;
+  followingPlayer = false;
+
+  /** Cancel the current job without losing the carried food or leaving a meat claim behind. */
+  followPlayer(s: VillageScene, follow: boolean): void {
+    this.followingPlayer = follow;
+    if (this.fetching) this.dropFetch(s);
+    this.clearGoal();
+    this.workTimer = 0;
+    this.thinkTimer = 0;
+    this.companyWait = 0;
+    this.delivering = false;
+    this.task = follow ? 'following you' : 'off foraging';
+  }
   private companyWait = 0;
   private companyRest = 0;
 
@@ -572,7 +585,7 @@ export class Villager extends Mover {
   private foragingParty(s: VillageScene): Villager[] {
     const adults = s.villagers().filter(v => v.role === 'gnome' && !v.dead && v.home === this.home).sort((a, b) => a.id - b.id);
     const start = Math.floor(adults.indexOf(this) / 3) * 3;
-    return adults.slice(start, start + 3).filter(v => v !== this && !v.hidden && !v.carriedBy && v.task !== 'fleeing');
+    return adults.slice(start, start + 3).filter(v => v !== this && !v.hidden && !v.carriedBy && !v.followingPlayer && v.task !== 'fleeing');
   }
 
   /** Prefer the patch a companion is already working, without chasing them across the map. */
@@ -627,6 +640,16 @@ export class Villager extends Mover {
   private civilUpdate(dt: number, s: VillageScene, job: 'farm' | 'wood' | 'forage'): void {
     const farmer = job === 'farm';
     if (s.nearestRaider(this.x, this.y, 90)) { this.task = 'fleeing'; this.delivering = false; if (this.fetching) this.dropFetch(s); this.goHome(s, dt); return; }
+
+    if (job === 'forage' && this.followingPlayer) {
+      const gap = (2 + this.id % 3 * 0.5) * TILE;
+      if (this.dist(s.player) > gap) {
+        this.setGoal(s, s.player.tile.tx, s.player.tile.ty);
+        this.followPath(dt);
+      } else { this.clearGoal(); this.vx = this.vy = 0; }
+      this.task = s.player.hidden ? 'waiting outside for you' : 'following you';
+      return;
+    }
 
     if (this.workTimer > 0) {
       this.workTimer -= dt;

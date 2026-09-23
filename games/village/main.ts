@@ -405,6 +405,7 @@ export class VillageScene extends SimScene {
     kb.on('keydown-F', () => this.cycleVariant());
     kb.on('keydown-M', () => this.toggleMute());
     kb.on('keydown-Z', () => this.cycleZoom());
+    kb.on('keydown-H', (e: KeyboardEvent) => { if (!e.repeat) this.summonGnomes(); });
 
     super.create(); // creates gfx + hud, then calls reset() -> setup()
     kb.removeAllListeners('keydown-SPACE'); // Esc handles pause; Space is the dodge roll
@@ -1677,6 +1678,21 @@ export class VillageScene extends SimScene {
   }
 
   // ---- player actions -------------------------------------------------------
+
+  /** H / the whistle button calls nearby adult gnomes; a second call releases the followers. */
+  summonGnomes(): void {
+    if (this.screen !== 'playing' || this.paused || this.interior.active) return;
+    const adults = this.villagers().filter(v => v.role === 'gnome' && !v.dead);
+    const following = adults.filter(v => v.followingPlayer);
+    if (following.length) {
+      for (const v of following) v.followPlayer(this, false);
+      this.event('info', 'The gnomes return to foraging.', true);
+      return;
+    }
+    const nearby = adults.filter(v => !v.hidden && !v.carriedBy && v.dist(this.player) <= 20 * TILE);
+    for (const v of nearby) v.followPlayer(this, true);
+    this.event('info', nearby.length ? `${nearby.length} gnomes answer your call. H or RELEASE GNOMES sends them back to work.` : 'No grown gnomes within calling distance (20 tiles).', true);
+  }
 
   shoot(who: Mover, dx: number, dy: number, dmg: number): boolean {
     if (this.arrows <= 0) { who.task = 'out of arrows'; if (who === this.player) this.event('info', 'Out of arrows. Craft a bundle at the barracks.'); return false; }
