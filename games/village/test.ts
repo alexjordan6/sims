@@ -5,7 +5,7 @@ import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, Wrecker, waveComposition } from './enemies';
 import { Boar } from './wildlife';
-import { COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, BOAR, GNOME_HOME } from './config';
+import { COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, BOAR, GNOME_HOME, RECIPES, DISHES, CROP_KINDS, zeroFood } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
 const output = document.getElementById('test-results')!, summary = document.getElementById('test-summary')!;
@@ -480,7 +480,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     const eater = s.spawn(new Villager(World.center(123, 97).x, World.center(123, 97).y, s.world.houses[0], 'kid', 1, 'Eater', s.mods)); eater.pen = 'farmer'; eater.mealAt = 0; s.day = 9;
     const careWas = eater.care; step(s, 8);
     assert(eater.diet.carrot > 0 && eater.ateDay === 9, `bites go on the diet (${JSON.stringify(eater.diet)})`);
-    eater.update = () => {}; eater.diet = { wheat: 0, carrot: 0, tomato: 0, berry: 0, mushroom: 0, hazelnut: 0, garlic: 0, burdock: 0, meat: 0 };
+    eater.update = () => {}; eater.diet = zeroFood();
     eater.eatBite('mushroom', 0.5); eater.eatBite('mushroom', 0.5); assert(eater.care === careWas + 1, 'a mushroom meal is worth one care point');
     eater.diet.carrot = p.dietFull; eater.diet.wheat = p.dietFull / 2;
     const live = eater.dietNow(); assert(Math.abs(live.speed - DIET_CAP.speed * p.dietMul) < 1e-9 && Math.abs(live.hp - DIET_CAP.hp * p.dietMul / 2) < 1e-9 && live.work === 0, `the diet projects its bonuses (${JSON.stringify(live)})`);
@@ -820,6 +820,84 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert((s.player.tool as string) === 'gnomehouse' && s.world.gnomeHouses.length === before + 1 && s.wood === wood - COST.gnomehouse, 'and now you can raise your own');
       assert(s.villagers().filter((v) => v.gnome).length === 4, 'which comes with a couple of its own');
     }
+    // ---- the gnome start ------------------------------------------------------------------
+    const wasGnome = p.gnomeStart, wasPeace = p.peaceful;
+    p.gnomeStart = true; s = fresh();
+    assert(s.world.houses.length === 0 && s.world.allBarracks.length === 0, 'the gnome start raises no house and no barracks');
+    assert(!s.world.wildGnomeHouse, 'and leaves no hidden cottage to find twice');
+    assert(!!s.world.granary && !!s.world.woodyard, 'but the granary and woodyard still stand');
+    assert(!s.world.tiles.some((t) => t.kind === 'crop'), 'and no field is sown');
+    const cot = s.world.gnomeStart!;
+    assert(!!cot && !cot.wild && cot.kind === 'gnomehouse', 'a toadstool cottage stands in the clearing, already yours');
+    assert(s.villagers().filter((v) => v.gnome && v.isAdult).length === 2, 'with its two founders');
+    assert(s.gnomesFound && !s.toolLocked('gnomehouse'), 'and the craft already learned');
+    const step0 = World.center(doorstep(cot).tx, doorstep(cot).ty);
+    assert(Math.hypot(s.player.x - step0.x, s.player.y - step0.y) < 24, 'the head starts on its doorstep');
+    s.pantry.wheat = 40; s.player.tool = 'basket';
+    Object.assign(s.player, World.center(s.world.granary!.tx + 1, s.world.granary!.ty + BUILDINGS.granary.h));
+    s.fillBasket();
+    assert(s.player.load?.kind === 'food' && s.player.load.n > 0, 'the basket still fills at the granary');
+    s.reset(7); assert(s.world.houses.length === 0 && s.gnomesFound, 'and a new village keeps the gnome start');
+
+    // ---- peace ----------------------------------------------------------------------------
+    p.peaceful = true; s = fresh(); s.day = 1;
+    assert(!Number.isFinite(s.nextRaidDay) && !s.isRaidDay(p.firstRaidDay), 'nobody is marching while peace is on');
+    for (let d = 0; d < p.bossDay + 1 && !s.result; d++) { s.day++; s.newDay(); }
+    const raiders = () => s.agents.filter((a) => a instanceof Raider && !a.lairBound);
+    assert(raiders().length === 0 && !s.raidActive, 'no raid ever comes');
+    assert(!s.journal.some((j) => /Raiders sighted|Scouts report|Warlord marches/.test(j.text)), 'and no warning is ever posted');
+    assert(s.result?.won === true && s.day >= p.bossDay, 'outlasting the day the Warlord would have come wins the run');
+    s = fresh(); s.spawnRaid();
+    assert(s.agents.some((a) => a instanceof Raider && !a.lairBound) && s.raidActive, 'but a raid called by hand still arrives');
+    assert(!!s.ogre, 'and the Ogre is untouched');
+    p.peaceful = wasPeace;
+
+    // ---- inside the cottage, and the pot ---------------------------------------------------
+    s = fresh(); const lodge = s.world.gnomeStart!;
+    Object.assign(s.player, World.center(doorstep(lodge).tx, doorstep(lodge).ty));
+    assert(s.doorAt() === lodge, 'a gnome cottage has a door you can push');
+    s.interior.enter(lodge);
+    assert(s.interior.active && s.interior.building === lodge, 'and you can walk inside');
+    for (const k of FOOD_KINDS) s.pantry[k] = 0;
+    s.pantry.mushroom = 2; s.pantry.burdock = 1;
+    lodge.warm = false; s.openCooking(lodge);
+    assert(/cold/i.test(s.cookProblem(RECIPES.stew) ?? ''), 'a cold hearth cooks nothing');
+    lodge.warm = true;
+    assert(s.cookProblem(RECIPES.stew) === null && s.cook(RECIPES.stew), 'a lit one does');
+    assert(s.pantry.stew === RECIPES.stew.makes && s.pantry.mushroom === 0 && s.pantry.burdock === 0, 'and the pot spends exactly what the recipe asks');
+    assert(/need/.test(s.cookProblem(RECIPES.stew) ?? ''), 'then says what is missing once the ingredients run out');
+    assert(/need/.test(s.cookProblem(RECIPES.roast) ?? ''), 'as it does for a dish never started');
+
+    // a dish is worth far more to a growing child than the raw food it was made of
+    const fedKid = s.spawn(new Villager(0, 0, lodge, 'kid', 1, 'Fed', s.mods)); fedKid.update = () => {};
+    const rawKid = s.spawn(new Villager(0, 0, lodge, 'kid', 1, 'Raw', s.mods)); rawKid.update = () => {};
+    fedKid.diet.stew = p.dietFull; rawKid.diet.tomato = p.dietFull;
+    assert(fedKid.dietNow().work > rawKid.dietNow().work * 2, `a child raised on stew far outgrows one raised on raw (${fedKid.dietNow().work.toFixed(2)} vs ${rawKid.dietNow().work.toFixed(2)} work)`);
+
+    // eating one: a meal now, and a while of being better at something
+    s.player.hp = 10; s.simTime = 100;
+    assert(s.buffMul('work') === 1 && s.workHits(3) === 3, 'an unfed head works at the usual pace');
+    assert(s.eatDish('stew') && s.player.hp > 10, 'eating a dish heals');
+    assert(s.buffMul('work') > 1 && s.workHits(3) === 2, 'and a stew takes a swing off every tool');
+    assert(s.pantry.stew === RECIPES.stew.makes - 1, 'one serving is spent');
+    s.simTime += RECIPES.stew.buffSecs + 1;
+    assert(s.buffMul('work') === 1 && s.workHits(3) === 3, 'and it wears off');
+    s.pantry.roast = 1; s.eatDish('roast');
+    assert(s.buffMul('dmg') > 1 && s.buffMul('work') === 1, 'a new dish replaces the last one');
+    assert(!s.eatDish('roast') && !s.eatDish('wheat'), 'you cannot eat what you do not have, and raw food is not a dish');
+
+    // dishes are food all the way down, but never a crop and never wild
+    assert(!DISHES.some((d) => CROP_KINDS.includes(d)) && !DISHES.some((d) => Object.values(WILD_FOOD).includes(d)), 'and nothing will ever sow or forage one');
+    for (const k of FOOD_KINDS) s.pantry[k] = 0;
+    s.pantry.stew = 10; s.pantry.wheat = 5;
+    assert(s.fullestKind() === 'wheat', 'rations come out of the raw bins first');
+    s.food -= 5;
+    assert(s.pantry.stew === 10 && s.pantry.wheat === 0, 'so a dawn of eating leaves the dishes alone');
+    s.food -= 4;
+    assert(s.pantry.stew === 6, 'but once the raw food is gone the dishes are eaten rather than nothing');
+    p.gnomeStart = wasGnome; s = fresh();
+    assert(s.world.houses.length > 0 && !!s.world.wildGnomeHouse && !s.gnomesFound, 'turning the gnome start off restores the founding family');
+
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;
   } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); }
@@ -834,6 +912,10 @@ document.querySelectorAll<HTMLButtonElement>('[data-preview]').forEach(btn => bt
   } else if (kind === 'forest') {
     const t = s.world.nearest(s.player.x, s.player.y, (t) => t.biome === 'deepwood' && t.kind === 'grass');
     if (t) Object.assign(s.player, World.center(t.tx, t.ty)); s.fitCamera();
+  } else if (kind === 'gnomehouse' || kind === 'cooking') {
+    const b = s.world.place('gnomehouse', 135, 95); b.level = 3; b.warm = true; s.foundGnomes(b);
+    s.interior.enter(b); s.interior.x = 162; s.interior.y = 140;
+    if (kind === 'cooking') { s.pantry.mushroom = 4; s.pantry.burdock = 2; s.pantry.berry = 3; s.pantry.wheat = 5; s.openCooking(b); }
   } else {
     const b = s.world.buildings.find(b => b.kind === kind) ?? s.world.place('tavern', 135, 95); b.level = 3;
     s.interior.enter(b); s.interior.x = 162; s.interior.y = 140;

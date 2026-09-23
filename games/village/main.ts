@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { SimScene, launch, button, SpatialGrid } from '@shared/index';
+import { SimScene, launch, button, getGui, SpatialGrid } from '@shared/index';
 import { launch as throwItem, type Item } from './items';
 import { World, WILD_FOOD, doorstep, buildingCenter, buildingMaxHp, hasHearth, hearthCost, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos } from './world';
 import { Villager, Raider, Player, Mover, Arrow, TOOLS, type Role, type Tool, type Order } from './agents';
@@ -8,7 +8,7 @@ import { Interior } from './interior';
 import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, Bolt, waveComposition } from './enemies';
 import { Boar, type Sounder } from './wildlife';
 import { Fog } from './fog';
-import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, BOAR, type LoadKind, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, GNOME_BEDS, GNOME_YARD, ORDER, LEVEL_PERKS, PEN_NAME, ITEM, FOODS, FOOD_KINDS, DIET_STAT_NAME, type FoodKind, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, BOAR, type LoadKind, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, GNOME_BEDS, GNOME_YARD, ORDER, LEVEL_PERKS, PEN_NAME, ITEM, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, zeroFood, isDish, foodCount, hasInterior, type Recipe, type DishKind, DIET_STAT_NAME, type DietStat, type FoodKind, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
@@ -59,7 +59,7 @@ export class VillageScene extends SimScene {
   world!: World;
   player!: Player;
   /** the granary, by kind of food; `food` is the total (its setter keeps the old callers working: gains land in wheat, spending drains the fullest kind first) */
-  pantry: Record<FoodKind, number> = { wheat: 0, carrot: 0, tomato: 0, berry: 0, mushroom: 0, hazelnut: 0, garlic: 0, burdock: 0, meat: 0 };
+  pantry: Record<FoodKind, number> = zeroFood();
   get food(): number { let n = 0; for (const k of FOOD_KINDS) n += this.pantry[k]; return n; }
   set food(v: number) {
     let delta = v - this.food;
@@ -72,8 +72,18 @@ export class VillageScene extends SimScene {
     }
     for (const k of FOOD_KINDS) if (this.pantry[k] < 1e-9) this.pantry[k] = 0;
   }
-  /** the kind the granary holds most of (null when empty) */
-  fullestKind(): FoodKind | null { let best: FoodKind | null = null, bn = 0; for (const k of FOOD_KINDS) if (this.pantry[k] > bn) { bn = this.pantry[k]; best = k; } return best; }
+  /**
+   * The kind rations come out of: whatever the granary holds most of, raw before cooked — nobody hands
+   * out the gnomes' stew while there is wheat in the bin. Null only when the granary is truly empty.
+   */
+  fullestKind(): FoodKind | null {
+    const most = (kinds: readonly FoodKind[]): FoodKind | null => {
+      let best: FoodKind | null = null, bn = 0;
+      for (const k of kinds) if (this.pantry[k] > bn) { bn = this.pantry[k]; best = k; }
+      return best;
+    };
+    return most(RAW_KINDS) ?? most(DISHES);
+  }
   wood = 0;
   arrows = 30;
   /** scrap iron looted from raiders; forges iron and steel armor */
@@ -82,6 +92,10 @@ export class VillageScene extends SimScene {
   armoryFor: Mover | null = null;
   /** the barracks whose chest the open armory restocks */
   armoryChest: Building | null = null;
+  /** the COOKING panel's cottage, or null when the panel is closed */
+  cookingAt: Building | null = null;
+  /** the one dish still warming the head: a new meal replaces the last, and sim time runs it out */
+  buff: { stat: Exclude<DietStat, 'care'>; mul: number; until: number; dish: FoodKind } | null = null;
   interior = new Interior(this);
   posting: Villager | null = null;
   /** the shaman wand's squad: fighters picked with the left button; orders go to them (or to everyone when empty) */
@@ -176,14 +190,15 @@ export class VillageScene extends SimScene {
   }
   wildRipe(t: { kind: string; stage: number }): boolean { const k = WILD_FOOD[t.kind as keyof typeof WILD_FOOD]; return !!k && t.stage >= this.regrowDays(k); }
 
-  /** Next raid day; the warlord's day caps the schedule. */
+  /** Next raid day; the warlord's day caps the schedule. Infinity when nobody is coming (p.peaceful). */
   get nextRaidDay(): number {
+    if (p.peaceful) return Infinity;
     const first = p.firstRaidDay, every = this.raidEvery;
     const next = this.day < first ? first : first + (Math.floor((this.day - first) / every) + 1) * every;
     return Math.min(next, p.bossDay);
   }
   /** Is `day` a raid day (the warlord's day aside)? */
-  isRaidDay(day: number): boolean { return day >= p.firstRaidDay && day < p.bossDay && (day - p.firstRaidDay) % this.raidEvery === 0; }
+  isRaidDay(day: number): boolean { return !p.peaceful && day >= p.firstRaidDay && day < p.bossDay && (day - p.firstRaidDay) % this.raidEvery === 0; }
 
   // ---- setup ----------------------------------------------------------------
 
@@ -198,9 +213,11 @@ export class VillageScene extends SimScene {
     this.arrows = 30; this.feverWas = null;
     this.scrap = 0;
     this.armoryFor = null;
+    this.cookingAt = null;
+    this.buff = null;
     this.mods = this.meta.mods();
     this.world = new World();
-    this.world.generate(this.rng, this.mods.fieldWide ? 5 : 3);
+    this.world.generate(this.rng, this.mods.fieldWide ? 5 : 3, p.gnomeStart ? 'gnome' : 'village');
     for (const k of FOOD_KINDS) this.pantry[k] = 0;
     this.food = this.mods.startFood;
     this.wood = this.mods.startWood;
@@ -221,32 +238,41 @@ export class VillageScene extends SimScene {
     this.sounders = []; this.meatClaims.clear();
     this.spawnSounders();
     this.lairFound = false;
-    this.gnomesFound = false;
+    this.gnomesFound = p.gnomeStart; // you already keep a toadstool cottage: the craft needs no finding
     this.fog?.reset();
     this.result = null;
     this.nameIdx = this.rng.int(0, NAMES.length - 1);
 
-    const home = this.world.houses[0];
+    const home = p.gnomeStart ? this.world.gnomeStart! : this.world.houses[0];
     const door = doorstep(home);
     const c = World.center(door.tx, door.ty);
-    this.player = this.spawn(new Player(c.x + TILE * 3, c.y + TILE));
+    this.player = this.spawn(new Player(c.x + (p.gnomeStart ? 0 : TILE * 3), c.y + TILE));
     this.player.keys = this.wasd;
     this.player.maxHp += this.mods.playerHpBonus;
     this.player.hp = this.player.maxHp;
 
     // the founders are young adults: a few days past coming of age, well short of growing old
     const grown = this.adultAge + 3;
-    const ma = this.addVillager(home, 'farmer', grown);
-    const pa = this.addVillager(home, 'woodcutter', grown);
-    this.addVillager(home, 'kid', p.infantDays).parents = [ma, pa];
-    for (let i = 0; i < this.mods.startSoldiers; i++) this.addVillager(home, 'soldier', grown + 2);
-    if (this.mods.extraAdults > 0) {
-      // a second family, in the nearest open 2x2 to the left of the first house
-      const spot = [[-5, 0], [-6, 0], [5, 0], [0, 5], [-5, 5], [5, 5]].map(([dx, dy]) => ({ tx: home.tx + dx, ty: home.ty + dy })).find((q) => this.world.canBuild('house', q.tx, q.ty)) ?? { tx: home.tx - 3, ty: home.ty };
-      const h2 = this.world.placeHouse(spot.tx, spot.ty);
-      for (let i = 0; i < this.mods.extraAdults; i++) this.addVillager(h2, i % 2 ? 'woodcutter' : 'farmer', grown);
+    if (p.gnomeStart) {
+      // a gnome couple and nothing else. The Legacy boons that hand out soldiers and second families are
+      // skipped on purpose: addVillager makes anyone homed in a cottage a gnome, so they'd arrive wrong.
+      this.foundGnomes(home);
+    } else {
+      const ma = this.addVillager(home, 'farmer', grown);
+      const pa = this.addVillager(home, 'woodcutter', grown);
+      this.addVillager(home, 'kid', p.infantDays).parents = [ma, pa];
+      for (let i = 0; i < this.mods.startSoldiers; i++) this.addVillager(home, 'soldier', grown + 2);
+      if (this.mods.extraAdults > 0) {
+        // a second family, in the nearest open 2x2 to the left of the first house
+        const spot = [[-5, 0], [-6, 0], [5, 0], [0, 5], [-5, 5], [5, 5]].map(([dx, dy]) => ({ tx: home.tx + dx, ty: home.ty + dy })).find((q) => this.world.canBuild('house', q.tx, q.ty)) ?? { tx: home.tx - 3, ty: home.ty };
+        const h2 = this.world.placeHouse(spot.tx, spot.ty);
+        for (let i = 0; i < this.mods.extraAdults; i++) this.addVillager(h2, i % 2 ? 'woodcutter' : 'farmer', grown);
+      }
     }
-    this.event('info', `A new village in ${this.world.denseForests ? 'the deep woodland' : 'the open meadows'}. Follow trails to explore. Build walls and stairs, then station archers.`);
+    const where = this.world.denseForests ? 'the deep woodland' : 'the open meadows';
+    this.event('info', p.gnomeStart
+      ? `A gnome family keeps house in ${where}. Forage what grows wild, then cook it at the pot inside — walk up into the door.`
+      : `A new village in ${where}. Follow trails to explore. Build walls and stairs, then station archers.`);
   }
 
   /** Settle a boar family at (tx, ty): `n` boars on the free tiles around it. */
@@ -343,8 +369,9 @@ export class VillageScene extends SimScene {
       const b = this.facedBuilding() ?? this.world.get(this.player.tile.tx, this.player.tile.ty)?.building ?? null;
       if (b) this.selectBuilding(b); else this.select(null);
     });
-    kb.on('keydown-E', () => { if (this.armoryFor) this.openArmory(null); else this.togglePause(); });
-    kb.on('keydown-ESC', () => { if (this.armoryFor) this.openArmory(null); else this.togglePause(); });
+    const closePanel = (): void => { if (this.cookingAt) this.openCooking(null); else if (this.armoryFor) this.openArmory(null); else this.togglePause(); };
+    kb.on('keydown-E', closePanel);
+    kb.on('keydown-ESC', closePanel);
     kb.on('keydown-V', () => this.openArmory(this.armoryFor ? null : this.player));
     kb.on('keydown-TAB', (e: KeyboardEvent) => { e.preventDefault?.(); this.player.cycleTool(e.shiftKey ? -1 : 1, this.locked); });
     kb.on('keydown-Q', () => this.player.cycleTool(1, this.locked));
@@ -686,6 +713,65 @@ export class VillageScene extends SimScene {
     this.ui?.renderArmory();
   }
 
+  // ---- the cooking pot --------------------------------------------------------------------
+
+  /** Open the gnomes' pot in `b`, or close the panel. */
+  openCooking(b: Building | null): void {
+    this.cookingAt = b;
+    this.ui?.renderCooking();
+  }
+  /** Why this dish can't be made right now, or null. */
+  cookProblem(r: Recipe): string | null {
+    const b = this.cookingAt;
+    if (!b) return 'no pot here';
+    if (b.ruined) return 'the cottage is in ruins — rebuild it with the hammer';
+    if (!b.warm) return 'the hearth is cold — stock it with firewood and it lights at dawn';
+    for (const [k, n] of Object.entries(r.needs) as [FoodKind, number][]) {
+      const have = this.pantry[k];
+      if (have < n) return `need ${foodCount(n, k)} (${Math.floor(have)} in store)`;
+    }
+    if (this.food >= this.foodCap) return 'the granary is full — upgrade it with the hammer';
+    return null;
+  }
+  /** Spend the ingredients and put the servings in the granary. */
+  cook(r: Recipe): boolean {
+    const b = this.cookingAt;
+    if (!b || this.cookProblem(r)) return false;
+    // paid bin by bin rather than through `food`, whose setter would drain whatever the granary holds most of
+    for (const [k, n] of Object.entries(r.needs) as [FoodKind, number][]) this.pantry[k] -= n;
+    this.addFood(r.makes, r.dish);
+    const c = buildingCenter(b);
+    this.fx.push({ kind: 'deposit', x: c.tx * TILE, y: (b.ty + BUILDINGS[b.kind].h) * TILE - 6, text: `+${foodCount(r.makes, r.dish)}`, colour: FOODS[r.dish].colour });
+    this.event('food', `${FOODS[r.dish].name} out of the pot — ${r.makes} servings. A child raised on it grows far past one raised on raw food.`, true);
+    return true;
+  }
+  /** Eat one serving: a big meal now, and the dish's stat raised for a while. */
+  eatDish(kind: FoodKind): boolean {
+    if (!isDish(kind) || this.pantry[kind] < 1) return false;
+    const r = RECIPES[kind as DishKind], stat = FOODS[kind].stat as Exclude<DietStat, 'care'>;
+    this.pantry[kind] -= 1;
+    this.player.hp = Math.min(this.player.maxHp, this.player.hp + r.heal);
+    this.buff = { stat, mul: 1 + r.buffAdd, until: this.simTime + r.buffSecs, dish: kind };
+    this.event('food', `${FOODS[kind].name}: +${r.heal} HP and +${Math.round(r.buffAdd * 100)}% ${DIET_STAT_NAME[stat]} for ${r.buffSecs}s.`, true);
+    return true;
+  }
+  /** What the head's last meal is still doing for `stat` (1 = nothing). */
+  buffMul(stat: DietStat): number {
+    const b = this.buff;
+    return b && b.stat === stat && b.until > this.simTime ? b.mul : 1;
+  }
+  /** Seconds of the current dish left, 0 when there is none. */
+  buffLeft(): number { return this.buff ? Math.max(0, this.buff.until - this.simTime) : 0; }
+  /** Swings a tool needs, with a stew inside you. */
+  workHits(base: number): number { return Math.max(1, Math.round(base / this.buffMul('work'))); }
+  /** The line shown when the head stands at the pot. */
+  cookHint(b: Building): string {
+    if (!b.warm) return 'Cooking pot · the hearth is cold — stock the pile and it lights at dawn';
+    const can = DISHES.filter((d) => { const was = this.cookingAt; this.cookingAt = b; const why = this.cookProblem(RECIPES[d]); this.cookingAt = was; return !why; });
+    const held = DISHES.filter((d) => this.pantry[d] >= 1).map((d) => foodCount(this.pantry[d] | 0, d)).join(', ');
+    return `Cooking pot · ${can.length ? `${can.length} dish${can.length === 1 ? '' : 'es'} you can make` : 'nothing you have the ingredients for'}${held ? ` · ${held} in store` : ''}`;
+  }
+
   // ---- child rearing ----------------------------------------------------------------------
 
   /** Can the head encourage this child right now? null when yes, else the reason. */
@@ -945,6 +1031,11 @@ export class VillageScene extends SimScene {
       if (mover) { mover.home.residents--; mover.home = h; h.residents++; this.event('info', `${mover.name} moved into a new house`); }
     }
 
+    if (p.peaceful) {
+      // nobody marches. The run still has a length: outlast the day the Warlord would have come.
+      if (this.day >= p.bossDay) { this.event('raid', 'The Warlord never came. The village endures.', true); this.endRun(true); }
+      return;
+    }
     const warn = 1 + this.mods.warnDaysDelta;
     if (this.day === p.bossDay) this.spawnRaid(true);
     else if (this.isRaidDay(this.day)) this.spawnRaid();
@@ -1852,7 +1943,7 @@ export class VillageScene extends SimScene {
   doorAt(): Building | null {
     const pt = this.player.tile;
     return this.world.buildings.find((b) => {
-      if (!['house', 'barracks', 'tavern'].includes(b.kind) || b.ruined) return false; // a ruin has no door to push
+      if (!hasInterior(b.kind) || b.ruined) return false; // a ruin has no door to push
       const d = doorstep(b);
       return d.tx === pt.tx && d.ty === pt.ty;
     }) ?? null;
@@ -1997,7 +2088,7 @@ export class VillageScene extends SimScene {
         if (pl.attackCd > 0) return;
         const hv = this.hoverTile, aim = hv ? World.center(hv.tx, hv.ty) : null;
         const auto = !aim ? this.bestTarget(pl.x, pl.y, 165) : null;
-        this.shoot(pl, aim ? aim.x - pl.x : auto ? auto.x - pl.x : pl.facing.x, aim ? aim.y - pl.y : auto ? auto.y - pl.y : pl.facing.y, Math.round(14 * weaponMul(pl.weapons, 'bow') * this.mods.playerDmgMul));
+        this.shoot(pl, aim ? aim.x - pl.x : auto ? auto.x - pl.x : pl.facing.x, aim ? aim.y - pl.y : auto ? auto.y - pl.y : pl.facing.y, Math.round(14 * weaponMul(pl.weapons, 'bow') * this.mods.playerDmgMul * this.buffMul('dmg')));
         return;
       }
       case 'wall': case 'gate': case 'stairs': this.buildDefense(pl.tool); return;
@@ -2046,14 +2137,14 @@ export class VillageScene extends SimScene {
         if (b.kind !== 'lair' && (b.ruined || b.hp < b.maxHp)) { this.repairBuilding(b); return; }
         const why = this.upgradeProblem(b);
         if (why) { this.event('build', why); return; }
-        if (++t.work >= this.mods.hammerHits) { t.work = 0; this.upgrade(b); }
+        if (++t.work >= this.workHits(this.mods.hammerHits)) { t.work = 0; this.upgrade(b); }
         return;
       }
       case 'hoe':
         if (t?.kind === 'grass') this.world.set(tx, ty, 'tilled');
         else if (t?.kind === 'sapling') this.world.set(tx, ty, 'grass'); // dig out a stump
         else if (t?.kind === 'tilled') { // flattening soil is deliberate: three hits on the same tile
-          if (++t.work >= 3) this.world.set(tx, ty, 'grass');
+          if (++t.work >= this.workHits(3)) this.world.set(tx, ty, 'grass');
         }
         this.fx.push({ kind: 'tool', tool: 'hoe', tx, ty });
         return;
@@ -2066,7 +2157,7 @@ export class VillageScene extends SimScene {
           const why = this.loadProblem('wood');
           if (why) { this.event('wood', why + '.'); return; }
           // the head clears ground; the real wood comes in on woodcutters' backs
-          if (++t.work >= 3) { this.world.set(tx, ty, 'sapling'); this.player.pickUp('wood', p.playerTreeYield); }
+          if (++t.work >= this.workHits(3)) { this.world.set(tx, ty, 'sapling'); this.player.pickUp('wood', p.playerTreeYield); }
           else this.world.dirty.add(ty * COLS + tx);
         } else if (t?.kind === 'sapling') this.world.set(tx, ty, 'grass'); // clear the stump
         this.fx.push({ kind: 'tool', tool: 'axe', tx, ty });
@@ -2204,6 +2295,13 @@ export class VillageScene extends SimScene {
 }
 
 // Decide the touch layout before Phaser measures its parent (the side panel becomes a drawer).
-if (matchMedia('(pointer: coarse)').matches || new URLSearchParams(location.search).has('touch')) document.body.classList.add('touch');
+const query = new URLSearchParams(location.search);
+if (matchMedia('(pointer: coarse)').matches || query.has('touch')) document.body.classList.add('touch');
+
+// Dev starts, so a link is enough: ?start=gnome and ?peaceful set the debug sliders before the first setup().
+if (query.get('start') === 'gnome') p.gnomeStart = true;
+if (query.has('peaceful')) p.peaceful = true;
+// lil-gui caches its controllers' values at module load, so the panel needs telling the flag moved.
+if (p.gnomeStart || p.peaceful) getGui().controllersRecursive().forEach((c) => c.updateDisplay());
 
 launch(VillageScene, { width: COLS * TILE, height: ROWS * TILE, zoom: ZOOM, scale: 'resize', pixelArt: true, background: '#1a2a1c' });

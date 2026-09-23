@@ -2,7 +2,7 @@ import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type Tool } from '../agents';
 import { Boar } from '../wildlife';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
-import { OGRE, BOAR, HAUL, COST, ORDER, GNOME_YARD, p, TOWER, HEARTH_WOOD, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, TRAITS, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, PEN_NAME, FOODS, FOOD_KINDS, CROP_KINDS, CALLINGS, DISMANTLE, DIET_CAP, DIET_STAT_NAME, type FoodKind, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS } from '../config';
+import { OGRE, BOAR, HAUL, COST, ORDER, GNOME_YARD, p, TOWER, HEARTH_WOOD, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, TRAITS, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, PEN_NAME, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, isDish, foodCount, hasInterior, type DishKind, CROP_KINDS, CALLINGS, DISMANTLE, DIET_CAP, DIET_STAT_NAME, type FoodKind, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS } from '../config';
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
@@ -104,6 +104,7 @@ export class UI {
       <div class="stat t-pop" title="Your villagers by role"><span class="cap">VILLAGERS</span><span class="val pop"></span></div>
       <div class="spacer"></div>
       <div class="stat t-raid" title="Raiders attack every few days; the Warlord comes on day 21"><span class="cap">NEXT RAID</span><span class="val raid"></span></div>
+      <div class="stat t-buff" title="The dish you last ate, and how long it keeps working"><span class="cap">MEAL</span><span class="val buff"></span></div>
       ${tile('t-hp', 'YOUR HP', `<span class="hearts"></span>`, 'You heal overnight. If you die the run ends')}
       <div class="stat t-speed" title="Game speed"><span class="cap">SPEED</span><span class="val speed">
         <button class="btn small" data-speed="1">1x</button><button class="btn small" data-speed="4">4x</button><button class="btn small" data-speed="16">16x</button>
@@ -432,6 +433,7 @@ export class UI {
     }
     if (this.rosterT > 0.5) { this.rosterT = 0; this.renderRoster(); }
     this.renderFeed();
+    if (this.scene.cookingAt) this.renderCooking();
   }
 
   private renderTop(): void {
@@ -448,7 +450,7 @@ export class UI {
     const night = s.dayTime < 0.22 || s.dayTime > 0.8;
     const raidIn = s.nextRaidDay - s.day;
     const held = s.player.load ? `${s.player.load.kind}${s.player.load.n}` : '';
-    const key = `${s.day}|${hour}|${held}|${s.food | 0}/${s.foodCap}|${s.surplusDays().toFixed(1)}|${s.feverActive()}|${s.wood | 0}/${s.woodCap}|${s.scrap}|${count('farmer')}|${count('woodcutter')}|${count('infant')}|${count('kid')}|${count('soldier')}|${count('gnome')}|${count('elder')}|${s.player.hp}|${s.raidActive}|${s.boss?.hp ?? ''}|${raidIn}|${s.speed}|${s.paused}|${night}`;
+    const key = `${s.day}|${hour}|${held}|${s.food | 0}/${s.foodCap}|${s.surplusDays().toFixed(1)}|${s.feverActive()}|${s.wood | 0}/${s.woodCap}|${s.scrap}|${count('farmer')}|${count('woodcutter')}|${count('infant')}|${count('kid')}|${count('soldier')}|${count('gnome')}|${count('elder')}|${s.player.hp}|${s.raidActive}|${s.boss?.hp ?? ''}|${raidIn}|${s.speed}|${s.paused}|${night}|${s.buff?.dish ?? ''}${Math.ceil(s.buffLeft())}`;
     if (key === this.lastTop) return;
     this.lastTop = key;
 
@@ -457,14 +459,14 @@ export class UI {
     // the day chip takes on the sky's colour: peach at dawn, blue at night
     const sky = skyAt(s.dayTime);
     this.top.style.setProperty('--sky', `rgba(${sky.r}, ${sky.g}, ${sky.b}, ${Math.min(0.85, sky.alpha * 1.3).toFixed(2)})`);
-    q('.day').textContent = `DAY ${s.day}/${p.bossDay}`;
+    q('.day').textContent = p.peaceful ? `DAY ${s.day}` : `DAY ${s.day}/${p.bossDay}`;
     q('.hour').textContent = `${String(hour).padStart(2, '0')}:00`;
     const inHand = (kind: string) => s.player.load?.kind === kind ? `<em class="hand">+${s.player.load.n} in hand</em>` : '';
     q('.wood').innerHTML = `${s.wood | 0}<small>/${s.woodCap}</small>${inHand('wood')}`;
     const days = s.surplusDays(), fever = s.feverActive();
     const feverBadge = s.mods.babyFever ? `<span class="badge fever ${fever ? 'on' : ''}" title="${fever ? `Baby fever: births ${Math.round(100 * p.feverBonus)}% more likely while the larder holds ${p.feverDays}+ days of food` : `Baby fever needs ${p.feverDays} days of food in store — ${Math.ceil(p.feverDays * s.dailyRation() - s.food)} more`}">FEVER</span>` : '';
     q('.food').innerHTML = `${s.food | 0}<small>/${s.foodCap} · ${Number.isFinite(days) ? `${days.toFixed(days < 10 ? 1 : 0)} days` : '∞'}</small>${feverBadge}${inHand('food')}`;
-    q('.t-food').title = `${FOOD_KINDS.map((k) => `${s.pantry[k] | 0} ${FOODS[k].one}`).join(' · ')} — each villager eats 1 a day; the small number is how many days the larder would last. Pen children eat only what the basket tosses in.`;
+    q('.t-food').title = `${FOOD_KINDS.filter((k) => s.pantry[k] >= 1).map((k) => `${s.pantry[k] | 0} ${FOODS[k].one}`).join(' · ') || 'empty'} — each villager eats 1 a day; the small number is how many days the larder would last. Pen children eat only what the basket tosses in.`;
     q('.scrap').textContent = String(s.scrap);
     q('.pop').innerHTML = ([
       ['farmer', CHAR.farmer, 'FARM'], ['woodcutter', CHAR.woodcutter, 'WOOD'], ['infant', CHAR.kid, 'CRIBS'], ['kid', CHAR.kid, 'KIDS'], ['soldier', CHAR.soldier, 'ARMY'], ['gnome', CHAR.gnome, 'GNOMES'], ['elder', CHAR.woodcutter, 'OLD'],
@@ -477,8 +479,12 @@ export class UI {
       raid.innerHTML = `${orc}<span>WARLORD</span><div class="bar boss"><i style="width:${pct}%"></i></div>`;
       raid.className = 'val raid now';
     } else if (s.raidActive) { raid.innerHTML = `${orc}<span>UNDER ATTACK!</span>`; raid.className = 'val raid now'; }
+    else if (!Number.isFinite(raidIn)) { raid.innerHTML = `${orc}<span>PEACE</span>`; raid.className = 'val raid'; } // p.peaceful: nobody is marching
     else if (raidIn <= 1) { raid.innerHTML = `${orc}<span>${bossNext ? 'WARLORD TOMORROW' : 'TOMORROW'}</span>`; raid.className = 'val raid soon'; }
     else { raid.innerHTML = `${orc}<span>${bossNext ? 'Warlord' : 'in'} ${raidIn} days</span>`; raid.className = bossNext ? 'val raid soon' : 'val raid'; }
+    const meal = this.top.querySelector<HTMLElement>('.t-buff')!;
+    meal.hidden = !s.buff || s.buffLeft() <= 0;
+    if (!meal.hidden && s.buff) q('.buff').innerHTML = `<span style="color:${FOODS[s.buff.dish].colour}">+${Math.round((s.buff.mul - 1) * 100)}% ${DIET_STAT_NAME[s.buff.stat]}</span><small>${Math.ceil(s.buffLeft())}s</small>`;
     const hearts = q('.hearts');
     const full = s.player.hp / s.player.maxHp * 6;
     hearts.innerHTML = Array.from({ length: 6 }, (_, i) => `<span class="heart ${i + 1 <= full ? '' : i < full ? 'half' : 'off'}"></span>`).join('');
@@ -641,14 +647,18 @@ export class UI {
         html += `<b>Beds</b><span>${s.bedsTaken(b)} / ${s.beds(b)}${s.bedsTaken(b) > s.beds(b) ? ' <em class="warn">· crowded</em>' : ''}</span>`;
         html += `<b>Nursery</b><span>${infants} / ${s.cribs(b)} cribs${b.ruined ? '' : why ? ` · <em class="warn">no births: ${esc(why)}</em>` : ` · ${Math.round(100 * s.birthChance(b))}% every ${p.birthEvery}s · next roll in ${Math.ceil(s.birthIn(b))}s${s.feverActive() ? ' <em class="fever-txt">· baby fever</em>' : ''}`}<em class="d"> infants walk out to a pen after ${p.infantDays} days</em></span>`;
       }
-      if (b.kind === 'granary') html += `<b>Stock</b><span>${FOOD_KINDS.map((k) => `<span style="color:${FOODS[k].colour}">${s.pantry[k] | 0}</span> ${FOODS[k].one}`).join(' · ')}<em class="d"> the basket takes one kind at a time (F)</em></span>`;
+      if (b.kind === 'granary') {
+        const bin = (ks: readonly FoodKind[]) => ks.filter((k) => s.pantry[k] >= 1).map((k) => `<span style="color:${FOODS[k].colour}">${s.pantry[k] | 0}</span> ${FOODS[k].one}`).join(' · ');
+        const raw = bin(RAW_KINDS), cooked = bin(DISHES);
+        html += `<b>Stock</b><span>${[raw || 'empty', cooked].filter(Boolean).join(' — ')}<em class="d"> the basket takes one kind at a time (F)</em></span>`;
+      }
       if (b.kind === 'barracks') {
         const ammo = b.ammo ?? 0, cap = s.towerCap(b);
         html += `<b>Arrows</b><span>${ammo ? `${ammo} / ${cap}` : `<em class="warn">OUT OF ARROWS</em> · 0 / ${cap}`} · range ${s.towerRange(b)} px<div class="bar ammo ${ammo / cap <= 0.25 ? 'low' : ''}"><i style="width:${Math.round(100 * ammo / cap)}%"></i></div></span>`;
       }
       html += `<b>Next</b><span>${b.level < MAX_LEVEL ? `Lv${b.level + 1}: ${LEVEL_PERKS[b.kind][b.level + 1]} <em>· ${cost} wood with the hammer</em>` : 'max level'}</span></div>`;
-      if (b.kind === 'gnomehouse') html += `<p class="d">Too small to go inside. A gnome couple raises children here; grown gnomes potter about it and fight whatever comes.</p>`;
-      if (['house', 'barracks', 'tavern'].includes(b.kind)) {
+      if (b.kind === 'gnomehouse') html += `<p class="d">A gnome couple raises children here; grown gnomes potter about it and fight whatever comes.</p>`;
+      if (hasInterior(b.kind)) {
         const onStep = s.doorAt() === b;
         html += `<p class="d">${onStep ? '<b>Walk up into the door</b> to go inside.' : 'To go inside, stand on the doorstep and walk up into the door.'}</p>`;
       }
@@ -720,7 +730,7 @@ export class UI {
         <button class="btn small ok encourage" ${why ? 'disabled' : ''}>ENCOURAGE${why ? ` · ${esc(why)}` : ''}</button></div>`;
       const d = s.dietReport(m);
       html += `<div class="upbring diet"><div class="cap">DIET</div>
-        ${d.kinds.map((k) => `<div class="lbl"><span>${FOODS[k.kind].name}</span><span>${k.n % 1 ? k.n.toFixed(1) : k.n} · ${FOODS[k.kind].stat === 'care' ? 'care' : `+${Math.round(DIET_CAP[FOODS[k.kind].stat as keyof typeof DIET_CAP] * p.dietMul * k.share * 100)}% ${DIET_STAT_NAME[FOODS[k.kind].stat]}`}</span></div><div class="bar diet"><i style="width:${Math.round(k.share * 100)}%;background:${FOODS[k.kind].colour}"></i></div>`).join('')}
+        ${d.kinds.filter((k) => k.n > 0 || !isDish(k.kind)).map((k) => `<div class="lbl"><span>${FOODS[k.kind].name}</span><span>${k.n % 1 ? k.n.toFixed(1) : k.n} · ${FOODS[k.kind].stat === 'care' ? 'care' : `+${Math.round(DIET_CAP[FOODS[k.kind].stat as keyof typeof DIET_CAP] * (FOODS[k.kind].power ?? 1) * p.dietMul * k.share * 100)}% ${DIET_STAT_NAME[FOODS[k.kind].stat]}`}</span></div><div class="bar diet"><i style="width:${Math.round(k.share * 100)}%;background:${FOODS[k.kind].colour}"></i></div>`).join('')}
         <div class="d">${d.bonuses ? `growing up: ${d.bonuses}` : `nothing eaten from the pen yet — ${p.dietFull} of one food for its full bonus`}</div></div>`;
     } else if (m instanceof Villager) {
       const d = s.dietReport(m);
@@ -902,6 +912,39 @@ export class UI {
     el.querySelectorAll<HTMLElement>('[data-dye]').forEach((b) => b.addEventListener('click', () => { s.setDye(who, Number(b.dataset.dye)); this.renderArmory(); }));
     el.querySelectorAll<HTMLElement>('[data-helm]').forEach((b) => b.addEventListener('click', () => { s.setHelmetStyle(who, Number(b.dataset.helm)); this.renderArmory(); }));
     el.querySelectorAll<HTMLElement>('[data-plume]').forEach((b) => b.addEventListener('click', () => { s.setPlume(who, Number(b.dataset.plume)); this.renderArmory(); }));
+  }
+
+  private cookEl: HTMLElement | null = null;
+  /** The COOKING POT: what the gnomes can make from the granary, and what one serving does for the head. */
+  renderCooking(): void {
+    const s = this.scene, b = s.cookingAt;
+    if (!b) { this.cookEl?.remove(); this.cookEl = null; return; }
+    const rows = DISHES.map((d) => {
+      const r = RECIPES[d], why = s.cookProblem(r), have = s.pantry[d] | 0, food = FOODS[d];
+      const needs = (Object.entries(r.needs) as [FoodKind, number][]).map(([k, n]) => `<span style="color:${FOODS[k].colour}">${foodCount(n, k)}</span> <small>(${Math.floor(s.pantry[k])})</small>`).join(' + ');
+      const eat = `+${r.heal} HP · +${Math.round(r.buffAdd * 100)}% ${DIET_STAT_NAME[food.stat]} for ${r.buffSecs}s`;
+      return `<div class="aslot">
+        <div class="aname">${this.tilePortrait({ key: 'flora', frame: FLORA.pile[d][2] })} ${food.name} <span class="tier">×${have}</span></div>
+        <div class="acur">${needs} <small>→ ${r.makes} servings</small></div>
+        <button class="btn small ${why ? '' : 'ok'} cook" data-cook="${d}" ${why ? 'disabled' : ''}>COOK · ${foodCount(r.makes, d)}</button>
+        <div class="d">${why ? `<em class="warn">${esc(why)}</em>` : `raised on it, a child gains up to +${Math.round(DIET_CAP[food.stat as keyof typeof DIET_CAP] * (food.power ?? 1) * p.dietMul * 100)}% ${DIET_STAT_NAME[food.stat]} for life`}</div>
+        <button class="btn small ${have < 1 ? '' : 'ok'} eat" data-eat="${d}" ${have < 1 ? 'disabled' : ''}>EAT ONE · ${eat}</button></div>`;
+    }).join('');
+    const warm = b.warm ? `the fire is lit · ${b.firewood} night${b.firewood === 1 ? '' : 's'} of wood` : '<em class="warn">COLD HEARTH</em>';
+    const on = s.buff && s.buffLeft() > 0 ? `<p class="sub small">Still warming you: <b>${FOODS[s.buff.dish].name}</b>, +${Math.round((s.buff.mul - 1) * 100)}% ${DIET_STAT_NAME[s.buff.stat]} for ${Math.ceil(s.buffLeft())}s more.</p>` : '';
+    const html = `<div class="cooking panel">
+      <div class="ph"><h2>Cooking pot</h2><span class="cap">${warm} · ${s.food | 0}/${s.foodCap} in store</span><button class="btn small close">CLOSE</button></div>
+      <div class="aslots">${rows}</div>
+      ${on}
+      <p class="sub small">Dishes are food like any other: the granary holds them, the basket carries them (F), and a child fed on them grows far past one raised on raw. Cooking needs a lit hearth — woodcutters keep the pile stocked.</p>
+    </div>`;
+    if (!this.cookEl) this.cookEl = h('<div class="screen cooking-screen"></div>');
+    if (!this.cookEl.isConnected) this.screens.append(this.cookEl); // showScreen() empties #screens without asking
+    this.cookEl.innerHTML = html;
+    const el = this.cookEl;
+    el.querySelector('.close')!.addEventListener('click', () => s.openCooking(null));
+    el.querySelectorAll<HTMLElement>('[data-cook]').forEach((btn) => btn.addEventListener('click', () => { s.cook(RECIPES[btn.dataset.cook as DishKind]); this.renderCooking(); }));
+    el.querySelectorAll<HTMLElement>('[data-eat]').forEach((btn) => btn.addEventListener('click', () => { s.eatDish(btn.dataset.eat as FoodKind); this.renderCooking(); }));
   }
 
   // ---- screens ---------------------------------------------------------------

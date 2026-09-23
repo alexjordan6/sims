@@ -115,6 +115,8 @@ export const p = live(
     godMode: [D.godMode, 'The head cannot die (revives at full HP).'],
     freeBuild: [D.freeBuild, 'Building, upgrading, fortifying, forging and hearth stocking cost nothing.'],
     collide: [D.collide, 'Bodies push each other apart. Off: everyone walks through everyone, as before.'],
+    gnomeStart: [D.gnomeStart, 'NEW VILLAGE starts you as a gnome family: no house, barracks or field — a toadstool cottage in the clearing, its founders, and the craft already learned. Also ?start=gnome.'],
+    peaceful: [D.peaceful, 'No raid schedule and no Warlord; the day you would have faced him you win instead. Boars and the Ogre still roam, and the SPAWN RAID button still works. Also ?peaceful.'],
   }, 'debug'),
 );
 
@@ -164,7 +166,7 @@ export const UPGRADE_COST: Record<BuildingKind, readonly number[]> = {
 /** what each level of a building gives, in a few words (index = level); shown in tooltips, hints and help */
 export const LEVEL_PERKS: Record<BuildingKind, readonly [string, string, string, string]> = {
   lair: ['', 'the Ogre sleeps here by day', '', ''],
-  gnomehouse: ['', '3 beds', '4 beds', '6 beds'],
+  gnomehouse: ['', '3 beds · a cooking pot by the hearth', '4 beds', '6 beds'],
   tavern: ['', 'hearth meals restore 20 HP', 'hearth meals restore 35 HP', 'hearth meals restore 50 HP · family hall'],
   house: ['', '4 beds', '6 beds', '8 beds · births +15%'],
   barracks: ['', 'fires arrows at raiders · drills the drill yard', 'soldiers +15 HP · iron forge · tower +1.5 dmg', 'soldiers +30 HP · +20% dmg · regen · steel forge · tower +3 dmg'],
@@ -212,14 +214,20 @@ export const GNOME_BEDS = [0, 3, 4, 6] as const;
 export const GNOME_YARD = 4;
 
 // ---- food and diet --------------------------------------------------------------------------
-/** Every kind of food. Crops are sown on soil; wild food grows in the woods and is picked by hand. What a child eats decides the adult. */
-export type FoodKind = 'wheat' | 'carrot' | 'tomato' | 'berry' | 'mushroom' | 'hazelnut' | 'garlic' | 'burdock' | 'meat';
-export const FOOD_KINDS: readonly FoodKind[] = ['wheat', 'carrot', 'tomato', 'berry', 'mushroom', 'hazelnut', 'garlic', 'burdock', 'meat'];
+/** What the gnomes' pot makes out of raw food: dishes are food like any other, only richer (see RECIPES and Food.power). */
+export type DishKind = 'stew' | 'roast' | 'tart' | 'soup';
+export const DISHES: readonly DishKind[] = ['stew', 'roast', 'tart', 'soup'];
+/** Every kind of food. Crops are sown on soil; wild food grows in the woods and is picked by hand; dishes are cooked. What a child eats decides the adult. */
+export type FoodKind = 'wheat' | 'carrot' | 'tomato' | 'berry' | 'mushroom' | 'hazelnut' | 'garlic' | 'burdock' | 'meat' | DishKind;
+export const RAW_KINDS: readonly FoodKind[] = ['wheat', 'carrot', 'tomato', 'berry', 'mushroom', 'hazelnut', 'garlic', 'burdock', 'meat'];
+export const FOOD_KINDS: readonly FoodKind[] = [...RAW_KINDS, ...DISHES];
 export const CROP_KINDS: readonly FoodKind[] = ['wheat', 'carrot', 'tomato'];
 export type DietStat = 'hp' | 'speed' | 'work' | 'dmg' | 'care';
 export interface Food {
   name: string; one: string;
-  source: 'crop' | 'wild' | 'hunt';
+  /** plural of `one`, when it isn't just `one` + s ('berries', 'bowls of stew', and the mass nouns that never take one) */
+  many?: string;
+  source: 'crop' | 'wild' | 'hunt' | 'cooked';
   /** crops: days to ripen on top of p.cropDays; wild: days to regrow after picking (× p.wildRegrowMul) */
   days: number;
   /** crops: yield on top of the cropYield slider; wild: what one picking gives */
@@ -232,21 +240,70 @@ export interface Food {
   colour: string;
 }
 export const FOODS: Record<FoodKind, Food> = {
-  wheat: { name: 'Wheat', one: 'wheat', source: 'crop', days: 0, yield: 0, stat: 'hp', blurb: 'hearty: +HP for life', colour: '#e0b04a' },
+  wheat: { name: 'Wheat', one: 'wheat', many: 'wheat', source: 'crop', days: 0, yield: 0, stat: 'hp', blurb: 'hearty: +HP for life', colour: '#e0b04a' },
   carrot: { name: 'Carrots', one: 'carrot', source: 'crop', days: 0, yield: -1, stat: 'speed', blurb: 'quick on their feet', colour: '#e8772c' },
-  tomato: { name: 'Tomatoes', one: 'tomato', source: 'crop', days: 1, yield: 1, stat: 'work', blurb: 'tireless workers', colour: '#c9564a' },
-  berry: { name: 'Berries', one: 'berry', source: 'wild', days: 3, yield: 3, stat: 'dmg', blurb: 'fierce: soldiers hit harder', colour: '#8c4ab0' },
+  tomato: { name: 'Tomatoes', one: 'tomato', many: 'tomatoes', source: 'crop', days: 1, yield: 1, stat: 'work', blurb: 'tireless workers', colour: '#c9564a' },
+  berry: { name: 'Berries', one: 'berry', many: 'berries', source: 'wild', days: 3, yield: 3, stat: 'dmg', blurb: 'fierce: soldiers hit harder', colour: '#8c4ab0' },
   mushroom: { name: 'Mushrooms', one: 'mushroom', source: 'wild', days: 4, yield: 2, stat: 'care', blurb: 'a care point with every meal', colour: '#a8765a' },
   // what the gnomes forage: hazel at the wood's edge, garlic in the meadow, burdock along the trails
   hazelnut: { name: 'Hazelnuts', one: 'hazelnut', source: 'wild', days: 5, yield: 3, stat: 'hp', blurb: 'hearty: +HP for life', colour: '#8a5a2a' },
-  garlic: { name: 'Wild garlic', one: 'garlic', source: 'wild', days: 3, yield: 2, stat: 'work', blurb: 'tireless workers', colour: '#e8e0d0' },
-  burdock: { name: 'Burdock', one: 'burdock root', source: 'wild', days: 4, yield: 2, stat: 'speed', blurb: 'quick on their feet', colour: '#7a5230' },
+  garlic: { name: 'Wild garlic', one: 'garlic', many: 'garlic', source: 'wild', days: 3, yield: 2, stat: 'work', blurb: 'tireless workers', colour: '#e8e0d0' },
+  burdock: { name: 'Burdock', one: 'burdock root', many: 'burdock roots', source: 'wild', days: 4, yield: 2, stat: 'speed', blurb: 'quick on their feet', colour: '#7a5230' },
   // hunted: a boar drops it where it falls (see BOAR.meat); gnomes carry it home
-  meat: { name: 'Boar meat', one: 'meat', source: 'hunt', days: 0, yield: 0, stat: 'dmg', power: 2, blurb: 'a hunter\'s diet: the fiercest fighters', colour: '#c9564a' },
+  meat: { name: 'Boar meat', one: 'meat', many: 'meat', source: 'hunt', days: 0, yield: 0, stat: 'dmg', power: 2, blurb: 'a hunter\'s diet: the fiercest fighters', colour: '#c9564a' },
+  // cooked at a gnome cottage's pot: worth three raw meals to a growing child, and a warm buff to the head
+  stew: { name: 'Mushroom stew', one: 'bowl of stew', many: 'bowls of stew', source: 'cooked', days: 0, yield: 0, stat: 'work', power: 3, blurb: 'cooked: tireless workers', colour: '#a8765a' },
+  roast: { name: 'Boar roast', one: 'roast', source: 'cooked', days: 0, yield: 0, stat: 'dmg', power: 3, blurb: 'cooked: the fiercest fighters', colour: '#b8463c' },
+  tart: { name: 'Berry tart', one: 'tart', source: 'cooked', days: 0, yield: 0, stat: 'hp', power: 3, blurb: 'cooked: hearty for life', colour: '#8c4ab0' },
+  soup: { name: 'Garden soup', one: 'bowl of soup', many: 'bowls of soup', source: 'cooked', days: 0, yield: 0, stat: 'speed', power: 3, blurb: 'cooked: quick on their feet', colour: '#e8772c' },
 };
+/** Cooked, rather than sown or foraged: dishes never appear on a tile and can't be planted or picked. */
+/** `n` of a food, in words: 1 carrot, 3 carrots, 2 bowls of stew. */
+export function foodCount(n: number, k: FoodKind): string {
+  const f = FOODS[k];
+  return `${n % 1 ? n.toFixed(1) : n} ${n === 1 ? f.one : f.many ?? `${f.one}s`}`;
+}
+export function isDish(k: FoodKind): boolean { return FOODS[k].source === 'cooked'; }
+/** An empty tally of every food kind (the granary's bins, a child's diet): one place to add a kind. */
+export function zeroFood(): Record<FoodKind, number> {
+  return Object.fromEntries(FOOD_KINDS.map((k) => [k, 0])) as Record<FoodKind, number>;
+}
 /** the most a full diet of one kind adds to its stat (× p.dietMul) */
 export const DIET_CAP: Record<Exclude<DietStat, 'care'>, number> = { hp: 0.25, speed: 0.15, work: 0.25, dmg: 0.25 };
 export const DIET_STAT_NAME: Record<DietStat, string> = { hp: 'HP', speed: 'speed', work: 'work speed', dmg: 'damage', care: 'care' };
+
+// ---- the cooking pot -------------------------------------------------------------------------
+/**
+ * One dish the gnomes' pot can make: what it costs from the granary, how many servings it yields, and
+ * what one serving does for the head who eats it (children just get the diet, like any food).
+ */
+export interface Recipe {
+  dish: DishKind;
+  /** raw kinds spent per batch */
+  needs: Partial<Record<FoodKind, number>>;
+  /** servings a batch makes */
+  makes: number;
+  /** HP one serving restores */
+  heal: number;
+  /** one serving raises the dish's stat by this share, for this many seconds of sim time */
+  buffAdd: number;
+  buffSecs: number;
+}
+export const RECIPES: Record<DishKind, Recipe> = {
+  stew: { dish: 'stew', needs: { mushroom: 2, burdock: 1 }, makes: 3, heal: 25, buffAdd: 0.35, buffSecs: 90 },
+  roast: { dish: 'roast', needs: { meat: 2, garlic: 1 }, makes: 3, heal: 30, buffAdd: 0.35, buffSecs: 90 },
+  tart: { dish: 'tart', needs: { berry: 3, wheat: 1 }, makes: 3, heal: 35, buffAdd: 0.25, buffSecs: 120 },
+  soup: { dish: 'soup', needs: { carrot: 2, tomato: 1 }, makes: 3, heal: 20, buffAdd: 0.35, buffSecs: 90 },
+};
+
+/** How a run begins: the founding family in their house, or a gnome family in their cottage (p.gnomeStart / ?start=gnome). */
+export type StartKind = 'village' | 'gnome';
+
+// ---- walkable interiors ----------------------------------------------------------------------
+/** Buildings you can push the door open and walk into. Every one needs a room palette (interior.ts ROOM). */
+export type InteriorKind = Extract<BuildingKind, 'house' | 'barracks' | 'tavern' | 'gnomehouse'>;
+export const INTERIOR_KINDS: readonly InteriorKind[] = ['house', 'barracks', 'tavern', 'gnomehouse'];
+export function hasInterior(k: BuildingKind): k is InteriorKind { return (INTERIOR_KINDS as readonly BuildingKind[]).includes(k); }
 
 // ---- bodies ---------------------------------------------------------------------------------
 /** How hard a body is to push aside when two overlap: the lighter one gives way (see VillageScene.separate). */

@@ -1,6 +1,6 @@
 import type { Agent } from '@shared/index';
 import { World, WILD_FOOD, doorstep, buildingCenter, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
-import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, CALLINGS, ORDER, GNOME_YARD, ITEM, MASS, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, BOAR, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
+import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, CALLINGS, ORDER, GNOME_YARD, ITEM, MASS, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, zeroFood, BOAR, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
 import type { Mods } from './meta';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle } from './characters';
 import type { VillageScene } from './main';
@@ -263,7 +263,7 @@ export class Villager extends Mover {
   ateDay = 0;
   mealAt = 0;
   /** what they ate as a child, by kind, and the bonuses it froze into at coming of age */
-  diet: Record<FoodKind, number> = { wheat: 0, carrot: 0, tomato: 0, berry: 0, mushroom: 0, hazelnut: 0, garlic: 0, burdock: 0, meat: 0 };
+  diet: Record<FoodKind, number> = zeroFood();
   dietBonus: Record<Exclude<DietStat, 'care'>, number> = { hp: 0, speed: 0, work: 0, dmg: 0 };
   /** mushrooms counted toward today's care point (one per meal) */
   private shroomMeal = false;
@@ -1063,8 +1063,12 @@ export class Player extends Mover {
 
   /** seconds the head is occupied (encouraging a child): no walking, no swinging */
   busy = 0;
+  /** incoming damage scale from the last meal (a hearty dish softens blows); hit() has no scene to ask */
+  damageMul = 1;
+  override hit(dmg: number, melee = true, by?: Mover): void { super.hit(dmg * this.damageMul, melee, by); }
 
   update(dt: number, s: VillageScene): void {
+    this.damageMul = 1 / s.buffMul('hp');
     if (s.interior.active) { s.interior.update(dt); return; }
     this.tickTimers(dt);
     this.sinceSwing += dt;
@@ -1078,7 +1082,7 @@ export class Player extends Mover {
     if (mx) this.dir = mx < 0 ? -1 : 1;
     // swinging plants your feet; the swing itself steps you forward
     const slow = this.swing ? 0.25 : this.recover > 0 ? 0.6 : 1;
-    const sp = this.speed * slow * this.armorSpeed * s.world.slowAt(this.x, this.y);
+    const sp = this.speed * slow * this.armorSpeed * s.world.slowAt(this.x, this.y) * s.buffMul('speed');
     this.vx = mx * sp; this.vy = my * sp;
     this.moveWithCollision(dt, s.world);
     // pushing up into a doorway walks you inside
@@ -1169,7 +1173,7 @@ export class Player extends Mover {
       if (this.fits(nx, ny, s.world)) { this.x = nx; this.y = ny; }
     }
     if (active || wasActive) {
-      const dmg = Math.round(p.playerDmg * weaponMul(this.weapons, 'melee') * s.mods.playerDmgMul * c.dmgMul);
+      const dmg = Math.round(p.playerDmg * weaponMul(this.weapons, 'melee') * s.mods.playerDmgMul * c.dmgMul * s.buffMul('dmg'));
       s.grid.forEachInRadius(this.x, this.y, SWING.reach + (c.spin ? 4 : 0), (o, d2) => {
         if (!(o instanceof Raider) || o.dead || sw.hit.has(o.id)) return;
         if (o.elevated !== this.elevated || !s.world.lineClear(this, o, this.elevated)) return;

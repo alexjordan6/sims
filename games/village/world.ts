@@ -1,5 +1,5 @@
 import type { Rng } from '@shared/index';
-import { TILE, COLS, ROWS, BUILDING_HP, HEARTH_WOOD, ITEM, GNOME_HOME, p, CROP_KINDS, type Calling, type FoodKind, type BuildingKind } from './config';
+import { TILE, COLS, ROWS, BUILDING_HP, HEARTH_WOOD, ITEM, GNOME_HOME, p, CROP_KINDS, type Calling, type FoodKind, type BuildingKind, type StartKind } from './config';
 export type { BuildingKind } from './config';
 import { tickItem, hop, type Item, type ItemKind } from './items';
 
@@ -118,6 +118,8 @@ export class World {
   defenses = new Map<number, Defense>();
   /** the Ogre's home, far out in the woods; found through the fog */
   lair: Building | null = null;
+  /** the gnome start's cottage in the clearing (see generate), so the scene needn't go looking for it */
+  gnomeStart: Building | null = null;
   denseForests = false;
   revision = 0;
   treeCount = 0;
@@ -530,8 +532,13 @@ export class World {
     return out.reverse();
   }
 
-  /** Starting map: tree clusters, a house, a barracks, the field, and the two supply buildings. */
-  generate(rng: Rng, fieldW = 3): void {
+  /**
+   * Starting map: tree clusters, a house, a barracks, the field, and the two supply buildings.
+   * In the 'gnome' start there is no house, barracks or field — a toadstool cottage stands in the
+   * clearing instead, and the hidden one out in the woods is left ungenerated (there is nothing left
+   * to discover). The supply buildings stand either way: hauling and storage work the same.
+   */
+  generate(rng: Rng, fieldW = 3, start: StartKind = 'village'): void {
     this.denseForests = rng.chance(0.65);
     // Broad overlapping forest regions leave meadows between them; some seeds have only open groves.
     const groves = Array.from({ length: this.denseForests ? 22 : 12 }, () => ({
@@ -561,17 +568,20 @@ export class World {
     // clear the village centre
     for (let ty = hy - 7; ty <= hy + 4; ty++)
       for (let tx = hx - 11; tx <= hx + 10; tx++) this.set(tx, ty, 'grass');
-    this.placeHouse(hx - 9, hy - 5);
-    this.placeBarracks(hx + 5, hy - 5);
+    if (start === 'village') { this.placeHouse(hx - 9, hy - 5); this.placeBarracks(hx + 5, hy - 5); }
     const half = Math.floor(fieldW / 2);
-    // the starting field: a row of each crop
+    // the starting field: a row of each crop. The gnome start sows nothing, but still draws — this loop
+    // is the block's only rng consumer, so skipping the draws would shift the whole wilderness downstream.
     for (let ty = hy + 1; ty <= hy + 3; ty++)
       for (let tx = hx - half; tx <= hx + half; tx++) {
-        const t = this.sow(tx, ty, CROP_KINDS[(ty - hy - 1) % CROP_KINDS.length]);
-        t.stage = rng.int(0, 2);
+        const stage = rng.int(0, 2);
+        if (start !== 'village') continue;
+        this.sow(tx, ty, CROP_KINDS[(ty - hy - 1) % CROP_KINDS.length]).stage = stage;
       }
     this.place('granary', hx + half + 2, hy + 1);
     this.place('woodyard', hx - 9, hy + 1);
+    // the gnome start's own cottage: yours from the first frame, where the house would have stood
+    if (start === 'gnome') this.gnomeStart = this.place('gnomehouse', hx - 8, hy - 4);
     // A small reliable starter grove; the wider seed still determines the wilderness.
     for (let y = hy + 8; y < hy + 12; y++) for (let x = hx - 8; x < hx - 3; x++) {
       if (!this.get(x, y)?.trail && rng.chance(0.65)) this.set(x, y, 'tree').stage = rng.int(0, 10);
@@ -589,9 +599,10 @@ export class World {
     }
     // The gnomes' toadstool cottage: hidden out in the woods, well away from the lair, with a clearing and a fairy
     // ring of mushrooms. It stays `wild` — no hearth, no fog sight, nobody's business — until the head finds it.
+    // (the gnome start already lives in one, so there is nothing out there left to find)
     const gf = BUILDINGS.gnomehouse;
     let den: Building | null = null;
-    for (let attempt = 0; attempt < 400; attempt++) {
+    for (let attempt = 0; start === 'village' && attempt < 400; attempt++) {
       const ang = rng.range(0, Math.PI * 2), dist = rng.range(GNOME_HOME.minDist, GNOME_HOME.maxDist);
       const tx = Math.round(hx + Math.cos(ang) * dist), ty = Math.round(hy + Math.sin(ang) * dist * 0.75);
       if (tx < 5 || ty < 5 || tx + gf.w > this.cols - 5 || ty + gf.h + 2 > this.rows - 5) continue;
