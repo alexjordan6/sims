@@ -859,8 +859,15 @@ export class VillageScene extends SimScene {
 
   /** tile under the mouse (null on touch / when the pointer left the canvas); drives cursor placement */
   hoverTile: TilePos | null = null;
-  /** the exact point under the mouse, for throws */
+  /** the exact point under the mouse, for throws and bow aiming */
   hoverPoint: { x: number; y: number } | null = null;
+
+  /** Refresh from screen coordinates so a stationary mouse still aims correctly as the camera follows. */
+  private bowAim(): { x: number; y: number } | null {
+    if (!this.hoverPoint || document.body.classList.contains('touch')) return null;
+    const ptr = this.input.activePointer;
+    return this.cameras.main.getWorldPoint(ptr.x, ptr.y);
+  }
 
   private onPointerMove(ptr: Phaser.Input.Pointer): void {
     if (this.drag) { this.drag.x1 = ptr.worldX; this.drag.y1 = ptr.worldY; }
@@ -2122,7 +2129,7 @@ export class VillageScene extends SimScene {
     switch (pl.tool) {
       case 'bow': {
         if (pl.attackCd > 0) return;
-        const hv = this.hoverTile, aim = hv ? World.center(hv.tx, hv.ty) : null;
+        const aim = this.bowAim();
         const auto = !aim ? this.bestTarget(pl.x, pl.y, 165) : null;
         this.shoot(pl, aim ? aim.x - pl.x : auto ? auto.x - pl.x : pl.facing.x, aim ? aim.y - pl.y : auto ? auto.y - pl.y : pl.facing.y, Math.round(14 * weaponMul(pl.weapons, 'bow') * this.mods.playerDmgMul * this.buffMul('dmg')));
         return;
@@ -2330,6 +2337,17 @@ export class VillageScene extends SimScene {
       const cam = this.cameras.main;
       const k = Math.min(1, dt * 8);
       cam.centerOn(cam.midPoint.x + (this.player.x - cam.midPoint.x) * k, cam.midPoint.y + (this.player.y - (this.player.elevated ? WALL_HEIGHT : 0) - cam.midPoint.y) * k);
+    }
+    if (this.player.tool === 'bow') {
+      const aim = this.bowAim();
+      if (aim) {
+        const dx = aim.x - this.player.x, dy = aim.y - this.player.y;
+        const length = Math.hypot(dx, dy);
+        if (length > 0.001) {
+          this.player.aim = { x: dx / length, y: dy / length };
+          if (dx !== 0) this.player.dir = dx < 0 ? -1 : 1;
+        }
+      }
     }
     this.view?.sync(dt);
     this.ui?.render(dt);
