@@ -463,23 +463,24 @@ export class VillageScene extends SimScene {
   }
 
   /** Follow-camera zoom levels the player can cycle through on small screens. */
-  static readonly ZOOMS = [1, 1.5, 2, 3] as const;
+  static readonly ZOOMS = [1, 1.5, 2, 3, 4, 6, 8] as const;
   /** index into ZOOMS; null = automatic */
   zoomChoice: number | null = null;
   /** the zoom the camera should rest at; fx bumps zoom in briefly and always return here */
   baseZoom = 2;
+  private cameraZoomSetting = p.cameraZoom;
 
   /**
    * The world is bigger than any normal screen, so the camera follows the player: 2x on
-   * desktop (a 40x22-tile window), 1.5x on phones so a portrait screen isn't filled by a single
-   * building. Z / the ZOOM button cycle ZOOMS. Only a huge display shows the whole map at once.
+   * desktop, 1.5x on phones, multiplied by p.cameraZoom (default 2 for a closer view).
+   * Z / the ZOOM button cycle ZOOMS. Only a huge display shows the whole map at once.
    */
   fitCamera(): void {
     const cam = this.cameras.main;
     cam.zoomEffect.reset(); // a zoom bump in flight would otherwise snap back to the old zoom
     const vw = this.scale.width, vh = this.scale.height;
     const fit = Math.min(vw / this.W, vh / this.H);
-    if (fit >= 2 && this.zoomChoice === null) {
+    if (fit >= 2 * p.cameraZoom && this.zoomChoice === null) {
       this.following = false;
       cam.removeBounds();
       this.baseZoom = Math.min(4, Math.floor(fit * 2) / 2);
@@ -487,7 +488,7 @@ export class VillageScene extends SimScene {
       cam.centerOn(this.W / 2, this.H / 2);
       return;
     }
-    const auto = Math.min(vw, vh) < 500 ? 1.5 : 2;
+    const auto = (Math.min(vw, vh) < 500 ? 1.5 : 2) * p.cameraZoom;
     const zoom = this.zoomChoice === null ? auto : VillageScene.ZOOMS[this.zoomChoice];
     this.following = true;
     this.baseZoom = zoom;
@@ -496,11 +497,11 @@ export class VillageScene extends SimScene {
     if (this.player) cam.centerOn(this.player.x, this.player.y);
   }
 
-  /** Cycle 1x → 1.5x → 2x → 3x (Z, or the touch zoom button). */
+  /** Cycle zoom presets (Z, or the touch zoom button). */
   cycleZoom(): void {
     const zooms: readonly number[] = VillageScene.ZOOMS;
-    const cur = this.zoomChoice ?? Math.max(0, zooms.indexOf(this.cameras.main.zoom));
-    this.zoomChoice = (cur + 1) % zooms.length;
+    const next = zooms.findIndex((zoom) => zoom > this.baseZoom);
+    this.zoomChoice = next < 0 ? 0 : next;
     this.fitCamera();
   }
 
@@ -2319,6 +2320,11 @@ export class VillageScene extends SimScene {
   // ---- rendering ------------------------------------------------------------
 
   draw(): void {
+    if (this.cameraZoomSetting !== p.cameraZoom) {
+      this.cameraZoomSetting = p.cameraZoom;
+      this.zoomChoice = null;
+      this.fitCamera();
+    }
     const dt = this.game.loop.delta / 1000;
     if (this.following) {
       const cam = this.cameras.main;

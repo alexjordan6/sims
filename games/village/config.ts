@@ -22,6 +22,9 @@ type UnionToIntersection<U> = (U extends unknown ? (k: U) => void : never) exten
 
 export const p = live(
   params({
+    cameraZoom: [D.cameraZoom, 0.5, 4, 0.25, 'Camera closeness multiplier: 1 is the original view, 2 is twice as close. Applies immediately; Z cycles zoom presets.'],
+  }, 'camera'),
+  params({
     dayLength: [D.dayLength, 10, 300, 1, 'Real seconds per in-game day. Shorter days = faster raids, less time to gather.'],
     bossDay: [D.bossDay, 5, 40, 1, 'The run\'s length: the Warlord arrives on this day. Beat him to win.'],
     raidEvery: [D.raidEvery, 1, 20, 1, 'Days between raids after the first (Long Peace adds one).'],
