@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { World, BUILDINGS, doorstep, type Tile, type Building, type BuildingKind } from './world';
-import { Mover, Villager, Raider, Player, Arrow } from './agents';
+import { Mover, Villager, Raider, Player, Arrow, type EnemyKind } from './agents';
 import { Bolt } from './enemies';
 import { Boar } from './wildlife';
 import { TOWN, CHAR } from './atlas';
@@ -587,7 +587,7 @@ function tileFrames(t: Tile, cropDays: number, dayTime: number, oldDays: number,
   }
 }
 
-const ENEMY_SCALE: Record<string, number> = { raider: 1, warlord: 1.5, rat: 0.8, snatcher: 0.9, brute: 1.3, shaman: 1, ogre: OGRE.scale, wrecker: 1.1, boar: 1 };
+const ENEMY_SCALE: Record<EnemyKind, number> = { raider: 1, warlord: 1.5, rat: 0.8, snatcher: 0.9, brute: 1.3, shaman: 1, ogre: OGRE.scale, wrecker: 1.1, boar: 1, troll: 1.15 };
 
 /** The layered look for an agent — role outfit, held tool, worn armor, dye — or null for things that aren't people. */
 export function lookFor(m: Mover): Look | null {
