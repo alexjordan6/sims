@@ -565,6 +565,41 @@ export class Villager extends Mover {
   haul(kind: LoadKind): number { return this.gnome ? (kind === 'food' && this.load?.food === 'meat' ? BOAR.meat : 1) : Math.round(HAUL.villager[kind] * p.haulMul); }
   /** the meat lying in the wild this gnome is on its way to (claimed in `VillageScene.meatClaims`, so two never chase one ham) */
   private fetching: Item | null = null;
+  private companyWait = 0;
+  private companyRest = 0;
+
+  /** Stable parties of up to three adults from one cottage; regroup when the household changes. */
+  private foragingParty(s: VillageScene): Villager[] {
+    const adults = s.villagers().filter(v => v.role === 'gnome' && !v.dead && v.home === this.home).sort((a, b) => a.id - b.id);
+    const start = Math.floor(adults.indexOf(this) / 3) * 3;
+    return adults.slice(start, start + 3).filter(v => v !== this && !v.hidden && !v.carriedBy && v.task !== 'fleeing');
+  }
+
+  /** Prefer the patch a companion is already working, without chasing them across the map. */
+  private companyPatch(s: VillageScene): { x: number; y: number } | null {
+    const mate = this.foragingParty(s).find(v => !v.delivering && v.goal && this.dist(v) < 20 * TILE);
+    return mate?.goal ? World.center(mate.goal.tx, mate.goal.ty) : null;
+  }
+
+  /** Let a trailing companion catch up. A bounded wait and cooldown prevent mutual waiting forever. */
+  private waitForCompany(dt: number, s: VillageScene): boolean {
+    this.companyRest = Math.max(0, this.companyRest - dt);
+    if (this.companyRest > 0) return false;
+    const destination = this.delivering ? s.world.granary && doorstep(s.world.granary) : this.goal;
+    if (!destination) { this.companyWait = 0; return false; }
+    const end = World.center(destination.tx, destination.ty);
+    const behind = this.foragingParty(s).some(v => {
+      const returning = v.delivering || !!v.load;
+      const gap = this.dist(v);
+      return returning === this.delivering && gap > 3 * TILE && gap < 12 * TILE && v.dist(end) > this.dist(end) + TILE;
+    });
+    if (!behind) { this.companyWait = 0; return false; }
+    this.companyWait += dt;
+    if (this.companyWait >= 2) { this.companyWait = 0; this.companyRest = 6; return false; }
+    this.vx = this.vy = 0;
+    this.task = 'waiting for foraging companions';
+    return true;
+  }
 
   /** Gnomes: walk to a claimed piece of meat and take it. Returns true while busy with it. */
   private fetchMeat(dt: number, s: VillageScene): boolean {
@@ -600,6 +635,8 @@ export class Villager extends Mover {
       return;
     }
 
+    if (job === 'forage' && this.load && this.load.n >= this.haul(this.load.kind)) this.delivering = true;
+    if (job === 'forage' && this.waitForCompany(dt, s)) return;
     if (this.delivering) { this.deliver(dt, s); return; }
     if (job === 'forage' && this.fetchMeat(dt, s)) return;
 
@@ -610,13 +647,15 @@ export class Villager extends Mover {
       // arms full: take it in before looking for more work
       if (this.load && this.load.n >= this.haul(this.load.kind)) { this.delivering = true; this.deliver(dt, s); return; }
       const ok = (tx: number, ty: number) => (this.unreachable.get(ty * w.cols + tx) ?? 0) <= s.simTime;
+      const patch = job === 'forage' ? this.companyPatch(s) : null;
       // meat lying in the wild comes before any plant: a gnome claims the nearest unclaimed piece and goes for it
       if (job === 'forage' && (!this.load || this.load.food === 'meat') && s.food < s.foodCap) {
-        const it = w.nearestWildMeat(this.x, this.y, (m) => !s.meatClaims.has(m.id) && ok(Math.floor(m.x / TILE), Math.floor(m.y / TILE)));
+        const it = w.nearestWildMeat(patch?.x ?? this.x, patch?.y ?? this.y, (m) => !s.meatClaims.has(m.id) && (!patch || Math.hypot(m.x - patch.x, m.y - patch.y) <= 6 * TILE) && ok(Math.floor(m.x / TILE), Math.floor(m.y / TILE)));
         if (it) { s.meatClaims.add(it.id); this.fetching = it; this.fetchMeat(dt, s); return; }
       }
       const spot = job === 'forage'
-        ? w.nearest(this.x, this.y, (t, tx, ty) => !!WILD_FOOD[t.kind] && s.wildLeft(t) > 0 && (!this.load || this.load.food === WILD_FOOD[t.kind]) && ok(tx, ty))
+        ? (patch ? w.nearest(patch.x, patch.y, (t, tx, ty) => !!WILD_FOOD[t.kind] && s.wildLeft(t) > 0 && (!this.load || this.load.food === WILD_FOOD[t.kind]) && Math.hypot((tx + 0.5) * TILE - patch.x, (ty + 0.5) * TILE - patch.y) <= 6 * TILE && ok(tx, ty)) : null)
+          ?? w.nearest(this.x, this.y, (t, tx, ty) => !!WILD_FOOD[t.kind] && s.wildLeft(t) > 0 && (!this.load || this.load.food === WILD_FOOD[t.kind]) && ok(tx, ty))
         : farmer
         ? (this.load?.kind === 'food' ? w.nearest(this.x, this.y, (t, tx, ty) => t.kind === 'crop' && s.isRipe(t) && t.food === this.load!.food && ok(tx, ty)) : null) ??
           w.nearest(this.x, this.y, (t, tx, ty) => t.kind === 'crop' && s.isRipe(t) && ok(tx, ty)) ??
