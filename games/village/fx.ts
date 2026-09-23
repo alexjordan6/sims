@@ -24,8 +24,6 @@ const WEAPON = {
 type WeaponKind = keyof typeof WEAPON;
 
 const DEPTH = { weapon: 11, numbers: 35, ghost: 12, particles: 34, swoosh: 33, star: 36 } as const;
-const POWS = ['POW!', 'WHAM!', 'BONK!', 'THWACK!', 'SMACK!'];
-const STREAKS = ['', '', 'DOUBLE!', 'TRIPLE!', 'RAMPAGE!'];
 
 interface SwingRec {
   sprite: Phaser.GameObjects.Sprite;
@@ -310,14 +308,12 @@ export class Fx {
         const ring = this.scene.add.graphics().setDepth(DEPTH.swoosh).setPosition(ev.x, ev.y + 4).setScale(0.2);
         ring.lineStyle(3, 0xd8c8a0, 0.9); ring.strokeEllipse(0, 0, ev.r * 2, ev.r);
         this.scene.tweens.add({ targets: ring, scaleX: 1.1, scaleY: 1.1, alpha: 0, duration: big ? 380 : 260, ease: 'Quad.Out', onComplete: () => ring.destroy() });
-        if (big) this.word('SMASH!', ev.x, ev.y - 26, '#ff9a3c', 9, 1.0);
         break;
       }
       case 'charge': {
         // head down, a bellow, and a scuff of dust kicked back from the start line
         this.stretch(ev.who.id, ev.ux, ev.uy, 0.35, 260);
         this.sfx.roar();
-        this.word('!!', ev.who.x, ev.who.y - 22, '#ff6a5a', 9, 0.7);
         for (let i = 0; i < 4; i++) this.dust.explode(3, ev.who.x - ev.ux * (6 + i * 5), ev.who.y + 6 - ev.uy * (6 + i * 5));
         break;
       }
@@ -425,8 +421,7 @@ export class Fx {
 
   private hit(ev: Extract<FxEvent, { kind: 'hit' }>, sprites: Map<number, Phaser.GameObjects.Sprite>): void {
     const { attacker, target, dmg, crit, killed } = ev;
-    if (target.blocked) { // the shield took it
-      this.word('BLOCK', target.x, target.y - 14, '#c9d3de', 7, 0.6);
+    if (target.blocked) { // the shield took it: sparks and the clang, no damage number
       this.sparks.explode(6, target.x, target.y - 6);
       this.sfx.hit(false);
       void sprites;
@@ -454,13 +449,12 @@ export class Fx {
     if (toRaider) this.star(cx, cy, crit ? 14 : 9, crit ? 0xff9a3c : 0xfff2b0);
     this.number(String(dmg), target.x + ux * 4, target.y - 14, toRaider ? (crit ? '#ff9a3c' : '#ffe066') : '#ff5a5a', crit ? 9 : attacker instanceof Raider && attacker.boss ? 8 : 6);
     if (byPlayer) {
-      this.word(crit ? 'CRIT!' : POWS[Math.floor(Math.random() * POWS.length)], target.x - ux * 6, target.y - 22, crit ? '#ff9a3c' : '#ffffff', crit ? 8 : 7, 0.8);
       this.lastBlow.set(target.id, { ux, uy, push: ev.push ?? 40, crit });
       this.sfx.hit(crit);
       if (crit) this.zoomBump(0.06, 60, 160);
       this.shake(crit ? 120 : 60, Math.min(0.012, 0.002 + dmg * 0.0003));
       if (killed && (ev.streak ?? 0) >= 2) {
-        this.scene.time.delayedCall(120, () => { this.word(STREAKS[Math.min(4, ev.streak!)], this.scene.player.x, this.scene.player.y - 24, '#ffcf5a', 9, 1.2); this.sfx.streak(ev.streak!); });
+        this.scene.time.delayedCall(120, () => this.sfx.streak(ev.streak!)); // a streak is heard, not shouted
       }
     } else {
       if (target instanceof Player) { this.shake(90, 0.005); this.sfx.hurt(); }
@@ -621,13 +615,13 @@ export class Fx {
     return t;
   }
 
-  /** Damage number: bounces in, drifts up, fades. */
+  /** Damage number: sits up straight, drifts up, fades. No slam, no tilt — it reports, it doesn't shout. */
   private number(text: string, x: number, y: number, color: string, size: number): void {
     const t = this.textFromPool();
     if (!t) return;
-    t.setText(text).setColor(color).setFontSize(size).setPosition(Math.round(x), Math.round(y)).setAlpha(1).setVisible(true).setRotation((Math.random() - 0.5) * 0.3).setScale(1.6);
-    this.scene.tweens.add({ targets: t, scaleX: 1, scaleY: 1, duration: 180, ease: 'Back.Out' });
-    this.scene.tweens.add({ targets: t, y: y - 14, alpha: 0, duration: 700, ease: 'Quad.Out', onComplete: () => t.setVisible(false) });
+    t.setText(text).setColor(color).setFontSize(size).setPosition(Math.round(x), Math.round(y)).setAlpha(1).setVisible(true).setRotation(0).setScale(1.12);
+    this.scene.tweens.add({ targets: t, scaleX: 1, scaleY: 1, duration: 110, ease: 'Quad.Out' });
+    this.scene.tweens.add({ targets: t, y: y - 11, alpha: 0, duration: 620, ease: 'Quad.Out', onComplete: () => t.setVisible(false) });
   }
 
   /** Word pop ("POW!", "!", "DOUBLE!"): slams in big, tilts, hangs, fades. */
