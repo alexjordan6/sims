@@ -1,14 +1,14 @@
 import Phaser from 'phaser';
 import { SimScene, launch, button, getGui, Rng, SpatialGrid } from '@shared/index';
 import { launch as throwItem, type Item } from './items';
-import { World, WILD_FOOD, doorstep, buildingCenter, buildingMaxHp, hasHearth, hearthCost, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos } from './world';
+import { World, WILD_FOOD, doorstep, buildingCenter, buildingMaxHp, hasHearth, hearthCost, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos, type Hive } from './world';
 import { Villager, Raider, Player, Mover, Arrow, TOOLS, type Role, type Tool, type Order } from './agents';
 import { DEFENSE_COST, WALL_HEIGHT } from './config';
 import { Interior } from './interior';
 import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, Bolt, Troll, waveComposition } from './enemies';
-import { Boar, type Sounder } from './wildlife';
+import { Boar, Swarm, type Sounder } from './wildlife';
 import { Fog } from './fog';
-import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, BOAR, type LoadKind, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, GNOME_BEDS, GNOME_YARD, ORDER, LEVEL_PERKS, PEN_NAME, TROLL, ITEM, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, zeroFood, isDish, foodCount, hasInterior, type Recipe, type DishKind, DIET_STAT_NAME, type DietStat, type FoodKind, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, BOAR, type LoadKind, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, GNOME_BEDS, GNOME_YARD, ORDER, LEVEL_PERKS, PEN_NAME, TROLL, HIVE, ITEM, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, zeroFood, isDish, foodCount, hasInterior, type Recipe, type DishKind, DIET_STAT_NAME, type DietStat, type FoodKind, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
@@ -42,6 +42,8 @@ export type FxEvent =
   | { kind: 'cut'; x: number; y: number }
   /** the long grass stirs where something unseen moves */
   | { kind: 'rustle'; x: number; y: number }
+  /** a swarm of bees on the wing: a handful of motes at (x, y), pushed every frame while it flies */
+  | { kind: 'bees'; x: number; y: number }
   | { kind: 'ruin'; building: Building }
   | { kind: 'demolish'; building: Building }
   /** the Ogre's ground slam (also his crash into a wall): shockwave of radius r */
@@ -238,6 +240,7 @@ export class VillageScene extends SimScene {
     this.sounders = []; this.meatClaims.clear();
     this.spawnSounders();
     this.spawnTrolls();
+    this.spawnHives();
     this.lairFound = false;
     this.gnomesFound = p.gnomeStart; // you already keep a toadstool cottage: the craft needs no finding
     this.fog?.reset();
@@ -325,6 +328,76 @@ export class VillageScene extends SimScene {
       }
     }
   }
+  /**
+   * Hang p.hives beehives in old-growth canopies. Like the trolls these draw from their own stream off
+   * the seed, so moving the slider does not reshuffle the rest of the world.
+   */
+  private spawnHives(): void {
+    const hx = COLS / 2, hy = ROWS / 2;
+    const rng = new Rng(this.seed ^ 0x81ee);
+    const placed: TilePos[] = [];
+    for (let k = 0; k < p.hives; k++) {
+      for (let tries = 0; tries < 40; tries++) {
+        const tx = rng.int(3, COLS - 4), ty = rng.int(3, ROWS - 4), t = this.world.get(tx, ty)!;
+        if (!this.isOldGrowth(t)) continue; // only a full canopy can hide a hive
+        if (Math.hypot(tx - hx, ty - hy) < HIVE.minDist) continue;
+        if (placed.some((q) => Math.hypot(q.tx - tx, q.ty - ty) < HIVE.spacing)) continue;
+        this.world.hives.set(ty * this.world.cols + tx, { tx, ty, angry: 0 });
+        placed.push({ tx, ty });
+        break;
+      }
+    }
+  }
+
+  /** seconds until the next sweep for bodies standing under a hive */
+  private hiveT = 0;
+  /**
+   * Wake any hive somebody is standing under. Scanning the handful of bodies against the hive map is far
+   * cheaper than scanning the hives, and it mirrors how a boar notices someone treading on it.
+   */
+  private tickHives(dt: number): void {
+    for (const h of this.world.hives.values()) if (h.angry > 0) h.angry -= dt;
+    this.hiveT -= dt;
+    if (this.hiveT > 0 || !this.world.hives.size) return;
+    this.hiveT = 0.25;
+    for (const a of this.agents) {
+      if (!(a instanceof Mover) || a.dead || a.hidden || a.elevated) continue;
+      // people and raiders disturb a hive; the wildlife that lives out here does not
+      const meat = a instanceof Player || (a instanceof Villager && !a.carriedBy && a.role !== 'infant') || (a instanceof Raider && !(a instanceof Boar));
+      if (!meat) continue;
+      const pt = a.tile;
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+        const h = this.world.hiveAt(pt.tx + dx, pt.ty + dy);
+        if (!h || h.angry > 0) continue;
+        if (Math.hypot((h.tx + 0.5) * TILE - a.x, (h.ty + 0.5) * TILE - a.y) > HIVE.perimeter) continue;
+        this.wakeHive(h, a);
+      }
+    }
+  }
+
+  /** Out they come, after whoever disturbed them. */
+  wakeHive(h: Hive, at: Mover): Swarm {
+    h.angry = HIVE.patience + HIVE.calmAfter;
+    const sw = this.spawn(new Swarm(h, at));
+    if (at instanceof Player) this.event('raid', 'Bees! A hive above you — run, or get behind a door.', true);
+    else if (at instanceof Villager) this.event('raid', `${at.name} disturbed a hive`);
+    return sw;
+  }
+
+  /**
+   * A hive comes down with its tree: the honey falls where it hung, and what is left of the swarm is
+   * extremely cross about it. Called before the tile is felled, since World.set drops the hive.
+   */
+  knockDownHive(tx: number, ty: number, by: Mover | null): void {
+    const h = this.world.hiveAt(tx, ty);
+    if (!h) return;
+    const c = World.center(tx, ty);
+    this.world.dropItem('food', HIVE.honey, c.x, c.y, 'honey', this.rng);
+    this.event('food', `The hive comes down — ${foodCount(HIVE.honey, 'honey')} in the grass, and the bees are furious.`, true);
+    if (by) this.wakeHive(h, by); else h.angry = HIVE.calmAfter;
+    this.world.hives.delete(ty * this.world.cols + tx);
+  }
+
   /** Dawn among the trolls: one that is not hunting anybody licks its wounds. */
   private tickTrolls(): void {
     for (const a of this.agents) if (a instanceof Troll && !a.dead && !a.hunting) a.hp = Math.min(a.maxHp, a.hp + Math.round(a.maxHp * TROLL.regen));
@@ -936,6 +1009,7 @@ export class VillageScene extends SimScene {
     this.world.tickItems(dt);
     this.pickUpItems();
     this.tidySelection();
+    this.tickHives(dt);
     this.tickTowers(dt);
     for (const a of this.agents) if (a.dead) this.onDeath(a as Mover);
     this.removeDead();
@@ -1235,7 +1309,7 @@ export class VillageScene extends SimScene {
     if (!p.collide) return;
     const solid: Mover[] = [];
     for (const a of this.agents) {
-      if (!(a instanceof Mover) || a.dead || a.hidden || a instanceof Arrow || a instanceof Bolt) continue;
+      if (!(a instanceof Mover) || a.dead || a.hidden || a instanceof Arrow || a instanceof Bolt || a instanceof Swarm) continue;
       if (a instanceof Villager && (a.carriedBy || a.role === 'infant')) continue;
       if (a instanceof Player && a.roll) continue; // a roll goes through bodies — walls still stop it
       solid.push(a);
@@ -2216,7 +2290,7 @@ export class VillageScene extends SimScene {
           const why = this.loadProblem('wood');
           if (why) { this.event('wood', why + '.'); return; }
           // the head clears ground; the real wood comes in on woodcutters' backs
-          if (++t.work >= this.workHits(3)) { this.world.set(tx, ty, 'sapling'); this.player.pickUp('wood', p.playerTreeYield); }
+          if (++t.work >= this.workHits(3)) { this.knockDownHive(tx, ty, this.player); this.world.set(tx, ty, 'sapling'); this.player.pickUp('wood', p.playerTreeYield); }
           else this.world.dirty.add(ty * COLS + tx);
         } else if (t?.kind === 'sapling') this.world.set(tx, ty, 'grass'); // clear the stump
         this.fx.push({ kind: 'tool', tool: 'axe', tx, ty });
@@ -2323,7 +2397,7 @@ export class VillageScene extends SimScene {
         if (kind === 'crop') return this.isRipe(t!) ? `ripe ${FOODS[t!.food ?? 'wheat'].name.toLowerCase()} — ${need('hands')}` : `${FOODS[t!.food ?? 'wheat'].name.toLowerCase()} growing (${t!.stage}/${this.cropDaysOf(t!)} days)`;
         return `seeds: ${FOODS[pl.cropKind].name.toLowerCase()} on soil, trees on grass · F: next crop`;
       case 'axe':
-        if (kind === 'tree') { const why = this.loadProblem('wood'); return why ?? `E: clear ${this.isOldGrowth(t!) ? 'old growth' : 'young tree'} (${t!.work}/3 · ${p.playerTreeYield} wood for you; a woodcutter gets ${this.treeYield(t!)})${pl.load ? ` · carrying ${pl.load.n}/${HAUL.player.wood} wood` : ''}`; }
+        if (kind === 'tree') { const why = this.loadProblem('wood'); return why ?? `E: clear ${this.isOldGrowth(t!) ? 'old growth' : 'young tree'}${this.world.hiveAt(tg.tx, tg.ty) ? ' — A HIVE HANGS HERE' : ''} (${t!.work}/3 · ${p.playerTreeYield} wood for you; a woodcutter gets ${this.treeYield(t!)})${pl.load ? ` · carrying ${pl.load.n}/${HAUL.player.wood} wood` : ''}`; }
         if (kind === 'sapling') return t!.stage < 2 ? 'E: clear the stump' : 'E: cut down the sapling';
         return 'axe: face a tree';
       case 'hands':

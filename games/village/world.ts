@@ -107,6 +107,13 @@ export interface Tile {
 
 export interface TilePos { tx: number; ty: number }
 
+/** A beehive in a tree's canopy, keyed in World.hives by its tile index. It dies with its tree. */
+export interface Hive {
+  tx: number; ty: number;
+  /** seconds before the hive settles enough to be woken again */
+  angry: number;
+}
+
 export const BLOCKING: Record<TileKind, boolean> = {
   grass: false, tilled: false, crop: false, sapling: false, bush: false, mushroom: false, hazel: false, garlic: false, burdock: false, tree: true, house: true, barracks: true, granary: true, woodyard: true,
   tavern: true, lair: true, gnomehouse: true, wall: true, gate: false, stairs: false,
@@ -116,6 +123,8 @@ export class World {
   tiles: Tile[] = [];
   buildings: Building[] = [];
   defenses = new Map<number, Defense>();
+  /** beehives by tile index: a side table rather than a Tile field, the way defenses work */
+  hives = new Map<number, Hive>();
   /** the Ogre's home, far out in the woods; found through the fog */
   lair: Building | null = null;
   /** the gnome start's cottage in the clearing (see generate), so the scene needn't go looking for it */
@@ -135,6 +144,7 @@ export class World {
     for (let i = 0; i < cols * rows; i++) { this.tiles.push({ kind: 'grass', stage: 0, work: 0, v: (i * 7919) % 97 }); this.dirty.add(i); }
   }
 
+  hiveAt(tx: number, ty: number): Hive | undefined { return this.hives.get(ty * this.cols + tx); }
   get houses(): Building[] { return this.buildings.filter((b) => b.kind === 'house'); }
   /** gnome families live apart: their own cottages, never a human house */
   get gnomeHouses(): Building[] { return this.buildings.filter((b) => b.kind === 'gnomehouse' && !b.wild); }
@@ -163,7 +173,7 @@ export class World {
     const i = ty * this.cols + tx;
     const t = this.tiles[i];
     if ((t.building || t.defense) && !this.stamping) return t;
-    if (t.kind === 'tree') this.treeCount--;
+    if (t.kind === 'tree') { this.treeCount--; this.hives.delete(i); } // a hive cannot outlive its tree
     if (kind === 'tree') this.treeCount++;
     // paths only go stale when walkability changes: tilling, planting and harvesting don't re-path anyone
     // (fortifications always count: a closed gate blocks enemies even though the tile kind doesn't)

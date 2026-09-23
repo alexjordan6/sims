@@ -719,10 +719,11 @@ export class Villager extends Mover {
   private pickTree(s: VillageScene, ok: (tx: number, ty: number) => boolean = () => true): TilePos | null {
     const w = s.world;
     const edge = (tx: number, ty: number) => w.treeNeighbours(tx, ty) <= 3;
-    return w.nearest(this.x, this.y, (t, tx, ty) => s.isOldGrowth(t) && edge(tx, ty) && ok(tx, ty))
-      ?? w.nearest(this.x, this.y, (t, tx, ty) => s.isOldGrowth(t) && ok(tx, ty))
-      ?? w.nearest(this.x, this.y, (t, tx, ty) => t.kind === 'tree' && edge(tx, ty) && ok(tx, ty))
-      ?? w.nearest(this.x, this.y, (t, tx, ty) => t.kind === 'tree' && ok(tx, ty));
+    const free = (tx: number, ty: number) => !w.hiveAt(tx, ty) && ok(tx, ty); // nobody fells a hive tree on their own initiative
+    return w.nearest(this.x, this.y, (t, tx, ty) => s.isOldGrowth(t) && edge(tx, ty) && free(tx, ty))
+      ?? w.nearest(this.x, this.y, (t, tx, ty) => s.isOldGrowth(t) && free(tx, ty))
+      ?? w.nearest(this.x, this.y, (t, tx, ty) => t.kind === 'tree' && edge(tx, ty) && free(tx, ty))
+      ?? w.nearest(this.x, this.y, (t, tx, ty) => t.kind === 'tree' && free(tx, ty));
   }
 
   /** Walk the load to its building and hand it in; falls back to the job loop if there is nowhere to take it. */

@@ -53,6 +53,8 @@ export class Fx {
   private seeds: Phaser.GameObjects.Particles.ParticleEmitter;
   /** blades of long grass thrown up by the sword */
   private clippings: Phaser.GameObjects.Particles.ParticleEmitter;
+  /** a disturbed hive on the wing */
+  private bees: Phaser.GameObjects.Particles.ParticleEmitter;
   private gold: Phaser.GameObjects.Particles.ParticleEmitter;
   private magic: Phaser.GameObjects.Particles.ParticleEmitter;
   private puff: Phaser.GameObjects.Particles.ParticleEmitter;
@@ -89,6 +91,8 @@ export class Fx {
     this.dust = mk([0xb8a88e, 0x8a6a4a], { speed: { min: 8, max: 25 }, gravityY: 20, lifespan: 380 });
     this.seeds = mk([0x8fd35a, 0x3a6b2a], { speed: { min: 10, max: 30 }, gravityY: 90 });
     this.clippings = mk([0x7cc65a, 0x4f9a3c, 0xa8e07a], { speed: { min: 20, max: 60 }, gravityY: 60, lifespan: 420, rotate: { onEmit: () => Math.random() * 360 } });
+    // bees: small, fast, no gravity — they hang in the air rather than fall
+    this.bees = mk([0xe8d45a, 0x3a2c18, 0xc9a02c], { speed: { min: 20, max: 70 }, gravityY: 0, lifespan: 260, scale: { start: 1, end: 0.6 } });
     this.gold = mk([0xffcf5a, 0xfff2b0], { speed: { min: 30, max: 90 }, gravityY: -20, lifespan: 700 });
     this.magic = mk([0xb46bff, 0xe0b0ff, 0x7a3fd6], { speed: { min: 10, max: 40 }, gravityY: -30, lifespan: 380 });
     this.puff = mk([0xffffff, 0xe8e8e8, 0xc9c9c9], { speed: { min: 15, max: 45 }, gravityY: -25, lifespan: 500, scale: { start: 2.5, end: 0 } });
@@ -274,6 +278,7 @@ export class Fx {
       case 'deposit': this.dust.explode(6, ev.x, ev.y); this.word(ev.text, ev.x, ev.y - 10, ev.colour, 7, 0.9); this.sfx.dig(); break;
       case 'cut': this.clippings.explode(6, ev.x, ev.y - 2); break;
       case 'rustle': if (!this.scene.fog || this.scene.fog.visibleAt(ev.x, ev.y) > 0.35) this.clippings.explode(3, ev.x, ev.y - 3); break; // fog-gated: unexplored grass keeps its secrets
+      case 'bees': if (!this.scene.fog || this.scene.fog.visibleAt(ev.x, ev.y) > 0.35) { this.bees.explode(2, ev.x + (Math.random() - 0.5) * 10, ev.y + (Math.random() - 0.5) * 10); this.sfx.buzz(); } break;
       case 'ruin': {
         // the roof comes down: a shudder, a thud, dust and smoke across the whole footprint
         const b = ev.building, f = BUILDINGS[b.kind], x0 = b.tx * TILE, y0 = b.ty * TILE, w = f.w * TILE, h = f.h * TILE;

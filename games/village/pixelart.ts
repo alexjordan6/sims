@@ -591,6 +591,7 @@ const BOWL = '#6f5a49', BOWL_DARK = '#4a3b30', BOWL_HI = '#9a836d';
 const BROTH = '#c98a3a', BROTH_HI = '#e8b567';
 const CRUST = '#e8c07a', CRUST_DARK = '#b8894c';
 const GLAZE = '#8a3a22', GLAZE_DARK = '#5e2415';
+const HONEY = '#e8a52c', HONEY_DARK = '#b87a18', HONEY_HI = '#f7d070';
 const TOMATO = '#d9382f', TOMATO_HI = '#f06a5a', FRUIT_GREEN = '#8bc34a', FLOWER = '#ffe27a', STAKE = '#a67b4a';
 
 /** Frame indices into the `flora` tileset (a single row of 16x16 tiles). */
@@ -615,7 +616,9 @@ export const FLORA = {
     wheat: [45, 46, 47], carrot: [48, 49, 50], tomato: [28, 29, 30], berry: [51, 52, 53], mushroom: [54, 55, 56],
     hazelnut: [64, 65, 66], garlic: [67, 68, 69], burdock: [70, 71, 72], meat: [76, 77, 78],
     /** what the pot makes: bowls and platters, so a cooked heap reads apart from a raw one */
-    stew: [79, 80, 81], roast: [82, 83, 84], tart: [85, 86, 87], soup: [88, 89, 90],
+    stew: [79, 80, 81], roast: [82, 83, 84], tart: [85, 86, 87], soup: [88, 89, 90], cake: [91, 92, 93],
+    /** robbed from a hive */
+    honey: [94, 95, 96],
   } as const,
   /** scrap iron a raider dropped */
   scrap: 57,
@@ -625,7 +628,9 @@ export const FLORA = {
   burdock: [62, 63] as const,
   /** long grass, three variants so a field doesn't tile visibly */
   tallGrass: [73, 74, 75] as const,
-  count: 91,
+  /** a beehive hanging in a canopy */
+  hive: 97,
+  count: 98,
 } as const;
 
 /** Filled ellipse, pixel by pixel. */
@@ -745,6 +750,8 @@ export function ensureFlora(scene: Phaser.Scene): void {
   for (let i = 0; i < 3; i++) { drawPile(ctx, at(FLORA.pile.hazelnut[i]), i, 'hazelnut'); drawPile(ctx, at(FLORA.pile.garlic[i]), i, 'garlic'); drawPile(ctx, at(FLORA.pile.burdock[i]), i, 'burdock'); drawPile(ctx, at(FLORA.pile.meat[i]), i, 'meat'); }
   for (let i = 0; i < 3; i++) { drawPile(ctx, at(FLORA.pile.wheat[i]), i, 'wheat'); drawPile(ctx, at(FLORA.pile.carrot[i]), i, 'carrot'); drawPile(ctx, at(FLORA.pile.berry[i]), i, 'berry'); drawPile(ctx, at(FLORA.pile.mushroom[i]), i, 'mushroom'); }
   for (let i = 0; i < 3; i++) for (const d of DISHES) drawPile(ctx, at(FLORA.pile[d][i]), i, d);
+  for (let i = 0; i < 3; i++) drawPile(ctx, at(FLORA.pile.honey[i]), i, 'honey');
+  drawHive(ctx, at(FLORA.hive));
   for (let i = 0; i < 3; i++) drawTallGrass(ctx, at(FLORA.tallGrass[i]), i);
   tex.refresh();
   drawScrap(ctx, at(FLORA.scrap));
@@ -837,7 +844,9 @@ function drawPile(ctx: Ctx, ox: number, size: number, kind: FoodKind): void {
     px(ctx, ox + x - 1, y + 1, BOWL_HI, 7, 1); px(ctx, ox + x, y + 2, BOWL, 5, 1); px(ctx, ox + x + 1, y + 3, BOWL_DARK, 3, 1);
   };
   const item = (x: number, y: number) => {
-    if (kind === 'stew') { bowl(x, y, BROTH, BROTH_HI); px(ctx, ox + x + 3, y - 1, SHROOM, 2, 1); }
+    if (kind === 'honey') { px(ctx, ox + x, y, HONEY_DARK, 5, 3); px(ctx, ox + x, y, HONEY, 5, 2); for (let i = 0; i < 2; i++) px(ctx, ox + x + 1 + i * 2, y, HONEY_HI, 1, 1); px(ctx, ox + x + 4, y + 2, HONEY_DARK, 1, 1); }
+    else if (kind === 'cake') { px(ctx, ox + x, y, CRUST_DARK, 5, 3); px(ctx, ox + x, y, CRUST, 5, 1); px(ctx, ox + x, y + 1, HONEY, 5, 1); px(ctx, ox + x + 1, y - 1, HONEY_HI, 3, 1); }
+    else if (kind === 'stew') { bowl(x, y, BROTH, BROTH_HI); px(ctx, ox + x + 3, y - 1, SHROOM, 2, 1); }
     else if (kind === 'soup') { bowl(x, y, CARROT, CARROT_HI); px(ctx, ox + x + 1, y - 1, LEAF_LIGHT, 1, 1); }
     else if (kind === 'tart') { px(ctx, ox + x, y, CRUST_DARK, 5, 3); px(ctx, ox + x, y, CRUST, 5, 1); px(ctx, ox + x + 1, y - 1, CRUST, 3, 1); px(ctx, ox + x + 1, y, BERRY, 1, 1); px(ctx, ox + x + 3, y, BERRY, 1, 1); px(ctx, ox + x + 2, y - 1, BERRY_HI, 1, 1); }
     else if (kind === 'roast') { px(ctx, ox + x - 1, y + 3, BOWL_HI, 7, 1); px(ctx, ox + x, y, GLAZE, 5, 3); px(ctx, ox + x + 1, y, MEAT_HI, 2, 1); px(ctx, ox + x + 4, y - 1, BONE, 1, 2); px(ctx, ox + x, y + 2, GLAZE_DARK, 4, 1); }
@@ -853,6 +862,18 @@ function drawPile(ctx: Ctx, ox: number, size: number, kind: FoodKind): void {
   item(3, 10); item(9, 10);
   if (size >= 1) { item(8, 6); item(3, 6); }
   if (size >= 2) { item(5, 3); item(10, 3); px(ctx, ox + 3, 13, SOIL_DARK, 10, 1); }
+}
+/** A hive hanging from a branch: a papery grey teardrop on a short stalk, with a dark mouth. */
+function drawHive(ctx: Ctx, ox: number): void {
+  const PAPER = '#b8a072', PAPER_DARK = '#8a7448', PAPER_HI = '#d8c69a', MOUTH = '#3a2c18';
+  px(ctx, ox + 7, 0, '#6b5a34', 2, 2);                                  // the stalk it hangs by
+  px(ctx, ox + 6, 2, PAPER_DARK, 4, 1);
+  px(ctx, ox + 5, 3, PAPER, 6, 3); px(ctx, ox + 4, 6, PAPER, 8, 5); px(ctx, ox + 5, 11, PAPER, 6, 3);
+  px(ctx, ox + 6, 14, PAPER_DARK, 4, 1);
+  for (let i = 0; i < 4; i++) px(ctx, ox + 4, 5 + i * 3, PAPER_DARK, 8, 1); // the layered courses
+  px(ctx, ox + 5, 4, PAPER_HI, 2, 1); px(ctx, ox + 5, 7, PAPER_HI, 1, 2);
+  px(ctx, ox + 7, 11, MOUTH, 2, 2);                                      // the mouth
+  px(ctx, ox + 3, 8, '#e8d45a', 1, 1); px(ctx, ox + 12, 5, '#e8d45a', 1, 1); // a couple of bees about it
 }
 /** A few shards of scrap iron, one with a glint. */
 function drawScrap(ctx: Ctx, ox: number): void {

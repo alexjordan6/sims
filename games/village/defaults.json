@@ -75,6 +75,8 @@
   "boarDmg": 8,
   "trolls": 100,
   "trollDmg": 6,
+  "hives": 40,
+  "beeDmg": 2,
   "fog": true,
   "hearths": true,
   "towerFires": true,

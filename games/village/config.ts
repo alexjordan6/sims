@@ -112,6 +112,8 @@ export const p = live(
     boarDmg: [D.boarDmg, 1, 30, 1, 'Damage per blow from a provoked boar. Boars never raid; they charge whoever strikes them.'],
     trolls: [D.trolls, 0, 400, 5, 'Trolls scattered over the map at NEW VILLAGE. Solitary, hostile on sight and never leashed — a chase can carry one into the village. The count is the difficulty dial, not their stats.'],
     trollDmg: [D.trollDmg, 1, 30, 1, 'Damage per blow from a troll.'],
+    hives: [D.hives, 0, 200, 5, 'Beehives hanging in old-growth trees at NEW VILLAGE. Walk inside a perimeter and the swarm comes out; chop the tree for the honey.'],
+    beeDmg: [D.beeDmg, 1, 15, 1, 'Damage a swarm does per sting. It stings often, so small numbers add up fast.'],
   }, 'enemies'),
   params({
     fog: [D.fog, 'Fog of war. Off lifts it everywhere; on drops it back over the unexplored.'],
@@ -220,11 +222,11 @@ export const GNOME_YARD = 4;
 
 // ---- food and diet --------------------------------------------------------------------------
 /** What the gnomes' pot makes out of raw food: dishes are food like any other, only richer (see RECIPES and Food.power). */
-export type DishKind = 'stew' | 'roast' | 'tart' | 'soup';
-export const DISHES: readonly DishKind[] = ['stew', 'roast', 'tart', 'soup'];
+export type DishKind = 'stew' | 'roast' | 'tart' | 'soup' | 'cake';
+export const DISHES: readonly DishKind[] = ['stew', 'roast', 'tart', 'soup', 'cake'];
 /** Every kind of food. Crops are sown on soil; wild food grows in the woods and is picked by hand; dishes are cooked. What a child eats decides the adult. */
-export type FoodKind = 'wheat' | 'carrot' | 'tomato' | 'berry' | 'mushroom' | 'hazelnut' | 'garlic' | 'burdock' | 'meat' | DishKind;
-export const RAW_KINDS: readonly FoodKind[] = ['wheat', 'carrot', 'tomato', 'berry', 'mushroom', 'hazelnut', 'garlic', 'burdock', 'meat'];
+export type FoodKind = 'wheat' | 'carrot' | 'tomato' | 'berry' | 'mushroom' | 'hazelnut' | 'garlic' | 'burdock' | 'meat' | 'honey' | DishKind;
+export const RAW_KINDS: readonly FoodKind[] = ['wheat', 'carrot', 'tomato', 'berry', 'mushroom', 'hazelnut', 'garlic', 'burdock', 'meat', 'honey'];
 export const FOOD_KINDS: readonly FoodKind[] = [...RAW_KINDS, ...DISHES];
 export const CROP_KINDS: readonly FoodKind[] = ['wheat', 'carrot', 'tomato'];
 export type DietStat = 'hp' | 'speed' | 'work' | 'dmg' | 'care';
@@ -232,7 +234,7 @@ export interface Food {
   name: string; one: string;
   /** plural of `one`, when it isn't just `one` + s ('berries', 'bowls of stew', and the mass nouns that never take one) */
   many?: string;
-  source: 'crop' | 'wild' | 'hunt' | 'cooked';
+  source: 'crop' | 'wild' | 'hunt' | 'hive' | 'cooked';
   /** crops: days to ripen on top of p.cropDays; wild: days to regrow after picking (× p.wildRegrowMul) */
   days: number;
   /** crops: yield on top of the cropYield slider; wild: what one picking gives */
@@ -256,11 +258,14 @@ export const FOODS: Record<FoodKind, Food> = {
   burdock: { name: 'Burdock', one: 'burdock root', many: 'burdock roots', source: 'wild', days: 4, yield: 2, stat: 'speed', blurb: 'quick on their feet', colour: '#7a5230' },
   // hunted: a boar drops it where it falls (see BOAR.meat); gnomes carry it home
   meat: { name: 'Boar meat', one: 'meat', many: 'meat', source: 'hunt', days: 0, yield: 0, stat: 'dmg', power: 2, blurb: 'a hunter\'s diet: the fiercest fighters', colour: '#c9564a' },
+  // robbed from a hive in the canopy, stings and all
+  honey: { name: 'Honey', one: 'comb of honey', many: 'combs of honey', source: 'hive', days: 0, yield: 0, stat: 'hp', power: 2, blurb: 'rich: hearty for life', colour: '#e8a52c' },
   // cooked at a gnome cottage's pot: worth three raw meals to a growing child, and a warm buff to the head
   stew: { name: 'Mushroom stew', one: 'bowl of stew', many: 'bowls of stew', source: 'cooked', days: 0, yield: 0, stat: 'work', power: 3, blurb: 'cooked: tireless workers', colour: '#a8765a' },
   roast: { name: 'Boar roast', one: 'roast', source: 'cooked', days: 0, yield: 0, stat: 'dmg', power: 3, blurb: 'cooked: the fiercest fighters', colour: '#b8463c' },
   tart: { name: 'Berry tart', one: 'tart', source: 'cooked', days: 0, yield: 0, stat: 'hp', power: 3, blurb: 'cooked: hearty for life', colour: '#8c4ab0' },
   soup: { name: 'Garden soup', one: 'bowl of soup', many: 'bowls of soup', source: 'cooked', days: 0, yield: 0, stat: 'speed', power: 3, blurb: 'cooked: quick on their feet', colour: '#e8772c' },
+  cake: { name: 'Honey cake', one: 'cake', source: 'cooked', days: 0, yield: 0, stat: 'hp', power: 4, blurb: 'cooked: the heartiest there is', colour: '#e8a52c' },
 };
 /** Cooked, rather than sown or foraged: dishes never appear on a tile and can't be planted or picked. */
 /** `n` of a food, in words: 1 carrot, 3 carrots, 2 bowls of stew. */
@@ -299,6 +304,7 @@ export const RECIPES: Record<DishKind, Recipe> = {
   roast: { dish: 'roast', needs: { meat: 2, garlic: 1 }, makes: 3, heal: 30, buffAdd: 0.35, buffSecs: 90 },
   tart: { dish: 'tart', needs: { berry: 3, wheat: 1 }, makes: 3, heal: 35, buffAdd: 0.25, buffSecs: 120 },
   soup: { dish: 'soup', needs: { carrot: 2, tomato: 1 }, makes: 3, heal: 20, buffAdd: 0.35, buffSecs: 90 },
+  cake: { dish: 'cake', needs: { honey: 2, wheat: 1 }, makes: 3, heal: 45, buffAdd: 0.3, buffSecs: 150 },
 };
 
 /** How a run begins: the founding family in their house, or a gnome family in their cottage (p.gnomeStart / ?start=gnome). */
@@ -424,6 +430,29 @@ export const TROLL = {
   regen: 0.15,
   /** map: least tiles from the village centre one may start, and least between two of them */
   minDist: 24, spacing: 4,
+} as const;
+
+// ---- beehives -------------------------------------------------------------------------------
+/**
+ * A hive hangs in the canopy of an old tree. Come inside its perimeter and the swarm boils out and
+ * chases you — it cannot be fought, only outrun or shut out behind a door. Boars and other wildlife
+ * are left alone; people and raiders alike are not. Chop the tree and the honey is yours, stings and all.
+ */
+export const HIVE = {
+  /** px from the tree at which a body wakes the swarm (a tile is 16) */
+  perimeter: 38,
+  /** the sting: px it must be within, and seconds between stings (the damage is p.beeDmg) */
+  reach: 10, stingEvery: 0.45,
+  /** how fast the swarm flies — above a walking pace, below a running one */
+  speed: 68,
+  /** seconds it keeps chasing before it loses interest, and how far from home it will go (tiles) */
+  patience: 11, range: 22,
+  /** seconds the hive stays shaken after a swarm goes home, before anything can wake it again */
+  calmAfter: 6,
+  /** honey a knocked-down hive leaves */
+  honey: 3,
+  /** map: least tiles from the village centre a hive may hang, and least between two of them */
+  minDist: 16, spacing: 5,
 } as const;
 
 // ---- armor ----------------------------------------------------------------------------------

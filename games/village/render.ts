@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { World, BUILDINGS, doorstep, type Tile, type Building, type BuildingKind } from './world';
 import { Mover, Villager, Raider, Player, Arrow, type EnemyKind } from './agents';
 import { Bolt } from './enemies';
-import { Boar } from './wildlife';
+import { Boar, Swarm } from './wildlife';
 import { TOWN, CHAR } from './atlas';
 import { ensureCharacter, seedLook, type Look } from './characters';
 import { p, TILE, COLS, ROWS, CAPS, WALL_HEIGHT, OGRE, BOAR, PEN_COLOUR } from './config';
@@ -36,7 +36,7 @@ export class Renderer {
   private ground!: Phaser.Tilemaps.TilemapLayer;
   private objects!: Phaser.Tilemaps.TilemapLayer;
   /** Only trees overlapping the camera need sprites; their feet determine occlusion. */
-  private trees = new Map<number, { trunk: Phaser.GameObjects.Image; crown: Phaser.GameObjects.Image }>();
+  private trees = new Map<number, { trunk: Phaser.GameObjects.Image; crown: Phaser.GameObjects.Image; hive: Phaser.GameObjects.Image }>();
   private cropT = 0;
   private sprites = new Map<number, Phaser.GameObjects.Sprite>();
   private forts = new Map<number, Phaser.GameObjects.Image>();
@@ -237,6 +237,7 @@ export class Renderer {
         tree = {
           trunk: s.add.image(0, 0, 'flora', 0).setOrigin(0.5, 1).setScale(2),
           crown: s.add.image(0, 0, 'flora', 0).setOrigin(0.5, 1).setScale(2),
+          hive: s.add.image(0, 0, 'flora', FLORA.hive).setOrigin(0.5, 0).setScale(2).setVisible(false),
         };
         this.trees.set(id, tree);
       }
@@ -246,9 +247,13 @@ export class Renderer {
       tree.trunk.setFrame(frames.object - GID.flora).setPosition(x, y).setDepth(depth).setTint(this.tint);
       tree.crown.setVisible(frames.canopy !== undefined);
       if (frames.canopy !== undefined) tree.crown.setFrame(frames.canopy - GID.flora).setPosition(x, y - 2 * TILE).setDepth(depth + 0.0001).setTint(this.tint);
+      // a hive hangs off the near edge of the canopy, over the crown but sorted with the tree as one thing
+      const hive = frames.canopy !== undefined && w.hives.has(id);
+      tree.hive.setVisible(hive);
+      if (hive) tree.hive.setPosition(x + 12, y - 3.1 * TILE).setDepth(depth + 0.0002).setTint(this.tint);
     }
     for (const [id, tree] of this.trees) if (!seen.has(id)) {
-      tree.trunk.destroy(); tree.crown.destroy(); this.trees.delete(id);
+      tree.trunk.destroy(); tree.crown.destroy(); tree.hive.destroy(); this.trees.delete(id);
     }
   }
 
@@ -279,7 +284,7 @@ export class Renderer {
         const c = charFor(m);
         sp = this.scene.add.sprite(m.x, m.y, c.key, c.frame).setOrigin(0.5, 0.75).setDepth(DEPTH.agents);
         sp.setData('agent', m);
-        if (!(m instanceof Bolt) && !(m instanceof Arrow)) sp.setInteractive({ useHandCursor: true });
+        if (!(m instanceof Bolt) && !(m instanceof Arrow) && !(m instanceof Swarm)) sp.setInteractive({ useHandCursor: true });
         // selection is handled by the scene's pointerdown (right click on desktop, tap on touch)
         sp.on('pointerover', () => this.scene.hoverAgent(m));
         sp.on('pointerout', () => this.scene.hoverAgent(null));
@@ -293,7 +298,7 @@ export class Renderer {
       const hurt = m.hp < m.maxHp * 0.4;
       const bob = moving ? Math.abs(Math.sin(this.t * (hurt ? 9 : 14) + m.id)) * 1.5 : 0;
       const a = this.fx.anims.get(m.id);
-      const base = m instanceof Villager && m.gnome ? (m.role === 'kid' ? 0.6 : 0.75) : m instanceof Villager && m.role === 'kid' ? 0.85 : m instanceof Boar ? (m.young ? BOAR.youngScale : 1) : m instanceof Raider ? ENEMY_SCALE[m.kind] : m instanceof Bolt ? 3 : 1;
+      const base = m instanceof Villager && m.gnome ? (m.role === 'kid' ? 0.6 : 0.75) : m instanceof Villager && m.role === 'kid' ? 0.85 : m instanceof Boar ? (m.young ? BOAR.youngScale : 1) : m instanceof Raider ? ENEMY_SCALE[m.kind] : m instanceof Bolt ? 3 : m instanceof Swarm ? 4 : 1;
       const height = m instanceof Arrow ? (m.elevated ? WALL_HEIGHT * Math.max(0, 1 - m.travelled / m.dropDistance) : 0) : m.elevated ? WALL_HEIGHT : 0;
       sp.setPosition(Math.round(m.x + (a?.ox ?? 0)), Math.round(m.y - height - bob + (a?.oy ?? 0)));
       sp.setFlipX(m.dir < 0);
@@ -319,6 +324,7 @@ export class Renderer {
       if (m.hurtT < 0.15 && !m.blocked) sp.setTintFill(0xffffff);
       else if (m instanceof Raider && !(m.wild && m.harmless)) sp.setTint(mulColor(m.boss ? 0xff6a6a : m.kind === 'brute' ? 0xb07070 : 0xffd0d0, this.tint)); // a calm boar reads as an animal, not a foe
       else if (m instanceof Bolt) sp.setTint(0xb46bff);
+      else if (m instanceof Swarm) sp.setTint(0x2e2412);
       else if (hurt) sp.setTint(mulColor(0xffb0a0, this.tint));
       else sp.setTint(this.tint);
     }
@@ -647,6 +653,7 @@ function charFor(m: Mover): { key: string; frame: number } {
   if (m instanceof Arrow) return { key: 'arrow', frame: 0 };
   if (m instanceof Player) return CHAR.player;
   if (m instanceof Bolt) return { key: 'px', frame: 0 };
+  if (m instanceof Swarm) return { key: 'px', frame: 0 };
   if (m instanceof Raider) return CHAR[m.kind];
   if (m instanceof Villager) return CHAR[m.role];
   return CHAR.kid;

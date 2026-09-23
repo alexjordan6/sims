@@ -4,18 +4,19 @@ import { World, WILD_FOOD, doorstep, buildingCenter, hearthCost, BUILDINGS, type
 import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, Wrecker, Troll, waveComposition } from './enemies';
-import { Boar } from './wildlife';
-import { COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, BOAR, GNOME_HOME, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL } from './config';
+import { Boar, Swarm } from './wildlife';
+import { COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, BOAR, GNOME_HOME, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
 const output = document.getElementById('test-results')!, summary = document.getElementById('test-summary')!;
 const assert = (ok: unknown, message: string) => { if (!ok) throw new Error(message); output.textContent += `PASS ${message}\n`; };
-/** `wild` keeps the boars, `trolls` keeps the trolls — both wander into timed checks otherwise, and a troll fights back. */
-function fresh(wild = false, trolls = false): VillageScene {
+/** `wild` keeps the boars, `trolls` keeps the trolls, `hives` keeps the beehives — both wander into timed checks otherwise, and a troll fights back. */
+function fresh(wild = false, trolls = false, hives = false): VillageScene {
   const s = scene(); s.reset(42); s.screen = 'playing'; s.paused = true; s.wood = 150; s.food = 150; s.fx.length = 0;
   for (const t of s.world.tiles) t.tall = undefined; // mown: the checks below time walks; the long grass checks raise it where they need it
   if (!wild) { for (const a of s.agents) if (a instanceof Boar) a.dead = true; s.sounders = []; } // no stray sounder wanders into a check
   if (!trolls) for (const a of s.agents) if (a instanceof Troll) a.dead = true; // nor a troll, which would fight back
+  if (!hives) s.world.hives.clear(); // nor a hive over a check that walks somebody past it
   s.removeDead();
   (s as unknown as { ui: { showScreen(v: null): void } }).ui.showScreen(null);
   document.querySelector('.ctrl-panel')?.classList.remove('open');
@@ -39,6 +40,10 @@ function births(s: VillageScene, rolls: number): number {
   const n = s.villagers().length;
   for (let i = 0; i < rolls; i++) { s.simTime += p.birthEvery; s.tickBirths(); }
   return s.villagers().length - n;
+}
+/** Like step(), but through the scene's own tick — for what the scene does per frame rather than what agents do. */
+function ticks(s: VillageScene, seconds: number) {
+  for (let i = 0; i < Math.ceil(seconds * 60); i++) { s.grid.rebuild(s.agents); s.tick(1 / 60); }
 }
 function step(s: VillageScene, seconds: number) {
   for (let i = 0; i < Math.ceil(seconds * 60); i++) { s.grid.rebuild(s.agents); for (const a of [...s.agents]) if (!a.dead) a.update(1 / 60, s); s.world.tickItems(1 / 60); s.removeDead(); }
@@ -951,6 +956,78 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(!s.world.items.some((it) => it.kind === 'scrap'), 'and no scrap iron — it carried none');
     p.trolls = wasTrolls;
 
+    // ---- beehives -------------------------------------------------------------------------
+    const wasHives = p.hives;
+    p.hives = 20; s = fresh(false, false, true);
+    assert(s.world.hives.size === 20, `the canopies hold p.hives hives (${s.world.hives.size})`);
+    p.hives = 0; s = fresh(false, false, true);
+    assert(s.world.hives.size === 0, 'and the slider can clear them off the map');
+    p.hives = 15; s = fresh(false, false, true);
+    const hvs = [...s.world.hives.values()];
+    assert(hvs.every((h) => s.isOldGrowth(s.world.get(h.tx, h.ty)!)), 'every hive hangs in an old-growth canopy');
+    assert(hvs.every((h) => Math.hypot(h.tx - COLS / 2, h.ty - ROWS / 2) >= HIVE.minDist), 'and none of them hangs over the village');
+
+    // walking under one wakes the swarm
+    s = fresh(false, false, true); clearing(s);
+    s.world.set(126, 100, 'tree').stage = 20;
+    s.world.hives.set(100 * s.world.cols + 126, { tx: 126, ty: 100, angry: 0 });
+    const hive = s.world.hiveAt(126, 100)!;
+    const walker = s.spawn(new Villager(World.center(122, 100).x, World.center(122, 100).y, s.world.houses[0], 'farmer', 20, 'Stung', s.mods));
+    walker.update = () => {};
+    const swarms = () => s.agents.filter((a) => a instanceof Swarm && !a.dead) as Swarm[];
+    ticks(s, 0.5);
+    assert(swarms().length === 0 && hive.angry === 0, 'four tiles off, the hive is undisturbed');
+    Object.assign(walker, World.center(126, 101));
+    ticks(s, 0.5);
+    assert(swarms().length === 1 && hive.angry > 0, 'step under it and the swarm comes out');
+    const hpWas = walker.hp;
+    ticks(s, 3);
+    assert(walker.hp < hpWas, `and it stings whoever woke it (${hpWas} to ${walker.hp})`);
+    assert(swarms().length === 1, 'one hive makes one swarm, however long you stand there');
+
+    // getting indoors sheds it, and the hive settles
+    walker.hidden = true;
+    ticks(s, HIVE.patience + 4);
+    assert(swarms().length === 0, 'behind a door, the bees give up and go home');
+
+    // wildlife is left alone; raiders are not
+    s = fresh(false, false, true); clearing(s);
+    s.world.set(126, 100, 'tree').stage = 20;
+    s.world.hives.set(100 * s.world.cols + 126, { tx: 126, ty: 100, angry: 0 });
+    const sow = s.foundSounder(126, 101, 1).members[0];
+    Object.assign(sow, World.center(126, 101));
+    sow.update = () => {};
+    ticks(s, 1);
+    assert(s.agents.filter((a) => a instanceof Swarm).length === 0, 'a boar under a hive is nobody\'s business');
+    const lured = s.spawn(new Troll(World.center(126, 101).x, World.center(126, 101).y));
+    lured.update = () => {};
+    ticks(s, 0.5);
+    assert(s.agents.some((a) => a instanceof Swarm), 'but a troll gets the same welcome anyone would');
+
+    // chopping the tree brings the hive down, honey and all
+    s = fresh(false, false, true); clearing(s);
+    s.world.set(126, 100, 'tree').stage = 20;
+    s.world.hives.set(100 * s.world.cols + 126, { tx: 126, ty: 100, angry: 0 });
+    s.knockDownHive(126, 100, null);
+    const honey = s.world.items.filter((it) => it.kind === 'food' && it.food === 'honey');
+    assert(honey.length === 1 && honey[0].n === HIVE.honey, `a felled hive leaves ${HIVE.honey} honey`);
+    assert(!s.world.hiveAt(126, 100), 'and the hive is gone from the map');
+    s.world.set(130, 100, 'tree').stage = 20;
+    s.world.hives.set(100 * s.world.cols + 130, { tx: 130, ty: 100, angry: 0 });
+    s.world.set(130, 100, 'sapling');
+    assert(!s.world.hiveAt(130, 100), 'felling a tree by any route takes its hive with it');
+
+    // honey is food, but nothing will ever sow or forage it
+    assert(FOOD_KINDS.includes('honey') && !CROP_KINDS.includes('honey') && !Object.values(WILD_FOOD).includes('honey'), 'honey is food, but neither a crop nor a wild plant');
+    for (const k of FOOD_KINDS) s.pantry[k] = 0;
+    s.pantry.honey = 2; s.pantry.wheat = 1;
+    const kitchen = s.world.place('gnomehouse', 135, 95); kitchen.warm = true;
+    s.openCooking(kitchen);
+    assert(s.cookProblem(RECIPES.cake) === null && s.cook(RECIPES.cake), 'and the pot bakes a honey cake from it');
+    assert(s.pantry.cake === RECIPES.cake.makes && s.pantry.honey === 0, 'spending the honey exactly');
+    s.openCooking(null);
+    p.hives = wasHives;
+
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;
   } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); }
@@ -968,7 +1045,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-preview]').forEach(btn => bt
   } else if (kind === 'gnomehouse' || kind === 'cooking') {
     const b = s.world.place('gnomehouse', 135, 95); b.level = 3; b.warm = true; s.foundGnomes(b);
     s.interior.enter(b); s.interior.x = 162; s.interior.y = 140;
-    if (kind === 'cooking') { s.pantry.mushroom = 4; s.pantry.burdock = 2; s.pantry.berry = 3; s.pantry.wheat = 5; s.openCooking(b); }
+    if (kind === 'cooking') { s.pantry.mushroom = 4; s.pantry.burdock = 2; s.pantry.berry = 3; s.pantry.wheat = 5; s.pantry.honey = 4; s.openCooking(b); }
   } else {
     const b = s.world.buildings.find(b => b.kind === kind) ?? s.world.place('tavern', 135, 95); b.level = 3;
     s.interior.enter(b); s.interior.x = 162; s.interior.y = 140;

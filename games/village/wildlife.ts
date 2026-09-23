@@ -1,6 +1,6 @@
 import { Mover, Raider, Villager, Player } from './agents';
-import { World, type TilePos } from './world';
-import { BOAR, TILE, p } from './config';
+import { World, type TilePos, type Hive } from './world';
+import { BOAR, HIVE, TILE, p } from './config';
 import type { VillageScene } from './main';
 
 // Wild animals. Like enemies.ts this imports agents, never the reverse.
@@ -113,6 +113,69 @@ export class Boar extends Raider {
         this.setGoal(s, tx, ty, true);
         if (this.path.length) break;
       }
+    }
+  }
+}
+
+/**
+ * The swarm out of a disturbed hive. It is a `Mover`, not a `Raider`, on purpose: bees are weather, not
+ * an army, so soldiers don't march on them, towers don't shoot them, villagers don't count them as a raid
+ * and they carry no HP bar or minimap dot. There is no killing one — you outrun it, or you get behind a
+ * door. When its patience runs out (or it loses its quarry) it drifts home and is gone.
+ */
+export class Swarm extends Mover {
+  /** seconds of temper left */
+  private patience = HIVE.patience;
+  private stingT = 0;
+  /** the erratic weave, so it doesn't fly in a straight line */
+  private weave = 0;
+  readonly home: { x: number; y: number };
+
+  constructor(public readonly hive: Hive, public target: Mover | null) {
+    super((hive.tx + 0.5) * TILE, (hive.ty + 0.5) * TILE);
+    this.home = { x: this.x, y: this.y };
+    this.hp = this.maxHp = 1;
+    this.speed = HIVE.speed;
+    this.radius = 3;
+    this.color = 0xe8d45a;
+    this.task = 'swarming';
+  }
+
+  /** Bees leave people and raiders alike alone once they are dead or behind a door. */
+  private lost(): boolean {
+    const t = this.target;
+    return !t || t.dead || t.hidden || this.dist(this.home) > HIVE.range * TILE;
+  }
+
+  update(dt: number, s: VillageScene): void {
+    this.patience -= dt;
+    this.stingT -= dt;
+    this.weave += dt * 9;
+    s.fx.push({ kind: 'bees', x: this.x, y: this.y });
+
+    const giveUp = this.patience <= 0 || this.lost();
+    const to = giveUp ? this.home : this.target!;
+    const dx = to.x - this.x, dy = to.y - this.y, d = Math.hypot(dx, dy) || 1;
+
+    if (giveUp && d < 6) { // home again: the hive settles, and the bees are gone
+      this.hive.angry = HIVE.calmAfter;
+      this.dead = true;
+      return;
+    }
+    // fly at it, weaving as bees do
+    const ux = dx / d, uy = dy / d;
+    const wob = Math.sin(this.weave) * 0.45;
+    this.x += (ux - uy * wob) * this.speed * dt;
+    this.y += (uy + ux * wob) * this.speed * dt;
+    this.dir = ux < 0 ? -1 : 1;
+
+    if (giveUp) { this.task = 'going home'; return; }
+    this.task = 'swarming';
+    if (d <= HIVE.reach && this.stingT <= 0) {
+      this.stingT = HIVE.stingEvery;
+      const t = this.target!;
+      t.hit(p.beeDmg, false);
+      s.fx.push({ kind: 'hit', attacker: this, target: t, dmg: p.beeDmg, crit: false, killed: !!t.dead });
     }
   }
 }

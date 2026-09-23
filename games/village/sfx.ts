@@ -141,6 +141,15 @@ export class Sfx {
   /** the dodge roll: a scuff of cloth on grass, then the shoulder landing */
   roll(): void { this.noise(0.18, 520, 130, 0.16, 0.5); this.tone('sine', 95, 60, 0.09, 0.09, 0.14); }
   horn(): void { this.tone('sawtooth', 110, 165, 0.5, 0.2); this.tone('sawtooth', 165, 220, 0.5, 0.15, 0.25); }
+  private buzzAt = 0;
+  /** An angry rasp from a swarm. The fx pushes one per frame, so it only actually sounds a few times a second. */
+  buzz(): void {
+    const now = performance.now();
+    if (now - this.buzzAt < 160) return;
+    this.buzzAt = now;
+    this.tone('sawtooth', 210, 180, 0.12, 0.05);
+    this.tone('square', 105, 92, 0.12, 0.03, 0.01);
+  }
   chop(): void { this.noise(0.06, 500, 150, 0.3, 0.7); this.tone('square', 200, 120, 0.06, 0.15); }
   dig(): void { this.noise(0.12, 300, 90, 0.2, 0.6); }
   /** a giant's footstep; `vol` fades with distance */
