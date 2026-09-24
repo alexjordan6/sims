@@ -44,6 +44,9 @@ export const p = live(
     cropYield: [D.cropYield, 1, 20, 1, 'Food per harvested crop before boons. Applies at NEW VILLAGE.'],
     cropDays: [D.cropDays, 1, 10, 1, 'Days from seed to harvest.'],
     foodPerDay: [D.foodPerDay, 0, 3, 'Ration each grown villager eats at dawn (children eat only what lands in their pen).'],
+    packSlots: [D.packSlots, 5, 36, 1, 'Player pack slots; applies at NEW VILLAGE.'],
+    pickupRange: [D.pickupRange, 1, 8, 0.25, 'Loose-item pickup attraction radius, in tiles.'],
+    pickupPull: [D.pickupPull, 10, 240, 5, 'Resting items move toward the player this many pixels per second.'],
     startWood: [D.startWood, 0, 200, 1, 'Wood in the woodyard at NEW VILLAGE.'],
     startFood: [D.startFood, 0, 200, 1, 'Food in the granary at NEW VILLAGE.'],
   }, 'economy'),
@@ -345,6 +348,9 @@ export const ITEM = {
 /** How much wood or food one pair of arms carries before a trip to the woodyard / granary. */
 export const HAUL = { villager: { wood: 16, food: 12 }, player: { wood: 24, food: 18 } } as const;
 export type LoadKind = 'wood' | 'food';
+export type BulkKind = LoadKind | 'scrap';
+export type ItemKind = BulkKind;
+export const STACK: Record<BulkKind, number> = { wood: HAUL.player.wood, food: HAUL.player.food, scrap: 20 };
 
 // ---- the Ogre -------------------------------------------------------------------------------
 /**

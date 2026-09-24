@@ -84,5 +84,8 @@
   "freeBuild": false,
   "collide": true,
   "gnomeStart": false,
-  "peaceful": false
+  "peaceful": false,
+  "packSlots": 12,
+  "pickupRange": 2.5,
+  "pickupPull": 90
 }
