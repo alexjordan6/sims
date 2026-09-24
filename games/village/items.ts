@@ -1,7 +1,8 @@
 import type { Rng } from '@shared/index';
-import { ITEM, p, type FoodKind, type LoadKind } from './config';
+import { ITEM, p, type FoodKind, type ItemKind } from './config';
 
-export type ItemKind = LoadKind | 'scrap';
+export type { ItemKind } from './config';
+import type { Gear } from './pack';
 
 /**
  * Something lying in the world at a pixel position: a handful of food thrown from the basket, the
@@ -11,6 +12,8 @@ export type ItemKind = LoadKind | 'scrap';
  */
 export interface Item {
   id: number;
+  gear?: Gear;
+  playerDropPending?: boolean;
   kind: ItemKind;
   food?: FoodKind;
   n: number;

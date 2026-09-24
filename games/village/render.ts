@@ -1,3 +1,4 @@
+import { gearTexture } from './gear-art';
 import Phaser from 'phaser';
 import { World, BUILDINGS, doorstep, type Tile, type Building, type BuildingKind } from './world';
 import { Mover, Villager, Raider, Player, Arrow, type EnemyKind } from './agents';
@@ -6,7 +7,7 @@ import type { Item } from './items';
 import { Boar, Swarm } from './wildlife';
 import { TOWN, CHAR } from './atlas';
 import { ensureCharacter, seedLook, type Look } from './characters';
-import { p, TILE, COLS, ROWS, CAPS, WALL_HEIGHT, OGRE, BOAR, ITEM, HAUL, PEN_COLOUR } from './config';
+import { p, TILE, COLS, ROWS, CAPS, WALL_HEIGHT, OGRE, BOAR, ITEM, PEN_COLOUR } from './config';
 import type { VillageScene } from './main';
 import { Fx } from './fx';
 import { ensureBuildingArt, ensureFlora, FLORA, BUILDING_TEXTURE, LIT_TEXTURE, STACK_ROWS } from './pixelart';
@@ -310,7 +311,7 @@ export class Renderer {
       sp.setDepth(DEPTH.agents + m.y / 1000);
       if (m.elevated) sp.setDepth(DEPTH.agents + (m.y + TILE) / 1000 + 0.001);
       if (m instanceof Arrow) sp.setRotation(Math.atan2(m.uy, m.ux)).setFlipX(false);
-      const armed = (m instanceof Villager && m.role === 'soldier' && m.weapon === 'bow') || (m instanceof Player && m.tool === 'bow');
+      const armed = (m instanceof Villager && m.role === 'soldier' && m.weapon === 'bow') || (m instanceof Player && m.tool === 'bow' && m.weapons.bow >= 0);
       let bow = this.bows.get(m.id);
       if (armed && !bow) { bow = this.scene.add.image(0, 0, 'bow'); this.bows.set(m.id, bow); }
       bow?.setPosition(sp.x + m.aim.x * 7, sp.y - 3 + m.aim.y * 7).setRotation(Math.atan2(m.aim.y, m.aim.x)).setScale(1, m.attackCd > 0.45 ? 0.8 : 1).setDepth(sp.depth + 0.01).setVisible(armed && !m.hidden).setTint(this.tint);
@@ -405,7 +406,8 @@ export class Renderer {
       seen.add(it.id);
       let sp = this.items.get(it.id);
       if (!sp) { sp = this.scene.add.image(it.x, it.y, 'flora', 0).setOrigin(0.5, 0.85); this.items.set(it.id, sp); }
-      if (it.kind === 'wood') { if (sp.texture.key !== 'carry-wood') sp.setTexture('carry-wood'); }
+      if(it.kind==='gear' && it.gear)sp.setTexture(gearTexture(this.scene,it.gear));
+      else if (it.kind === 'wood') { if (sp.texture.key !== 'carry-wood') sp.setTexture('carry-wood'); }
       else {
         const frame = it.kind === 'scrap' ? FLORA.scrap : FLORA.pile[it.food ?? 'wheat'][Math.min(2, Math.max(0, Math.ceil(it.n / Math.max(1, p.tossSize)) - 1))];
         if (sp.texture.key !== 'flora' || sp.frame.name !== String(frame)) sp.setTexture('flora', frame);
@@ -430,8 +432,7 @@ export class Renderer {
       if (!this.lit(it)) continue;
       if (s.fog && s.fog.visibleAt(it.x, it.y) <= 0.3) continue;
       // bright only when walking here would actually collect it: right kind, and room left for it
-      const room = it.kind === 'scrap' ? Infinity : HAUL.player[it.kind] - (s.player.load?.n ?? 0);
-      const a = it.kind === 'scrap' || (s.player.canCarry(it.kind, it.food) && room > 0) ? 1 : 0.3;
+      const a = s.itemRoom(it) > 0 && !it.playerDropPending ? 1 : 0.3;
       u.fillStyle(0xffe066, (0.1 + 0.08 * loot) * a);
       u.fillEllipse(it.x, it.y + 1, 18 + 3 * loot, 9 + 1.5 * loot);
       u.lineStyle(1, 0xffe066, 0.85 * a);
@@ -659,8 +660,8 @@ export function lookFor(m: Mover): Look | null {
   const seed = seedLook(m.id);
   const base = { ...seed, armor: m.armor, dye: m.dye, helmetStyle: m.helmetStyle, plume: m.plume };
   // a crude blade shows as a club until the chest forges a real sword
-  const blade = m.weapons.melee > 0 ? 'sword' : 'club';
-  if (m instanceof Player) return { ...base, skin: 1, hair: 0, hairStyle: 0, body: 'adult', outfit: 'head', held: m.tool === 'sword' ? blade : m.tool === 'bow' ? 'bow' : m.tool === 'axe' ? 'axe' : m.tool === 'hoe' ? 'hoe' : m.tool === 'wand' ? 'wand' : 'none' };
+  const blade = m.weapons.melee < 0 ? 'none' : m.weapons.melee > 0 ? 'sword' : 'club';
+  if (m instanceof Player) return { ...base, skin: 1, hair: 0, hairStyle: 0, body: 'adult', outfit: 'head', held: m.tool === 'sword' ? blade : m.tool === 'bow' && m.weapons.bow >= 0 ? 'bow' : m.tool === 'axe' ? 'axe' : m.tool === 'hoe' ? 'hoe' : m.tool === 'wand' ? 'wand' : 'none' };
   if (m instanceof Villager) {
     if (m.gnome) return { ...base, body: m.isChild ? 'gnomekid' : 'gnome', outfit: 'gnome', held: m.isAdult ? 'club' : 'none' };
     if (m.role === 'kid' || m.role === 'infant') return { ...base, body: 'kid', outfit: 'kid', held: 'none' };

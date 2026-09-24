@@ -1,3 +1,7 @@
+import { PackUI } from './pack-ui';
+import { slotName, slotKey } from '../pack';
+import { gearUrl } from '../gear-art';
+import { STACK, type BulkKind } from '../config';
 import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type Tool } from '../agents';
 import { Boar } from '../wildlife';
@@ -89,7 +93,8 @@ export class UI {
   /** the building whose DEMOLISH button has been pressed once (the second press does it) */
   private confirmDemolish: import('../world').Building | null = null;
 
-  constructor(private scene: VillageScene) {}
+  readonly inventory: PackUI;
+  constructor(private scene: VillageScene) { this.inventory = new PackUI(scene); }
 
   mount(): void {
     const s = this.scene;
@@ -142,6 +147,7 @@ export class UI {
         ${slot('wand', 'dungeon', DUNGEON.wizard, 'WAND', 'Shaman wand: left click or drag a box to pick soldiers, right click to send them — open ground = go there and hold, a raider = attack it, a wall top = take that archer post. F = follow me (again to stop). With no one picked, orders go to everyone')}
         ${slot('basket', 'farm', FARM.crate, 'BASKET', 'F picks a kind of food; walk up to the granary to fill the basket with it, then throw toward a pen. It flies where you point, bounces and rolls; children only eat what lies inside their pen, and what they eat is who they become')}
       </div>
+      <div class="inventory-host panel"></div>
       <div class="hint"><kbd>click / C</kbd><span class="hint-text"></span></div>
     </div>`);
     this.hotbar.querySelectorAll<HTMLElement>('.slot').forEach((el) => el.addEventListener('click', () => s.setTool(el.dataset.tool as Tool)));
@@ -149,6 +155,7 @@ export class UI {
     this.feed = h('<div class="feed"></div>');
     this.toasts = h('<div class="toasts"></div>');
     this.overlay.append(this.top, this.hotbar, this.feed, this.toasts);
+    this.inventory.mount(this.hotbar.querySelector('.inventory-host')!);
     // the feed sits above the belt, whatever height the belt turns out to be (its hint line wraps)
     const belt = () => this.overlay.style.setProperty('--hotbar-h', this.hotbar.offsetHeight + 'px');
     new ResizeObserver(belt).observe(this.hotbar); belt();
@@ -203,7 +210,7 @@ export class UI {
       ? [
           ['MOVE stick', 'walk'],
           ['ROLL', 'dodge roll — through bodies, not walls'],
-          ['TOSS', 'throw the whole armful you carry'],
+          ['TOSS', 'throw the largest supply stack'],
           ['USE', 'use the tool you hold (the button says what)'],
           ['TOOL', 'next tool — or tap a slot'],
           ['tap a villager', 'inspect them'],
@@ -215,7 +222,7 @@ export class UI {
       : [
           ['W A S D', 'move'],
           ['Space', 'dodge roll — through bodies, not walls'],
-          ['G', 'throw the whole armful you carry'],
+          ['G', 'throw the largest supply stack'],
           ['click · C', 'use the held tool, toward the cursor'],
           ['right click · X', 'check a villager'],
           ['1 – 9', 'pick a tool'],
@@ -439,6 +446,8 @@ export class UI {
     }
     if (this.rosterT > 0.5) { this.rosterT = 0; this.renderRoster(); }
     this.renderFeed();
+    this.inventory.render();
+    if(this.scene.armoryFor)this.renderArmory();
     if (this.scene.cookingAt) this.renderCooking();
   }
 
@@ -455,7 +464,7 @@ export class UI {
     const hour = Math.floor(s.dayTime * 24);
     const night = s.dayTime < 0.22 || s.dayTime > 0.8;
     const raidIn = s.nextRaidDay - s.day;
-    const held = s.player.load ? `${s.player.load.kind}${s.player.load.n}` : '';
+    const held = s.player.pack.slots.map(slotKey).join('|');
     const key = `${s.day}|${hour}|${held}|${s.food | 0}/${s.foodCap}|${s.surplusDays().toFixed(1)}|${s.feverActive()}|${s.wood | 0}/${s.woodCap}|${s.scrap}|${count('farmer')}|${count('woodcutter')}|${count('infant')}|${count('kid')}|${count('soldier')}|${count('gnome')}|${count('elder')}|${s.player.hp}|${s.raidActive}|${s.boss?.hp ?? ''}|${raidIn}|${s.speed}|${s.paused}|${night}|${s.buff?.dish ?? ''}${Math.ceil(s.buffLeft())}`;
     if (key === this.lastTop) return;
     this.lastTop = key;
@@ -467,7 +476,7 @@ export class UI {
     this.top.style.setProperty('--sky', `rgba(${sky.r}, ${sky.g}, ${sky.b}, ${Math.min(0.85, sky.alpha * 1.3).toFixed(2)})`);
     q('.day').textContent = p.peaceful ? `DAY ${s.day}` : `DAY ${s.day}/${p.bossDay}`;
     q('.hour').textContent = `${String(hour).padStart(2, '0')}:00`;
-    const inHand = (kind: string) => s.player.load?.kind === kind ? `<em class="hand">+${s.player.load.n} in hand</em>` : '';
+    const inHand = (kind: BulkKind) => s.player.carriedOf(kind) ? `<em class="hand">+${Number(s.player.carriedOf(kind).toFixed(1))} in pack</em>` : ''; 
     q('.wood').innerHTML = `${s.wood | 0}<small>/${s.woodCap}</small>${inHand('wood')}`;
     const days = s.surplusDays(), fever = s.feverActive();
     const feverBadge = s.mods.babyFever ? `<span class="badge fever ${fever ? 'on' : ''}" title="${fever ? `Baby fever: births ${Math.round(100 * p.feverBonus)}% more likely while the larder holds ${p.feverDays}+ days of food` : `Baby fever needs ${p.feverDays} days of food in store — ${Math.ceil(p.feverDays * s.dailyRation() - s.food)} more`}">FEVER</span>` : '';
@@ -506,7 +515,7 @@ export class UI {
       el.classList.toggle('off', !!s.toolLocked(tool) || ((tool === 'house' || tool === 'barracks') && s.wood < COST[tool]));
       if (tool === 'gnomehouse') { const want = s.toolLocked(tool) ? 'Somewhere in these woods a gnome family keeps house. Warm motes drift over their glade — walk into it and they will teach you the craft.' : GNOME_TITLE; if (el.title !== want) el.title = want; }
       if (tool === 'pen') { const lbl = el.querySelector('.lbl')!, want = s.player.penKind === 'farmer' ? 'FARM PEN' : s.player.penKind === 'woodcutter' ? 'WOOD PEN' : 'DRILL PEN'; if (lbl.textContent !== want) lbl.textContent = want; }
-      if (tool === 'basket') { const lbl = el.querySelector('.lbl')!, want = s.player.load?.kind === 'food' ? `${s.player.load.n} ${FOODS[s.player.load.food ?? 'wheat'].name.toUpperCase()}` : `BASKET · ${FOODS[s.player.basketKind].name.toUpperCase()}`; if (lbl.textContent !== want) lbl.textContent = want; }
+      if (tool === 'basket') { const lbl = el.querySelector('.lbl')!, want = `BASKET · ${s.player.carriedOf('food',s.player.basketKind)} ${FOODS[s.player.basketKind].name.toUpperCase()}`; if (lbl.textContent !== want) lbl.textContent = want; }
       if (tool === 'seeds') { const lbl = el.querySelector('.lbl')!, want = FOODS[s.player.cropKind].name.toUpperCase(); if (lbl.textContent !== want) lbl.textContent = want; }
     });
     const hint = this.hotbar.querySelector('.hint-text')!;
@@ -540,16 +549,16 @@ export class UI {
   /** A card for something lying on the ground. */
   private renderItemCard(it: Item, head: string): void {
     const s = this.scene;
-    const art = it.kind === 'wood' ? spr('town', TOWN.iconWood, 48) : this.tilePortrait({ key: 'flora', frame: it.kind === 'scrap' ? FLORA.scrap : FLORA.pile[it.food ?? 'wheat'][Math.min(2, Math.max(0, Math.ceil(it.n / Math.max(1, p.tossSize)) - 1))] });
-    const name = it.kind === 'scrap' ? 'Scrap iron' : it.kind === 'wood' ? 'Wood' : FOODS[it.food ?? 'wheat'].name;
+    const art = it.kind === 'gear' && it.gear ? `<img class="art" src="${gearUrl(it.gear)}" alt="">` : it.kind === 'wood' ? spr('town', TOWN.iconWood, 48) : this.tilePortrait({ key: 'flora', frame: it.kind === 'scrap' ? FLORA.scrap : FLORA.pile[it.food ?? 'wheat'][Math.min(2, Math.max(0, Math.ceil(it.n / Math.max(1, p.tossSize)) - 1))] });
+    const name = it.kind === 'gear' && it.gear ? slotName(it.gear) : it.kind === 'scrap' ? 'Scrap iron' : it.kind === 'wood' ? 'Wood' : FOODS[it.food ?? 'wheat'].name;
     const amount = it.n % 1 ? it.n.toFixed(1) : String(it.n);
     const q = { tx: Math.floor(it.x / 16), ty: Math.floor(it.y / 16) }, t = s.world.get(q.tx, q.ty);
     const where = !it.rest ? 'in the air' : t?.pen ? `in the ${PEN_NAME[t.pen]}` : t?.kind === 'crop' || t?.kind === 'tilled' ? 'on the field' : 'on open ground';
     const eaters = it.kind === 'food' ? s.villagers().filter((v) => v.eatingFrom === it && !v.dead).length : 0;
-    let html = `${head}<div class="head">${art}<div><div class="name">${amount} ${name.toLowerCase()}</div><span class="badge ${it.kind === 'scrap' ? 'soldier' : 'farmer'}">${it.kind === 'scrap' ? 'loot' : it.kind === 'wood' ? 'an armful' : 'food on the ground'}</span></div><button class="btn small close">x</button></div><div class="rows">`;
+    let html = `${head}<div class="head">${art}<div><div class="name">${amount} ${name.toLowerCase()}</div><span class="badge ${it.kind === 'scrap' ? 'soldier' : 'farmer'}">${it.kind === 'scrap' ? 'loot' : it.kind === 'wood' ? 'supplies' : it.kind === 'gear' ? 'equipment' : 'food on the ground'}</span></div><button class="btn small close">x</button></div><div class="rows">`;
     html += `<b>Where</b><span>${where} · tile ${q.tx}, ${q.ty}${it.rest ? '' : ' <em>· still moving</em>'}</span>`;
     if (it.kind === 'food') html += `<b>Feeds</b><span>${FOODS[it.food ?? 'wheat'].blurb}${t?.pen ? ` · ${eaters ? `${eaters} eating from it now` : 'children here will eat it'}` : ' · <em class="warn">not in a pen — children only eat inside their pen</em>'}</span>`;
-    html += `<b>Pick up</b><span>${it.kind === 'scrap' ? 'walk over it' : 'walk over it with any tool in hand (one kind per armful)'}</span></div>`;
+    html += `<b>Pick up</b><span>${it.kind === 'scrap' ? 'walk over it' : 'approach to collect into your pack when space is available'}</span></div>`;
     html += `<p class="d">Thrown things fly where you point, bounce off walls and trees, and lie where they stop.</p>`;
     this.inspector.innerHTML = html;
     this.inspector.querySelector('.close')?.addEventListener('click', () => s.selectItem(null));
@@ -561,7 +570,7 @@ export class UI {
     const art = this.tilePortrait(tileArt(t, s));
     const close = `<button class="btn small close">x</button>`;
     const lying = w.itemsOn(q.tx, q.ty);
-    const lyingRow = lying.length ? `<b>Lying here</b><span>${lying.map((it) => `<a href="#" class="pick-item" data-id="${it.id}">${it.n % 1 ? it.n.toFixed(1) : it.n} ${it.kind === 'scrap' ? 'scrap' : it.kind === 'wood' ? 'wood' : FOODS[it.food ?? 'wheat'].one}</a>`).join(', ')}</span>` : '';
+    const lyingRow = lying.length ? `<b>Lying here</b><span>${lying.map((it) => `<a href="#" class="pick-item" data-id="${it.id}">${it.n % 1 ? it.n.toFixed(1) : it.n} ${it.kind === 'gear' && it.gear ? slotName(it.gear) : it.kind === 'scrap' ? 'scrap' : it.kind === 'wood' ? 'wood' : FOODS[it.food ?? 'wheat'].one}</a>`).join(', ')}</span>` : '';
     const plan = (kind: FoodKind | undefined, cap: string) => `<div class="raise"><div class="cap">${cap}</div><div class="seg">${CROP_KINDS.map((k) => `<button class="btn small ${kind === k ? 'on' : ''}" data-plan="${k}">${FOODS[k].name.toUpperCase()}</button>`).join('')}</div><div class="d">Farmers replant what the soil remembers; pick what this tile should grow next. ${kind ? FOODS[kind].blurb : ''}</div></div>`;
     let title = '', badge = '', badgeCls = 'farmer', rows = '', extra = '';
     if (t.defense) {
@@ -677,8 +686,10 @@ export class UI {
         const why = s.demolishProblem(b), refund = s.demolishRefund(b), arming = this.confirmDemolish === b;
         html += `<p class="d"><button class="btn small ${arming ? 'danger' : ''} demolish" ${why ? 'disabled' : ''} title="${why ? esc(why) : 'Take it down'}">${arming ? `REALLY TAKE IT DOWN? · ${refund} WOOD BACK` : `DEMOLISH · ${refund} WOOD BACK`}</button>${why ? ` ${esc(why)}` : arming ? ' <em class="warn">tenants move out, anyone inside steps out</em>' : b.ruined ? ' rubble is worth nothing' : ''}</p>`;
       }
+      if(b.kind==='granary'||b.kind==='woodyard')html += '<button class="btn small recover-kit">RECOVER BASIC KIT</button><p class="d">Free missing tools and basic weapons. Make room in your pack first.</p>';
       if (force || html !== this.lastInspector) {
         this.inspector.innerHTML = html; this.lastInspector = html;
+        this.inspector.querySelector('.recover-kit')?.addEventListener('click',()=>s.recoverBasicKit());
         this.inspector.querySelector('.close')?.addEventListener('click', () => s.selectBuilding(null));
         this.inspector.querySelector('.craft-arrows')?.addEventListener('click', () => s.craftArrows());
         this.inspector.querySelector('.restock')?.addEventListener('click', () => { s.restockTower(b); this.renderInspector(true); });
@@ -689,7 +700,7 @@ export class UI {
           this.confirmDemolish = null; if (s.demolish(b)) s.selectBuilding(null); else this.renderInspector(true);
         });
         // a ruin does nothing: every control but CLOSE waits for the hammer
-        if (b.ruined) this.inspector.querySelectorAll<HTMLButtonElement>('button:not(.close):not(.demolish)').forEach((el) => { el.disabled = true; });
+        if (b.ruined) this.inspector.querySelectorAll<HTMLButtonElement>('button:not(.close):not(.demolish):not(.recover-kit)').forEach((el) => { el.disabled = true; });
       }
       return;
     }
@@ -715,6 +726,7 @@ export class UI {
       html += `<b>Home</b><span>${s.bedsTaken(m.home)} of ${s.beds(m.home)} beds</span>`;
       html += `<b>Fed</b><span>${m.role === 'infant' ? (m.hungerDays ? `<em class="warn">hungry for ${m.hungerDays} days — nobody at home was fed; ${p.kidStarveDays} days starve an infant</em>` : 'nursed — a fed grown-up at home feeds the nursery') : m.role === 'kid' ? (m.ateDay >= s.day ? (m.gnome ? 'ate today from food by the gnome house' : 'ate today from a pen pile') : m.hungerDays ? `<em class="warn">hungry for ${m.hungerDays} days — ${m.gnome ? 'throw food by the gnome house' : m.pen ? `throw food into the ${PEN_NAME[m.pen]}` : 'paint a pen and throw food in'}</em>` : 'not yet today') : m.hungerDays === 0 ? 'yes' : `<em class="warn">hungry for ${m.hungerDays} days</em>`}</span>`;
     }
+    if(m instanceof Player)html += `<b>Pack</b><span>${m.pack.slots.length-m.pack.emptySlots} / ${m.pack.slots.length} slots used</span>`;
     if (m.load) html += `<b>Carrying</b><span>${m.load.n} ${m.load.kind}</span>`;
     if (m instanceof Boar) {
       html += `<b>Temper</b><span>${m.provoked ? '<em class="warn">provoked — it charges whoever struck it</em>' : 'calm — leave it be and it leaves you be'}${m.lurking ? ' · hidden in the long grass' : ''}</span>`;
@@ -846,8 +858,10 @@ export class UI {
   // ---- armory ----------------------------------------------------------------
 
   private armoryEl: HTMLElement | null = null;
+  private lastArmory = "";
   /** The ARMORY: pick a wearer, forge the next tier per slot, dye the tabard, pick a helmet and plume. */
   renderArmory(): void {
+    if(this.inventory.dragging)return;
     const s = this.scene;
     const who = s.armoryFor;
     if (!who) { this.armoryEl?.remove(); this.armoryEl = null; return; }
@@ -860,7 +874,7 @@ export class UI {
       const tier = who.armor[slot], cur = ARMOR[slot].tiers[tier], next = ARMOR[slot].tiers[tier + 1];
       const why = s.craftProblem(who, slot);
       const stat = (t: typeof cur) => [t.hp ? `+${t.hp} HP` : '', t.reduce ? `-${Math.round(t.reduce * 100)}% damage` : '', t.speed ? `+${Math.round(t.speed * 100)}% speed` : '', t.block ? `${Math.round(t.block * 100)}% block` : ''].filter(Boolean).join(' · ') || '—';
-      return `<div class="aslot"><div class="aname">${ARMOR[slot].name} <span class="tier">${'●'.repeat(tier)}${'○'.repeat(3 - tier)}</span></div>
+      return `<div class="aslot"><div class="aname">${ARMOR[slot].name} <span class="tier">${'●'.repeat(Math.max(0,tier))}${'○'.repeat(3 - Math.max(0,tier))}</span></div>
         <div class="acur">${cur.name} <small>${stat(cur)}</small></div>
         ${next ? `<button class="btn small ${why ? '' : 'ok'} forge" data-slot="${slot}" ${why ? 'disabled' : ''}>FORGE ${next.name.toUpperCase()} · ${s.forgeCost(next).wood} wood${s.forgeCost(next).scrap ? ` + ${s.forgeCost(next).scrap} scrap` : ''}</button><div class="d">${why ? `<em class="warn">${esc(why)}</em>` : stat(next)}</div>` : '<div class="d">the best there is</div>'}</div>`;
     }).join('');
@@ -868,8 +882,8 @@ export class UI {
     const weapons = WEAPON_SLOTS.map((slot) => {
       const tier = who.weapons[slot], cur = WEAPONS[slot].tiers[tier], next = WEAPONS[slot].tiers[tier + 1];
       const why = s.weaponProblem(who, slot);
-      return `<div class="aslot"><div class="aname">${WEAPONS[slot].name} <span class="tier">${'●'.repeat(tier)}${'○'.repeat(3 - tier)}</span></div>
-        <div class="acur">${cur.name} <small>×${cur.mul} damage</small></div>
+      return `<div class="aslot"><div class="aname">${WEAPONS[slot].name} <span class="tier">${'●'.repeat(Math.max(0,tier))}${'○'.repeat(3 - Math.max(0,tier))}</span></div>
+        <div class="acur">${cur?.name ?? 'Empty'} <small>×${cur?.mul ?? 0} damage</small></div>
         ${next ? `<button class="btn small ${why ? '' : 'ok'} forge" data-weapon-slot="${slot}" ${why ? 'disabled' : ''}>FORGE ${next.name.toUpperCase()} · ${s.forgeCost(next).wood} wood${s.forgeCost(next).scrap ? ` + ${s.forgeCost(next).scrap} scrap` : ''}</button><div class="d">${why ? `<em class="warn">${esc(why)}</em>` : `×${next.mul} damage`}</div>` : '<div class="d">the best there is</div>'}</div>`;
     }).join('');
     const dyes = DYES.map((c, i) => `<button class="swatch ${who.dye === i ? 'on' : ''}" data-dye="${i}" style="background:${c}" title="${DYE_NAMES[i]}"></button>`).join('');
@@ -890,11 +904,12 @@ export class UI {
     }
     const html = `<div class="armory panel">
       <div class="ph"><h2>Armory</h2><span class="cap">${s.wood | 0} wood · ${s.scrap} scrap · barracks Lv${s.world.barracksLevel}</span><button class="btn small close">CLOSE</button></div>
+      <div class="inventory-host"></div>
       ${chestHtml}
       <div class="acols">
         <div class="wearers">${list}</div>
         <div class="afit">
-          <div class="portrait-big"><img class="art" src="${charImg(look)}" alt=""><div class="d">${esc(name(who))} · ${WEAPONS.melee.tiers[who.weapons.melee].name.toLowerCase()} ×${weaponMul(who.weapons, 'melee')} · ${WEAPONS.bow.tiers[who.weapons.bow].name.toLowerCase()} ×${weaponMul(who.weapons, 'bow')} · ${st.hp ? `+${st.hp} HP · ` : ''}${Math.round((1 - st.dmgMul) * 100)}% less damage · ${Math.round(st.block * 100)}% block</div></div>
+          <div class="portrait-big"><img class="art" src="${charImg(look)}" alt=""><div class="d">${esc(name(who))} · ${WEAPONS.melee.tiers[who.weapons.melee]?.name.toLowerCase() ?? 'no melee weapon'} ×${weaponMul(who.weapons, 'melee')} · ${WEAPONS.bow.tiers[who.weapons.bow]?.name.toLowerCase() ?? 'no bow'} ×${weaponMul(who.weapons, 'bow')} · ${st.hp ? `+${st.hp} HP · ` : ''}${Math.round((1 - st.dmgMul) * 100)}% less damage · ${Math.round(st.block * 100)}% block</div></div>
           <div class="cap">WEAPONS</div>
           <div class="aslots">${weapons}</div>
           <div class="cap">ARMOR</div>
@@ -906,8 +921,11 @@ export class UI {
       </div>
       <p class="sub small">Everyone starts with a wooden club and a hunting bow that hit for half. Bronze and leather cost wood; iron and steel need scrap iron from slain raiders and a Lv2 / Lv3 barracks. A bow needs both hands, so archers can't carry a shield.</p>
     </div>`;
-    if (!this.armoryEl) { this.armoryEl = h('<div class="screen armory-screen"></div>'); this.screens.append(this.armoryEl); }
-    this.armoryEl.innerHTML = html;
+    if (!this.armoryEl) this.armoryEl = h('<div class="screen armory-screen"></div>');
+    if(!this.armoryEl.isConnected){this.screens.append(this.armoryEl);this.lastArmory='';}
+    if(this.lastArmory===html)return;
+    this.lastArmory=html;this.armoryEl.innerHTML=html;
+    this.inventory.mount(this.armoryEl.querySelector('.inventory-host')!);
     const el = this.armoryEl;
     el.querySelector('.close')!.addEventListener('click', () => s.openArmory(null));
     el.querySelector('.chest .restock')?.addEventListener('click', () => { if (chest) s.restockTower(chest); this.renderArmory(); });
@@ -966,6 +984,7 @@ export class UI {
   // ---- screens ---------------------------------------------------------------
 
   showScreen(kind: 'title' | 'pause' | 'over' | 'won' | null): void {
+    this.inventory.cancel();
     const s = this.scene;
     this.screens.innerHTML = '';
     if (!kind) return;
@@ -980,7 +999,7 @@ export class UI {
           Survive ${p.bossDay} days of raids and <b>beat the Warlord</b>.</p>
           <div class="controls">
             <kbd>WASD</kbd><span>move</span><kbd>Space</kbd><span>dodge roll</span>
-            <kbd>G</kbd><span>throw the armful you carry</span>
+            <kbd>G</kbd><span>throw the largest supply stack</span>
             <kbd>click / C</kbd><span>use the tool you hold, toward the cursor</span>
             <kbd>right click / X</kbd><span>check a villager</span><kbd>1-9 · Tab · wheel</kbd><span>pick a tool</span>
             <kbd>E / Esc</kbd><span>menu</span><kbd>- / =</kbd><span>game speed</span>
@@ -1063,7 +1082,7 @@ export class UI {
           <p>You can't recruit anyone. <b>Every adult was a child you raised.</b> See RAISING CHILDREN below.</p>
           <h3>EACH DAY</h3>
           <p>Every villager eats 1 food. Crops ripen in ${s.cropDays}–${s.cropDays + 1} days. Couples with a free crib have children. Everyone heals overnight.</p>
-          <p><b>Nothing counts until it's carried in.</b> Chopped wood and picked crops ride on the arms of whoever took them: woodcutters haul ${HAUL.villager.wood} wood to the woodyard per trip, farmers ${HAUL.villager.food} food to the granary. You carry ${HAUL.player.wood} wood or ${HAUL.player.food} food and unload by walking up to the building. Long walks are wasted work — keep the woodyard by the grove and the granary by the field.</p>
+          <p><b>Nothing counts until it's carried in.</b> Chopped wood and picked crops ride on the arms of whoever took them: woodcutters haul ${HAUL.villager.wood} wood to the woodyard per trip, farmers ${HAUL.villager.food} food to the granary. Your pack holds mixed supplies and equipment. Food unloads at the granary; wood and scrap unload at the woodyard. Full stores leave the remainder in your pack. Drag pack items to move, equip or drop them. Recover missing basic tools and weapons from either supply building. Long walks are wasted work — keep the woodyard by the grove and the granary by the field.</p>
         </section>
         <section>
           <h3>WHO'S WHO</h3>
@@ -1098,7 +1117,7 @@ export class UI {
           <p><b>Births.</b> Every ${p.birthEvery} seconds a couple in a warm house with a free <b>crib</b> (${p.cribs} in a Lv1 nursery, +1 per level) has a ${Math.round(100 * p.birthChance)}% chance of a child (needs food to spare). A house can raise at most cribs ÷ infantDays children a day, so more houses and bigger nurseries mean more children. The <b>Baby Fever</b> legacy boon adds ${Math.round(100 * p.feverBonus)}% while the larder holds <b>${p.feverDays}+ days of food</b> for everyone — the FOOD tile shows the days, and a FEVER badge glows while it holds. More mouths shrink the surplus, so it only lasts if the fields keep up.</p>
           <p><b>Pens.</b> Take the <b>PEN</b> tool (F picks the kind: <b>training field</b>, <b>wood lot</b> or <b>drill yard</b>) and paint it over open grass; painting the same kind again erases it. A child leaving the nursery walks to the <b>nearest pen</b> and lives there day and night. <b>The pen decides what they become</b> — a field makes farmers, a wood lot woodcutters, a drill yard soldiers (while a warm barracks stands) — and ${Villager.drillNeeded(s)} fed days there make them <b>skilled</b>: faster work, bigger harvests and loads, tougher soldiers. A child with no pen stays a child until one is painted.</p>
           <p><b>Every child can starve.</b> Nobody young eats from the granary. Infants are nursed: they eat only when a fed grown-up lives at home, so an empty larder or an empty house starves the nursery. Children eat only what lies in their pen — or, for gnome children, what lies within ${GNOME_YARD} tiles of their cottage. ${p.kidStarveDays} hungry days are fatal.</p>
-          <p><b>Feeding the pens.</b> Pen children eat nothing from the granary — only what you throw in. Take the <b>BASKET</b>, walk up to the granary to fill it (${HAUL.player.food} food), point anywhere within ${p.tossRange} tiles and throw: ${p.tossSize} food flies there, bounces off walls and trees, rolls and stops wherever it stops. Children eat only what lies <b>inside their pen</b> (${p.kidFood} a day each) — a throw that rolls out is wasted until you walk over it. A child that misses a day stops training; after ${p.kidStarveDays} hungry days they starve. The basket's hint and the pen's hover tell you how many are there and how much food is left.</p>
+          <p><b>Feeding the pens.</b> Pen children eat nothing from the granary — only what you throw in. Take the <b>BASKET</b>, walk up to the granary to fill it (${STACK.food} food), point anywhere within ${p.tossRange} tiles and throw: ${p.tossSize} food flies there, bounces off walls and trees, rolls and stops wherever it stops. Children eat only what lies <b>inside their pen</b> (${p.kidFood} a day each) — a throw that rolls out is wasted until you walk over it. A child that misses a day stops training; after ${p.kidStarveDays} hungry days they starve. The basket's hint and the pen's hover tell you how many are there and how much food is left.</p>
           <p><b>Care.</b> Each dawn a child earns care for the day before: fed · <b>well fed</b> (ate from the pen that day) · both parents alive · another child at home · a Lv2+ house · your <b>encouragement</b>. Running from raiders, going hungry or losing a parent costs care. It averages into <b>stars</b> (★ to ★★★★★) that are fixed at coming of age and last for life: each star is +6% HP and work speed; five stars make a <b>gifted</b> adult with a trait (Hardy, Quick, Brave, Green Thumb, Tireless); a neglected child grows up frail.</p>
           <p><b>Encourage.</b> Walk up to a child and press X (or tap them, or the button on their card): a moment together, once a day, worth a care point and a day of apprenticeship. During a raid it also sends them inside.</p>
           <p><b>Children go to bed at dusk</b> and sleep indoors until dawn, and they <b>run for the nearest door</b> when raiders are near. Snatchers take children caught in the open.</p>
@@ -1123,7 +1142,7 @@ export class UI {
           <div class="controls">
             <kbd>WASD</kbd><span>move (joystick on phone)</span>
             <kbd>Space</kbd><span>dodge roll — a committed tumble the way you are moving (or facing). It goes clean through bodies but not through walls, and you cannot steer or swing until it lands. A raider's blow checks its reach at the moment it strikes, so rolling out of a wind-up beats it.</span>
-            <kbd>G</kbd><span>throw the whole armful you are carrying — wood or food — wherever you are aiming, with any tool in hand. The only other way to put a load down is to walk it to the woodyard or granary.</span>
+            <kbd>G</kbd><span>throw the largest wood, food or scrap stack toward the cursor. Drag any pack item onto the world to drop it. Walk away from your dropped items before returning to pick them up.</span>
             <kbd>click / C</kbd><span>use the tool you hold. A click also turns you toward the cursor. The bottom bar says what the tool will do. The sword swings an arc; it only hits what it reaches.</span>
             <kbd>right click / X</kbd><span>check a villager (opens the inspector)</span>
             <kbd>1-9 · Tab · wheel</kbd><span>pick a tool — hands, hoe, seeds, axe, sword, house, barracks, hammer</span>

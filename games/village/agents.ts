@@ -5,6 +5,8 @@ import type { Mods } from './meta';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle } from './characters';
 import type { VillageScene } from './main';
 import type { Item } from './items';
+import { Pack, IMPLEMENTS } from './pack';
+import type { BulkKind } from './config';
 
 // All distances are in world pixels: 16 px per tile.
 
@@ -29,9 +31,22 @@ export abstract class Mover implements Agent {
   /** what the arms hold: wood, or food of one kind */
   load: { kind: LoadKind; n: number; food?: FoodKind } | null = null;
   /** Put a yield in this body's arms (one kind at a time — the other kind is taken in first; one crop per armful). */
-  pickUp(kind: LoadKind, n: number, food?: FoodKind): void {
-    if (this.load && (this.load.kind !== kind || (kind === 'food' && this.load.food !== food))) return;
+  pickUp(kind: BulkKind, n: number, food?: FoodKind): number {
+    if (kind === 'scrap' || (this.load && (this.load.kind !== kind || (kind === 'food' && this.load.food !== food)))) return 0;
     this.load = { kind, n: (this.load?.n ?? 0) + n, food: kind === 'food' ? food : undefined };
+    return n;
+  }
+  carriedLoads(): readonly { kind: BulkKind; n: number; food?: FoodKind }[] { return this.load ? [{ ...this.load }] : []; }
+  roomFor(kind: BulkKind, food?: FoodKind): number {
+    if (kind === 'scrap' || !this.canCarry(kind, food)) return 0;
+    const cap = this instanceof Player ? HAUL.player[kind] : this instanceof Villager ? this.haul(kind) : HAUL.villager[kind];
+    return Math.max(0, cap - (this.load?.n ?? 0));
+  }
+  carriedOf(kind: BulkKind, food?: FoodKind): number { return this.load?.kind === kind && (kind !== 'food' || food === undefined || this.load.food === food) ? this.load.n : 0; }
+  takeOut(kind: BulkKind, n: number, food?: FoodKind): number {
+    const take = Math.min(Math.max(0, n), this.carriedOf(kind, food));
+    if (take && this.load) { this.load.n -= take; if (this.load.n < 1e-9) this.load = null; }
+    return take;
   }
   /** Can these arms take n of this? */
   canCarry(kind: LoadKind, food?: FoodKind): boolean { return !this.load || (this.load.kind === kind && (kind !== 'food' || this.load.food === food)); }
@@ -1069,6 +1084,13 @@ export const COMBO = [
 export const SWING = { reach: 24, halfAngleCos: 0.35, comboWindow: 0.5, recoverAfterSpin: 0.4, stepIn: 10 } as const;
 
 export class Player extends Mover {
+  readonly pack = new Pack(p.packSlots);
+  override pickUp(kind: BulkKind, n: number, food?: FoodKind): number { return this.pack.add(kind, n, food); }
+  override carriedLoads() { return this.pack.bulk().map(b => ({ ...b, food: b.kind === 'food' ? b.food : undefined })); }
+  override roomFor(kind: BulkKind, food?: FoodKind): number { return this.pack.room(kind, food); }
+  override carriedOf(kind: BulkKind, food?: FoodKind): number { return kind === 'food' && food === undefined ? this.pack.bulk().reduce((n,b)=>n+(b.kind==='food'?b.n:0),0) : this.pack.countOf(kind, food); }
+  override takeOut(kind: BulkKind, n: number, food?: FoodKind): number { return this.pack.take(kind, n, food); }
+  override canCarry(kind: BulkKind, food?: FoodKind): boolean { return this.roomFor(kind, food) > 0; }
   override get mass(): number { return MASS.player; }
   facing = { x: 0, y: 1 };
   tool: Tool = 'hands';
@@ -1080,10 +1102,10 @@ export class Player extends Mover {
   cycleCrop(): void { this.cropKind = CROP_KINDS[(CROP_KINDS.indexOf(this.cropKind) + 1) % CROP_KINDS.length]; }
   /** next food kind for the basket; skips kinds the pantry is out of (unless every kind is) */
   cycleBasket(stock: Record<FoodKind, number>): void {
-    const any = FOOD_KINDS.some((k) => stock[k] > 0);
+    const any = FOOD_KINDS.some((k) => stock[k] > 0 || this.carriedOf('food', k) > 0);
     for (let i = 1; i <= FOOD_KINDS.length; i++) {
       const k = FOOD_KINDS[(FOOD_KINDS.indexOf(this.basketKind) + i) % FOOD_KINDS.length];
-      if (!any || stock[k] > 0) { this.basketKind = k; return; }
+      if (!any || stock[k] > 0 || this.carriedOf('food', k) > 0) { this.basketKind = k; return; }
     }
   }
   swing: Swing | null = null;
@@ -1110,6 +1132,7 @@ export class Player extends Mover {
     this.radius = 3.5;
     this.color = 0xffe066;
     this.task = 'you';
+    for (const tool of IMPLEMENTS) this.pack.put({ kind: 'tool', tool });
   }
 
   /** The building the tool would place, if it's a building tool. */
@@ -1209,6 +1232,7 @@ export class Player extends Mover {
    * (so mashing chains instead of being eaten). Returns the stage started, or -1.
    */
   pressAttack(): number {
+    if(this.weapons.melee<0)return -1;
     if (this.swing) { this.swing.queued = true; return -1; }
     if (this.recover > 0) return -1;
     if (this.sinceSwing > SWING.comboWindow) this.nextStage = 0;

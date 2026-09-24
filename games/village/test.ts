@@ -1,4 +1,7 @@
 import './main';
+import { runPackChecks } from './pack-test';
+import { STACK } from './config';
+const clearBulk = (s: VillageScene) => s.player.pack.slots.forEach((b,i)=>{if(b && ['wood','food','scrap'].includes(b.kind))s.player.pack.removeAt(i);});
 import type { VillageScene } from './main';
 import { World, WILD_FOOD, doorstep, buildingCenter, hearthCost, BUILDINGS, type BuildingKind } from './world';
 import { Rng } from '../../src/shared/rng';
@@ -52,6 +55,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
   output.textContent = ''; summary.textContent = 'Running';
   try {
     assert(COLS * ROWS > 80 * 44 * 10, 'world is over ten times the old area');
+    runPackChecks(scene(), assert);
     let dense = 0;
     for (let seed = 1; seed <= 20; seed++) {
       const w = new World(); w.generate(new Rng(seed)); if (w.denseForests) dense++;
@@ -284,11 +288,11 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     Object.assign(s.player, World.center(yd.tx + 3, yd.ty + 8)); s.player.tool = 'axe'; s.player.facing = { x: 0, y: -1 }; s.hoverTile = null;
     s.world.set(yd.tx + 3, yd.ty + 7, 'tree'); const w0 = s.wood;
     for (let i = 0; i < 3; i++) s.interact();
-    assert(s.player.load?.kind === 'wood' && s.player.load.n === p.playerTreeYield && s.wood === w0, 'the head\'s chop clears the tree for a token of wood');
-    s.player.load = { kind: 'wood', n: HAUL.player.wood }; s.world.set(yd.tx + 3, yd.ty + 7, 'tree'); s.interact();
+    assert(s.player.pack.bulk()[0]?.kind === 'wood' && s.player.pack.bulk()[0].n === p.playerTreeYield && s.wood === w0, 'the head\'s chop clears the tree for a token of wood');
+    clearBulk(s); s.player.pickUp('wood', STACK.wood); while(!s.player.pack.full)s.player.pack.put({kind:'tool',tool:'axe'}); s.world.set(yd.tx + 3, yd.ty + 7, 'tree'); s.interact();
     assert(s.world.get(yd.tx + 3, yd.ty + 7)!.kind === 'tree' && s.hint().includes('full'), 'full arms refuse another tree and say so');
     Object.assign(s.player, World.center(yd.tx, yd.ty)); s.tick(1 / 60);
-    assert(!s.player.load && s.wood === w0 + HAUL.player.wood, 'walking up to the woodyard unloads the head\'s arms');
+    assert(!s.player.pack.bulk().length && s.wood === w0 + HAUL.player.wood, 'walking up to the woodyard unloads the head\'s arms');
     // taking things down: a sound wall comes down after a few hammer blows for half its cost; a hurt one is mended first
     s = fresh(); clearing(s); s.agents = [s.player]; s.wood = 50;
     Object.assign(s.player, World.center(121, 100)); s.player.tool = 'hammer'; s.player.facing = { x: 1, y: 0 }; s.hoverTile = null;
@@ -391,14 +395,14 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(first.role === 'kid' && !first.hidden && first.pen === 'soldier', `an infant of age ${p.infantDays} walks out of the nursery to the house's pen (${first.role}, ${first.pen})`);
     assert(s.villagers().filter((v) => v.role === 'infant').length === s.cribs(hearth) - 1 && !s.birthProblem(hearth), 'the crib frees up for the next birth');
     // the basket: fill at the granary, toss onto the pen
-    s.player.tool = 'basket'; s.player.load = null; s.food = 100;
+    s.player.tool = 'basket'; clearBulk(s); s.food = 100;
     const g = s.world.granary!; Object.assign(s.player, World.center(g.tx + 1, g.ty + BUILDINGS[g.kind].h)); s.fillBasket();
-    const basket = s.player.load as { kind: string; n: number } | null; assert(basket?.kind === 'food' && basket.n === HAUL.player.food && s.food === 100 - HAUL.player.food, 'the basket fills with food from the granary');
+    const basket = s.player.pack.bulk()[0] as { kind: string; n: number } | null; assert(basket?.kind === 'food' && basket.n === STACK.food && s.food === 100 - STACK.food, 'the basket fills with food from the granary');
     // a throw is a thing in the world: it flies where you point, bounces, rolls and lies where it stops
     for (let y = 95; y <= 97; y++) for (let x = 122; x <= 124; x++) if (s.world.get(x, y)!.pen !== 'soldier') s.world.paintPen(x, y, 'soldier');
     Object.assign(s.player, World.center(123, 100)); const aim = World.center(123, 96); s.hoverPoint = aim;
     const thrown = s.toss()!;
-    assert(!!thrown && !thrown.rest && thrown.vz > 0 && thrown.n === p.tossSize && thrown.food === 'wheat' && s.player.load!.n === HAUL.player.food - p.tossSize, `a throw launches ${p.tossSize} food into the air`);
+    assert(!!thrown && !thrown.rest && thrown.vz > 0 && thrown.n === p.tossSize && thrown.food === 'wheat' && s.player.pack.bulk()[0].n === STACK.food - p.tossSize, `a throw launches ${p.tossSize} food into the air`);
     settle(s);
     assert(thrown.rest && thrown.z === 0 && Math.hypot(thrown.x - aim.x, thrown.y - aim.y) < 1.5 * 16 && s.world.inPen(thrown, 'soldier'), `it comes down near the aim and lies there (${Math.hypot(thrown.x - aim.x, thrown.y - aim.y).toFixed(0)} px off, in the pen)`);
     s.hoverPoint = { x: aim.x, y: aim.y - (p.tossRange + 3) * 16 }; assert(s.tossProblem() === 'too far to throw', 'the throw has a range');
@@ -408,19 +412,19 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     for (let x = 121; x <= 125; x++) { const d = s.world.get(x, 94)!.defense; if (d) s.world.damageDefense(d, Infinity); }
     s.world.removeItem(atWall); s.hoverPoint = null;
     // G: throw the whole armful, wood or food, with any tool in hand — the only way to put wood down away from the woodyard
-    s.player.tool = 'axe'; s.player.load = { kind: 'wood', n: 17 };
+    s.player.tool = 'axe'; clearBulk(s); s.player.pickUp('wood',17);
     Object.assign(s.player, World.center(123, 100)); const logAim = World.center(123, 98); s.hoverPoint = logAim;
     const logs = s.tossLoad()!;
-    assert(!!logs && logs.kind === 'wood' && logs.n === 17 && !s.player.load, 'G throws the whole armful of wood, axe in hand');
+    assert(!!logs && logs.kind === 'wood' && logs.n === 17 && !s.player.pack.bulk().length, 'G throws the whole armful of wood, axe in hand');
     settle(s);
     assert(logs.rest && Math.hypot(logs.x - logAim.x, logs.y - logAim.y) < 1.5 * 16, `the logs land near the aim and lie there (${Math.hypot(logs.x - logAim.x, logs.y - logAim.y).toFixed(0)} px off)`);
     assert(s.tossLoad() === null, 'empty-handed, there is nothing to throw');
-    s.player.load = { kind: 'food', n: 9, food: 'carrot' };
+    clearBulk(s); s.player.pickUp('food',9,'carrot');
     s.hoverPoint = { x: logAim.x, y: logAim.y - (p.tossRange + 3) * 16 };
-    assert(s.tossLoad() === null && s.player.load!.n === 9, 'the armful stays in hand when the aim is out of range');
+    const ranged = s.tossLoad(); assert(!!ranged && !s.player.pack.bulk().length, 'G clamps a distant aim to throwing range'); s.world.removeItem(ranged!); s.player.pickUp('food',9,'carrot');
     s.hoverPoint = null; s.player.facing = { x: 0, y: 1 };
     const spill = s.tossLoad()!;
-    assert(spill.kind === 'food' && spill.food === 'carrot' && spill.n === 9 && !s.player.load, 'with no cursor it throws the way you face');
+    assert(spill.kind === 'food' && spill.food === 'carrot' && spill.n === 9 && !s.player.pack.bulk().length, 'with no cursor it throws the way you face');
     settle(s); s.world.removeItem(logs); s.world.removeItem(spill); s.player.tool = 'basket';
     // a pen child walks to food lying in the pen and eats; food stray the pen is not theirs
     s.world.removeItem(thrown);
@@ -456,7 +460,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     s.removeDead();
     // diet: the pantry keeps kinds apart
     // diet: the pantry keeps kinds apart, crops and wild food have kinds, and what a child eats is who they become
-    const held = () => s.player.load as { kind: string; n: number; food?: string } | null;
+    const held = () => s.player.pack.bulk()[0] as { kind: string; n: number; food?: string } | null;
     s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(124, 100));
     for (const k of FOOD_KINDS) s.pantry[k] = 0;
     s.food = 50; assert(s.pantry.wheat === 50 && s.food === 50, 'a plainKid food gain lands in wheat');
@@ -465,22 +469,22 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     s.player.tool = 'seeds'; s.player.cropKind = 'carrot'; s.world.set(122, 98, 'tilled'); s.hoverTile = { tx: 122, ty: 98 }; Object.assign(s.player, World.center(122, 99)); s.interact();
     const sown = s.world.get(122, 98)!;
     assert(sown.kind === 'crop' && sown.food === 'carrot' && s.cropDaysOf(sown) === s.cropDays + FOODS.carrot.days, 'seeds sow the chosen crop and it ripens on its own clock');
-    sown.stage = 99; s.player.tool = 'hands'; s.player.load = null; s.interact();
+    sown.stage = 99; s.player.tool = 'hands'; clearBulk(s); s.interact();
     assert(held()?.food === 'carrot' && held()!.n === s.cropYieldOf('carrot') && s.world.get(122, 98)!.kind === 'tilled' && s.world.get(122, 98)!.food === 'carrot', 'harvesting by hand yields the crop and the soil remembers it');
     const sower = s.spawn(new Villager(World.center(122, 99).x, World.center(122, 99).y, s.world.houses[0], 'farmer', 20, 'Sower', s.mods));
     for (const q of s.world.find(t => t.kind === 'crop' || t.kind === 'tilled')) if (q.tx !== 122 || q.ty !== 98) s.world.set(q.tx, q.ty, 'grass');
     step(s, 6); assert(s.world.get(122, 98)!.kind === 'crop' && s.world.get(122, 98)!.food === 'carrot', `a farmer replants what the soil remembers (${s.world.get(122, 98)!.kind} ${s.world.get(122, 98)!.food})`);
     sower.dead = true; s.removeDead();
-    s.world.set(126, 98, 'bush').stage = 99; s.hoverTile = { tx: 126, ty: 98 }; Object.assign(s.player, World.center(126, 99)); s.player.load = null; s.interact();
+    s.world.set(126, 98, 'bush').stage = 99; s.hoverTile = { tx: 126, ty: 98 }; Object.assign(s.player, World.center(126, 99)); clearBulk(s); s.interact();
     const bush = s.world.get(126, 98)!;
     assert(held()?.food === 'berry' && held()!.n === FOODS.berry.yield && bush.kind === 'bush' && bush.stage === 0 && !s.wildRipe(bush), 'a ripe bush is picked by hand and starts regrowing');
     const berries = held()!.n; s.interact(); assert(held()?.n === berries, 'a picked bush gives nothing');
     for (let i = 0; i < s.regrowDays('berry'); i++) s.newDay(); assert(s.wildRipe(bush), `a bush bears again after ${s.regrowDays('berry')} days`);
-    s.hoverTile = null; s.player.load = null;
+    s.hoverTile = null; clearBulk(s);
     // the basket takes one kind; a child's bites build a diet that freezes at coming of age
     s.world.paintPen(123, 96, 'farmer'); s.player.tool = 'basket'; s.player.basketKind = 'carrot'; s.pantry.carrot = 40;
     const g2 = s.world.granary!; Object.assign(s.player, World.center(g2.tx + 1, g2.ty + BUILDINGS[g2.kind].h)); s.fillBasket();
-    assert(held()?.food === 'carrot' && held()!.n === HAUL.player.food && s.pantry.carrot === 40 - HAUL.player.food, 'the basket fills with the chosen kind');
+    assert(held()?.food === 'carrot' && held()!.n === STACK.food && s.pantry.carrot === 40 - STACK.food, 'the basket fills with the chosen kind');
     for (let y = 95; y <= 97; y++) for (let x = 122; x <= 124; x++) if (s.world.get(x, y)!.pen !== 'farmer') s.world.paintPen(x, y, 'farmer');
     Object.assign(s.player, World.center(123, 100)); s.hoverPoint = World.center(123, 96); const carrots = s.toss()!; s.hoverPoint = null; settle(s);
     assert(carrots.food === 'carrot' && carrots.n === p.tossSize && s.world.inPen(carrots, 'farmer'), 'a throw carries its kind');
@@ -507,30 +511,30 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     const loot = s.world.items.find((it) => it.kind === 'scrap');
     assert(!!loot && loot.n > 0 && s.scrap === scrapWas, 'a slain raider drops scrap on the ground instead of into your pocket');
     Object.assign(s.player, { x: loot!.x, y: loot!.y }); s.player.tool = 'sword'; s.tick(1 / 60);
-    assert(s.scrap === scrapWas + loot!.n && !s.world.items.includes(loot!), 'walking over scrap picks it up with any tool');
-    Object.assign(s.player, { x: dropped!.x, y: dropped!.y }); s.player.load = null; s.player.tool = 'sword'; s.tick(1 / 60);
+    assert(s.scrap === scrapWas && s.player.carriedOf('scrap') > 0 && !s.world.items.includes(loot!), 'scrap goes in the pack and must be deposited before forging');
+    Object.assign(s.player, { x: dropped!.x, y: dropped!.y }); clearBulk(s); s.player.tool = 'sword'; s.tick(1 / 60);
     assert(held()?.kind === 'wood' && held()!.n === 9 && !s.world.items.includes(dropped!), 'an armful comes along with the sword out — whatever you are holding picks it up');
     for (const tool of ['axe', 'hammer', 'basket', 'hands'] as const) {
-      s.player.load = null;
+      clearBulk(s);
       const armful = s.world.dropItem('wood', 4, s.player.x, s.player.y);
       s.player.tool = tool; s.tick(1 / 60);
       assert(held()?.kind === 'wood' && !s.world.items.includes(armful), `and with the ${tool} too`);
     }
-    s.player.load = null;
+    clearBulk(s);
     const flying = s.world.dropItem('wood', 4, s.player.x, s.player.y);
     flying.rest = false; flying.z = 8;
     s.tick(1 / 60);
-    assert(!s.player.load && s.world.items.includes(flying), 'but nothing is caught in mid-air — a thrown armful gets away');
+    assert(!s.player.pack.bulk().length && s.world.items.includes(flying), 'but nothing is caught in mid-air — a thrown armful gets away');
     flying.rest = true; flying.z = 0; s.tick(1 / 60);
     assert(held()?.kind === 'wood', 'once it comes to rest it is fair game');
-    s.player.load = null;
+    clearBulk(s);
     const outOfReach = s.world.dropItem('wood', 4, s.player.x + ITEM.reach + 6, s.player.y);
     s.tick(1 / 60);
-    assert(!s.player.load && s.world.items.includes(outOfReach), `and one out of reach (${ITEM.reach}px) stays where it lies`);
+    assert(!s.player.pack.bulk().length && s.world.items.includes(outOfReach), `and one out of reach (${ITEM.reach}px) stays where it lies`);
     s.world.removeItem(outOfReach);
-    s.player.load = { kind: 'wood', n: 9 };
+    clearBulk(s); s.player.pickUp('wood',9);
     const snack = s.world.dropItem('food', 3, s.player.x, s.player.y, 'berry'); s.tick(1 / 60);
-    assert(s.world.items.includes(snack) && held()?.kind === 'wood', 'arms full of wood leave food lying');
+    assert(!s.world.items.includes(snack) && s.player.carriedOf('food','berry')===3 && held()?.kind === 'wood', 'the pack carries food alongside wood');
     // bodies: nobody stands inside anybody; the light give way to the heavy; walls are never entered
     s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(124, 100)); s.world.items.length = 0;
     const home3 = s.world.houses[0];
@@ -623,7 +627,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(carried, 'a gnome carries exactly one hazelnut at a time');
     assert(s.pantry.hazelnut === nutsWas + 1 && s.wildLeft(hazel) === FOODS.hazelnut.yield - 1 && hazel.stage >= 99, `the find reaches the granary and the plant keeps the rest (${s.wildLeft(hazel)} left)`);
     gma.update = () => {};
-    const rest = s.wildLeft(hazel); Object.assign(s.player, World.center(127, 100)); s.player.tool = 'hands'; s.player.facing = { x: 1, y: 0 }; s.player.load = null; s.interact(); const got = s.player.load as { food?: string; n: number } | null;
+    const rest = s.wildLeft(hazel); Object.assign(s.player, World.center(127, 100)); s.player.tool = 'hands'; s.player.facing = { x: 1, y: 0 }; clearBulk(s); s.interact(); const got = s.player.pack.bulk()[0] as { food?: string; n: number } | null;
     assert(got?.food === 'hazelnut' && got.n === rest && hazel.stage === 0 && hazel.left === undefined, `hands take everything left (${rest}) and the plant starts regrowing`);
     for (let d = 0; d < s.regrowDays('hazelnut'); d++) { s.day++; s.newDay(); }
     assert(s.wildLeft(hazel) === FOODS.hazelnut.yield, 'a bare plant regrows to its full yield');
@@ -861,7 +865,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     s.pantry.wheat = 40; s.player.tool = 'basket';
     Object.assign(s.player, World.center(s.world.granary!.tx + 1, s.world.granary!.ty + BUILDINGS.granary.h));
     s.fillBasket();
-    assert(s.player.load?.kind === 'food' && s.player.load.n > 0, 'the basket still fills at the granary');
+    assert(s.player.pack.bulk()[0]?.kind === 'food' && s.player.pack.bulk()[0].n > 0, 'the basket still fills at the granary');
     s.reset(7); assert(s.world.houses.length === 0 && s.gnomesFound, 'and a new village keeps the gnome start');
 
     // ---- peace ----------------------------------------------------------------------------

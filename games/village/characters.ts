@@ -14,7 +14,7 @@ export const NO_ARMOR: Armor = { helmet: 0, chest: 0, legs: 0, shield: 0 };
 /** forged weapon tier per slot (index into WEAPONS[slot].tiers); everyone starts crude */
 export interface Weapons { melee: number; bow: number }
 export const NO_WEAPONS: Weapons = { melee: 0, bow: 0 };
-export function weaponMul(w: Weapons, slot: WeaponSlot): number { return w[slot] === 0 ? p.weaponTier0Mul : WEAPONS[slot].tiers[w[slot]]?.mul ?? 1; }
+export function weaponMul(w: Weapons, slot: WeaponSlot): number { return w[slot] < 0 ? 0 : w[slot] === 0 ? p.weaponTier0Mul : WEAPONS[slot].tiers[w[slot]]?.mul ?? 1; }
 
 export interface Look {
   body: Body;

@@ -589,3 +589,15 @@ body.touch .wearers { flex-direction: row; flex-wrap: wrap; }
 
 /* what the head is carrying, under the wood / food count */
 .topbar .stat .val .hand { font-size: 9px; font-style: normal; color: var(--accent); margin-left: 4px; white-space: nowrap; }
+
+/* Desktop backpack. Touch keeps its existing belt and controls. */
+.inventory-host { display:flex; flex-wrap:wrap; gap:8px 18px; padding:8px 10px; pointer-events:auto; user-select:none; }
+.pack-grid,.equipment-grid { display:flex; flex-wrap:wrap; gap:4px; }
+.pack-cell { position:relative; width:40px; height:40px; padding:2px; border:1px solid #756544; border-radius:4px; background:#29261f; color:#baa984; cursor:grab; font:9px monospace; }
+.pack-cell:hover { border-color:#ffe066; background:#393329; }
+.pack-cell img { width:32px; height:32px; object-fit:contain; image-rendering:pixelated; pointer-events:none; }
+.pack-cell b { position:absolute; right:2px; bottom:1px; color:#fff3d5; font: bold 11px monospace; text-shadow:1px 1px #000; }
+.pack-cell span { text-transform:uppercase; font-size:8px; }
+.pack-help { flex-basis:100%; color:#baa984; font-size:10px; }
+.pack-ghost { position:fixed; z-index:100000; pointer-events:none; opacity:.85; }
+body.touch .inventory-host { display:none; }

@@ -1,3 +1,5 @@
+import { STACK, type BulkKind } from './config';
+import { isImplement, IMPLEMENTS, TOOL_NAME, type Gear, type EquipmentSlot, isBulk, slotName } from './pack';
 import Phaser from 'phaser';
 import { SimScene, launch, button, getGui, Rng, SpatialGrid } from '@shared/index';
 import { launch as throwItem, type Item } from './items';
@@ -8,7 +10,7 @@ import { Interior } from './interior';
 import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, Bolt, Troll, waveComposition } from './enemies';
 import { Boar, Swarm, type Sounder } from './wildlife';
 import { Fog } from './fog';
-import { p, TILE, COLS, ROWS, ZOOM, COST, HAUL, BOAR, type LoadKind, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, GNOME_BEDS, GNOME_YARD, ORDER, LEVEL_PERKS, PEN_NAME, TROLL, HIVE, ITEM, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, zeroFood, isDish, foodCount, hasInterior, type Recipe, type DishKind, DIET_STAT_NAME, type DietStat, type FoodKind, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, BOAR, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, GNOME_BEDS, GNOME_YARD, ORDER, LEVEL_PERKS, PEN_NAME, TROLL, HIVE, ITEM, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, zeroFood, isDish, foodCount, hasInterior, type Recipe, type DishKind, DIET_STAT_NAME, type DietStat, type FoodKind, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
@@ -529,6 +531,7 @@ export class VillageScene extends SimScene {
   }
 
   reset(newSeed?: number): void {
+    this.ui?.inventory.cancel();
     super.reset(newSeed);
     this.view?.rebuild();
     this.ui?.clear();
@@ -624,7 +627,50 @@ export class VillageScene extends SimScene {
   private locked = (t: Tool) => !!this.toolLocked(t);
   /** Why a tool can't be picked up yet, or null. The gnomes' craft is learned by finding them. */
   toolLocked(tool: Tool): string | null {
+    if (isImplement(tool) && !this.player.pack.hasTool(tool)) { const name = TOOL_NAME[tool].toLowerCase(); return `Recover or pick up ${/^[aeiou]/.test(name) ? 'an' : 'a'} ${name}`; }
+    if ((tool === 'sword' && this.player.weapons.melee < 0) || (tool === 'bow' && this.player.weapons.bow < 0)) return 'Equip a weapon first';
     return tool === 'gnomehouse' && !this.gnomesFound ? 'You have never seen how a toadstool cottage is built' : null;
+  }
+  validateTool(): void { if (this.toolLocked(this.player.tool)) { this.player.tool = 'hands'; this.player.swing = null; } }
+  equipped(slot: EquipmentSlot): Gear | null {
+    const pl=this.player;
+    if(slot==='melee'||slot==='bow') return pl.weapons[slot]<0?null:{kind:'weapon',slot,tier:pl.weapons[slot]};
+    return pl.armor[slot]===0?null:{kind:'armor',slot,tier:pl.armor[slot]};
+  }
+  private wear(slot: EquipmentSlot, gear: Gear | null): void {
+    if(slot==='melee'||slot==='bow') this.player.weapons[slot]=gear && gear.kind==='weapon'?gear.tier:-1;
+    else this.player.armor[slot]=gear && gear.kind==='armor'?gear.tier:0;
+    this.refitArmor(this.player); this.validateTool();
+  }
+  swapEquipment(index: number, slot: EquipmentSlot): boolean {
+    if(index<0||index>=this.player.pack.slots.length)return false;
+    const item=this.player.pack.at(index), old=this.equipped(slot);
+    if(item && (isBulk(item)||item.kind==='tool'||item.slot!==slot))return false;
+    this.player.pack.slots[index]=old; this.wear(slot,item as Gear|null); return true;
+  }
+  stowGear(gear: Gear): void {
+    if(this.player.pack.put(gear)>=0)return;
+    const it=this.world.dropItem('gear',1,this.player.x,this.player.y);it.gear={...gear};it.playerDropPending=true;
+    this.event('info',slotName(gear)+' placed at your feet — pack full',true);
+  }
+  recoverBasicKit(): boolean {
+    const pack=this.player.pack, missing: Gear[]=IMPLEMENTS.filter(t=>!pack.hasTool(t)).map(tool=>({kind:'tool',tool}));
+    for(const slot of ['melee','bow'] as const) if(this.player.weapons[slot]<0 && pack.findSlot(g=>g.kind==='weapon'&&g.slot===slot)<0) missing.push({kind:'weapon',slot,tier:0});
+    if(missing.length>pack.emptySlots){this.event('info','Recovery needs '+(missing.length-pack.emptySlots)+' more empty pack slots',true);return false;}
+    for(const gear of missing)pack.put(gear);
+    this.event('info',missing.length?'Basic kit recovered':'You already have the basic kit',true);return true;
+  }
+  clampThrow(aim: {x:number;y:number}): {x:number;y:number} {
+    const pl=this.player,d=Math.hypot(aim.x-pl.x,aim.y-pl.y),k=Math.min(1,p.tossRange*TILE/(d||1));
+    return {x:pl.x+(aim.x-pl.x)*k,y:pl.y+(aim.y-pl.y)*k};
+  }
+  dropPackItem(source: number | EquipmentSlot, aim: {x:number;y:number}): boolean {
+    const slot=typeof source==='number'?this.player.pack.at(source):this.equipped(source);
+    if(!slot)return false;
+    if(typeof source==='number')this.player.pack.removeAt(source);else this.wear(source,null);
+    const it=isBulk(slot)?this.world.dropItem(slot.kind,slot.n,this.player.x,this.player.y,slot.kind==='food'?slot.food:undefined):this.world.dropItem('gear',1,this.player.x,this.player.y);
+    if(!isBulk(slot))it.gear={...slot};it.playerDropPending=true;
+    throwItem(it,this.player,this.clampThrow(aim),this.rng);this.validateTool();return true;
   }
   setTool(tool: Tool): void {
     const why = this.toolLocked(tool);
@@ -724,7 +770,7 @@ export class VillageScene extends SimScene {
     const pl = this.player;
     if (pl.tool === 'pen') pl.cyclePen();
     else if (pl.tool === 'seeds') pl.cycleCrop();
-    else if (pl.tool === 'basket') { if (pl.load?.kind === 'food') { this.event('food', 'Empty the basket first (toss it, or switch tools at the granary to store it)'); return; } pl.cycleBasket(this.pantry); }
+    else if (pl.tool === 'basket') pl.cycleBasket(this.pantry);
     else if (pl.tool === 'wand') this.orderFollow();
     else pl.tool = 'pen';
   }
@@ -766,6 +812,7 @@ export class VillageScene extends SimScene {
     if (why) { this.event('info', `Can't forge: ${why}`, true); return false; }
     const next = who.weapons[slot] + 1, tier = WEAPONS[slot].tiers[next];
     const paid = this.forgeCost(tier); this.wood -= paid.wood; this.scrap -= paid.scrap;
+    if (who instanceof Player && who.weapons[slot]>=0) this.stowGear({kind:'weapon',slot,tier:who.weapons[slot]});
     who.weapons = { ...who.weapons, [slot]: next };
     this.fx.push({ kind: 'tool', tool: 'hammer', tx: who.tile.tx, ty: who.tile.ty });
     this.event('build', `${who instanceof Player ? 'You' : (who as Villager).name} now carr${who instanceof Player ? 'y' : 'ies'} a ${tier.name.toLowerCase()}`, true);
@@ -787,6 +834,7 @@ export class VillageScene extends SimScene {
     if (why) { this.event('info', `Can't forge: ${why}`, true); return false; }
     const next = who.armor[slot] + 1, tier = ARMOR[slot].tiers[next];
     const paid = this.forgeCost(tier); this.wood -= paid.wood; this.scrap -= paid.scrap;
+    if (who instanceof Player && who.armor[slot]>0) this.stowGear({kind:'armor',slot,tier:who.armor[slot]});
     who.armor = { ...who.armor, [slot]: next };
     this.refitArmor(who);
     this.fx.push({ kind: 'tool', tool: 'hammer', tx: who.tile.tx, ty: who.tile.ty });
@@ -794,7 +842,7 @@ export class VillageScene extends SimScene {
     return true;
   }
   /** Re-derive max HP after armor changes (soldiers via applyRole; the head keeps a base + bonus). */
-  private refitArmor(who: Mover): void {
+  refitArmor(who: Mover): void {
     if (who instanceof Villager) { const frac = who.hp / who.maxHp; who.applyRole(this.mods); who.hp = Math.round(who.maxHp * frac); }
     else if (who instanceof Player) {
       const base = p.playerHp + this.mods.playerHpBonus;
@@ -1007,7 +1055,8 @@ export class VillageScene extends SimScene {
     this.tickAges(dt);
     this.tickBirths();
     this.world.tickItems(dt);
-    this.pickUpItems();
+    this.validateTool();
+    this.pickUpItems(dt);
     this.tidySelection();
     this.tickHives(dt);
     this.tickTowers(dt);
@@ -1034,10 +1083,12 @@ export class VillageScene extends SimScene {
     }
     // the head unloads by walking up to the woodyard / granary — or, with the basket out, fills it there
     if (!this.player.hidden) {
-      const basket = this.player.tool === 'basket' && (!this.player.load || this.player.load.kind === 'food');
-      const b = basket ? this.world.granary : this.player.load ? (this.player.load.kind === 'wood' ? this.world.woodyard : this.world.granary) : null;
       const pt = this.player.tile;
-      if (b && pt.tx >= b.tx - 1 && pt.tx <= b.tx + BUILDINGS[b.kind].w && pt.ty >= b.ty - 1 && pt.ty <= b.ty + BUILDINGS[b.kind].h) { if (basket) this.fillBasket(); else if (this.player.load) this.deposit(this.player); }
+      for (const b of [this.world.granary, this.world.woodyard]) {
+        if (b && pt.tx >= b.tx - 1 && pt.tx <= b.tx + BUILDINGS[b.kind].w && pt.ty >= b.ty - 1 && pt.ty <= b.ty + BUILDINGS[b.kind].h) {
+          if (b === this.world.granary && this.player.tool === 'basket') this.fillBasket(); else this.deposit(this.player, b);
+        }
+      }
     }
     this.stats.peakPop = Math.max(this.stats.peakPop, this.villagers().length);
     if (this.player.dead) { if (p.godMode) { this.player.dead = false; this.player.hp = this.player.maxHp; } else this.endRun(false); }
@@ -1228,12 +1279,11 @@ export class VillageScene extends SimScene {
     const g = this.world.granary, pl = this.player;
     if (!g || g.ruined) return;
     // the basket holds one kind: the chosen one, or whatever is already in it; an empty choice falls back to the fullest bin
-    const kind: FoodKind = pl.load?.food ?? (this.pantry[pl.basketKind] > 0 ? pl.basketKind : this.fullestKind() ?? pl.basketKind);
-    const room = HAUL.player.food - (pl.load?.n ?? 0);
-    const take = Math.min(room, Math.floor(this.pantry[kind]));
+    const kind = pl.basketKind;
+    const room = Math.min(STACK.food - pl.carriedOf('food', kind), pl.roomFor('food', kind));
+    const take = pl.pickUp('food', Math.min(room, Math.floor(this.pantry[kind])), kind);
     if (take <= 0) return;
     this.pantry[kind] -= take;
-    pl.pickUp('food', take, kind);
     const c = buildingCenter(g);
     this.fx.push({ kind: 'deposit', x: c.tx * TILE, y: (g.ty + BUILDINGS[g.kind].h) * TILE - 6, text: `-${take} ${FOODS[kind].one}`, colour: FOODS[kind].colour });
   }
@@ -1245,14 +1295,15 @@ export class VillageScene extends SimScene {
   /** Why the basket can't throw at the aim, or null. */
   tossProblem(aim = this.tossAim): string | null {
     const pl = this.player;
-    if (!pl.load || pl.load.kind !== 'food') return 'the basket is empty — walk up to the granary (or harvest by hand)';
+    if (pl.carriedOf('food', pl.basketKind) <= 0) return 'the basket is empty — walk up to the granary (or harvest by hand)';
     if (Math.hypot(aim.x - pl.x, aim.y - pl.y) > p.tossRange * TILE) return 'too far to throw';
     return null;
   }
   /** Put `n` of a kind into the world with a throw from the head's hands toward `aim`. */
-  private hurl(kind: LoadKind, n: number, aim: { x: number; y: number }, food?: FoodKind): Item {
+  private hurl(kind: BulkKind, n: number, aim: { x: number; y: number }, food?: FoodKind): Item {
     const pl = this.player;
     const it = this.world.dropItem(kind, n, pl.x, pl.y, food);
+    it.playerDropPending = true;
     throwItem(it, { x: pl.x, y: pl.y }, aim, this.rng);
     if (pl.x !== aim.x) pl.dir = aim.x < pl.x ? -1 : 1;
     return it;
@@ -1261,8 +1312,7 @@ export class VillageScene extends SimScene {
   toss(): Item | null {
     const aim = this.tossAim, why = this.tossProblem(aim);
     if (why) { this.event('food', why); return null; }
-    const pl = this.player, n = Math.min(pl.load!.n, p.tossSize), food = pl.load!.food ?? 'wheat';
-    pl.load!.n -= n; if (pl.load!.n <= 0) pl.load = null;
+    const pl = this.player, food = pl.basketKind, n = pl.takeOut('food', p.tossSize, food);
     return this.hurl('food', n, aim, food);
   }
   /**
@@ -1273,32 +1323,40 @@ export class VillageScene extends SimScene {
   tossLoad(): Item | null {
     if (this.screen !== 'playing' || this.interior.active) return null;
     const pl = this.player;
-    if (!pl.load) { this.event('info', 'Your hands are empty — walk over an armful to pick it up'); return null; }
-    const aim = this.tossAim;
-    if (Math.hypot(aim.x - pl.x, aim.y - pl.y) > p.tossRange * TILE) { this.event('info', 'Too far to throw — aim closer'); return null; }
-    const { kind, n, food } = pl.load;
-    pl.load = null;
-    return this.hurl(kind, n, aim, food);
+    const stack = pl.pack.bulk().reduce<ReturnType<typeof pl.pack.bulk>[number] | null>((best, b) => !best || b.n > best.n ? b : best, null);
+    if (!stack) { this.event('info', 'No bulk supplies in your pack'); return null; }
+    const aim = this.clampThrow(this.tossAim);
+    pl.pack.removeAt(pl.pack.slots.indexOf(stack));
+    return this.hurl(stack.kind, stack.n, aim, stack.kind === 'food' ? stack.food : undefined);
   }
   /** Items lying at the head's feet come along, whatever tool is in hand: scrap always, an armful one kind at a time. */
-  pickUpItems(): void {
-    const pl = this.player;
+  pickUpItems(dt = 0): void {
+    const pl = this.player, range = p.pickupRange * TILE;
     if (pl.hidden) return;
-    for (const it of this.world.itemsNear(pl.x, pl.y, ITEM.reach)) {
-      if (it.kind === 'scrap') { this.scrap += it.n; this.world.removeItem(it); this.fx.push({ kind: 'deposit', x: it.x, y: it.y - 4, text: `+${it.n} scrap`, colour: '#b0b3b9' }); continue; }
-      if (!pl.canCarry(it.kind, it.food)) continue;
-      const room = HAUL.player[it.kind] - (pl.load?.n ?? 0);
-      const take = Math.min(room, it.n);
-      if (take <= 0) continue;
-      pl.pickUp(it.kind, take, it.food);
-      it.n -= take; if (it.n <= 1e-9) this.world.removeItem(it);
-      this.fx.push({ kind: 'deposit', x: it.x, y: it.y - 4, text: `+${take % 1 ? take.toFixed(1) : take} ${it.kind === 'wood' ? 'wood' : FOODS[it.food ?? 'wheat'].one}`, colour: it.kind === 'wood' ? '#d9a566' : FOODS[it.food ?? 'wheat'].colour });
+    for (const it of [...this.world.items]) {
+      let d = Math.hypot(it.x-pl.x, it.y-pl.y);
+      if (it.playerDropPending) { if (it.rest && d > Math.max(range, ITEM.reach)) it.playerDropPending = false; else continue; }
+      if (!it.rest || !this.itemRoom(it)) continue;
+      const q = World.toTile(it.x,it.y);
+      const protectedFood = it.kind === 'food' && (this.world.gnomeHouses.some(h => Math.hypot(it.x-buildingCenter(h).tx*TILE,it.y-buildingCenter(h).ty*TILE)<=GNOME_YARD*TILE) || this.villagers().some(v=>v.eatingFrom===it));
+      if (d > ITEM.reach && d <= range && !this.world.get(q.tx,q.ty)?.pen && !this.meatClaims.has(it.id) && !protectedFood) {
+        let left = Math.min(p.pickupPull * dt, d - ITEM.reach);
+        while (left > 0.001) {
+          const step = Math.min(2,left), x=it.x+(pl.x-it.x)/d*step, y=it.y+(pl.y-it.y)/d*step;
+          if (this.world.itemBlocked(x,y,0)) break;
+          it.x=x;it.y=y;left-=step;d=Math.hypot(it.x-pl.x,it.y-pl.y);
+        }
+      }
+      if (d > ITEM.reach + 0.001) continue;
+      if (it.kind === 'gear') { if (it.gear && pl.pack.put(it.gear)>=0) this.world.removeItem(it); }
+      else { const take = pl.pickUp(it.kind,it.n,it.food); it.n-=take; if(it.n<1e-9)this.world.removeItem(it); }
     }
   }
+  itemRoom(it: Item): number { return it.kind === 'gear' ? (it.gear ? this.player.pack.emptySlots : 0) : this.player.roomFor(it.kind,it.food); }
   /** What is lying on a tile, in words. */
   itemsBlurb(tx: number, ty: number): string {
     const on = this.world.itemsOn(tx, ty);
-    return on.map((it) => `${it.n % 1 ? it.n.toFixed(1) : it.n} ${it.kind === 'scrap' ? 'scrap' : it.kind === 'wood' ? 'wood' : FOODS[it.food ?? 'wheat'].one}`).join(', ');
+    return on.map((it) => it.kind === 'gear' && it.gear ? slotName(it.gear) : `${it.n % 1 ? it.n.toFixed(1) : it.n} ${it.kind === 'scrap' ? 'scrap' : it.kind === 'wood' ? 'wood' : FOODS[it.food ?? 'wheat'].one}`).join(', ');
   }
   // ---- bodies ---------------------------------------------------------------------------------
 
@@ -1570,29 +1628,27 @@ export class VillageScene extends SimScene {
   get foodCap(): number { return Math.round(CAPS[this.world.granary?.level ?? 1] * this.mods.capMul); }
   get woodCap(): number { return Math.round(CAPS[this.world.woodyard?.level ?? 1] * this.mods.capMul); }
   private warnedFull = false;
-  private warnedRuin = false;
+
 
   /** Add to the stockpile, respecting storage; says so (once a day) when the store is full. */
   /** Hand a carried load in at its building: the stockpile takes it (up to the cap) and the arms are free. */
-  deposit(m: Mover): void {
-    const load = m.load;
-    if (!load) return;
-    const b = load.kind === 'wood' ? this.world.woodyard : this.world.granary;
-    if (!b) return;
-    if (b.ruined) { if (m === this.player && !this.warnedRuin) { this.warnedRuin = true; this.event('build', `The ${BUILDINGS[b.kind].name.toLowerCase()} is in ruins — rebuild it with the hammer before anything can be stored.`, true); } return; }
-    if (load.kind === 'wood') this.addWood(load.n); else this.addFood(load.n, load.food);
-    m.load = null;
-    const c = buildingCenter(b);
-    this.fx.push({ kind: 'deposit', x: c.tx * TILE, y: (b.ty + BUILDINGS[b.kind].h) * TILE - 6, text: `+${load.n} ${load.kind === 'wood' ? 'wood' : FOODS[load.food ?? 'wheat'].one}`, colour: load.kind === 'wood' ? '#d9a566' : FOODS[load.food ?? 'wheat'].colour });
+  deposit(m: Mover, at?: Building): void {
+    for (const load of m.carriedLoads()) {
+      const b = load.kind === 'food' ? this.world.granary : this.world.woodyard;
+      if (!b || (at && at !== b) || b.ruined) continue;
+      const room = load.kind === 'food' ? this.foodCap - this.food : load.kind === 'wood' ? this.woodCap - this.wood : Infinity;
+      const take = m.takeOut(load.kind, Math.min(load.n, Math.max(0, room)), load.food);
+      if (take <= 0) continue;
+      if (load.kind === 'food') this.addFood(take, load.food);
+      else if (load.kind === 'wood') this.addWood(take);
+      else this.scrap += take;
+      const c = buildingCenter(b);
+      this.fx.push({ kind: 'deposit', x: c.tx * TILE, y: (b.ty + BUILDINGS[b.kind].h) * TILE - 6, text: '+' + take + ' ' + (load.kind === 'food' ? FOODS[load.food ?? 'wheat'].one : load.kind), colour: load.kind === 'wood' ? '#d9a566' : '#e8d59c' });
+    }
   }
   /** Why the head can't pick up `kind` right now (arms full, or holding the other thing), or null. */
-  loadProblem(kind: LoadKind, food?: FoodKind): string | null {
-    const l = this.player.load;
-    if (!l) return null;
-    if (l.kind !== kind) return `Take the ${l.kind} to the ${l.kind === 'wood' ? 'woodyard' : 'granary'} first`;
-    if (kind === 'food' && food && l.food !== food) return `Take the ${FOODS[l.food ?? 'wheat'].name.toLowerCase()} to the granary first`;
-    if (l.n >= HAUL.player[kind]) return `Your arms are full — drop the ${kind} at the ${kind === 'wood' ? 'woodyard' : 'granary'}`;
-    return null;
+  loadProblem(kind: BulkKind, food?: FoodKind, n = 1): string | null {
+    return this.player.roomFor(kind, food) >= n ? null : 'Your pack is full — unload supplies or drop an item';
   }
   addFood(n: number, kind: FoodKind = 'wheat'): void {
     const room = this.foodCap - this.food;
@@ -1769,6 +1825,7 @@ export class VillageScene extends SimScene {
   }
 
   shoot(who: Mover, dx: number, dy: number, dmg: number): boolean {
+    if(who.weapons.bow<0)return false;
     if (this.arrows <= 0) { who.task = 'out of arrows'; if (who === this.player) this.event('info', 'Out of arrows. Craft a bundle at the barracks.'); return false; }
     const len = Math.hypot(dx, dy) || 1;
     who.aim = { x: dx / len, y: dy / len }; who.dir = dx < 0 ? -1 : 1;
@@ -1895,12 +1952,11 @@ export class VillageScene extends SimScene {
   }
   /** A carried load becomes nights of firewood, as many as fit; whatever is left stays in the arms for the woodyard. */
   stockFromLoad(b: Building, m: Mover): number {
-    const load = m.load;
-    if (!load || load.kind !== 'wood' || !hasHearth(b) || b.ruined) return 0;
+    if (!hasHearth(b) || b.ruined) return 0;
     const cost = hearthCost(b);
+    if (cost <= 0) return 0;
     let nights = 0;
-    while (b.firewood < p.hearthNights && load.n >= cost) { load.n -= cost; b.firewood++; nights++; }
-    if (load.n <= 0) m.load = null;
+    while (b.firewood < p.hearthNights && m.carriedOf('wood') >= cost) { m.takeOut('wood', cost); b.firewood++; nights++; }
     if (nights) { const c = this.towerCenter(b); this.fx.push({ kind: 'deposit', x: c.x, y: c.y - TILE, text: `+${nights} night${nights > 1 ? 's' : ''}`, colour: '#ffb060' }); }
     return nights;
   }
@@ -2207,6 +2263,7 @@ export class VillageScene extends SimScene {
   /** Use the equipped tool on the faced tile (or swing the sword). */
   interact(): void {
     if (this.screen !== 'playing') return;
+    this.validateTool();
     if (this.interior.active) { this.interior.act(); return; }
     const pl = this.player;
     if (pl.busy > 0) return;
@@ -2287,7 +2344,7 @@ export class VillageScene extends SimScene {
         return;
       case 'axe':
         if (t?.kind === 'tree') {
-          const why = this.loadProblem('wood');
+          const why = this.loadProblem('wood', undefined, p.playerTreeYield);
           if (why) { this.event('wood', why + '.'); return; }
           // the head clears ground; the real wood comes in on woodcutters' backs
           if (++t.work >= this.workHits(3)) { this.knockDownHive(tx, ty, this.player); this.world.set(tx, ty, 'sapling'); this.player.pickUp('wood', p.playerTreeYield); }
@@ -2297,7 +2354,7 @@ export class VillageScene extends SimScene {
         return;
       case 'hands':
         if (t && this.isRipe(t)) {
-          const kind = t.food ?? 'wheat', why = this.loadProblem('food', kind);
+          const kind = t.food ?? 'wheat', why = this.loadProblem('food', kind, this.cropYieldOf(kind));
           if (why) { this.event('food', why + '.'); return; }
           this.world.set(tx, ty, 'tilled'); this.player.pickUp('food', this.cropYieldOf(kind), kind); this.fx.push({ kind: 'tool', tool: 'seed', tx, ty });
         } else if (t && WILD_FOOD[t.kind]) {
@@ -2306,7 +2363,7 @@ export class VillageScene extends SimScene {
           if (!this.wildRipe(t)) { this.event('food', `Nothing to pick yet — ${FOODS[kind].name.toLowerCase()} in ${this.regrowDays(kind) - t.stage} day${this.regrowDays(kind) - t.stage === 1 ? '' : 's'}`); return; }
           const why = this.loadProblem('food', kind);
           if (why) { this.event('food', why + '.'); return; }
-          const got = this.pickWild(tx, ty, this.wildLeft(t));
+          const got = this.pickWild(tx, ty, Math.min(this.wildLeft(t), pl.roomFor('food', kind)));
           this.player.pickUp('food', got, kind); this.fx.push({ kind: 'tool', tool: 'seed', tx, ty });
         }
         return;
@@ -2316,9 +2373,7 @@ export class VillageScene extends SimScene {
   /** What the tool would do right now, as "E: verb" (or a reason it won't). */
   /** "carrying 8 wood — walk up to the woodyard to unload", shown while the head holds something. */
   carryHint(): string | null {
-    const l = this.player.load;
-    if (l?.kind === 'food' && this.player.tool === 'basket') return `basket ${l.n}/${HAUL.player.food} ${FOODS[l.food ?? 'wheat'].one} — aim at a pen and E to toss`;
-    return l ? `carrying ${l.n} ${l.kind === 'wood' ? 'wood' : FOODS[l.food ?? 'wheat'].one} — walk up to the ${l.kind === 'wood' ? 'woodyard' : 'granary'} to unload, or G to throw the lot` : null;
+    return this.player.pack.bulk().length ? 'Pack supplies: food → granary · wood/scrap → woodyard · G throws largest stack' : null;
   }
   hint(): string {
     if (this.interior.active) return this.interior.hint();
@@ -2359,14 +2414,14 @@ export class VillageScene extends SimScene {
       }
       case 'basket': {
         const why = this.tossProblem();
-        const carry = pl.load?.kind === 'food' ? `basket ${pl.load.n}/${HAUL.player.food} ${FOODS[pl.load.food ?? 'wheat'].one}` : `basket empty · F: take ${FOODS[pl.basketKind].name.toLowerCase()} (${this.pantry[pl.basketKind] | 0} in store)`;
+        const carry = `basket: ${pl.carriedOf('food', pl.basketKind)} ${FOODS[pl.basketKind].one} · F: change food`;
         if (why) return `${carry} — ${why}`;
         const aim = this.tossAim, pen = this.world.get(Math.floor(aim.x / TILE), Math.floor(aim.y / TILE))?.pen;
         const yard = !pen ? this.world.gnomeHouses.find((b) => { const c = buildingCenter(b); return Math.hypot(c.tx * TILE - aim.x, c.ty * TILE - aim.y) <= GNOME_YARD * TILE; }) : undefined;
-        if (yard) { const kids = this.villagers().filter((v) => v.role === 'kid' && v.home === yard && !v.dead); return `E: throw ${Math.min(pl.load!.n, p.tossSize)} ${FOODS[pl.load!.food ?? 'wheat'].one} by the gnome house (${carry} · ${kids.length} children, ${kids.filter((v) => v.hungerDays > 0 || v.task.startsWith('hungry')).length} hungry · ${this.world.yardFoodTotal(yard, GNOME_YARD) || 'nothing'} lying there)`; }
-        if (!pen) return `E: throw ${Math.min(pl.load!.n, p.tossSize)} ${FOODS[pl.load!.food ?? 'wheat'].one} — no pen there: children only eat what lies inside their pen or by a gnome house (${carry})`;
+        if (yard) { const kids = this.villagers().filter((v) => v.role === 'kid' && v.home === yard && !v.dead); return `E: throw ${Math.min(pl.carriedOf('food', pl.basketKind), p.tossSize)} ${FOODS[pl.basketKind].one} by the gnome house (${carry} · ${kids.length} children, ${kids.filter((v) => v.hungerDays > 0 || v.task.startsWith('hungry')).length} hungry · ${this.world.yardFoodTotal(yard, GNOME_YARD) || 'nothing'} lying there)`; }
+        if (!pen) return `E: throw ${Math.min(pl.carriedOf('food', pl.basketKind), p.tossSize)} ${FOODS[pl.basketKind].one} — no pen there: children only eat what lies inside their pen or by a gnome house (${carry})`;
         const r = this.penReport(pen);
-        return `E: throw ${Math.min(pl.load!.n, p.tossSize)} ${FOODS[pl.load!.food ?? 'wheat'].one} toward the ${PEN_NAME[pen]} (${carry} · ${r.kids} children, ${r.hungry} hungry · ${r.piles || 'nothing'} lying there)`;
+        return `E: throw ${Math.min(pl.carriedOf('food', pl.basketKind), p.tossSize)} ${FOODS[pl.basketKind].one} toward the ${PEN_NAME[pen]} (${carry} · ${r.kids} children, ${r.hungry} hungry · ${r.piles || 'nothing'} lying there)`;
       }
       case 'house':
       case 'tavern':
@@ -2397,13 +2452,13 @@ export class VillageScene extends SimScene {
         if (kind === 'crop') return this.isRipe(t!) ? `ripe ${FOODS[t!.food ?? 'wheat'].name.toLowerCase()} — ${need('hands')}` : `${FOODS[t!.food ?? 'wheat'].name.toLowerCase()} growing (${t!.stage}/${this.cropDaysOf(t!)} days)`;
         return `seeds: ${FOODS[pl.cropKind].name.toLowerCase()} on soil, trees on grass · F: next crop`;
       case 'axe':
-        if (kind === 'tree') { const why = this.loadProblem('wood'); return why ?? `E: clear ${this.isOldGrowth(t!) ? 'old growth' : 'young tree'}${this.world.hiveAt(tg.tx, tg.ty) ? ' — A HIVE HANGS HERE' : ''} (${t!.work}/3 · ${p.playerTreeYield} wood for you; a woodcutter gets ${this.treeYield(t!)})${pl.load ? ` · carrying ${pl.load.n}/${HAUL.player.wood} wood` : ''}`; }
+        if (kind === 'tree') { const why = this.loadProblem('wood', undefined, p.playerTreeYield); return why ?? `E: clear ${this.isOldGrowth(t!) ? 'old growth' : 'young tree'}${this.world.hiveAt(tg.tx, tg.ty) ? ' — A HIVE HANGS HERE' : ''} (${t!.work}/3 · ${p.playerTreeYield} wood for you; a woodcutter gets ${this.treeYield(t!)}) · ${pl.carriedOf('wood')} wood in pack`; }
         if (kind === 'sapling') return t!.stage < 2 ? 'E: clear the stump' : 'E: cut down the sapling';
         return 'axe: face a tree';
       case 'hands':
         if (t?.defense?.kind === 'stairs' || this.world.get(pl.tile.tx, pl.tile.ty)?.kind === 'stairs') return `E: ${pl.elevated ? 'descend' : 'climb'} stairs`;
         if (t?.defense?.kind === 'gate') return `E: ${t.defense.open ? 'close' : 'open'} gate`;
-        if (kind === 'crop') { const fk = t!.food ?? 'wheat', why = this.loadProblem('food', fk); return this.isRipe(t!) ? (why ?? `E: harvest ${FOODS[fk].name.toLowerCase()} (${this.cropYieldOf(fk)})${pl.load ? ` · carrying ${pl.load.n}/${HAUL.player.food} ${FOODS[pl.load.food ?? 'wheat'].one}` : ''}`) : `${FOODS[fk].name.toLowerCase()} growing (${t!.stage}/${this.cropDaysOf(t!)} days)`; }
+        if (kind === 'crop') { const fk = t!.food ?? 'wheat', why = this.loadProblem('food', fk, this.cropYieldOf(fk)); return this.isRipe(t!) ? (why ?? `E: harvest ${FOODS[fk].name.toLowerCase()} (${this.cropYieldOf(fk)}) · ${pl.carriedOf('food',fk)} in pack`) : `${FOODS[fk].name.toLowerCase()} growing (${t!.stage}/${this.cropDaysOf(t!)} days)`; }
         if (kind && WILD_FOOD[kind]) { const fk = WILD_FOOD[kind]!, why = this.loadProblem('food', fk); return this.wildRipe(t!) ? (why ?? `E: pick ${FOODS[fk].name.toLowerCase()} (${this.wildLeft(t!)} · ${FOODS[fk].blurb})`) : `${FOODS[fk].name.toLowerCase()} picked — back in ${this.regrowDays(fk) - t!.stage} day${this.regrowDays(fk) - t!.stage === 1 ? '' : 's'}`; }
         if (kind === 'grass') return t!.tall ? `long grass — slows everyone to ${Math.round(p.grassSlow * 100)}% · ${need('sword')} to mow it` : `grass — ${need('hoe')} to till`;
         if (kind === 'tilled') return `tilled — ${need('seeds')}`;

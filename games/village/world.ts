@@ -239,7 +239,7 @@ export class World {
   }
   removeItem(it: Item): void { const i = this.items.indexOf(it); if (i >= 0) this.items.splice(i, 1); }
   /** what stops a rolling item: the map edge and anything an enemy can't walk through (walls, trees, buildings, closed gates) */
-  private itemBlocked = (x: number, y: number, z: number): boolean => {
+  itemBlocked = (x: number, y: number, z: number): boolean => {
     const tx = Math.floor(x / TILE), ty = Math.floor(y / TILE), t = this.get(tx, ty);
     if (!t) return true;
     if (t.kind === 'tree') return z < ITEM.treeHeight; // lobbed over the crown

@@ -1,0 +1,101 @@
+/* Run against npm run dev. Set PLAYWRIGHT_MODULE if Playwright is supplied by an external runtime. */
+const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
+const assert = require('node:assert/strict');
+const url = process.env.VILLAGE_TEST_URL || 'http://127.0.0.1:5174/games/village/test.html';
+let checks = 0;
+const check = (ok, msg) => { assert.ok(ok, msg); console.log('PASS '+msg); checks++; };
+(async () => {
+  const browser = await chromium.launch({ headless: true, channel: process.env.BROWSER_CHANNEL || (process.platform === 'win32' ? 'msedge' : undefined) });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+    const errors=[];page.on('pageerror',e=>errors.push(e.message));
+    await page.goto(url);
+    await page.waitForFunction(()=>window.game?.scene?.scenes?.[0]?.ui);
+    await page.click('#run-checks');
+    const summary=await page.locator('#test-summary').textContent();
+    check(/checks passed/.test(summary),summary+'\n'+(await page.locator('#test-results').textContent()).slice(-800));
+    const run=fn=>page.evaluate(fn);
+    const frame=()=>page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    await run(async()=>{
+      const {p}=await import('/games/village/config.ts');p.gnomeStart=false;p.peaceful=true;
+      const s=window.game.scene.scenes[0];window.s=s;s.startGame(42);s.agents=[s.player];s.world.items.length=0;
+      for(let y=90;y<110;y++)for(let x=115;x<140;x++)s.world.set(x,y,'grass');
+      s.player.x=124*16+8;s.player.y=100*16+8;s.fitCamera();s.paused=false;s.speed=1;
+      s.ui.showScreen(null);document.querySelector('.ctrl-panel')?.classList.remove('open');document.querySelector('#test-controls').style.display='none';
+      window.interactions=0;const interact=s.interact.bind(s);s.interact=()=>{window.interactions++;interact();};
+    });
+    await frame();
+    const hot='.hotbar .inventory-host', arm='.armory .inventory-host';
+    const cell=(host,index)=>`${host} [data-pack-index="${index}"]`;
+    const equip=(host,slot)=>`${host} [data-equipment="${slot}"]`;
+    const center=async selector=>{const b=await page.locator(selector).boundingBox();assert.ok(b,selector);return {x:b.x+b.width/2,y:b.y+b.height/2};};
+    const start=async selector=>{const q=await center(selector);await page.mouse.move(q.x,q.y);await page.mouse.down();};
+    const finish=async target=>{const q=typeof target==='string'?await center(target):target;await page.mouse.move(q.x,q.y,{steps:8});await page.mouse.up();await frame();};
+    const drag=async(a,b)=>{await start(a);await finish(b);};
+    check(await page.locator(hot+' .pack-cell').count()===18,'always-visible pack has twelve slots and six equipment cells');
+    await drag(cell(hot,0),cell(hot,5));
+    check(await run(()=>s.player.pack.at(0)===null&&s.player.pack.at(5)?.tool==='axe'),'mouse drag moves a tool to empty slot while simulation runs');
+    await drag(cell(hot,5),cell(hot,1));
+    check(await run(()=>s.player.pack.at(1)?.tool==='axe'&&s.player.pack.at(5)?.tool==='hoe'),'mouse drag swaps different pack items');
+    await run(()=>{s.player.pack.slots[6]={kind:'wood',n:10};s.player.pack.slots[7]={kind:'wood',n:22};s.ui.inventory.render();});
+    await drag(cell(hot,6),cell(hot,7));
+    check(await run(()=>s.player.pack.at(6)?.n===8&&s.player.pack.at(7)?.n===24),'mouse merge keeps overflow in source slot');
+    await drag(equip(hot,'melee'),cell(hot,0));
+    check(await run(()=>s.player.weapons.melee===-1&&s.player.pack.at(0)?.tier===0),'mouse unequip preserves starting club');
+    await drag(cell(hot,0),equip(hot,'melee'));
+    check(await run(()=>s.player.weapons.melee===0&&s.player.pack.at(0)===null),'mouse equips starting club');
+    await drag(cell(hot,1),equip(hot,'helmet'));
+    check(await run(()=>s.player.pack.at(1)?.tool==='axe'&&s.player.armor.helmet===0),'invalid equipment drop cancels');
+    for(const mode of ['escape','cancel','lost','blur','screen','reset']){
+      await start(cell(hot,1));await page.mouse.move(500,500);
+      if(mode==='escape')await page.keyboard.press('Escape');
+      else await page.evaluate(mode=>{
+        const host=document.querySelector('.hotbar .inventory-host');
+        if(mode==='cancel'||mode==='lost')host.dispatchEvent(new PointerEvent(mode==='cancel'?'pointercancel':'lostpointercapture',{bubbles:true}));
+        else if(mode==='blur')window.dispatchEvent(new Event('blur'));
+        else if(mode==='screen')s.ui.showScreen('pause');
+        else s.reset(42);
+      },mode);
+      await page.mouse.up();await frame();
+      check(await page.locator('.pack-ghost').count()===0,'drag cancels cleanly on '+mode);
+      await run(()=>{s.screen='playing';s.paused=false;s.ui.showScreen(null);document.querySelector('.ctrl-panel')?.classList.remove('open');});await frame();
+    }
+    await run(()=>{s.player.pack.slots[6]={kind:'wood',n:10};s.player.pack.slots[7]=null;s.ui.inventory.render();});
+    await start(cell(hot,6));
+    await run(()=>{window.oldHot=document.querySelector('.hotbar [data-pack-index="6"]');s.player.pack.removeAt(6);s.player.pack.slots[6]={kind:'food',food:'berry',n:3};s.ui.inventory.render();});
+    check(await run(()=>window.oldHot===document.querySelector('.hotbar [data-pack-index="6"]')),'inventory DOM remains frozen during drag');
+    await finish(cell(hot,7));
+    check(await run(()=>s.player.pack.at(6)?.kind==='food'&&s.player.pack.at(7)===null),'changed source item cannot move the replacement');
+    await run(()=>{
+      s.agents=[s.player];s.world.items.length=0;for(let y=90;y<110;y++)for(let x=115;x<140;x++)s.world.set(x,y,'grass');
+      s.player.x=124*16+8;s.player.y=100*16+8;s.fitCamera();s.player.tool='axe';s.ui.inventory.render();window.interactions=0;
+    });await frame();
+    const aim=await run(()=>{const c=s.game.canvas.getBoundingClientRect();return {x:c.x+c.width*.55,y:c.y+c.height*.4};});
+    await drag(cell(hot,0),aim);
+    check(await run(()=>s.player.pack.at(0)===null&&s.player.tool==='hands'&&s.world.items.some(i=>i.gear?.tool==='axe'&&i.playerDropPending)),'mouse world drop creates protected physical tool and disables its mode');
+    check(await run(()=>window.interactions===0),'drag does not also trigger world interaction');
+    await run(()=>{s.world.woodyard.ruined=true;s.selectBuilding(s.world.woodyard);s.ui.renderInspector(true);});
+    await page.click('.recover-kit');
+    check(await run(()=>s.player.pack.hasTool('axe')),'real click recovers missing tool from ruined supply building');
+    await run(()=>{s.openArmory(s.player,s.world.barracks[0]);});await frame();
+    check(await page.locator(arm+' .pack-cell').count()===18,'armory duplicates the pack and equipment controls');
+    await start(cell(arm,0));
+    await run(()=>{window.hotNode=document.querySelector('.hotbar .pack-cell');window.armNode=document.querySelector('.armory .pack-cell');s.wood++;s.ui.renderArmory();s.ui.inventory.render();});
+    check(await run(()=>window.hotNode===document.querySelector('.hotbar .pack-cell')&&window.armNode===document.querySelector('.armory .pack-cell')),'both inventory views remain intact while dragging');
+    await finish(cell(arm,7));
+    check(await run(()=>s.player.pack.at(0)===null&&s.player.pack.at(7)?.tool==='axe'),'mouse drag works in armory');
+    await drag(equip(arm,'bow'),cell(arm,0));
+    check(await run(()=>s.player.weapons.bow===-1&&s.player.pack.at(0)?.slot==='bow'),'armory unequips bow safely');
+    await page.click('.armory .close');
+    check(await page.locator('.armory').count()===0,'armory close accepts a real mouse click');
+    await run(()=>{s.ui.showScreen('pause');s.ui.showScreen(null);s.openArmory(s.player,s.world.barracks[0]);});await frame();
+    check(await page.locator('.armory').count()===1,'armory reopens after its old screen was detached');
+    await page.click('.armory .close');
+    await run(async()=>{const {p}=await import('/games/village/config.ts');p.gnomeStart=true;s.startGame(7);s.player.pack.removeAt(2);s.selectBuilding(s.world.granary);s.ui.renderInspector(true);document.querySelector('.ctrl-panel')?.classList.remove('open');});
+    await page.click('.recover-kit');
+    check(await run(()=>s.player.pack.hasTool('hammer')&&s.world.houses.length===0),'gnome start can recover a lost essential tool through the inspector');
+    check(errors.length===0,'no browser exceptions: '+errors.join('; '));
+    if(process.env.PACK_SCREENSHOT)await page.screenshot({path:process.env.PACK_SCREENSHOT});
+    console.log(`${checks} desktop checks passed; ${summary}`);
+  } finally { await browser.close(); }
+})().catch(e=>{console.error(e);process.exitCode=1;});

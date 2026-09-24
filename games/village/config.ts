@@ -349,7 +349,7 @@ export const ITEM = {
 export const HAUL = { villager: { wood: 16, food: 12 }, player: { wood: 24, food: 18 } } as const;
 export type LoadKind = 'wood' | 'food';
 export type BulkKind = LoadKind | 'scrap';
-export type ItemKind = BulkKind;
+export type ItemKind = BulkKind | 'gear';
 export const STACK: Record<BulkKind, number> = { wood: HAUL.player.wood, food: HAUL.player.food, scrap: 20 };
 
 // ---- the Ogre -------------------------------------------------------------------------------
