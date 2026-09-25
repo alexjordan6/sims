@@ -45,6 +45,8 @@ export class Renderer {
   private bows = new Map<number, Phaser.GameObjects.Image>();
   /** the bundle of logs / basket someone is carrying */
   private carries = new Map<number, Phaser.GameObjects.Image>();
+  /** a tuft of the head's own tile laid over them, so long grass reads as cover rather than a floor */
+  private cover: Phaser.GameObjects.Image | null = null;
   /** things lying (or flying) on the ground */
   private items = new Map<number, Phaser.GameObjects.Image>();
   /** each building's sprite (frame = level - 1) and, for the supply buildings, its climbing stock column */
@@ -338,6 +340,18 @@ export class Renderer {
       else if (m instanceof Swarm) this.paint(sp, 0x2e2412);
       else if (hurt) this.paint(sp, mulColor(0xffb0a0, this.tint));
       else this.paint(sp, this.tint);
+      // The head wades chest-deep through long grass: the tile's own tuft is drawn back over them,
+      // so they read as being *in* it rather than standing on it. Nothing here changes what can see
+      // or reach them — it is cover to look at, not to hide behind. A swing stands them back up.
+      if (m instanceof Player) {
+        const t = this.scene.world.get(Math.floor(m.x / TILE), Math.floor(m.y / TILE));
+        const inGrass = t?.kind === 'grass' && !!t.tall && sp.visible && !m.swing;
+        if (inGrass && !this.cover) this.cover = this.scene.add.image(0, 0, 'flora', 0).setOrigin(0.5, 1);
+        if (this.cover) {
+          this.cover.setVisible(inGrass);
+          if (inGrass) this.cover.setFrame(FLORA.tallGrass[t.v % 3]).setPosition(Math.round(m.x), Math.round(m.y) + 5).setDepth(sp.depth + 0.02).setTint(this.tint);
+        }
+      }
     }
     for (const [id, sp] of this.sprites) if (!seen.has(id)) { this.sprites.delete(id); this.fx.die(sp, sp.getData('agent') as Mover); }
     for (const [id, sp] of this.bows) if (!seen.has(id)) { sp.destroy(); this.bows.delete(id); }

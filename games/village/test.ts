@@ -800,6 +800,35 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       for (let x = 126; x <= 134; x++) for (let y = 96; y <= 104; y++) s.world.cutGrass(x, y);
       s.fx.length = 0; Object.assign(lb, World.center(130, 100)); lb.setGoal(s, 133, 103, true); step(s, 2);
       assert(!s.fx.some((e) => e.kind === 'rustle'), 'on mown grass there is nothing to stir');
+      // the head wades through long grass: it stirs as they go, and it is cover to LOOK at only —
+      // nothing about who can see or reach them changes (the boar above is the one that truly hides)
+      s = fresh(); clearing(s); s.agents = [s.player];
+      {
+        const home = World.center(124, 100);
+        for (let x = 116; x <= 136; x++) for (let y = 94; y <= 106; y++) { const t = s.world.get(x, y)!; if (t.kind === 'grass') { if (!t.tall) { t.tall = true; s.world.tallCount++; } } }
+        Object.assign(s.player, home);
+        s.fx.length = 0; step(s, 1);
+        assert(!s.fx.some((e) => e.kind === 'rustle'), 'standing still in long grass stirs nothing');
+        s.player.keys = { ...keysOff(), D: { isDown: true } };
+        s.fx.length = 0; step(s, 2);
+        assert(s.fx.some((e) => e.kind === 'rustle'), 'but wading through it stirs the grass as a boar does');
+        const stirs = s.fx.filter((e) => e.kind === 'rustle').length;
+        assert(stirs <= 8, `and only now and then, not every frame (${stirs} in 2s)`);
+        // a hostile finds the head in the grass exactly as it would on bare ground: cover is cosmetic
+        Object.assign(s.player, home); s.player.keys = keysOff();
+        const stalker = s.spawn(new Troll(home.x + 3 * TILE, home.y));
+        s.grid.rebuild(s.agents); stalker.update(1 / 60, s);
+        assert(stalker.quarry === s.player, 'long grass does not hide the head from a troll');
+        assert(!!s.nearestVictim(stalker.x, stalker.y), 'nor from anything else hunting people');
+        stalker.dead = true; s.removeDead();
+        // mown ground stirs nothing, however fast you cross it
+        for (let x = 116; x <= 136; x++) for (let y = 94; y <= 106; y++) s.world.cutGrass(x, y);
+        Object.assign(s.player, home);
+        s.player.keys = { ...keysOff(), D: { isDown: true } };
+        s.fx.length = 0; step(s, 2);
+        assert(!s.fx.some((e) => e.kind === 'rustle'), 'mown ground stirs nothing under the head');
+        s.player.keys = keysOff();
+      }
       // breeding: a sounder of two or more grows, one alone does not, none past the cap
       s = fresh(); s.agents = [s.player];
       const pair = s.foundSounder(126, 100, 2), lone = s.foundSounder(134, 106, 1);

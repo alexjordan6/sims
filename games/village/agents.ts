@@ -1171,11 +1171,20 @@ export class Player extends Mover {
     const sp = this.speed * slow * this.armorSpeed * s.world.slowAt(this.x, this.y) * s.buffMul('speed');
     this.vx = mx * sp; this.vy = my * sp;
     this.moveWithCollision(dt, s.world);
+    // wading through long grass stirs it, the same tell a moving boar gives away
+    this.rustleT -= dt;
+    if ((mx || my) && this.rustleT <= 0 && s.world.tallAt(this.x, this.y)) {
+      this.rustleT = s.rng.range(BOAR.rustleEvery[0], BOAR.rustleEvery[1]);
+      s.fx.push({ kind: 'rustle', x: this.x, y: this.y });
+    }
     // pushing up into a doorway walks you inside
     s.pushDoor(dt, my < -0.5 && Math.abs(mx) < 0.5);
     this.updateSwing(dt, s);
     if (s.mods.playerRegen && this.hp < this.maxHp && !s.nearestRaider(this.x, this.y, 40)) this.hp = Math.min(this.maxHp, this.hp + s.mods.playerRegen * dt);
   }
+
+  /** seconds until the long grass stirs again as the head wades through it */
+  private rustleT = 0;
 
   /** The movement axis this tick: WASD, or the virtual stick when no key is down. Diagonals are normalised. */
   private moveAxis(): { mx: number; my: number } {
