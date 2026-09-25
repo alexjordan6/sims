@@ -120,6 +120,14 @@ export abstract class SimScene extends Phaser.Scene {
   // ---- Phaser lifecycle -------------------------------------------------------
 
   create(): void {
+    // Phaser 4 rounds a game object to whole pixels only when its transform is position-only
+    // ('safeAuto'), so a SCALED pixel-art sprite lands between screen pixels where v3 snapped it.
+    // Measured at zoom 2: a scaled sprite nudged 0.4px renders differently under the two modes.
+    // 'fullAuto' is what v3 did for everything, so this restores the old look rather than picking
+    // a new one. It still defers to the camera's roundPixels, which pixelArt: true turns on.
+    this.events.on(Phaser.Scenes.Events.ADDED_TO_SCENE, (obj: Phaser.GameObjects.GameObject) => {
+      if ('vertexRoundMode' in obj) (obj as { vertexRoundMode: string }).vertexRoundMode = 'fullAuto';
+    });
     this.gfx = this.add.graphics();
     this.hud = new Hud(this);
     this.seed = seedFromUrl();
