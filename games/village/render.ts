@@ -45,8 +45,8 @@ export class Renderer {
   private bows = new Map<number, Phaser.GameObjects.Image>();
   /** the bundle of logs / basket someone is carrying */
   private carries = new Map<number, Phaser.GameObjects.Image>();
-  /** a tuft of each body's own tile laid over them, so long grass reads as cover rather than a floor */
-  private covers = new Map<number, Phaser.GameObjects.Image>();
+  /** the standing blades of each visible tall-grass tile, drawn over whatever is in them */
+  private grass = new Map<number, Phaser.GameObjects.Image>();
   /** things lying (or flying) on the ground */
   private items = new Map<number, Phaser.GameObjects.Image>();
   /** each building's sprite (frame = level - 1) and, for the supply buildings, its climbing stock column */
@@ -113,6 +113,7 @@ export class Renderer {
     this.drainDirty();
     this.tintTiles();
     this.syncTrees();
+    this.syncGrass();
     this.syncSprites();
     this.syncItems();
     for (const ev of this.scene.fx) {
@@ -287,6 +288,35 @@ export class Renderer {
     sp.setTint(colour).setTintMode(fill ? Phaser.TintModes.FILL : Phaser.TintModes.MULTIPLY);
   }
 
+  /**
+   * The standing blades of every visible tall-grass tile, drawn a second time on top of the ground
+   * frame and sorted by the tile's bottom edge exactly as a tree is. Anything whose feet are on the
+   * tile sorts below those blades and is seen through them; anything a row further south sorts above
+   * and walks in front. Nothing is attached to a body, so how much of you the grass hides is just how
+   * tall you are against one tile of it — a gnome nearly vanishes, an ogre is covered to the knee.
+   */
+  private syncGrass(): void {
+    const s = this.scene, w = s.world, view = s.cameras.main.worldView;
+    const seen = new Set<number>();
+    const left = Math.max(0, Math.floor(view.left / TILE) - 1);
+    const right = Math.min(w.cols - 1, Math.ceil(view.right / TILE) + 1);
+    const top = Math.max(0, Math.floor(view.top / TILE) - 1);
+    const bottom = Math.min(w.rows - 1, Math.ceil(view.bottom / TILE) + 1);
+    for (let ty = top; ty <= bottom; ty++) for (let tx = left; tx <= right; tx++) {
+      const t = w.get(tx, ty)!;
+      if (t.kind !== 'grass' || !t.tall) continue;
+      const id = ty * w.cols + tx;
+      seen.add(id);
+      let blade = this.grass.get(id);
+      if (!blade) {
+        blade = s.add.image(tx * TILE, ty * TILE, 'flora', FLORA.tallGrass[t.v % 3]).setOrigin(0, 0);
+        this.grass.set(id, blade);
+      }
+      blade.setDepth(DEPTH.agents + ((ty + 1) * TILE) / 1000).setTint(this.tint);
+    }
+    for (const [id, blade] of this.grass) if (!seen.has(id)) { blade.destroy(); this.grass.delete(id); }
+  }
+
   private syncSprites(): void {
     const seen = new Set<number>();
     for (const ag of this.scene.agents) {
@@ -340,32 +370,10 @@ export class Renderer {
       else if (m instanceof Swarm) this.paint(sp, 0x2e2412);
       else if (hurt) this.paint(sp, mulColor(0xffb0a0, this.tint));
       else this.paint(sp, this.tint);
-      // Anything that walks through long grass is waded into it: the tile's own tuft is drawn back
-      // over the body, so it reads as being *in* the grass rather than standing on it. The tuft is
-      // never bigger than one tile, so the grass swallows a gnome and only reaches an ogre's knees.
-      // Cosmetic only — nothing here changes what can see or reach anyone. A lurking boar is the one
-      // thing that truly hides (see Raider.lurking), and it has no sprite to cover in the first place.
-      const airborne = m instanceof Arrow || m instanceof Bolt || m instanceof Swarm;
-      const gt = !airborne && !m.elevated && sp.visible ? this.scene.world.get(Math.floor(m.x / TILE), Math.floor(m.y / TILE)) : undefined;
-      const inGrass = gt?.kind === 'grass' && !!gt.tall && !(m instanceof Player && m.swing);
-      let cover = this.covers.get(m.id);
-      if (inGrass && !cover) { cover = this.scene.add.image(0, 0, 'flora', 0).setOrigin(0.5, 1); this.covers.set(m.id, cover); }
-      if (cover) {
-        cover.setVisible(inGrass);
-        if (inGrass) {
-          // p.grassCover is the share of the body the grass swallows. The sprite sits at origin
-          // (0.5, 0.75), so its top is 0.75h above the anchor: put the tuft top that far down and
-          // the tuft (never wider than its tile) hangs from there.
-          const scale = Math.min(base, 1), h = sp.height * base;
-          const top = m.y + h * (0.25 - p.grassCover);
-          cover.setFrame(FLORA.tallGrass[gt.v % 3]).setScale(scale).setPosition(Math.round(m.x), Math.round(top + cover.height * scale)).setDepth(sp.depth + 0.02).setTint(this.tint);
-        }
-      }
     }
     for (const [id, sp] of this.sprites) if (!seen.has(id)) { this.sprites.delete(id); this.fx.die(sp, sp.getData('agent') as Mover); }
     for (const [id, sp] of this.bows) if (!seen.has(id)) { sp.destroy(); this.bows.delete(id); }
     for (const [id, sp] of this.carries) if (!seen.has(id)) { sp.destroy(); this.carries.delete(id); }
-    for (const [id, sp] of this.covers) if (!seen.has(id)) { sp.destroy(); this.covers.delete(id); }
   }
 
   /** Screen-space centre of an agent's sprite (for DOM tooltips). */
