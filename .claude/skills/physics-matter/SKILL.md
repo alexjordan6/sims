@@ -3,11 +3,6 @@ name: physics-matter
 description: "Use this skill when using Matter.js physics in Phaser 4. Covers rigid bodies, constraints, composite bodies, sensors, collision filtering, world configuration, and advanced physics shapes. Triggers on: Matter, matter physics, constraint, joint, rigid body, sensor."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Matter.js Physics
 > Setting up and using Matter.js physics in Phaser 4 -- full-body physics with rigid bodies, compound bodies, constraints, composites, sensors, collision filtering, pointer dragging, tilemap integration, and debug rendering.
 

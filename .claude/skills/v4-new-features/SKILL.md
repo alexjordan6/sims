@@ -3,11 +3,6 @@ name: v4-new-features
 description: "Use this skill when learning about new features, game objects, components, and rendering capabilities added in Phaser 4. Covers Filters, RenderNodes, CaptureFrame, Gradient, Noise, SpriteGPULayer, TilemapGPULayer, Lighting component, RenderSteps, and new tint modes. Triggers on: new in v4, Phaser 4 features, RenderNode, SpriteGPULayer, CaptureFrame, Gradient game object, Noise game object, new tint modes. For migrating v3 code to v4, see the v3-to-v4-migration skill instead."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Phaser 4 New Features
 
 > New features and capabilities in Phaser 4: Filters (replacing FX/BitmapMask), RenderNodes (replacing Pipelines), CaptureFrame, Gradient, Noise game objects, SpriteGPULayer, TilemapGPULayer, Lighting component, RenderSteps, and new tint modes.

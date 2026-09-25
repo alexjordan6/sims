@@ -3,11 +3,6 @@ name: data-manager
 description: "Use this skill when using the Phaser 4 DataManager to store custom key-value data on game objects, listen for data change events, or manage game state. Triggers on: setData, getData, data events, custom data storage."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # DataManager
 
 > Phaser's DataManager provides key-value storage with event-driven change tracking. It operates at three levels: per-GameObject (`sprite.setData`/`getData`), per-Scene (`this.data`), and global (`this.registry`). Every set/change/remove operation emits events, enabling reactive data binding between game systems without tight coupling.

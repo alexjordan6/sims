@@ -3,11 +3,6 @@ name: game-object-components
 description: "Use this skill when working with Phaser 4 game object components and the mixin system. Covers Transform, Alpha, Tint, Origin, Depth, Flip, Mask, GetBounds, Lighting, and other shared component behaviors. Triggers on: component, mixin, transform, mask, bounds, lighting."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Phaser 4 -- Game Object Components Reference
 
 > Component mixins that provide shared behavior to all Game Objects: Alpha, BlendMode, Depth, Flip, GetBounds, Lighting, Mask, Origin, ScrollFactor, Size, Texture, TextureCrop, Tint, Transform, Visible, PathFollower, RenderNodes, RenderSteps, Filters, FilterList.

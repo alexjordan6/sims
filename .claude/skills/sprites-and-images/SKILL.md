@@ -3,11 +3,6 @@ name: sprites-and-images
 description: "Use this skill when creating Sprites or Images in Phaser 4. Covers factory methods, texture/frame selection, position, scale, rotation, tint, flip, alpha, origin, depth, and the component mixin system. Triggers on: Sprite, Image, this.add.sprite, this.add.image, texture, setTint, setAlpha."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Sprites and Images
 > Creating and manipulating Sprite and Image game objects in Phaser 4 -- factory methods, texture/frame selection, the component mixin system, and common visual operations (position, scale, rotation, tint, flip, alpha, origin, depth).
 

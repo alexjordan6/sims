@@ -475,6 +475,9 @@ export class Fx {
   die(sprite: Phaser.GameObjects.Sprite, who: Mover | undefined): void {
     this.dying.add(sprite);
     sprite.disableInteractive();
+    // v4 keeps the tint mode as its own sticky property: an agent that dies inside its hurt
+    // flash would tween away as a solid white silhouette without this.
+    sprite.setTintMode(Phaser.TintModes.MULTIPLY);
     const done = () => { this.dying.delete(sprite); sprite.destroy(); };
     if (who) { this.anims.delete(who.id); this.weapons.get(who.id)?.setVisible(false); const sw = this.swings.get(who.id); if (sw) { sw.swoosh.destroy(); this.swings.delete(who.id); } }
     if (who instanceof Bolt || who instanceof Arrow) { sprite.destroy(); this.dying.delete(sprite); return; }
@@ -554,8 +557,8 @@ export class Fx {
   /** Comic impact star at the contact point. */
   private star(x: number, y: number, r: number, color: number): void {
     const g = this.scene.add.graphics().setDepth(DEPTH.star).setPosition(x, y).setScale(0.1).setRotation(Math.random() * Math.PI);
-    const pts: Phaser.Types.Math.Vector2Like[] = [];
-    for (let i = 0; i < 16; i++) { const rr = i % 2 ? r * 0.42 : r; const ang = (i / 16) * Math.PI * 2; pts.push({ x: Math.cos(ang) * rr, y: Math.sin(ang) * rr }); }
+    const pts: Phaser.Math.Vector2[] = []; // v4 narrowed fillPoints/strokePoints to Vector2[]
+    for (let i = 0; i < 16; i++) { const rr = i % 2 ? r * 0.42 : r; const ang = (i / 16) * Math.PI * 2; pts.push(new Phaser.Math.Vector2(Math.cos(ang) * rr, Math.sin(ang) * rr)); }
     g.fillStyle(color, 1); g.fillPoints(pts, true);
     g.lineStyle(1, 0x000000, 0.8); g.strokePoints(pts, true);
     g.fillStyle(0xffffff, 0.9); g.fillCircle(0, 0, r * 0.3);

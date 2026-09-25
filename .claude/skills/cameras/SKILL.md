@@ -3,11 +3,6 @@ name: cameras
 description: "Use this skill when working with cameras in Phaser 4. Covers camera effects (shake, fade, flash, pan, zoom), following sprites, scroll, bounds, viewports, multiple cameras, and minimap. Triggers on: camera, viewport, scroll, zoom, follow, shake, fade."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Cameras
 > Camera system in Phaser 4 -- CameraManager, main camera, viewport vs scroll, zoom, bounds, following sprites, camera effects (fade, flash, shake, pan, zoomTo, rotateTo), ignore lists, filters, and keyboard controls.
 

@@ -3,11 +3,6 @@ name: filters-and-postfx
 description: "Use this skill when applying visual filters or post-processing effects in Phaser 4. Covers bloom, blur, glow, color matrix, barrel distortion, displacement, custom shaders, and the filter pipeline. Triggers on: filter, post-processing, shader, bloom, blur, glow, color effects."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Phaser 4 Filters and Post-FX
 
 ## Quick Start

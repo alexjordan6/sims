@@ -3,11 +3,6 @@ name: groups-and-containers
 description: "Use this skill when using Groups or Containers in Phaser 4. Covers organizing game objects, object pooling, batch operations, and nested transforms with Containers. Triggers on: Group, Container, object pool, getFirstDead, children."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Groups and Containers
 > Logical grouping (Group), visual grouping with transform inheritance (Container), render-layer grouping (Layer), object pooling, and when to use each in Phaser 4.
 

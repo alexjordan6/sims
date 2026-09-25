@@ -3,11 +3,6 @@ name: loading-assets
 description: "Use this skill when loading assets in Phaser 4. Covers the Loader plugin, loading images, spritesheets, atlases, audio, JSON, tilemaps, bitmap fonts, and tracking load progress. Triggers on: preload, this.load, asset loading, spritesheet, atlas, load progress."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Loading Assets
 > The Phaser Loader (`this.load`) handles fetching all external content: images, audio, JSON, tilemaps, atlases, fonts, scripts, and more. Assets are queued in `preload()`, loaded in parallel, and placed into global caches accessible by every Scene.
 

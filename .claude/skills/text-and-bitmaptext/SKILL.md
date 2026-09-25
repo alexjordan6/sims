@@ -3,11 +3,6 @@ name: text-and-bitmaptext
 description: "Use this skill when displaying text in Phaser 4. Covers Text game objects, BitmapText, web fonts, text styling, word wrap, alignment, padding, and dynamic text content. Triggers on: Text, BitmapText, this.add.text, font, word wrap, text style."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Text and BitmapText
 > Displaying text in Phaser 4 -- the Canvas-based Text game object, TextStyle configuration, word wrap, BitmapText (static and dynamic), retro fonts, text alignment, text bounds, and padding.
 

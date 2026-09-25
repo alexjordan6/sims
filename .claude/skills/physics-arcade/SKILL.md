@@ -3,11 +3,6 @@ name: physics-arcade
 description: "Use this skill when using Arcade Physics in Phaser 4. Covers enabling physics, velocity, acceleration, gravity, collisions, overlap, world bounds, physics groups, static bodies, and collision categories. Triggers on: physics, arcade, velocity, gravity, collide, overlap, bounce, physics body."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Arcade Physics
 > Setting up and using Arcade Physics in Phaser 4 -- enabling physics in GameConfig, creating physics-enabled sprites/images/groups, velocity, acceleration, gravity, collisions (collide/overlap), world bounds, body properties, and collision categories.
 

@@ -37,8 +37,16 @@ export function launch(scene: typeof Phaser.Scene, opts: LaunchOptions = {}): Ph
     requestAnimationFrame(retry);
     return null; // window.game is set once it actually boots
   }
+  // Phaser 4's Canvas renderer is deprecated and cannot do what the village night wash needs
+  // (framebuffer ERASE for the light pools), so the renderer is pinned rather than left to AUTO.
+  // Phaser.WEBGL has no fallback and fails silently, hence the check.
+  if (!document.createElement('canvas').getContext('webgl2')) {
+    const where = parentEl ?? document.body;
+    where.textContent = 'This game needs WebGL 2. Try a current browser.';
+    return null;
+  }
   const game = new Phaser.Game({
-    type: Phaser.AUTO,
+    type: Phaser.WEBGL,
     parent: opts.parent ?? 'game',
     width: opts.width ?? 1280,
     height: opts.height ?? 720,

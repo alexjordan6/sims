@@ -3,11 +3,6 @@ name: time-and-timers
 description: "Use this skill when using timers and time-based events in Phaser 4. Covers TimerEvent, delayed calls, looping timers, the Clock plugin, and time scaling. Triggers on: timer, delay, delayedCall, TimerEvent, Clock, time event."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Time and Timers
 > Clock plugin, TimerEvent, delays, loops, Timeline event sequencing, pausing time, time scale, and delta time in Phaser 4.
 

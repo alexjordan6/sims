@@ -3,11 +3,6 @@ name: actions-and-utilities
 description: "Use this skill when working with Phaser 4 utility functions, actions, alignment, grid layout, or batch operations on game objects. Triggers on: align, grid layout, actions, set operations on groups of game objects."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Phaser 4 -- Actions & Utility Functions
 
 > Phaser.Actions namespace for batch operations on Game Object arrays, plus Phaser.Utils.Array, Phaser.Utils.Objects, and Phaser.Utils.String helper functions.

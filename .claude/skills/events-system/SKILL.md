@@ -3,11 +3,6 @@ name: events-system
 description: "Use this skill when working with the Phaser 4 event system. Covers EventEmitter, scene events, game events, custom events, and event-driven communication. Triggers on: events, on, emit, EventEmitter, scene events, listeners."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Events System
 
 > Phaser uses the EventEmitter pattern (via eventemitter3) throughout the entire framework. Every major system -- Game, Scene, Input, Loader, Cameras, Sound, Tweens, Physics, Textures, Animations -- is an EventEmitter or contains one. Events use lowercase string keys. Phaser provides named constants for all built-in events to avoid typos and enable IDE autocomplete.

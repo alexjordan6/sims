@@ -3,11 +3,6 @@ name: tweens
 description: "Use this skill when animating properties over time in Phaser 4. Covers tweens, tween chains, easing functions, stagger, yoyo, repeat, callbacks, number tweens, and the TweenManager. Triggers on: tween, ease, animate, this.tweens.add, tween chain, stagger."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Tweens
 > Animating properties over time in Phaser 4 -- TweenManager, creating tweens, tween config, easing functions, tween chains, stagger, yoyo, repeat, callbacks, and tween targets.
 

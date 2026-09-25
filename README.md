@@ -1,6 +1,6 @@
 # sims
 
-Browser playground for multi-agent simulations. Phaser 3 + Vite + TypeScript, deployed to GitHub Pages on every push.
+Browser playground for multi-agent simulations. Phaser 4 + Vite + TypeScript, deployed to GitHub Pages on every push.
 
 ## Workflow
 

@@ -3,11 +3,6 @@ name: v3-to-v4-migration
 description: "Use this skill when migrating a Phaser 3 project to Phaser 4, or when a user asks about breaking changes, API differences, or how to update their v3 code. Covers renderer changes (pipelines to render nodes), FX/masks to filters, tint system, camera matrix, texture coordinates, DynamicTexture, shaders, lighting, removed game objects, and a full migration checklist. Triggers on: migrate, upgrade, v3 to v4, breaking changes, Phaser 3 to 4, migration guide, update from v3."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Phaser v3 to v4 Migration Guide
 
 This guide covers everything you need to change when upgrading a Phaser v3 project to Phaser v4. It is organized from highest-impact changes to smaller details, so you can work through it top-to-bottom.

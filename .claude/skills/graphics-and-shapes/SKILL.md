@@ -3,11 +3,6 @@ name: graphics-and-shapes
 description: "Use this skill when drawing shapes and graphics in Phaser 4. Covers the Graphics game object, lines, rectangles, circles, arcs, polygons, gradients, fill, stroke, and generated textures. Triggers on: Graphics, draw shape, fillRect, lineStyle, polygon, arc."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Phaser 4 — Graphics and Shapes
 
 > Drawing primitives with the Graphics game object, and using Shape game objects (Arc, Curve, Ellipse, Grid, IsoBox, IsoTriangle, Line, Polygon, Rectangle, Star, Triangle).

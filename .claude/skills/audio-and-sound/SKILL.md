@@ -3,11 +3,6 @@ name: audio-and-sound
 description: "Use this skill when adding audio or sound to a Phaser 4 game. Covers loading audio, playing sounds, music, volume, spatial audio, Web Audio API, and SoundManager. Triggers on: sound, audio, music, volume, mute."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Audio and Sound
 > Phaser provides a unified Sound system via `this.sound` (a SoundManager) that abstracts over Web Audio API and HTML5 Audio. It handles loading, playback, volume, panning, looping, markers, audio sprites, spatial audio, and browser autoplay-policy unlocking.
 

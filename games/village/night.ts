@@ -52,7 +52,6 @@ const DEPTH = { wash: 40, warm: 41, fireflies: 42, smoke: 11 } as const;
 
 export class Night {
   private rt: Phaser.GameObjects.RenderTexture;
-  private stamp: Phaser.GameObjects.Image; // erased from the wash to make light pools
   private warm: Phaser.GameObjects.Image[] = [];
   private smoke: Phaser.GameObjects.Particles.ParticleEmitter;
   private fireflies: Phaser.GameObjects.Particles.ParticleEmitter;
@@ -65,7 +64,6 @@ export class Night {
   constructor(private scene: VillageScene) {
     // sized to the camera view (not the world) and moved with it, so the fill stays cheap
     this.rt = scene.add.renderTexture(0, 0, 64, 64).setOrigin(0).setDepth(DEPTH.wash).setBlendMode(Phaser.BlendModes.MULTIPLY);
-    this.stamp = scene.make.image({ key: 'glow', add: false });
     this.smoke = scene.add.particles(0, 0, 'px', {
       emitting: false, lifespan: { min: 1400, max: 2200 }, speedY: { min: -14, max: -8 }, speedX: { min: -4, max: 4 },
       scale: { start: 0.7, end: 1.8 }, alpha: { start: 0.45, end: 0 }, tint: [0xc9c9d2, 0xb0b0ba],
@@ -88,7 +86,9 @@ export class Night {
       for (const w of this.warm) w.setVisible(false);
     } else if (this.frame++ % 2 === 0) { // the wash redraws at half rate; nobody can tell
       this.rt.setVisible(true);
-      const vw = Math.ceil(view.width) + 4, vh = Math.ceil(view.height) + 4;
+      // v4 rounds a Render Texture up to even dimensions, so an odd target would never match
+      // what it stored and we would reallocate the framebuffer on every wash frame.
+      const vw = (Math.ceil(view.width) + 5) & ~1, vh = (Math.ceil(view.height) + 5) & ~1;
       if (this.rt.width !== vw || this.rt.height !== vh) this.rt.resize(vw, vh);
       const ox = Math.floor(view.x) - 2, oy = Math.floor(view.y) - 2;
       this.rt.setPosition(ox, oy);
@@ -98,8 +98,10 @@ export class Night {
       const light = (x: number, y: number, r: number, strength: number, warmth: number) => {
         // pools of light: erase a soft disc, then lay a warm glow over it
         if (x + r < ox || y + r < oy || x - r > ox + vw || y - r > oy + vh) return;
-        this.stamp.setScale((r * 2) / 64).setAlpha(Math.min(1, strength));
-        this.rt.erase(this.stamp, x - ox, y - oy);
+        // stamp() copies this config into the command buffer by value. A buffered erase(image)
+        // would instead re-read one shared image at flush time, and every pool in the frame would
+        // come out the size of the last light.
+        this.rt.stamp('glow', undefined, x - ox, y - oy, { scale: (r * 2) / 64, alpha: Math.min(1, strength), blendMode: Phaser.BlendModes.ERASE });
         if (warmth > 0) {
           const w = this.warm[wi] ?? (this.warm[wi] = s.add.image(0, 0, 'glow').setBlendMode(Phaser.BlendModes.ADD).setDepth(DEPTH.warm));
           w.setPosition(x, y).setScale((r * 2.2) / 64).setTint(0xff8a2a).setAlpha(warmth).setVisible(true);
@@ -123,6 +125,7 @@ export class Night {
         else if (a instanceof Raider && a.boss) light(a.x, a.y, 18, 0.5, sky.night * 0.25);
       }
       for (; wi < this.warm.length; wi++) this.warm[wi].setVisible(false);
+      this.rt.render(); // v4 buffers every draw call; without this the wash never appears
     }
 
     // chimney smoke from dusk to mid-morning

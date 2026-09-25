@@ -3,11 +3,6 @@ name: particles
 description: "Use this skill when creating particle effects in Phaser 4. Covers ParticleEmitter, emission zones, death zones, particle properties, textures, gravity wells, and particle movement. Triggers on: particles, emitter, particle effect, explosion, fire, smoke."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Particle System
 > Creating and controlling particle effects in Phaser 4 -- ParticleEmitter creation and configuration, emitter ops (value formats), gravity wells, emission and death zones, flow vs burst modes, following game objects, and particle callbacks.
 

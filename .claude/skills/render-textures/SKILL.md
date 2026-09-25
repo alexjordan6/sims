@@ -3,11 +3,6 @@ name: render-textures
 description: "Use this skill when using RenderTexture or DynamicTexture in Phaser 4. Covers drawing game objects to textures, dynamic texture creation, snapshot/screenshot, stamps, and off-screen rendering. Triggers on: RenderTexture, DynamicTexture, snapshot, draw to texture, stamp."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Render Textures and Dynamic Textures
 > Drawing game objects to off-screen textures in Phaser 4 -- RenderTexture game object, DynamicTexture for shared textures, the Stamp helper, command-buffer rendering, snapshots, procedural generation, and minimap patterns.
 

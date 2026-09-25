@@ -276,6 +276,15 @@ export class Renderer {
 
   // ---- sprites -------------------------------------------------------------
 
+  /**
+   * v4 keeps the tint colour and the tint mode as separate sticky properties: a sprite left in
+   * FILL mode stays white for good, because setTint() no longer clears it the way v3 did. Every
+   * sprite passes through here exactly once per frame, so this is the one place that states both.
+   */
+  private paint(sp: Phaser.GameObjects.Sprite, colour: number, fill = false): void {
+    sp.setTint(colour).setTintMode(fill ? Phaser.TintModes.FILL : Phaser.TintModes.MULTIPLY);
+  }
+
   private syncSprites(): void {
     const seen = new Set<number>();
     for (const ag of this.scene.agents) {
@@ -323,12 +332,12 @@ export class Renderer {
         if (m.load && carry.texture.key !== key) carry.setTexture(key);
         carry.setPosition(sp.x - m.dir * 2, sp.y - 11 + (a?.oy ?? 0)).setFlipX(m.dir < 0).setScale(base).setDepth(sp.depth + 0.01).setVisible(!!m.load && !m.hidden && sp.visible).setTint(this.tint);
       }
-      if (m.hurtT < 0.15 && !m.blocked) sp.setTintFill(0xffffff);
-      else if (m instanceof Raider && !(m.wild && m.harmless)) sp.setTint(mulColor(m.boss ? 0xff6a6a : m.kind === 'brute' ? 0xb07070 : 0xffd0d0, this.tint)); // a calm boar reads as an animal, not a foe
-      else if (m instanceof Bolt) sp.setTint(0xb46bff);
-      else if (m instanceof Swarm) sp.setTint(0x2e2412);
-      else if (hurt) sp.setTint(mulColor(0xffb0a0, this.tint));
-      else sp.setTint(this.tint);
+      if (m.hurtT < 0.15 && !m.blocked) this.paint(sp, 0xffffff, true);
+      else if (m instanceof Raider && !(m.wild && m.harmless)) this.paint(sp, mulColor(m.boss ? 0xff6a6a : m.kind === 'brute' ? 0xb07070 : 0xffd0d0, this.tint)); // a calm boar reads as an animal, not a foe
+      else if (m instanceof Bolt) this.paint(sp, 0xb46bff);
+      else if (m instanceof Swarm) this.paint(sp, 0x2e2412);
+      else if (hurt) this.paint(sp, mulColor(0xffb0a0, this.tint));
+      else this.paint(sp, this.tint);
     }
     for (const [id, sp] of this.sprites) if (!seen.has(id)) { this.sprites.delete(id); this.fx.die(sp, sp.getData('agent') as Mover); }
     for (const [id, sp] of this.bows) if (!seen.has(id)) { sp.destroy(); this.bows.delete(id); }

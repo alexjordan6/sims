@@ -3,11 +3,6 @@ name: geometry-and-math
 description: "Use this skill when using Phaser 4 math and geometry utilities. Covers vectors, rectangles, circles, triangles, polygons, random number generation, angles, distance, interpolation, and snapping. Triggers on: Vector2, Rectangle, Circle, math, distance, angle, random, lerp."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Phaser 4 — Geometry and Math
 
 > Geom classes (Circle, Ellipse, Line, Polygon, Rectangle, Triangle), intersection tests, and Math utilities (Vector2, Vector3, Matrix4, angles, distances, interpolation, easing, random, snap, clamp).

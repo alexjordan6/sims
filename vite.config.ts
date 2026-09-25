@@ -28,7 +28,7 @@ export default defineConfig(({ mode }) => ({
   resolve: { alias: { '@shared': resolve('src/shared') } },
   plugins: [restartOnNewGame],
   build: {
-    chunkSizeWarningLimit: 1500, // phaser alone is ~1.2 MB
+    chunkSizeWarningLimit: 1800, // phaser 4 alone is ~1.38 MB minified
     rollupOptions: {
       input: { main: resolve('index.html'), ...gameInputs },
     },

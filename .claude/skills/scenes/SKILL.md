@@ -3,11 +3,6 @@ name: scenes
 description: "Use this skill when working with Phaser 4 scenes. Covers scene lifecycle methods, scene transitions, parallel scenes, scene communication, sleeping, pausing, restarting, and the SceneManager. Triggers on: Scene, scene lifecycle, preload, create, update, scene transition, SceneManager."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Scenes
 
 > Scenes are the organizational backbone of a Phaser game. Each Scene has its own lifecycle (init, preload, create, update), its own set of injected systems (this.add, this.input, this.cameras, etc.), and can be started, stopped, paused, slept, or run in parallel with other Scenes. The ScenePlugin (`this.scene`) controls all multi-scene orchestration.

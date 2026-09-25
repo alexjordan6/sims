@@ -3,11 +3,6 @@ name: input-keyboard-mouse-touch
 description: "Use this skill when handling user input in Phaser 4. Covers keyboard keys, mouse clicks and movement, touch events, pointer handling, drag and drop, hit areas, interactive objects, and gamepad support. Triggers on: keyboard, mouse, touch, pointer, drag, drop, click, input, gamepad, cursor keys."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Input: Keyboard, Mouse, Touch, and Gamepad
 > Phaser provides a unified input system accessed via `this.input` in any Scene. It supports keyboard polling and events, mouse/pointer interaction with Game Objects (click, hover, drag), multi-touch, mouse wheel, and gamepad input. Input can be handled through event listeners or by polling state each frame.
 

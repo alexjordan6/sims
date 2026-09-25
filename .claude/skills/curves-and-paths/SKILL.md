@@ -3,11 +3,6 @@ name: curves-and-paths
 description: "Use this skill when working with curves and paths in Phaser 4. Covers splines, bezier curves, lines, ellipses, path followers, and mathematical curve types. Triggers on: curve, path, spline, bezier, path follower."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Curves and Paths
 > Creating paths from curves, getting points along them, drawing them with Graphics, and making sprites follow paths automatically using PathFollower in Phaser 4.
 

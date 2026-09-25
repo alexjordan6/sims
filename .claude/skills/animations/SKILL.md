@@ -3,11 +3,6 @@ name: animations
 description: "Use this skill when creating or controlling sprite animations in Phaser 4. Covers spritesheets, atlases, AnimationManager, AnimationState, play/stop/chain, frame callbacks, and animation events. Triggers on: sprite animation, spritesheet, play animation, animation frames."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Phaser 4 -- Sprite Animations
 
 > AnimationManager (global), AnimationState (per-sprite), creating animations from spritesheets and atlases, playing/pausing/chaining, animation events, frame callbacks.

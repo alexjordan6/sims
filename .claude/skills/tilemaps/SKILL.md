@@ -3,11 +3,6 @@ name: tilemaps
 description: "Use this skill when working with tilemaps in Phaser 4. Covers loading Tiled JSON maps, creating tilemap layers, tile collision, dynamic tiles, tile properties, and tilemap camera culling. Triggers on: Tilemap, Tiled, tilemap layer, tile collision, tile properties."
 ---
 
-> **Upstream Phaser 4 documentation.** This repo runs **Phaser 3.90** (see `package.json`), so treat
-> renderer-facing detail here (pipelines/filters, tint, camera matrix, DynamicTexture, shaders, lighting)
-> as v4-only and check `../v3-to-v4-migration/SKILL.md` first. Scenes, tweens, input, timers, tilemaps,
-> groups and arcade physics are broadly the same in v3. Line added locally; not upstream.
-
 # Tilemaps
 > Phaser Tilemaps render tile-based levels from Tiled JSON, CSV, or raw 2D arrays. A `Tilemap` holds parsed map data and provides methods to add tilesets, create layers, set collision, and query tiles. Layers (`TilemapLayer` or `TilemapGPULayer`) are the Game Objects that actually render tiles. Phaser supports orthogonal, isometric, hexagonal, and staggered maps.
 
