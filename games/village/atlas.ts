@@ -102,6 +102,7 @@ export const CHAR = {
   wrecker: { key: 'dungeon', frame: DUNGEON.orc },
   boar: { key: 'farm', frame: FARM.cow },
   troll: { key: 'dungeon', frame: DUNGEON.orc },
+  skulk: { key: 'dungeon', frame: DUNGEON.imp },
 } as const;
 
 /** CSS background-position for a frame in a 12-col sheet, at a given scale. */

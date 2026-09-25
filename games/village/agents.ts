@@ -912,7 +912,7 @@ export class Villager extends Mover {
 // ---------------------------------------------------------------------------
 // raiders
 
-export type EnemyKind = 'raider' | 'warlord' | 'rat' | 'snatcher' | 'brute' | 'shaman' | 'ogre' | 'wrecker' | 'boar' | 'troll';
+export type EnemyKind = 'raider' | 'warlord' | 'rat' | 'snatcher' | 'brute' | 'shaman' | 'ogre' | 'wrecker' | 'boar' | 'troll' | 'skulk';
 
 export interface RaiderOpts {
   /** the warlord: big, tough, and the run ends when he falls */

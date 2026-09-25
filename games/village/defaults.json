@@ -87,5 +87,10 @@
   "peaceful": false,
   "packSlots": 12,
   "pickupRange": 2.5,
-  "pickupPull": 90
+  "pickupPull": 90,
+  "skulks": 40,
+  "skulkTiles": 60,
+  "skulkEvery": 6,
+  "skulkDmg": 4,
+  "skulkClub": 0.5
 }

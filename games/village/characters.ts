@@ -4,7 +4,7 @@ import { ARMOR, DYES, PLUMES, WEAPONS, p, type ArmorSlot, type WeaponSlot } from
 // Modular pixel people: every villager, the head and every raider is drawn from layers (body,
 // hair, outfit, then armor pieces) into a cached 16x20 texture, so what someone wears shows.
 
-export type Body = 'adult' | 'kid' | 'orc' | 'imp' | 'rat' | 'shaman' | 'boss' | 'brute' | 'ogre' | 'gnome' | 'gnomekid' | 'boar' | 'troll';
+export type Body = 'adult' | 'kid' | 'orc' | 'imp' | 'rat' | 'shaman' | 'boss' | 'brute' | 'ogre' | 'gnome' | 'gnomekid' | 'boar' | 'troll' | 'skulk';
 export type Outfit = 'farmer' | 'woodcutter' | 'soldier' | 'kid' | 'head' | 'none' | 'gnome';
 export type Held = 'none' | 'hoe' | 'axe' | 'sword' | 'club' | 'bow' | 'wand';
 export type HelmetStyle = 0 | 1 | 2;
@@ -79,7 +79,7 @@ export function drawCharacter(ctx: Ctx, ox: number, oy: number, l: Look, walk = 
   if (l.body === 'ogre') { drawOgre(ctx, ox, oy, walk); return; }
 
   const big = l.body === 'boss' || l.body === 'brute' || l.body === 'troll';
-  const mskin = l.body === 'orc' ? '#6f9a4a' : l.body === 'imp' ? '#c84a3a' : l.body === 'shaman' ? '#8c7ab0' : l.body === 'brute' ? '#7a8a4a' : l.body === 'boss' ? '#5f7f3a' : l.body === 'troll' ? '#79857a' : skin;
+  const mskin = l.body === 'orc' ? '#6f9a4a' : l.body === 'imp' ? '#c84a3a' : l.body === 'shaman' ? '#8c7ab0' : l.body === 'brute' ? '#7a8a4a' : l.body === 'boss' ? '#5f7f3a' : l.body === 'troll' ? '#79857a' : l.body === 'skulk' ? '#5c6b3a' : skin;
   const legX = 5, legY = 13;
   // shield on the back arm
   if (l.armor.shield) {

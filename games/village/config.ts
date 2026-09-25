@@ -117,6 +117,11 @@ export const p = live(
     trollDmg: [D.trollDmg, 1, 30, 1, 'Damage per blow from a troll.'],
     hives: [D.hives, 0, 200, 5, 'Beehives hanging in old-growth trees at NEW VILLAGE. Walk inside a perimeter and the swarm comes out; chop the tree for the honey.'],
     beeDmg: [D.beeDmg, 1, 15, 1, 'Damage a swarm does per sting. It stings often, so small numbers add up fast.'],
+    skulks: [D.skulks, 0, 200, 5, 'Most skulks abroad at once. They creep out of long grass all run long and go for gnomes first — mow the grass to starve them out.'],
+    skulkTiles: [D.skulkTiles, 5, 400, 5, 'Tiles of long grass that sustain one skulk. Fewer tiles standing means a lower ceiling, so mowing is the real answer.'],
+    skulkEvery: [D.skulkEvery, 0.5, 60, 0.5, 'Seconds between one skulk creeping out, while the ceiling allows it.'],
+    skulkDmg: [D.skulkDmg, 1, 20, 1, 'Damage per blow from a skulk.'],
+    skulkClub: [D.skulkClub, 0, 1, 0.05, 'Chance a slain skulk leaves its club rather than a single scrap. Clubs break down for wood at a barracks chest.'],
   }, 'enemies'),
   params({
     fog: [D.fog, 'Fog of war. Off lifts it everywhere; on drops it back over the unexplored.'],
@@ -321,7 +326,7 @@ export function hasInterior(k: BuildingKind): k is InteriorKind { return (INTERI
 
 // ---- bodies ---------------------------------------------------------------------------------
 /** How hard a body is to push aside when two overlap: the lighter one gives way (see VillageScene.separate). */
-export const MASS = { kid: 0.5, villager: 1, player: 2, raider: 1, brute: 2, ogre: 10, warlord: 3, rat: 0.3, snatcher: 0.8, boar: 1.5, troll: 1.2 } as const;
+export const MASS = { kid: 0.5, villager: 1, player: 2, raider: 1, brute: 2, ogre: 10, warlord: 3, rat: 0.3, snatcher: 0.8, boar: 1.5, troll: 1.2, skulk: 0.7 } as const;
 
 // ---- items on the ground --------------------------------------------------------------------
 /** Thrown food, dropped armfuls and raider loot are free items with a pixel position and a little physics (see items.ts). */
@@ -424,6 +429,30 @@ export const BOAR = {
  * wanders the wilderness, and anything it lays eyes on it hunts until that quarry is dead or indoors,
  * however far the chase goes. How many there are is p.trolls; how hard they hit is p.trollDmg.
  */
+/**
+ * A small thing that lives in the long grass. It creeps out wherever the grass still stands, so the
+ * population ceiling is a function of how much you have left standing, and it goes for gnomes first —
+ * they forage far from the walls and cannot fight back.
+ */
+export const SKULK = {
+  hp: 14, speed: 30, huntSpeed: 46, radius: 2.5,
+  /** the blow: reach in px, wind-up and recovery in seconds */
+  reach: 11, windup: 0.3, recover: 0.45,
+  /** tiles it can see prey at, and seconds between looking for a nearer quarry */
+  sight: 9, retarget: 1.2,
+  /** tiles it drifts per wandering leg */
+  roam: 7,
+  /** a gnome this many tiles further off still beats a nearer villager */
+  gnomeBias: 7,
+  /** least tiles from the head one may creep out at, so nothing appears in your lap */
+  spawnDist: 10,
+  /** wood a broken-down club returns */
+  clubWood: 2,
+} as const;
+
+/** Gear a single barracks chest can hold. */
+export const STASH_SLOTS = 12;
+
 export const TROLL = {
   hp: 30, speed: 33, huntSpeed: 44, radius: 3,
   /** the blow: reach in px, wind-up and recovery in seconds */
@@ -530,7 +559,7 @@ export const HEARTH_WOOD: Record<BuildingKind, readonly [number, number, number,
   gnomehouse: [0, 1, 1, 2],
 };
 /** scrap iron looted from slain raiders */
-export const SCRAP_DROP = { raider: 2, brute: 4, warlord: 10, snatcher: 1, shaman: 2, rat: 0, ogre: 30, wrecker: 3, boar: 0, troll: 0 } as const;
+export const SCRAP_DROP = { raider: 2, brute: 4, warlord: 10, snatcher: 1, shaman: 2, rat: 0, ogre: 30, wrecker: 3, boar: 0, troll: 0, skulk: 0 } as const;
 
 // ---- building damage ------------------------------------------------------------------------
 /** Hit points per building level (index = level). Every kind must appear here, so new buildings are destructible by default; 0 means it can't be hurt (the Ogre's lair). */

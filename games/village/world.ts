@@ -2,6 +2,7 @@ import type { Rng } from '@shared/index';
 import { TILE, COLS, ROWS, BUILDING_HP, HEARTH_WOOD, ITEM, GNOME_HOME, p, CROP_KINDS, type Calling, type FoodKind, type BuildingKind, type StartKind } from './config';
 export type { BuildingKind } from './config';
 import { tickItem, hop, type Item, type ItemKind } from './items';
+import type { Gear } from './pack';
 
 export type DefenseKind = 'wall' | 'gate' | 'stairs';
 export interface Defense extends TilePos { kind: DefenseKind; hp: number; maxHp: number; open: boolean }
@@ -39,6 +40,8 @@ export interface Building {
   nextBirth?: number;
   /** barracks: arrows left in the tower's chest */
   ammo?: number;
+  /** barracks: gear parked in the chest — spare clubs waiting to be broken down, pieces you are not wearing */
+  stash?: Gear[];
   /** barracks: seconds until the tower may fire again */
   fireCd?: number;
   /** barracks: the "out of arrows" warning has been posted since the last restock */
@@ -132,6 +135,8 @@ export class World {
   denseForests = false;
   revision = 0;
   treeCount = 0;
+  /** tiles of long grass still standing: the ceiling on skulks (see VillageScene.tickSkulks) */
+  tallCount = 0;
   /** tile indices changed since the renderer last drained this */
   dirty = new Set<number>();
   /** painted pen tiles by kind (tile indices) and the food piled on them */
@@ -174,6 +179,7 @@ export class World {
     const t = this.tiles[i];
     if ((t.building || t.defense) && !this.stamping) return t;
     if (t.kind === 'tree') { this.treeCount--; this.hives.delete(i); } // a hive cannot outlive its tree
+    if (t.tall) this.tallCount--;
     if (kind === 'tree') this.treeCount++;
     // paths only go stale when walkability changes: tilling, planting and harvesting don't re-path anyone
     // (fortifications always count: a closed gate blocks enemies even though the tile kind doesn't)
@@ -194,6 +200,7 @@ export class World {
     if (!t || t.building || t.defense || !PEN_GROUND.has(t.kind)) return false;
     if (kind === t.pen) kind = null;
     if (t.pen) this.pens.get(t.pen)?.delete(i);
+    if (t.tall) this.tallCount--;
     t.pen = kind ?? undefined; t.tall = undefined; // the rope goes up over trampled earth
     if (kind) { if (!this.pens.has(kind)) this.pens.set(kind, new Set()); this.pens.get(kind)!.add(i); }
     this.dirty.add(i);
@@ -219,8 +226,13 @@ export class World {
   cutGrass(tx: number, ty: number): boolean {
     const t = this.get(tx, ty);
     if (!t || t.kind !== 'grass' || !t.tall) return false;
-    t.tall = undefined; this.dirty.add(ty * this.cols + tx);
+    t.tall = undefined; this.tallCount--; this.dirty.add(ty * this.cols + tx);
     return true;
+  }
+  /** Mow every tile on the map. The census is a field, so nothing may clear `tall` behind its back. */
+  mowAll(): void {
+    for (let i = 0; i < this.tiles.length; i++) if (this.tiles[i].tall) { this.tiles[i].tall = undefined; this.dirty.add(i); }
+    this.tallCount = 0;
   }
   /** Is the tile under a pixel position long grass? */
   tallAt(x: number, y: number): boolean {
@@ -659,7 +671,7 @@ export class World {
       if (l && tx >= l.tx - 1 && tx <= l.tx + f.w && ty >= l.ty - 1 && ty <= l.ty + f.h + 1) continue;
       if (den && tx >= den.tx - 2 && tx <= den.tx + gf.w + 1 && ty >= den.ty - 2 && ty <= den.ty + gf.h + 2) continue; // the gnomes keep their glade trimmed
       if (rng.chance(0.06)) continue;
-      t.tall = true; this.dirty.add(ty * this.cols + tx);
+      t.tall = true; this.tallCount++; this.dirty.add(ty * this.cols + tx);
     }
   }
 }

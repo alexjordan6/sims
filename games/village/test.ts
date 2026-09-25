@@ -6,20 +6,21 @@ import type { VillageScene } from './main';
 import { World, WILD_FOOD, doorstep, buildingCenter, hearthCost, BUILDINGS, type BuildingKind } from './world';
 import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
-import { Brute, Rat, Ogre, Wrecker, Troll, waveComposition } from './enemies';
+import { Brute, Rat, Ogre, Wrecker, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm } from './wildlife';
-import { COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE } from './config';
+import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
 const output = document.getElementById('test-results')!, summary = document.getElementById('test-summary')!;
 const assert = (ok: unknown, message: string) => { if (!ok) throw new Error(message); output.textContent += `PASS ${message}\n`; };
 /** `wild` keeps the boars, `trolls` keeps the trolls, `hives` keeps the beehives — both wander into timed checks otherwise, and a troll fights back. */
-function fresh(wild = false, trolls = false, hives = false): VillageScene {
+function fresh(wild = false, trolls = false, hives = false, skulks = false): VillageScene {
   const s = scene(); s.reset(42); s.screen = 'playing'; s.paused = true; s.wood = 150; s.food = 150; s.fx.length = 0;
-  for (const t of s.world.tiles) t.tall = undefined; // mown: the checks below time walks; the long grass checks raise it where they need it
+  s.world.mowAll(); // mown: the checks below time walks; the long grass checks raise it where they need it (mowAll keeps world.tallCount honest)
   if (!wild) { for (const a of s.agents) if (a instanceof Boar) a.dead = true; s.sounders = []; } // no stray sounder wanders into a check
   if (!trolls) for (const a of s.agents) if (a instanceof Troll) a.dead = true; // nor a troll, which would fight back
   if (!hives) s.world.hives.clear(); // nor a hive over a check that walks somebody past it
+  if (!skulks) for (const a of s.agents) if (a instanceof Skulk) a.dead = true; // nor a skulk that crept out during an earlier check
   s.removeDead();
   (s as unknown as { ui: { showScreen(v: null): void } }).ui.showScreen(null);
   document.querySelector('.ctrl-panel')?.classList.remove('open');
@@ -1048,6 +1049,146 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(s.pantry.cake === RECIPES.cake.makes && s.pantry.honey === 0, 'spending the honey exactly');
     s.openCooking(null);
     p.hives = wasHives;
+
+    // ---- skulks: what the long grass keeps ------------------------------------------------
+    {
+      const wasSkulks = p.skulks, wasTiles = p.skulkTiles, wasEvery = p.skulkEvery, wasClub = p.skulkClub;
+      try {
+        const s = fresh(false, false, false, true);
+        assert(s.world.tallCount === 0 && s.skulkCap() === 0, 'a mown map sustains no skulks at all');
+
+        // the census follows every route that raises or clears long grass
+        s.world.get(150, 150)!.tall = true; s.world.tallCount++;
+        const raised = s.world.tallCount;
+        assert(s.world.cutGrass(150, 150) && s.world.tallCount === raised - 1, 'mowing a tile takes it off the census');
+        s.world.get(151, 150)!.tall = true; s.world.tallCount++;
+        s.world.set(151, 150, 'tilled');
+        assert(s.world.tallCount === raised - 1, 'and so does tilling it');
+        s.world.get(152, 150)!.tall = true; s.world.tallCount++;
+        s.world.paintPen(152, 150, 'farmer');
+        assert(s.world.tallCount === raised - 1, 'and so does painting a pen over it');
+        s.world.paintPen(152, 150, null);
+
+        // the ceiling is the standing grass, bounded by the slider
+        p.skulks = 100; p.skulkTiles = 10; s.world.tallCount = 55;
+        assert(s.skulkCap() === 5, 'the ceiling is one skulk per p.skulkTiles of standing grass');
+        p.skulks = 3;
+        assert(s.skulkCap() === 3, 'and never more than p.skulks, however much grass stands');
+        s.world.mowAll();
+        assert(s.world.tallCount === 0 && s.skulkCap() === 0, 'mowing the lot closes the ceiling again');
+
+        // they creep out of grass, and never into your lap
+        p.skulks = 60; p.skulkTiles = 1; p.skulkEvery = 0.5;
+        for (let ty = 60; ty < 70; ty++) for (let tx = 60; tx < 70; tx++) {
+          const t = s.world.get(tx, ty)!;
+          if (t.kind === 'grass' && !t.building && !t.defense) { t.tall = true; s.world.tallCount++; }
+        }
+        Object.assign(s.player, World.center(124, 100));
+        for (let i = 0; i < 60 && s.skulkCount() < 5; i++) s.tick(1);
+        const crept = s.agents.filter(a => a instanceof Skulk && !a.dead) as Skulk[];
+        assert(crept.length > 0, 'skulks creep out of the standing grass');
+        assert(crept.every(k => Math.hypot(k.x - s.player.x, k.y - s.player.y) >= SKULK.spawnDist * TILE), 'and never within SKULK.spawnDist of the head');
+        assert(crept.every(k => k.wild && k.lairBound && !k.harmless), 'a skulk is wild and lair-bound, so it neither starts a raid nor holds one open');
+        assert(!s.raidActive, 'a field full of them is still not a raid');
+
+        // ...and stop coming once the grass is gone
+        s.world.mowAll();
+        for (const k of crept) k.dead = true;
+        s.removeDead();
+        for (let i = 0; i < 20; i++) s.tick(1);
+        assert(s.skulkCount() === 0, 'mow the grass and no more creep out');
+      } finally { p.skulks = wasSkulks; p.skulkTiles = wasTiles; p.skulkEvery = wasEvery; p.skulkClub = wasClub; }
+    }
+
+    // ---- who a skulk goes for, and what it leaves ------------------------------------------
+    {
+      const wasClub = p.skulkClub;
+      try {
+        const s = fresh(false, false, false, true);
+        clearing(s);
+        const here = World.center(124, 100);
+        // a gnome further off still beats a nearer villager
+        const near = new Villager(here.x + 3 * TILE, here.y, s.world.houses[0], 'farmer', 20, 'Near', s.mods);
+        const far = new Villager(here.x + 6 * TILE, here.y, s.world.houses[0], 'farmer', 20, 'Far', s.mods);
+        far.gnome = true;
+        s.agents.push(near, far);
+        const k = new Skulk(here.x, here.y); s.spawn(k);
+        s.grid.rebuild(s.agents);
+        k.update(1 / 60, s);
+        assert(k.quarry === far, 'a skulk walks past a nearer villager to get at a gnome');
+        near.dead = true; far.dead = true; k.dead = true; s.removeDead();
+
+        // the drop is a club, or a single scrap — never meat
+        p.skulkClub = 1;
+        const a = new Skulk(here.x, here.y); s.spawn(a); a.hp = 0; a.dead = true;
+        s.tick(1 / 60);
+        const club = s.world.items.find(it => it.kind === 'gear');
+        assert(!!club && club.gear?.kind === 'weapon' && club.gear.slot === 'melee' && club.gear.tier === 0, 'a slain skulk leaves the club it swung');
+        assert(!s.world.items.some(it => it.food === 'meat'), 'and never any meat');
+        s.world.items.length = 0;
+
+        p.skulkClub = 0;
+        const b = new Skulk(here.x, here.y); s.spawn(b); b.hp = 0; b.dead = true;
+        s.tick(1 / 60);
+        const scrap = s.world.items.find(it => it.kind === 'scrap');
+        assert(!!scrap && scrap.n === 1, 'or a single scrap when it has no club to leave');
+        s.world.items.length = 0;
+      } finally { p.skulkClub = wasClub; }
+    }
+
+    // ---- the chest holds gear, and breaks clubs down ---------------------------------------
+    {
+      const s = fresh(false, false, false, true);
+      const barracks = s.world.barracks[0];
+      assert(!!barracks, 'the starting village has a barracks to keep a chest in');
+      s.player.pack.clear();
+      const club = { kind: 'weapon', slot: 'melee', tier: 0 } as const;
+      const i = s.player.pack.put({ ...club });
+      assert(s.storeGear(i, barracks) && s.stashOf(barracks).length === 1 && s.player.pack.at(i) === null, 'a club stows in the barracks chest');
+
+      // a full woodyard would swallow the wood, so the chest refuses to break anything up for nothing
+      s.wood = s.woodCap;
+      assert(!!s.salvageProblem(barracks, 0) && s.stashOf(barracks).length === 1, 'a full woodyard leaves the club in the chest rather than breaking it up for nothing');
+      s.wood = s.woodCap - 20;
+      const woodWas = s.wood | 0;
+      assert(s.salvageProblem(barracks, 0) === null && s.salvage(barracks, 0), 'with room in the woodyard it breaks down there');
+      assert((s.wood | 0) === woodWas + SKULK.clubWood && s.stashOf(barracks).length === 0, 'returning its wood and leaving the chest empty');
+
+      // supplies belong in the granary, not the chest
+      s.player.pack.clear(); s.player.pickUp('wood', 5);
+      const woodSlot = s.player.pack.slots.findIndex(x => !!x);
+      assert(!s.storeGear(woodSlot, barracks) && s.stashOf(barracks).length === 0, 'the chest refuses supplies');
+
+      // a tool may be parked, but never broken down: losing the hammer is unrecoverable
+      s.player.pack.clear();
+      const hammer = s.player.pack.put({ kind: 'tool', tool: 'hammer' });
+      assert(s.storeGear(hammer, barracks) && !!s.salvageProblem(barracks, 0), 'a tool parks in the chest but is never broken down');
+      assert(s.takeGear(0, barracks) && s.player.pack.hasTool('hammer'), 'and comes back out again');
+
+      // forged gear gives back half of what it cost
+      s.player.pack.clear();
+      s.storeGear(s.player.pack.put({ kind: 'weapon', slot: 'melee', tier: 1 }), barracks);
+      s.wood = Math.min(s.wood, s.woodCap - 40);
+      const paid = s.forgeCost(WEAPONS.melee.tiers[1]), before = s.wood | 0, scrapBefore = s.scrap;
+      s.salvage(barracks, 0);
+      assert((s.wood | 0) === before + Math.floor(paid.wood / 2) && s.scrap === scrapBefore + Math.floor(paid.scrap / 2), 'a forged blade gives back half its forge cost');
+
+      // BREAK DOWN CLUBS takes the clubs and leaves everything else
+      s.player.pack.clear();
+      for (let n = 0; n < 3; n++) s.storeGear(s.player.pack.put({ ...club }), barracks);
+      s.storeGear(s.player.pack.put({ kind: 'armor', slot: 'helmet', tier: 1 }), barracks);
+      s.wood = Math.min(s.wood, s.woodCap - 40);
+      const woodBefore = s.wood | 0;
+      assert(s.salvageClubs(barracks) === 3 && (s.wood | 0) === woodBefore + 3 * SKULK.clubWood, 'breaking down clubs takes every club in one go');
+      assert(s.stashOf(barracks).length === 1 && s.stashOf(barracks)[0].kind === 'armor', 'and leaves the armor alone');
+
+      // the chest has a bottom
+      while (s.stashOf(barracks).length < STASH_SLOTS) s.stashOf(barracks).push({ ...club });
+      s.player.pack.clear();
+      const spare = s.player.pack.put({ ...club });
+      assert(!s.storeGear(spare, barracks) && s.player.pack.at(spare)?.kind === 'weapon', 'a full chest keeps the club in your pack');
+      s.stashOf(barracks).length = 0;
+    }
 
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;

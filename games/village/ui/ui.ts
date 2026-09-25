@@ -40,7 +40,7 @@ const GNOME_LOOK = { body: 'gnome', skin: 0, hair: 0, hairStyle: 0, outfit: 'gno
 /** the GNOME HOUSE slot's tooltip once the craft is learned (locked, it says how to learn it) */
 const GNOME_TITLE = 'A toadstool cottage: a gnome couple moves in and raises a family like any house. Gnomes take no pen or calling; the grown ones forage wild plants for the granary, one find at a time';
 
-const ENEMY_LABEL: Record<string, string> = { raider: 'Raider', warlord: 'Warlord', rat: 'Rat — eats crops', snatcher: 'Snatcher — steals children', brute: 'Brute — heavy', shaman: 'Shaman — ranged', wrecker: 'Wrecker — tears down buildings', boar: 'Boar — wild game, fights back' };
+const ENEMY_LABEL: Record<string, string> = { raider: 'Raider', warlord: 'Warlord', rat: 'Rat — eats crops', snatcher: 'Snatcher — steals children', brute: 'Brute — heavy', shaman: 'Shaman — ranged', wrecker: 'Wrecker — tears down buildings', boar: 'Boar — wild game, fights back', troll: 'Troll — prowls the wild', skulk: 'Skulk — creeps from long grass, hunts gnomes' };
 
 const EVENT_ICON: Record<EventKind, { key: string; frame: number }> = {
   birth: { key: 'dungeon', frame: DUNGEON.villager },
@@ -904,7 +904,7 @@ export class UI {
     }
     const html = `<div class="armory panel">
       <div class="ph"><h2>Armory</h2><span class="cap">${s.wood | 0} wood · ${s.scrap} scrap · barracks Lv${s.world.barracksLevel}</span><button class="btn small close">CLOSE</button></div>
-      <div class="inventory-host"></div>
+      <div class="inventory-host" data-with-stash="1"></div>
       ${chestHtml}
       <div class="acols">
         <div class="wearers">${list}</div>

@@ -1,6 +1,6 @@
 import { Mover, Raider, Villager, Player, type RaiderOpts } from './agents';
 import { World, BUILDINGS, type TilePos, type Building } from './world';
-import { COLS, ROWS, TILE, OGRE, BEDTIME, WRECKER, TROLL, p, MASS } from './config';
+import { COLS, ROWS, TILE, OGRE, BEDTIME, WRECKER, TROLL, SKULK, p, MASS } from './config';
 import type { VillageScene } from './main';
 
 // Enemy kinds beyond the plain raider. Each has a different job so raids need different answers.
@@ -817,6 +817,101 @@ export class Troll extends Raider {
       const here = this.tile;
       for (let i = 0; i < 12; i++) {
         const tx = here.tx + s.rng.int(-TROLL.roam, TROLL.roam), ty = here.ty + s.rng.int(-TROLL.roam, TROLL.roam);
+        if (!s.world.inBounds(tx, ty) || s.world.isBlocked(tx, ty, true)) continue;
+        this.setGoal(s, tx, ty, true);
+        if (this.path.length) break;
+      }
+    }
+  }
+}
+
+/**
+ * A small thing that lives in the long grass and creeps out of it all run long (see
+ * VillageScene.tickSkulks, where the standing grass sets the ceiling). Like the troll it is wild and
+ * lair-bound, so it neither starts a raid nor holds one open — but it is nobody's friend, so towers
+ * and soldiers engage it and villagers flee.
+ *
+ * What makes it its own problem is who it goes for: gnomes forage far from the walls and, since they
+ * gave up fighting, cannot answer back. A gnome well outside its reach still outweighs a nearer
+ * villager (SKULK.gnomeBias), so a skulk will walk past a farmer to get at the cottage folk.
+ */
+export class Skulk extends Raider {
+  override get mass(): number { return MASS.skulk; }
+  /** seconds until it looks around for a better quarry */
+  private lookT = 0;
+  /** seconds until it re-reads the path to a quarry that keeps moving */
+  private pathT = 0;
+  /** seconds until it picks somewhere new to creep */
+  private roamT = 0;
+
+  constructor(x: number, y: number) {
+    super(x, y);
+    this.kind = 'skulk';
+    this.name = 'Skulk';
+    this.wild = true;      // no raid brought it here
+    this.lairBound = true; // ...so it neither starts a raid nor holds one open
+    this.harmless = false; // but it is nobody's friend
+    this.hp = this.maxHp = SKULK.hp;
+    this.dmg = p.skulkDmg;
+    this.speed = SKULK.speed;
+    this.radius = SKULK.radius;
+    this.color = 0x7d8f4a;
+    this.task = 'creeping';
+  }
+
+  /** whoever it is hunting (for the inspector and the tests) */
+  get quarry(): Mover | null { return this.target; }
+  get hunting(): boolean { return !!this.target && !this.target.dead && !this.target.hidden; }
+
+  /**
+   * The best prey it can see. Distance decides, except that a gnome counts as SKULK.gnomeBias tiles
+   * nearer than it is — enough to walk past a farmer on the way to the cottages.
+   */
+  private spot(s: VillageScene): Mover | null {
+    let best: Mover | null = null, bs = Infinity;
+    s.grid.forEachInRadius(this.x, this.y, SKULK.sight * TILE, (o, d2) => {
+      if (!(o instanceof Mover) || o.dead || o.hidden) return;
+      const prey = o instanceof Player || (o instanceof Villager && !o.carriedBy && o.role !== 'infant');
+      if (!prey) return;
+      const gnome = o instanceof Villager && o.gnome;
+      const score = Math.sqrt(d2) - (gnome ? SKULK.gnomeBias * TILE : 0);
+      if (score < bs) { bs = score; best = o; }
+    });
+    return best;
+  }
+
+  update(dt: number, s: VillageScene): void {
+    this.tickTimers(dt);
+    if (this.frozen(dt)) return;
+    if (this.siege && this.breach(dt, s)) return;
+    if (this.attackTick(dt, s)) return;
+
+    this.lookT -= dt;
+    if (this.lookT <= 0) { this.lookT = SKULK.retarget; const seen = this.spot(s); if (seen) this.target = seen; }
+    if (this.target && (this.target.dead || this.target.hidden)) { this.target = null; this.clearGoal(); this.roamT = 0; }
+
+    if (this.target) {
+      this.speed = SKULK.huntSpeed;
+      this.task = this.target instanceof Villager && this.target.gnome ? 'stalking a gnome' : 'hunting';
+      if (this.startAttack(s, this.target, this.dmg, SKULK.reach, SKULK.windup, SKULK.recover)) return;
+      // the quarry moves, so the path is re-read on a timer rather than every frame (there are a lot of these)
+      this.pathT -= dt;
+      if (this.pathT <= 0) { this.pathT = 0.5; this.setGoal(s, this.target.tile.tx, this.target.tile.ty); }
+      if (!this.path.length && (this.dist(this.target) > 14 || !s.world.lineClear(this, this.target) || this.target.elevated) && this.breach(dt, s)) return;
+      this.followPath(dt);
+      return;
+    }
+
+    // nothing in sight: creep about, a few tiles at a time
+    this.speed = SKULK.speed;
+    this.task = 'creeping';
+    this.roamT -= dt;
+    if (this.roamT <= 0 || this.followPath(dt)) {
+      this.roamT = s.rng.range(3, 7);
+      this.vx = this.vy = 0;
+      const here = this.tile;
+      for (let i = 0; i < 12; i++) {
+        const tx = here.tx + s.rng.int(-SKULK.roam, SKULK.roam), ty = here.ty + s.rng.int(-SKULK.roam, SKULK.roam);
         if (!s.world.inBounds(tx, ty) || s.world.isBlocked(tx, ty, true)) continue;
         this.setGoal(s, tx, ty, true);
         if (this.path.length) break;

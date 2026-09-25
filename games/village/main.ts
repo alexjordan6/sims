@@ -1,4 +1,4 @@
-import { STACK, type BulkKind } from './config';
+import { STACK, SKULK, STASH_SLOTS, type BulkKind } from './config';
 import { isImplement, IMPLEMENTS, TOOL_NAME, type Gear, type EquipmentSlot, isBulk, slotName } from './pack';
 import Phaser from 'phaser';
 import { SimScene, launch, button, getGui, Rng, SpatialGrid } from '@shared/index';
@@ -7,7 +7,7 @@ import { World, WILD_FOOD, doorstep, buildingCenter, buildingMaxHp, hasHearth, h
 import { Villager, Raider, Player, Mover, Arrow, TOOLS, type Role, type Tool, type Order } from './agents';
 import { DEFENSE_COST, WALL_HEIGHT } from './config';
 import { Interior } from './interior';
-import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, Bolt, Troll, waveComposition } from './enemies';
+import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, Bolt, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm, type Sounder } from './wildlife';
 import { Fog } from './fog';
 import { p, TILE, COLS, ROWS, ZOOM, COST, BOAR, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, GNOME_BEDS, GNOME_YARD, ORDER, LEVEL_PERKS, PEN_NAME, TROLL, HIVE, ITEM, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, zeroFood, isDish, foodCount, hasInterior, type Recipe, type DishKind, DIET_STAT_NAME, type DietStat, type FoodKind, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
@@ -353,10 +353,36 @@ export class VillageScene extends SimScene {
 
   /** seconds until the next sweep for bodies standing under a hive */
   private hiveT = 0;
+  /** seconds until the next skulk may creep out of the grass */
+  private skulkT = 0;
   /**
    * Wake any hive somebody is standing under. Scanning the handful of bodies against the hive map is far
    * cheaper than scanning the hives, and it mirrors how a boar notices someone treading on it.
    */
+  /** Skulks abroad right now (they are lair-bound, so they never count towards a raid). */
+  skulkCount(): number { let n = 0; for (const a of this.agents) if (a instanceof Skulk && !a.dead) n++; return n; }
+  /** How many skulks the standing grass can sustain: mow it and the ceiling comes down with it. */
+  skulkCap(): number { return Math.min(Math.round(p.skulks), Math.floor(this.world.tallCount / Math.max(1, p.skulkTiles))); }
+  /**
+   * One skulk creeps out of the long grass every p.skulkEvery seconds while the standing grass can
+   * sustain it. Tiles are sampled rather than swept — the map is 200x200 and this runs all run long —
+   * and nothing appears within SKULK.spawnDist of the head, so none of them lands in your lap.
+   */
+  private tickSkulks(dt: number): void {
+    this.skulkT -= dt;
+    if (this.skulkT > 0) return;
+    this.skulkT = Math.max(0.5, p.skulkEvery);
+    if (this.screen !== 'playing' || this.skulkCount() >= this.skulkCap()) return;
+    const pl = this.player;
+    for (let tries = 0; tries < 60; tries++) {
+      const tx = this.rng.int(1, COLS - 2), ty = this.rng.int(1, ROWS - 2), t = this.world.get(tx, ty);
+      if (!t?.tall || t.building || this.world.isBlocked(tx, ty, true)) continue;
+      const c = World.center(tx, ty);
+      if (Math.hypot(c.x - pl.x, c.y - pl.y) < SKULK.spawnDist * TILE) continue;
+      this.spawn(new Skulk(c.x, c.y));
+      return;
+    }
+  }
   private tickHives(dt: number): void {
     for (const h of this.world.hives.values()) if (h.angry > 0) h.angry -= dt;
     this.hiveT -= dt;
@@ -1059,6 +1085,7 @@ export class VillageScene extends SimScene {
     this.pickUpItems(dt);
     this.tidySelection();
     this.tickHives(dt);
+    this.tickSkulks(dt);
     this.tickTowers(dt);
     for (const a of this.agents) if (a.dead) this.onDeath(a as Mover);
     this.removeDead();
@@ -1504,6 +1531,15 @@ export class VillageScene extends SimScene {
         this.world.dropItem('food', a.meat, a.x, a.y, 'meat', this.rng);
         this.event('food', `A ${a.name.toLowerCase()} falls — ${a.meat} meat lies where it fell${a.sounder.members.length ? '' : '; the sounder is no more'}`);
       }
+    } else if (a instanceof Skulk) {
+      // no meat on one of these: it leaves the club it swung, or a single scrap off its trappings
+      if (a.hp <= 0) {
+        this.stats.raidersKilled++;
+        if (this.rng.chance(p.skulkClub)) {
+          const it = this.world.dropItem('gear', 1, a.x, a.y, undefined, this.rng);
+          it.gear = { kind: 'weapon', slot: 'melee', tier: 0 };
+        } else this.world.dropItem('scrap', 1, a.x, a.y, undefined, this.rng);
+      }
     } else if (a instanceof Troll) {
       // a monster, but the meat is good: it lies where it fell for the head's hands or a gnome
       if (a.hp <= 0) {
@@ -1877,6 +1913,74 @@ export class VillageScene extends SimScene {
       b.ammo!--; b.fireCd = p.towerCd;
       if (!b.ammo && !b.dryWarned) { b.dryWarned = true; this.event('raid', 'The barracks tower is out of arrows — restock at its chest.', true); }
     }
+  }
+  /** The gear parked in a barracks chest, made on first use. */
+  stashOf(b: Building): Gear[] { return (b.stash ??= []); }
+  /** Move pack slot `i` into `b`'s chest. Gear only — supplies belong in the granary and woodyard. */
+  storeGear(i: number, b: Building): boolean {
+    const slot = this.player.pack.at(i);
+    if (!slot || isBulk(slot)) { this.event('info', 'The chest takes equipment, not supplies', true); return false; }
+    const stash = this.stashOf(b);
+    if (stash.length >= STASH_SLOTS) { this.event('info', 'The chest is full', true); return false; }
+    this.player.pack.removeAt(i);
+    stash.push(slot);
+    this.validateTool();
+    return true;
+  }
+  /** Take chest item `i` back into the pack. */
+  takeGear(i: number, b: Building): boolean {
+    const stash = this.stashOf(b), gear = stash[i];
+    if (!gear) return false;
+    if (this.player.pack.put(gear) < 0) { this.event('info', 'No room in your pack', true); return false; }
+    stash.splice(i, 1);
+    return true;
+  }
+  /**
+   * What breaking a piece down returns. A club is just shaped wood; anything forged gives back half
+   * of what it cost. Implements are never broken down — losing the hammer to a stray click is the
+   * one mistake the village cannot recover from on its own.
+   */
+  salvageYield(g: Gear): { wood: number; scrap: number } | null {
+    if (g.kind === 'tool') return null;
+    if (g.tier <= 0) return { wood: SKULK.clubWood, scrap: 0 };
+    const tier = g.kind === 'weapon' ? WEAPONS[g.slot].tiers[g.tier] : ARMOR[g.slot].tiers[g.tier];
+    if (!tier) return null;
+    const paid = this.forgeCost(tier);
+    return { wood: Math.floor(paid.wood / 2), scrap: Math.floor(paid.scrap / 2) };
+  }
+  /** Why chest item `i` can't be broken down, or null. */
+  salvageProblem(b: Building, i: number): string | null {
+    const g = this.stashOf(b)[i];
+    if (!g) return 'nothing there';
+    if (b.ruined) return 'the barracks is in ruins';
+    const got = this.salvageYield(g);
+    if (!got) return 'a tool is worth more whole';
+    if (got.wood > this.woodCap - this.wood) return 'the woodyard is full — it would be broken up for nothing';
+    return null;
+  }
+  /** Break chest item `i` down into the stockpiles. */
+  salvage(b: Building, i: number): boolean {
+    const why = this.salvageProblem(b, i);
+    if (why) { this.event('info', `Can't break that down: ${why}`, true); return false; }
+    const stash = this.stashOf(b), g = stash[i], got = this.salvageYield(g)!;
+    stash.splice(i, 1);
+    if (got.wood) this.addWood(got.wood);
+    if (got.scrap) this.scrap += got.scrap;
+    const c = this.towerCenter(b);
+    this.fx.push({ kind: 'tool', tool: 'hammer', tx: b.tx, ty: b.ty });
+    this.fx.push({ kind: 'deposit', x: c.x, y: c.y - TILE, text: `+${got.wood} wood${got.scrap ? ` +${got.scrap} scrap` : ''}`, colour: '#d9a566' });
+    this.event('wood', `Broke down a ${slotName(g).toLowerCase()} — +${got.wood} wood${got.scrap ? `, +${got.scrap} scrap` : ''}.`);
+    return true;
+  }
+  /** Break down every club in the chest in one go — what you do after a night of skulks. */
+  salvageClubs(b: Building): number {
+    let n = 0;
+    for (let i = this.stashOf(b).length - 1; i >= 0; i--) {
+      const g = this.stashOf(b)[i];
+      if (g.kind === 'weapon' && g.tier <= 0 && this.salvage(b, i)) n++;
+    }
+    if (!n) this.event('info', 'No clubs in the chest', true);
+    return n;
   }
   /** Why the tower chest can't be restocked right now, or null. */
   restockProblem(b: Building): string | null {

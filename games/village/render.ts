@@ -653,7 +653,7 @@ function tileFrames(t: Tile, cropDays: number, dayTime: number, oldDays: number,
   }
 }
 
-const ENEMY_SCALE: Record<EnemyKind, number> = { raider: 1, warlord: 1.5, rat: 0.8, snatcher: 0.9, brute: 1.3, shaman: 1, ogre: OGRE.scale, wrecker: 1.1, boar: 1, troll: 1.15 };
+const ENEMY_SCALE: Record<EnemyKind, number> = { raider: 1, warlord: 1.5, rat: 0.8, snatcher: 0.9, brute: 1.3, shaman: 1, ogre: OGRE.scale, wrecker: 1.1, boar: 1, troll: 1.15, skulk: 0.7 };
 
 /** The layered look for an agent — role outfit, held tool, worn armor, dye — or null for things that aren't people. */
 export function lookFor(m: Mover): Look | null {
@@ -670,7 +670,7 @@ export function lookFor(m: Mover): Look | null {
     return { ...base, body: 'adult', outfit: m.role, held };
   }
   if (m instanceof Raider) {
-    const body = m.boss ? 'boss' : m.kind === 'ogre' ? 'ogre' : m.kind === 'brute' ? 'brute' : m.kind === 'rat' ? 'rat' : m.kind === 'boar' ? 'boar' : m.kind === 'troll' ? 'troll' : m.kind === 'snatcher' ? 'imp' : m.kind === 'shaman' ? 'shaman' : 'orc';
+    const body = m.boss ? 'boss' : m.kind === 'ogre' ? 'ogre' : m.kind === 'brute' ? 'brute' : m.kind === 'rat' ? 'rat' : m.kind === 'boar' ? 'boar' : m.kind === 'troll' ? 'troll' : m.kind === 'skulk' ? 'skulk' : m.kind === 'snatcher' ? 'imp' : m.kind === 'shaman' ? 'shaman' : 'orc';
     return { ...base, body, outfit: 'none', held: body === 'orc' || body === 'boss' ? 'sword' : body === 'brute' ? 'axe' : 'none', armor: { helmet: 0, chest: 0, legs: 0, shield: 0 } };
   }
   return null;
