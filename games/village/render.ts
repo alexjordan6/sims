@@ -45,8 +45,8 @@ export class Renderer {
   private bows = new Map<number, Phaser.GameObjects.Image>();
   /** the bundle of logs / basket someone is carrying */
   private carries = new Map<number, Phaser.GameObjects.Image>();
-  /** a tuft of the head's own tile laid over them, so long grass reads as cover rather than a floor */
-  private cover: Phaser.GameObjects.Image | null = null;
+  /** a tuft of each body's own tile laid over them, so long grass reads as cover rather than a floor */
+  private covers = new Map<number, Phaser.GameObjects.Image>();
   /** things lying (or flying) on the ground */
   private items = new Map<number, Phaser.GameObjects.Image>();
   /** each building's sprite (frame = level - 1) and, for the supply buildings, its climbing stock column */
@@ -340,22 +340,32 @@ export class Renderer {
       else if (m instanceof Swarm) this.paint(sp, 0x2e2412);
       else if (hurt) this.paint(sp, mulColor(0xffb0a0, this.tint));
       else this.paint(sp, this.tint);
-      // The head wades chest-deep through long grass: the tile's own tuft is drawn back over them,
-      // so they read as being *in* it rather than standing on it. Nothing here changes what can see
-      // or reach them — it is cover to look at, not to hide behind. A swing stands them back up.
-      if (m instanceof Player) {
-        const t = this.scene.world.get(Math.floor(m.x / TILE), Math.floor(m.y / TILE));
-        const inGrass = t?.kind === 'grass' && !!t.tall && sp.visible && !m.swing;
-        if (inGrass && !this.cover) this.cover = this.scene.add.image(0, 0, 'flora', 0).setOrigin(0.5, 1);
-        if (this.cover) {
-          this.cover.setVisible(inGrass);
-          if (inGrass) this.cover.setFrame(FLORA.tallGrass[t.v % 3]).setPosition(Math.round(m.x), Math.round(m.y) + 5).setDepth(sp.depth + 0.02).setTint(this.tint);
+      // Anything that walks through long grass is waded into it: the tile's own tuft is drawn back
+      // over the body, so it reads as being *in* the grass rather than standing on it. The tuft is
+      // never bigger than one tile, so the grass swallows a gnome and only reaches an ogre's knees.
+      // Cosmetic only — nothing here changes what can see or reach anyone. A lurking boar is the one
+      // thing that truly hides (see Raider.lurking), and it has no sprite to cover in the first place.
+      const airborne = m instanceof Arrow || m instanceof Bolt || m instanceof Swarm;
+      const gt = !airborne && !m.elevated && sp.visible ? this.scene.world.get(Math.floor(m.x / TILE), Math.floor(m.y / TILE)) : undefined;
+      const inGrass = gt?.kind === 'grass' && !!gt.tall && !(m instanceof Player && m.swing);
+      let cover = this.covers.get(m.id);
+      if (inGrass && !cover) { cover = this.scene.add.image(0, 0, 'flora', 0).setOrigin(0.5, 1); this.covers.set(m.id, cover); }
+      if (cover) {
+        cover.setVisible(inGrass);
+        if (inGrass) {
+          // p.grassCover is the share of the body the grass swallows. The sprite sits at origin
+          // (0.5, 0.75), so its top is 0.75h above the anchor: put the tuft top that far down and
+          // the tuft (never wider than its tile) hangs from there.
+          const scale = Math.min(base, 1), h = sp.height * base;
+          const top = m.y + h * (0.25 - p.grassCover);
+          cover.setFrame(FLORA.tallGrass[gt.v % 3]).setScale(scale).setPosition(Math.round(m.x), Math.round(top + cover.height * scale)).setDepth(sp.depth + 0.02).setTint(this.tint);
         }
       }
     }
     for (const [id, sp] of this.sprites) if (!seen.has(id)) { this.sprites.delete(id); this.fx.die(sp, sp.getData('agent') as Mover); }
     for (const [id, sp] of this.bows) if (!seen.has(id)) { sp.destroy(); this.bows.delete(id); }
     for (const [id, sp] of this.carries) if (!seen.has(id)) { sp.destroy(); this.carries.delete(id); }
+    for (const [id, sp] of this.covers) if (!seen.has(id)) { sp.destroy(); this.covers.delete(id); }
   }
 
   /** Screen-space centre of an agent's sprite (for DOM tooltips). */

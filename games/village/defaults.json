@@ -92,5 +92,6 @@
   "skulkTiles": 60,
   "skulkEvery": 6,
   "skulkDmg": 4,
-  "skulkClub": 0.5
+  "skulkClub": 0.5,
+  "grassCover": 0.5
 }
