@@ -515,6 +515,17 @@ export class VillageScene extends SimScene {
   create(): void {
     const kb = this.input.keyboard!;
     this.wasd = kb.addKeys('W,A,S,D') as typeof this.wasd;
+    const clearMovementInput = (): void => {
+      kb.resetKeys();
+      if (this.player) this.player.touch = { x: 0, y: 0 };
+    };
+    const clearMovementWhenHidden = (): void => { if (document.hidden) clearMovementInput(); };
+    window.addEventListener('blur', clearMovementInput);
+    document.addEventListener('visibilitychange', clearMovementWhenHidden);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      window.removeEventListener('blur', clearMovementInput);
+      document.removeEventListener('visibilitychange', clearMovementWhenHidden);
+    });
     // playtest buttons on the backtick panel (once: the scene is created a single time)
     if (!VillageScene.buttonsMade) {
       VillageScene.buttonsMade = true;

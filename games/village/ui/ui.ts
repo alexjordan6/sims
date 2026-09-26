@@ -344,6 +344,11 @@ export class UI {
     const release = (e: PointerEvent) => { if (e.pointerId !== active) return; active = null; set(0, 0); };
     stick.addEventListener('pointerup', release);
     stick.addEventListener('pointercancel', release);
+    stick.addEventListener('lostpointercapture', release);
+    window.addEventListener('blur', () => {
+      active = null;
+      set(0, 0);
+    });
   }
 
   /**
