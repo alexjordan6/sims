@@ -298,7 +298,10 @@ export class VillageScene extends SimScene {
       // skipped on purpose: addVillager makes anyone homed in a cottage a gnome, so they'd arrive wrong.
       this.foundGnomes(home);
     } else {
-      // Start with a lone defender; the player establishes farming and woodcutting.
+      // Start with a small working village and two defenders.
+      this.addVillager(home, 'farmer', grown);
+      this.addVillager(home, 'woodcutter', grown);
+      this.addVillager(home, 'soldier', grown + 2);
       this.addVillager(home, 'soldier', grown + 2);
       for (let i = 0; i < this.mods.startSoldiers; i++) this.addVillager(home, 'soldier', grown + 2);
       if (this.mods.extraAdults > 0) {
