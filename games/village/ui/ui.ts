@@ -110,7 +110,8 @@ export class UI {
       <div class="spacer"></div>
       <div class="stat t-raid" title="Raiders attack every few days; the Warlord comes on day 21"><span class="cap">NEXT RAID</span><span class="val raid"></span></div>
       <div class="stat t-buff" title="The dish you last ate, and how long it keeps working"><span class="cap">MEAL</span><span class="val buff"></span></div>
-      ${tile('t-hp', 'YOUR HP', `<span class="hearts"></span>`, 'You heal overnight. If you die the run ends')}
+      <div class="stat t-hunger" title="Your own belly, in food units. It empties as the day passes; empty, you lose HP and stop mending. T eats one meal — out of your pack first, the granary second. Meat and honey fill double, a cooked dish three or four times. Click to eat"><span class="cap">BELLY</span><span class="val"><span class="belly-num"></span><span class="bar belly"><i></i></span></span></div>
+      ${tile('t-hp', 'YOUR HP', `<span class="hearts"></span>`, 'You heal overnight — but not on an empty belly. If you die the run ends')}
       <div class="stat t-speed" title="Game speed"><span class="cap">SPEED</span><span class="val speed">
         <button class="btn small" data-speed="1">1x</button><button class="btn small" data-speed="4">4x</button><button class="btn small" data-speed="16">16x</button>
         <button class="btn small pause" title="Menu (E / Esc)">II</button>
@@ -156,6 +157,7 @@ export class UI {
     this.toasts = h('<div class="toasts"></div>');
     this.overlay.append(this.top, this.hotbar, this.feed, this.toasts);
     this.inventory.mount(this.hotbar.querySelector('.inventory-host')!);
+    this.top.querySelector('.t-hunger')!.addEventListener('click', () => this.scene.eat());
     // the feed sits above the belt, whatever height the belt turns out to be (its hint line wraps)
     const belt = () => this.overlay.style.setProperty('--hotbar-h', this.hotbar.offsetHeight + 'px');
     new ResizeObserver(belt).observe(this.hotbar); belt();
@@ -223,6 +225,7 @@ export class UI {
           ['W A S D', 'move'],
           ['Space', 'dodge roll — through bodies, not walls'],
           ['G', 'throw the largest supply stack'],
+          ['T', 'eat a meal — your pack first, then the granary'],
           ['click · C', 'use the held tool, toward the cursor'],
           ['right click · X', 'check a villager'],
           ['1 – 9', 'pick a tool'],
@@ -465,7 +468,7 @@ export class UI {
     const night = s.dayTime < 0.22 || s.dayTime > 0.8;
     const raidIn = s.nextRaidDay - s.day;
     const held = s.player.pack.slots.map(slotKey).join('|');
-    const key = `${s.day}|${hour}|${held}|${s.food | 0}/${s.foodCap}|${s.surplusDays().toFixed(1)}|${s.feverActive()}|${s.wood | 0}/${s.woodCap}|${s.scrap}|${count('farmer')}|${count('woodcutter')}|${count('infant')}|${count('kid')}|${count('soldier')}|${count('gnome')}|${count('elder')}|${s.player.hp}|${s.raidActive}|${s.boss?.hp ?? ''}|${raidIn}|${s.speed}|${s.paused}|${night}|${s.buff?.dish ?? ''}${Math.ceil(s.buffLeft())}`;
+    const key = `${s.day}|${hour}|${held}|${s.food | 0}/${s.foodCap}|${s.surplusDays().toFixed(1)}|${s.feverActive()}|${s.wood | 0}/${s.woodCap}|${s.scrap}|${count('farmer')}|${count('woodcutter')}|${count('infant')}|${count('kid')}|${count('soldier')}|${count('gnome')}|${count('elder')}|${Math.round(s.player.hp / Math.max(1, s.player.maxHp) * 12)}|${p.hunger ? Math.ceil(s.player.hunger * 2) / 2 : 'off'}/${p.hungerMax}|${s.raidActive}|${s.boss?.hp ?? ''}|${raidIn}|${s.speed}|${s.paused}|${night}|${s.buff?.dish ?? ''}${Math.ceil(s.buffLeft())}`;
     if (key === this.lastTop) return;
     this.lastTop = key;
 
@@ -481,7 +484,7 @@ export class UI {
     const days = s.surplusDays(), fever = s.feverActive();
     const feverBadge = s.mods.babyFever ? `<span class="badge fever ${fever ? 'on' : ''}" title="${fever ? `Baby fever: births ${Math.round(100 * p.feverBonus)}% more likely while the larder holds ${p.feverDays}+ days of food` : `Baby fever needs ${p.feverDays} days of food in store — ${Math.ceil(p.feverDays * s.dailyRation() - s.food)} more`}">FEVER</span>` : '';
     q('.food').innerHTML = `${s.food | 0}<small>/${s.foodCap} · ${Number.isFinite(days) ? `${days.toFixed(days < 10 ? 1 : 0)} days` : '∞'}</small>${feverBadge}${inHand('food')}`;
-    q('.t-food').title = `${FOOD_KINDS.filter((k) => s.pantry[k] >= 1).map((k) => `${s.pantry[k] | 0} ${FOODS[k].one}`).join(' · ') || 'empty'} — each villager eats 1 a day; the small number is how many days the larder would last. Pen children eat only what the basket tosses in.`;
+    q('.t-food').title = `${FOOD_KINDS.filter((k) => s.pantry[k] >= 1).map((k) => `${s.pantry[k] | 0} ${FOODS[k].one}`).join(' · ') || 'empty'} — each grown villager eats ${p.foodPerDay} a day${s.headRation() ? `, and you eat ${s.headRation()} on top when you eat from the granary` : ''}; the small number is how many days the larder would last for the villagers. Pen children eat only what the basket tosses in.`;
     q('.scrap').textContent = String(s.scrap);
     q('.pop').innerHTML = ([
       ['farmer', CHAR.farmer, 'FARM'], ['woodcutter', CHAR.woodcutter, 'WOOD'], ['infant', CHAR.kid, 'CRIBS'], ['kid', CHAR.kid, 'KIDS'], ['soldier', CHAR.soldier, 'ARMY'], ['gnome', CHAR.gnome, 'GNOMES'], ['elder', CHAR.woodcutter, 'OLD'],
@@ -500,6 +503,17 @@ export class UI {
     const meal = this.top.querySelector<HTMLElement>('.t-buff')!;
     meal.hidden = !s.buff || s.buffLeft() <= 0;
     if (!meal.hidden && s.buff) q('.buff').innerHTML = `<span style="color:${FOODS[s.buff.dish].colour}">+${Math.round((s.buff.mul - 1) * 100)}% ${DIET_STAT_NAME[s.buff.stat]}</span><small>${Math.ceil(s.buffLeft())}s</small>`;
+    const belly = this.top.querySelector<HTMLElement>('.t-hunger')!;
+    belly.hidden = !p.hunger;
+    if (p.hunger) {
+      const left = Math.max(0, Math.min(s.player.hunger, p.hungerMax)), share = left / Math.max(1e-6, p.hungerMax);
+      const num = q('.belly-num'), want = `${left < 10 ? left.toFixed(1) : Math.round(left)}`;
+      if (num.textContent !== want) num.textContent = want;
+      const bar = q('.bar.belly');
+      bar.className = `bar belly ${left <= 0 ? 'empty' : share <= 0.25 ? 'low' : ''}`;
+      (bar.firstElementChild as HTMLElement).style.width = `${Math.round(share * 100)}%`;
+      belly.classList.toggle('empty', left <= 0);
+    }
     const hearts = q('.hearts');
     const full = s.player.hp / s.player.maxHp * 6;
     hearts.innerHTML = Array.from({ length: 6 }, (_, i) => `<span class="heart ${i + 1 <= full ? '' : i < full ? 'half' : 'off'}"></span>`).join('');
@@ -726,6 +740,7 @@ export class UI {
       html += `<b>Home</b><span>${s.bedsTaken(m.home)} of ${s.beds(m.home)} beds</span>`;
       html += `<b>Fed</b><span>${m.role === 'infant' ? (m.hungerDays ? `<em class="warn">hungry for ${m.hungerDays} days — nobody at home was fed; ${p.kidStarveDays} days starve an infant</em>` : 'nursed — a fed grown-up at home feeds the nursery') : m.role === 'kid' ? (m.ateDay >= s.day ? (m.gnome ? 'ate today from food by the gnome house' : 'ate today from a pen pile') : m.hungerDays ? `<em class="warn">hungry for ${m.hungerDays} days — ${m.gnome ? 'throw food by the gnome house' : m.pen ? `throw food into the ${PEN_NAME[m.pen]}` : 'paint a pen and throw food in'}</em>` : 'not yet today') : m.hungerDays === 0 ? 'yes' : `<em class="warn">hungry for ${m.hungerDays} days</em>`}</span>`;
     }
+    if (m instanceof Player) html += `<b>Belly</b><span>${!p.hunger ? 'hunger is off' : m.hunger <= 0 ? `<em class="warn">empty — starving, ${p.starveHpPerDay} HP a day and no mending</em>` : `${m.hunger.toFixed(1)} / ${p.hungerMax} · about ${(m.hunger / Math.max(1e-6, p.hungerPerDay)).toFixed(1)} days · T eats a meal`}</span>`;
     if(m instanceof Player)html += `<b>Pack</b><span>${m.pack.slots.length-m.pack.emptySlots} / ${m.pack.slots.length} slots used</span>`;
     if (m.load) html += `<b>Carrying</b><span>${m.load.n} ${m.load.kind}</span>`;
     if (m instanceof Boar) {
@@ -1000,6 +1015,7 @@ export class UI {
           <div class="controls">
             <kbd>WASD</kbd><span>move</span><kbd>Space</kbd><span>dodge roll</span>
             <kbd>G</kbd><span>throw the largest supply stack</span>
+            <kbd>T</kbd><span>eat one meal. Your pack is eaten before the granary, and raw food before cooked so a dish's warmth is never spent on a routine meal. Meat and honey fill twice as much per unit, a cooked dish three or four times.</span>
             <kbd>click / C</kbd><span>use the tool you hold, toward the cursor</span>
             <kbd>right click / X</kbd><span>check a villager</span><kbd>1-9 · Tab · wheel</kbd><span>pick a tool</span>
             <kbd>E / Esc</kbd><span>menu</span><kbd>- / =</kbd><span>game speed</span>
@@ -1152,7 +1168,7 @@ export class UI {
             <kbd>\`</kbd><span>tuning sliders (debug)</span>
           </div>
           <h3>TOP BAR</h3>
-          <p><b>DAY</b> of ${p.bossDay} and the hour · <b>WOOD</b> / <b>FOOD</b> stockpiles and their caps (upgrade the woodyard / granary) · <b>VILLAGERS</b> by role · <b>NEXT RAID</b> countdown · <b>YOUR HP</b>.</p>
+          <p><b>DAY</b> of ${p.bossDay} and the hour · <b>WOOD</b> / <b>FOOD</b> stockpiles and their caps (upgrade the woodyard / granary) · <b>VILLAGERS</b> by role · <b>NEXT RAID</b> countdown · <b>BELLY</b> your own hunger · <b>YOUR HP</b>.</p>
         </section>
       </div>
     </div>`);

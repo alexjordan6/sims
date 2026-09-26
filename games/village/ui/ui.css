@@ -601,3 +601,11 @@ body.touch .wearers { flex-direction: row; flex-wrap: wrap; }
 .pack-help { flex-basis:100%; color:#baa984; font-size:10px; }
 .pack-ghost { position:fixed; z-index:100000; pointer-events:none; opacity:.85; }
 body.touch .inventory-host { display:none; }
+
+/* the head's belly: a small bar beside the hearts, amber when low and red when empty */
+.topbar .bar.belly { display: inline-block; width: 54px; height: 8px; vertical-align: middle; margin-left: 4px; }
+.topbar .bar.belly i { background: var(--ok); }
+.topbar .bar.belly.low i { background: var(--accent); }
+.topbar .bar.belly.empty i { background: var(--danger); }
+.topbar .t-hunger { cursor: pointer; }
+.topbar .t-hunger.empty { animation: pulse .6s infinite alternate; }

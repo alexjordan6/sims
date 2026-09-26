@@ -1149,6 +1149,8 @@ export class Player extends Mover {
 
   /** seconds the head is occupied (encouraging a child): no walking, no swinging */
   busy = 0;
+  /** the head's own belly, in food units: it empties as the day passes, and an empty one costs HP (see VillageScene.tickHunger) */
+  hunger = p.hungerMax;
   /** incoming damage scale from the last meal (a hearty dish softens blows); hit() has no scene to ask */
   damageMul = 1;
   override hit(dmg: number, melee = true, by?: Mover): void { super.hit(dmg * this.damageMul, melee, by); }
@@ -1180,7 +1182,8 @@ export class Player extends Mover {
     // pushing up into a doorway walks you inside
     s.pushDoor(dt, my < -0.5 && Math.abs(mx) < 0.5);
     this.updateSwing(dt, s);
-    if (s.mods.playerRegen && this.hp < this.maxHp && !s.nearestRaider(this.x, this.y, 40)) this.hp = Math.min(this.maxHp, this.hp + s.mods.playerRegen * dt);
+    // an empty belly stops the mending: playerRegen is 5 HP/s, which would outrun any starve rate
+    if (s.mods.playerRegen && (!p.hunger || this.hunger > 0) && this.hp < this.maxHp && !s.nearestRaider(this.x, this.y, 40)) this.hp = Math.min(this.maxHp, this.hp + s.mods.playerRegen * dt);
   }
 
   /** seconds until the long grass stirs again as the head wades through it */

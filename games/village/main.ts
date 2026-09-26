@@ -512,6 +512,7 @@ export class VillageScene extends SimScene {
     kb.removeAllListeners('keydown-SPACE'); // Esc handles pause; Space is the dodge roll
     kb.on('keydown-SPACE', () => this.dodge());
     kb.on('keydown-G', () => this.tossLoad());
+    kb.on('keydown-T', () => { if (this.screen === 'playing' && !this.paused) this.eat(); });
     // number keys pick tools; game speed moves to - / =
     kb.removeAllListeners('keydown-ONE'); kb.removeAllListeners('keydown-TWO'); kb.removeAllListeners('keydown-THREE');
     kb.on('keydown-MINUS', () => (this.speed = this.speed > 4 ? 4 : 1));
@@ -922,14 +923,58 @@ export class VillageScene extends SimScene {
     return true;
   }
   /** Eat one serving: a big meal now, and the dish's stat raised for a while. */
-  eatDish(kind: FoodKind): boolean {
-    if (!isDish(kind) || this.pantry[kind] < 1) return false;
-    const r = RECIPES[kind as DishKind], stat = FOODS[kind].stat as Exclude<DietStat, 'care'>;
-    this.pantry[kind] -= 1;
+  /** What one unit of a food fills: meat and honey are worth two, a cooked dish three or four (Food.power). */
+  hungerOf(kind: FoodKind): number { return FOODS[kind].power ?? 1; }
+  /**
+   * What T would eat: out of the pack first, the granary second; raw before cooked, and the most-held
+   * of those — the same order fullestKind() spends the granary in. Raw before cooked so a routine meal
+   * never burns a dish's buff; EAT ONE at the pot stays the way you spend one deliberately.
+   */
+  eatKind(): { kind: FoodKind; from: 'pack' | 'granary' } | null {
+    const pick = (have: (k: FoodKind) => number) => {
+      const most = (ks: readonly FoodKind[]) => { let best: FoodKind | null = null, n = 0; for (const k of ks) if (have(k) >= 1 && have(k) > n) { n = have(k); best = k; } return best; };
+      return most(RAW_KINDS) ?? most(DISHES);
+    };
+    const inPack = pick((k) => this.player.carriedOf('food', k));
+    if (inPack) return { kind: inPack, from: 'pack' };
+    const g = this.world.granary;
+    if (!g || g.ruined) return null; // a ruin feeds nobody
+    const inBin = pick((k) => this.pantry[k]);
+    return inBin ? { kind: inBin, from: 'granary' } : null;
+  }
+  /** Eat up to `units` of one food from wherever it is. A dish still heals and warms on top. */
+  eatFood(kind: FoodKind, from: 'pack' | 'granary', units: number): boolean {
+    const pl = this.player;
+    const have = from === 'pack' ? pl.carriedOf('food', kind) : this.pantry[kind];
+    // a dish is a deliberate spend, so it is never refused for want of room; raw food is
+    const room = isDish(kind) ? Infinity : Math.max(0, p.hungerMax - pl.hunger);
+    const want = Math.min(units, have, Math.max(1, Math.ceil(room / this.hungerOf(kind))));
+    if (want < 1 || room <= 0) return false;
+    const took = from === 'pack' ? pl.takeOut('food', want, kind) : want;
+    if (took < 1e-9) return false;
+    if (from === 'granary') this.pantry[kind] -= took; // bin by bin: `this.food -=` would drain fullestKind(), not the one we named
+    pl.hunger = Math.min(p.hungerMax, pl.hunger + took * this.hungerOf(kind));
+    this.fx.push({ kind: 'deposit', x: pl.x, y: pl.y - TILE, text: `+${Math.round(took * this.hungerOf(kind))}`, colour: FOODS[kind].colour });
+    if (isDish(kind)) this.dishBuff(kind as DishKind);
+    else this.event('food', `You eat ${foodCount(took, kind)}.`);
+    return true;
+  }
+  /** The heal and the warm glow a cooked dish leaves behind. */
+  private dishBuff(kind: DishKind): void {
+    const r = RECIPES[kind], stat = FOODS[kind].stat as Exclude<DietStat, 'care'>;
     this.player.hp = Math.min(this.player.maxHp, this.player.hp + r.heal);
     this.buff = { stat, mul: 1 + r.buffAdd, until: this.simTime + r.buffSecs, dish: kind };
     this.event('food', `${FOODS[kind].name}: +${r.heal} HP and +${Math.round(r.buffAdd * 100)}% ${DIET_STAT_NAME[stat]} for ${r.buffSecs}s.`, true);
-    return true;
+  }
+  /** T: one meal of whatever eatKind() picks. Refuses a full belly rather than wasting the food. */
+  eat(): boolean {
+    if (!p.hunger || this.player.hunger >= p.hungerMax - 1e-9) return false;
+    const pick = this.eatKind();
+    return !!pick && this.eatFood(pick.kind, pick.from, Math.round(p.hungerMeal));
+  }
+  eatDish(kind: FoodKind): boolean {
+    if (!isDish(kind) || this.pantry[kind] < 1) return false;
+    return this.eatFood(kind, 'granary', 1);
   }
   /** What the head's last meal is still doing for `stat` (1 = nothing). */
   buffMul(stat: DietStat): number {
@@ -1079,6 +1124,7 @@ export class VillageScene extends SimScene {
     for (const a of this.agents) a.update(dt, this);
     this.separate();
     this.tickAges(dt);
+    this.tickHunger(dt);
     this.tickBirths();
     this.world.tickItems(dt);
     this.validateTool();
@@ -1122,8 +1168,9 @@ export class VillageScene extends SimScene {
   }
 
   newDay(): void {
-    // a night's rest
-    this.player.hp = Math.min(this.player.maxHp, this.player.hp + 30);
+    // a night's rest — but not on an empty belly
+    if (!p.hunger || this.player.hunger > 0) this.player.hp = Math.min(this.player.maxHp, this.player.hp + 30);
+    else this.event('food', 'You slept badly on an empty belly.', true);
     // crops grow
     this.world.tiles.forEach((t, i) => { if (t.kind === 'crop') { t.stage++; this.world.dirty.add(i); } });
     // stumps and saplings grow back; trees seed their neighbours
@@ -1252,6 +1299,31 @@ export class VillageScene extends SimScene {
     return null;
   }
   /** Every house rolls for a birth every p.birthEvery seconds: a couple, a warm hearth, a free crib, food to spare. */
+  /** How much the head eats a day, for the HUD only — dailyRation() is the villagers' and must stay theirs. */
+  headRation(): number { return p.hunger ? p.hungerPerDay : 0; }
+  /** 0 fed, 1 getting hungry, 2 starving — so the warning fires once per crossing rather than once a frame. */
+  private hungerWarned = 0;
+  /**
+   * The head's own belly. It empties as the day passes and an empty one costs HP — taken off `hp`
+   * directly rather than through hit(), which floors at 1 (60 HP/s at this cadence), lets armor turn
+   * the blow, and would have a hearty dish make you starve slower.
+   */
+  tickHunger(dt: number): void {
+    const pl = this.player;
+    if (!p.hunger) { pl.hunger = p.hungerMax; this.hungerWarned = 0; return; } // off: the belly stays full
+    const days = dt / p.dayLength;
+    // clamped against the slider every tick rather than cached, so dragging hungerMax takes mid-run
+    pl.hunger = Math.max(0, Math.min(pl.hunger, p.hungerMax) - p.hungerPerDay * days);
+    const stage = pl.hunger <= 0 ? 2 : pl.hunger <= p.hungerMax * 0.25 ? 1 : 0;
+    if (stage !== this.hungerWarned) {
+      if (stage > this.hungerWarned) this.event('food', stage === 2 ? 'You are starving — eat something (T)' : 'You are getting hungry — eat something (T)', true);
+      this.hungerWarned = stage;
+    }
+    if (pl.hunger > 0 || p.godMode) return; // god mode starves without bleeding
+    pl.hp -= p.starveHpPerDay * days;
+    if (pl.hp <= 0) { pl.hp = 0; pl.dead = true; this.event('death', 'You starved.', true); }
+  }
+
   tickBirths(): void {
     const fever = this.feverActive();
     for (const h of this.world.familyHouses) {
@@ -2611,7 +2683,8 @@ if (matchMedia('(pointer: coarse)').matches || query.has('touch')) document.body
 // Dev starts, so a link is enough: ?start=gnome and ?peaceful set the debug sliders before the first setup().
 if (query.get('start') === 'gnome') p.gnomeStart = true;
 if (query.has('peaceful')) p.peaceful = true;
+if (query.has('nohunger')) p.hunger = false;
 // lil-gui caches its controllers' values at module load, so the panel needs telling the flag moved.
-if (p.gnomeStart || p.peaceful) getGui().controllersRecursive().forEach((c) => c.updateDisplay());
+if (p.gnomeStart || p.peaceful || query.has('nohunger')) getGui().controllersRecursive().forEach((c) => c.updateDisplay());
 
 launch(VillageScene, { width: COLS * TILE, height: ROWS * TILE, zoom: ZOOM, scale: 'resize', pixelArt: true, background: '#1a2a1c' });

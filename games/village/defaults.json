@@ -92,5 +92,10 @@
   "skulkTiles": 60,
   "skulkEvery": 6,
   "skulkDmg": 4,
-  "skulkClub": 0.5
+  "skulkClub": 0.5,
+  "hungerMax": 6,
+  "hungerPerDay": 4,
+  "hungerMeal": 2,
+  "starveHpPerDay": 60,
+  "hunger": true
 }

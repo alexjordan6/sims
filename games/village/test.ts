@@ -945,6 +945,94 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(s.buffMul('dmg') > 1 && s.buffMul('work') === 1, 'a new dish replaces the last one');
     assert(!s.eatDish('roast') && !s.eatDish('wheat'), 'you cannot eat what you do not have, and raw food is not a dish');
 
+    // ---- the head's own belly ------------------------------------------------------------
+    {
+      const was = { max: p.hungerMax, rate: p.hungerPerDay, meal: p.hungerMeal, dmg: p.starveHpPerDay, on: p.hunger, god: p.godMode, peace: p.peaceful };
+      // peaceful for the whole block: a raid landing mid-check would end the run, and a tick() on a
+      // finished run returns before tickHunger ever runs — which reads as 'hunger does nothing'
+      p.peaceful = true;
+      // a quarter day at a time: long spans roll the clock far enough to starve the village out
+      const QUARTER = () => p.dayLength / 4;
+      try {
+        let h = fresh(); let pl = h.player;
+        assert(pl.hunger === p.hungerMax, 'a new run starts on a full belly');
+        assert(FOOD_KINDS.every((k) => h.hungerOf(k) > 0), 'every food kind fills the belly');
+
+        // the clock, and that the slider drives it
+        ticks(h, p.dayLength / p.hungerPerDay);
+        assert(Math.abs(pl.hunger - (p.hungerMax - 1)) < 0.05, `the belly empties at hungerPerDay (${pl.hunger.toFixed(2)} left)`);
+        const rate = p.hungerPerDay; p.hungerPerDay = rate * 2; pl.hunger = p.hungerMax;
+        ticks(h, p.dayLength / rate);
+        assert(Math.abs(pl.hunger - (p.hungerMax - 2)) < 0.1, 'doubling the slider empties the belly twice as fast');
+        p.hungerPerDay = rate;
+
+        // three off switches, all genuinely off
+        h = fresh(); pl = h.player;
+        p.hunger = false; pl.hunger = 1; pl.hp = pl.maxHp; ticks(h, QUARTER());
+        assert(pl.hunger === p.hungerMax && pl.hp === pl.maxHp && !h.eat(), 'hunger off: the belly stays full, nothing drains and T does nothing');
+        p.hunger = true;
+        p.hungerPerDay = 0; pl.hunger = 2; ticks(h, QUARTER());
+        assert(pl.hunger === 2, 'a rate of 0 holds the belly where it is'); p.hungerPerDay = rate;
+        p.starveHpPerDay = 0; pl.hunger = 0; pl.hp = pl.maxHp; ticks(h, QUARTER());
+        assert(pl.hp === pl.maxHp, 'and 0 damage leaves the meter with no teeth'); p.starveHpPerDay = was.dmg;
+
+        // the teeth
+        h = fresh(); pl = h.player;
+        pl.hunger = 0; pl.hp = pl.maxHp; let hp0 = pl.hp; ticks(h, QUARTER());
+        assert(Math.abs((hp0 - pl.hp) - p.starveHpPerDay / 4) < 1.5, `an empty belly costs starveHpPerDay a day (${(hp0 - pl.hp).toFixed(1)} in a quarter)`);
+        assert(h.buffMul('speed') === 1 && h.buffMul('dmg') === 1 && h.buffMul('work') === 1, 'and starving never touches the head\'s stats');
+        h = fresh(); pl = h.player;
+        pl.armor.chest = 2; pl.hunger = 0; pl.hp = pl.maxHp; hp0 = pl.hp; ticks(h, QUARTER());
+        assert(Math.abs((hp0 - pl.hp) - p.starveHpPerDay / 4) < 1.5, 'armor turns no blow from hunger'); pl.armor.chest = 0;
+        h = fresh(); pl = h.player;
+        h.mods.playerRegen = 5; pl.hunger = 0; pl.hp = 20; ticks(h, 2);
+        assert(pl.hp < 20, 'a starving head does not regenerate'); h.mods.playerRegen = 0;
+        h = fresh(); pl = h.player;
+        p.godMode = true; pl.hunger = 0; pl.hp = pl.maxHp; ticks(h, QUARTER());
+        assert(pl.hp === pl.maxHp && pl.hunger === 0, 'god mode starves without bleeding'); p.godMode = false;
+
+        // the overnight rest
+        h = fresh(); pl = h.player;
+        pl.hunger = 0; pl.hp = 10; h.newDay();
+        assert(pl.hp === 10, 'a night on an empty belly is no rest at all');
+        pl.hunger = p.hungerMax; pl.hp = 10; h.newDay();
+        assert(pl.hp > 10, 'a fed head wakes mended');
+
+        // eating: pack before granary, raw before cooked
+        h = fresh(); pl = h.player;
+        clearBulk(h); for (const k of FOOD_KINDS) h.pantry[k] = 0;
+        h.pantry.wheat = 20; h.pantry.stew = 5; pl.hunger = 0;
+        assert(h.eatKind()?.from === 'granary' && h.eatKind()?.kind === 'wheat', 'an empty pack eats from the granary, raw before cooked');
+        pl.pickUp('food', 4, 'meat');
+        assert(h.eatKind()?.from === 'pack' && h.eatKind()?.kind === 'meat', 'but what you carry is eaten first');
+        assert(h.eat() && Math.abs(pl.hunger - Math.min(p.hungerMax, p.hungerMeal * 2)) < 1e-6, 'meat fills twice its weight (Food.power)');
+        assert(pl.carriedOf('food', 'meat') === 4 - p.hungerMeal, 'and exactly one meal leaves the pack');
+        pl.hunger = p.hungerMax;
+        assert(!h.eat(), 'a full belly refuses the key rather than wasting food');
+
+        // dishes are the same verb, and are never refused
+        clearBulk(h); for (const k of FOOD_KINDS) h.pantry[k] = 0;
+        h.pantry.stew = 3; pl.hunger = 0; h.simTime = 500;
+        assert(h.eat() && h.buffMul('work') > 1 && pl.hunger > 0, 'with only stew left, T both fills you and warms you');
+        pl.hunger = 0; h.pantry.roast = 1;
+        assert(h.eatDish('roast') && pl.hunger > 0, 'EAT ONE at the pot fills the belly as well as healing');
+        pl.hunger = p.hungerMax; h.pantry.roast = 1;
+        assert(h.eatDish('roast'), 'a dish is a deliberate spend: a full belly never refuses it');
+
+        // a ruin feeds nobody
+        clearBulk(h); for (const k of FOOD_KINDS) h.pantry[k] = 0;
+        h.pantry.wheat = 50; h.world.granary!.ruined = true;
+        assert(!h.eatKind() && !h.eat(), 'a ruined granary feeds nobody'); h.world.granary!.ruined = false;
+
+        // and it can kill, down the same path any death takes
+        h = fresh(); pl = h.player;
+        pl.hunger = 0; pl.hp = 2; ticks(h, QUARTER());
+        assert(pl.dead && String(h.screen) === 'over', 'an empty belly can kill, and the run ends the way any death does');
+      } finally {
+        p.hungerMax = was.max; p.hungerPerDay = was.rate; p.hungerMeal = was.meal;
+        p.starveHpPerDay = was.dmg; p.hunger = was.on; p.godMode = was.god; p.peaceful = was.peace;
+      }
+    }
     // dishes are food all the way down, but never a crop and never wild
     assert(!DISHES.some((d) => CROP_KINDS.includes(d)) && !DISHES.some((d) => Object.values(WILD_FOOD).includes(d)), 'and nothing will ever sow or forage one');
     for (const k of FOOD_KINDS) s.pantry[k] = 0;

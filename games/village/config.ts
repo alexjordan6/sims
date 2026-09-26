@@ -44,6 +44,9 @@ export const p = live(
     cropYield: [D.cropYield, 1, 20, 1, 'Food per harvested crop before boons. Applies at NEW VILLAGE.'],
     cropDays: [D.cropDays, 1, 10, 1, 'Days from seed to harvest.'],
     foodPerDay: [D.foodPerDay, 0, 3, 'Ration each grown villager eats at dawn (children eat only what lands in their pen).'],
+    hungerMax: [D.hungerMax, 1, 30, 1, 'Food units the head\'s belly holds. It empties as the day passes; empty, you lose HP.'],
+    hungerPerDay: [D.hungerPerDay, 0, 12, 0.5, 'Food units the head burns a day (a grown villager eats foodPerDay). 0 = the belly never empties.'],
+    hungerMeal: [D.hungerMeal, 1, 10, 1, 'Food units one press of T eats. Meat and honey fill twice as much per unit, a cooked dish three or four times.'],
     packSlots: [D.packSlots, 5, 36, 1, 'Player pack slots; applies at NEW VILLAGE.'],
     pickupRange: [D.pickupRange, 1, 8, 0.25, 'Loose-item pickup attraction radius, in tiles.'],
     pickupPull: [D.pickupPull, 10, 240, 5, 'Resting items move toward the player this many pixels per second.'],
@@ -85,6 +88,7 @@ export const p = live(
   }, 'lifecycle'),
   params({
     playerHp: [D.playerHp, 10, 200, 5, 'The head\'s base HP before armor and boons. Applies at NEW VILLAGE or the next armor change.'],
+    starveHpPerDay: [D.starveHpPerDay, 0, 200, 5, 'HP the head loses over a full day on an empty belly (60 = a whole bar a day). A starving head does not mend overnight and does not regenerate. 0 = the belly empties but never hurts.'],
     playerDmg: [D.playerDmg, 1, 40, 1, 'The head\'s sword damage at a ×1 weapon (the starting club is ×weaponTier0Mul).'],
     rollDist: [D.rollDist, 8, 80, 1, 'Pixels the head covers in one dodge roll (two tiles is 32). The roll goes through bodies but not walls.'],
     rollTime: [D.rollTime, 0.1, 0.8, 0.02, 'Seconds the roll takes. Shorter = snappier, and a smaller window to be caught in.'],
@@ -131,6 +135,7 @@ export const p = live(
     freeBuild: [D.freeBuild, 'Building, upgrading, fortifying, forging and hearth stocking cost nothing.'],
     collide: [D.collide, 'Bodies push each other apart. Off: everyone walks through everyone, as before.'],
     gnomeStart: [D.gnomeStart, 'NEW VILLAGE starts you as a gnome family: no house, barracks or field — a toadstool cottage in the clearing, its founders, and the craft already learned. Also ?start=gnome.'],
+    hunger: [D.hunger, 'The head gets hungry and starves. Off: the belly stays full, nothing drains and T does nothing. Also ?nohunger.'],
     peaceful: [D.peaceful, 'No raid schedule and no Warlord; the day you would have faced him you win instead. Boars and the Ogre still roam, and the SPAWN RAID button still works. Also ?peaceful.'],
   }, 'debug'),
 );

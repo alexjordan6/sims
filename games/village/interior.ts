@@ -166,6 +166,7 @@ export class Interior {
       this.s.food -= cost; this.mealAt = this.time;
       const hp = this.building.kind === 'tavern' ? 5 + this.building.level * 15 : 12;
       this.s.player.hp = Math.min(this.s.player.maxHp, this.s.player.hp + hp);
+      this.s.player.hunger = Math.min(p.hungerMax, this.s.player.hunger + cost); // a meal is a meal
       this.s.event('food', `A warm meal and a quiet moment · restored ${hp} HP.`, true); return;
     }
     this.s.selectBuilding(this.building);
