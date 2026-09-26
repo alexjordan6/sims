@@ -496,6 +496,7 @@ export class VillageScene extends SimScene {
     const d = doorstep(home);
     const c = World.center(d.tx, d.ty);
     const v = new Villager(c.x + this.rng.range(-4, 4), c.y + this.rng.range(-4, 4), home, role, age, NAMES[this.nameIdx++ % NAMES.length], this.mods);
+    if (role === 'soldier') v.order = { kind: 'follow' };
     if (home.kind === 'gnomehouse') { v.gnome = true; v.followingPlayer = this.gnomesFollow; v.applyRole(this.mods); v.hp = v.maxHp; } // born under a toadstool: a gnome for life, and one of your train
     if (role === 'soldier') { v.barracksHp = this.world.barracksLevel >= 3 ? 30 : this.world.barracksLevel >= 2 ? 15 : 0; v.applyRole(this.mods); v.hp = v.maxHp; }
     // infants live in the nursery, unseen until they walk out
@@ -1733,6 +1734,18 @@ export class VillageScene extends SimScene {
       if (!(o instanceof Raider) || o.dead || (o.wild && o.harmless)) return;
       const score = Math.sqrt(d2) - (o.carrying ? 120 : o.harmless ? -60 : 0);
       if (score < bs) { bs = score; best = o; }
+    });
+    return best;
+  }
+
+  /** Enemies currently targeting the player; following soldiers defend against these only. */
+  attackingPlayer(x: number, y: number, r: number): Raider | null {
+    let best: Raider | null = null, bestDistance = r * r;
+    this.grid.forEachInRadius(x, y, r, (o, d2) => {
+      if (o instanceof Raider && o.isTargeting(this.player) && d2 < bestDistance) {
+        best = o;
+        bestDistance = d2;
+      }
     });
     return best;
   }

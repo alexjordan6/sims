@@ -317,6 +317,7 @@ export class Villager extends Mover {
   constructor(x: number, y: number, public home: House, role: Role, age: number, name: string, mods: Mods) {
     super(x, y);
     this.role = role;
+    if (role === 'soldier') this.order = { kind: 'follow' };
     this.age = age;
     this.name = name;
     this.applyRole(mods);
@@ -889,7 +890,7 @@ export class Villager extends Mover {
       const leash = ORDER.leash * TILE;
       this.target = order?.kind === 'attack' ? (order.target as Raider)
         : order?.kind === 'hold' ? s.bestTarget((order.tx + 0.5) * TILE, (order.ty + 0.5) * TILE, leash)
-        : order?.kind === 'follow' ? s.bestTarget(s.player.x, s.player.y, leash)
+        : order?.kind === 'follow' ? s.attackingPlayer(s.player.x, s.player.y, leash)
         : s.bestTarget(this.x, this.y, this.weapon === 'bow' ? 190 : 130);
     }
     if (this.target && !this.target.dead) {
@@ -1033,6 +1034,7 @@ export class Raider extends Mover {
     return true;
   }
   protected target: Mover | null = null;
+  isTargeting(who: Mover): boolean { return this.target === who && !this.dead; }
   /** Adaptive encounters pursue the head rather than villagers. */
   huntPlayer = false;
   protected retarget = 0;
