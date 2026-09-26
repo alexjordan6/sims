@@ -1,0 +1,12 @@
+import assert from 'node:assert/strict';
+import { WorkerSafety } from '../games/village/worker-safety.ts';
+const s = new WorkerSafety();
+assert.equal(s.update(1,false,false),false);
+assert.equal(s.update(0.1,true,true),true);
+for(let i=0;i<100;i++) assert.equal(s.update(0.1,i%2===0,true),true,'crossing flee boundary never releases worker');
+assert.equal(s.update(2.9,false,false),true);
+assert.equal(s.update(0.1,false,true),true,'nearby threat restarts calm period');
+assert.equal(s.update(2.9,false,false),true);
+assert.equal(s.update(0.2,false,false),false,'sustained clearance releases worker');
+assert.equal(s.update(0.1,true,true),true,'new danger immediately triggers flight');
+console.log('Worker safety state regressions passed.');

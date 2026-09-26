@@ -6,6 +6,7 @@ import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, 
 import type { VillageScene } from './main';
 import type { Item } from './items';
 import { Pack, IMPLEMENTS } from './pack';
+import { WorkerSafety, WORKER_DANGER, WORKER_CLEAR } from './worker-safety';
 import type { BulkKind } from './config';
 
 // All distances are in world pixels: 16 px per tile.
@@ -426,7 +427,12 @@ export class Villager extends Mover {
         return;
       }
       this.task = 'hiding indoors';
-      if (!s.raidActive || this.role === 'soldier') this.unhide(s);
+      if (this.role === 'soldier') { this.unhide(s); return; }
+      // Roaming enemies do not set raidActive. Check the exit, not the indoor position.
+      const door = doorstep(this.indoors ?? this.home);
+      const exit = World.center(door.tx, door.ty);
+      const unsafe = !!s.nearestRaider(exit.x, exit.y, WORKER_CLEAR + TILE);
+      if (!this.workerSafety.update(dt, unsafe, unsafe) && !s.raidActive) this.unhide(s);
       return;
     }
     switch (this.role) {
@@ -575,6 +581,7 @@ export class Villager extends Mover {
 
   /** heading to the woodyard / granary with a load */
   private delivering = false;
+  private readonly workerSafety = new WorkerSafety();
   /** job tiles no path led to, keyed by tile index, with the sim time they may be tried again */
   private unreachable = new Map<number, number>();
   private failedPicks = 0;
@@ -698,7 +705,22 @@ export class Villager extends Mover {
   /** Farmers, woodcutters and foraging gnomes: find a job tile, walk there, work it, carry the take home. */
   private civilUpdate(dt: number, s: VillageScene, job: 'farm' | 'wood' | 'forage'): void {
     const farmer = job === 'farm';
-    if (s.nearestRaider(this.x, this.y, 90)) { this.task = 'fleeing'; this.delivering = false; if (this.fetching) this.dropFetch(s); this.goHome(s, dt); return; }
+    const danger = !!s.nearestRaider(this.x, this.y, WORKER_DANGER);
+    const wasFleeing = this.workerSafety.fleeing;
+    const nearby = danger || (wasFleeing && !!s.nearestRaider(this.x, this.y, WORKER_CLEAR));
+    if (this.workerSafety.update(dt, danger, nearby)) {
+      if (!wasFleeing) {
+        // Do not immediately retry the dangerous job or inherit its work progress.
+        if (this.goal) this.unreachable.set(this.goal.ty * s.world.cols + this.goal.tx, s.simTime + 15);
+        this.workTimer = 0;
+        this.clearGoal();
+      }
+      this.task = 'fleeing'; this.delivering = false;
+      if (this.fetching) this.dropFetch(s);
+      this.goHome(s, dt);
+      return;
+    }
+    if (wasFleeing) { this.clearGoal(); this.thinkTimer = 0; }
 
     // at the head’s heels: still foraging, but only what lies within a short walk of them
     const heeling = job === 'forage' && this.followingPlayer;
@@ -731,6 +753,7 @@ export class Villager extends Mover {
       // arms full: take it in before looking for more work
       if (this.load && this.load.n >= this.haul(this.load.kind)) { this.delivering = true; this.deliver(dt, s); return; }
       const ok = (tx: number, ty: number) => (this.unreachable.get(ty * w.cols + tx) ?? 0) <= s.simTime
+        && !s.nearestRaider((tx + 0.5) * TILE, (ty + 0.5) * TILE, WORKER_CLEAR)
         && (!heeling || Math.hypot((tx + 0.5) * TILE - s.player.x, (ty + 0.5) * TILE - s.player.y) <= GNOME_PACK.leash * TILE); // a follower picks what is near you, not what is near home
       const patch = job === 'forage' && !heeling ? this.companyPatch(s) : null; // the head is the company now
       // meat lying in the wild comes before any plant: a gnome claims the nearest unclaimed piece and goes for it
