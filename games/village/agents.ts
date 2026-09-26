@@ -397,6 +397,7 @@ export class Villager extends Mover {
     this.role = role;
     this.pen = null; // grown: they eat at the granary like everyone else
     this.barracksHp = s.world.barracksLevel >= 3 ? 30 : s.world.barracksLevel >= 2 ? 15 : 0;
+    if (this.role === 'gnome') this.followingPlayer = s.gnomesFollow; // a young gnome falls in with whatever the grown ones are doing
     this.applyRole(s.mods);
     this.hp = this.maxHp;
     const star = '★'.repeat(this.stars) + '☆'.repeat(5 - this.stars);
@@ -580,7 +581,8 @@ export class Villager extends Mover {
   haul(kind: LoadKind): number { return this.gnome ? (kind === 'food' && this.load?.food === 'meat' ? BOAR.meat : 1) : Math.round(HAUL.villager[kind] * p.haulMul); }
   /** the meat lying in the wild this gnome is on its way to (claimed in `VillageScene.meatClaims`, so two never chase one ham) */
   private fetching: Item | null = null;
-  followingPlayer = false;
+  /** Gnomes keep to the head's heels by default; H (`VillageScene.summonGnomes`) sends them off foraging. Ignored by every other role. */
+  followingPlayer = true;
 
   /** Cancel the current job without losing the carried food or leaving a meat claim behind. */
   followPlayer(s: VillageScene, follow: boolean): void {

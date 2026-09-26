@@ -137,6 +137,8 @@ export class VillageScene extends SimScene {
   lairFound = false;
   /** the gnomes' cottage has been found: their family is yours and the GNOME HOUSE tool is unlocked */
   gnomesFound = false;
+  /** standing order for the gnomes: at their head's heels (the default) or off foraging. Toggled by H, inherited by gnomes coming of age. */
+  gnomesFollow = true;
   /** set when the run ends */
   result: { won: boolean; renown: RenownBreakdown } | null = null;
 
@@ -245,6 +247,7 @@ export class VillageScene extends SimScene {
     this.spawnHives();
     this.lairFound = false;
     this.gnomesFound = p.gnomeStart; // you already keep a toadstool cottage: the craft needs no finding
+    this.gnomesFollow = true; // every run starts with them at your heels (reset() does not re-run the field initialiser)
     this.fog?.reset();
     this.result = null;
     this.nameIdx = this.rng.int(0, NAMES.length - 1);
@@ -450,7 +453,7 @@ export class VillageScene extends SimScene {
     this.foundGnomes(b);
     this.world.refresh(b);
     this.fx.push({ kind: 'upgrade', building: b });
-    this.event('grow', 'You found the gnomes! Their cottage is yours — and they will show you how to raise another.', true);
+    this.event('grow', 'You found the gnomes! Their cottage is yours, they fall in at your heels — and they will show you how to raise another. H sends them foraging.', true);
   }
 
   /** A new gnome house comes with its founders: a grown couple, who breed like any family. */
@@ -463,7 +466,7 @@ export class VillageScene extends SimScene {
     const d = doorstep(home);
     const c = World.center(d.tx, d.ty);
     const v = new Villager(c.x + this.rng.range(-4, 4), c.y + this.rng.range(-4, 4), home, role, age, NAMES[this.nameIdx++ % NAMES.length], this.mods);
-    if (home.kind === 'gnomehouse') { v.gnome = true; v.applyRole(this.mods); v.hp = v.maxHp; } // born under a toadstool: a gnome for life
+    if (home.kind === 'gnomehouse') { v.gnome = true; v.followingPlayer = this.gnomesFollow; v.applyRole(this.mods); v.hp = v.maxHp; } // born under a toadstool: a gnome for life, and one of your train
     if (role === 'soldier') { v.barracksHp = this.world.barracksLevel >= 3 ? 30 : this.world.barracksLevel >= 2 ? 15 : 0; v.applyRole(this.mods); v.hp = v.maxHp; }
     // infants live in the nursery, unseen until they walk out
     if (role === 'infant') { v.hidden = true; v.indoors = home; const c = buildingCenter(home); v.x = c.tx * TILE; v.y = c.ty * TILE; }
@@ -1917,19 +1920,25 @@ export class VillageScene extends SimScene {
 
   // ---- player actions -------------------------------------------------------
 
-  /** H / the whistle button calls nearby adult gnomes; a second call releases the followers. */
+  /**
+   * H / the whistle button. Gnomes trail their head by default (`gnomesFollow`), so the first press sends
+   * them off foraging; the next calls the ones within 20 tiles back to your heels. The standing order sticks,
+   * so gnomes coming of age fall in with the rest (see `Villager.comeOfAge`).
+   */
   summonGnomes(): void {
     if (this.screen !== 'playing' || this.paused || this.interior.active) return;
     const adults = this.villagers().filter(v => v.role === 'gnome' && !v.dead);
     const following = adults.filter(v => v.followingPlayer);
     if (following.length) {
+      this.gnomesFollow = false;
       for (const v of following) v.followPlayer(this, false);
-      this.event('info', 'The gnomes return to foraging.', true);
+      this.event('info', 'The gnomes go off foraging. H or CALL GNOMES brings them back.', true);
       return;
     }
     const nearby = adults.filter(v => !v.hidden && !v.carriedBy && v.dist(this.player) <= 20 * TILE);
+    if (nearby.length) this.gnomesFollow = true; // a call nobody heard changes no standing order
     for (const v of nearby) v.followPlayer(this, true);
-    this.event('info', nearby.length ? `${nearby.length} gnomes answer your call. H or RELEASE GNOMES sends them back to work.` : 'No grown gnomes within calling distance (20 tiles).', true);
+    this.event('info', nearby.length ? `${nearby.length} gnome${nearby.length === 1 ? ' answers' : 's answer'} your call. H or SEND FORAGING puts them back to work.` : 'No grown gnomes within calling distance (20 tiles).', true);
   }
 
   shoot(who: Mover, dx: number, dy: number, dmg: number): boolean {

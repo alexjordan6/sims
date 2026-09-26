@@ -618,6 +618,11 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     gfoe.dead = true; s.removeDead(); step(s, 1);
     // foraging: a grown gnome picks one unit off the nearest wild plant, carries it to the granary and goes again
     for (const v of [gma, gpa, sprout]) { v.hidden = false; v.indoors = null; }
+    // gnomes keep to their head by default; H (SEND FORAGING) is what puts them to work
+    step(s, 1);
+    assert([gma, gpa, sprout].every((v) => v.followingPlayer && v.task === 'following you'), `grown gnomes trail the head by default (${gma.task})`);
+    s.paused = false; s.summonGnomes(); s.paused = true;
+    assert(!s.gnomesFollow && ![gma, gpa, sprout].some((v) => v.followingPlayer) && gma.task === 'off foraging', `H sends the whole family off foraging (${gma.task})`);
     for (const v of [gpa, sprout]) v.update = () => {}; // one forager, so the plant isn't stripped before the first find lands
     for (const q of [...s.world.find((t) => !!WILD_FOOD[t.kind])]) s.world.set(q.tx, q.ty, 'grass');
     const hazel = s.world.set(128, 100, 'hazel'); hazel.stage = 99;
@@ -758,7 +763,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(s.stats.raidersKilled === killed && s.scrap === scrapBefore && s.stats.boarsHunted === 1 && sd.members.length === 1, 'a boar is game, not a raider: no scrap, no kill count');
       b2.calm(); Object.assign(s.player, World.center(118, 92)); s.player.tool = 'hoe';
       const bden = s.world.place('gnomehouse', 129, 96), [bg, bg2] = s.foundGnomes(bden); bg2.dead = true; s.removeDead();
-      Object.assign(bg, World.center(129, 98)); bg.load = null;
+      Object.assign(bg, World.center(129, 98)); bg.load = null; bg.followPlayer(s, false); // it would trail the head otherwise
       settle(s, 2); step(s, 6);
       const held = bg.load as { food?: string; n: number } | null;
       assert(held?.food === 'meat' && held.n === BOAR.meat && !s.world.items.includes(meat!), `a gnome fetches the whole piece (${bg.task})`);

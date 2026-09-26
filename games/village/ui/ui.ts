@@ -116,7 +116,7 @@ export class UI {
         <button class="btn small" data-speed="1">1x</button><button class="btn small" data-speed="4">4x</button><button class="btn small" data-speed="16">16x</button>
         <button class="btn small pause" title="Menu (E / Esc)">II</button>
       </span></div>
-      <button class="btn small summon-gnomes" title="H: call grown gnomes within 20 tiles to follow you; press again to release them">CALL GNOMES</button>
+      <button class="btn small summon-gnomes" title="H: gnomes trail you by default — send them off foraging; press again to call the ones within 20 tiles back to your heels">SEND FORAGING</button>
       <button class="btn small help" title="How to play">?</button>
     </div>`);
     this.top.querySelectorAll<HTMLButtonElement>('[data-speed]').forEach((b) => b.addEventListener('click', () => (s.speed = Number(b.dataset.speed))));
@@ -428,9 +428,9 @@ export class UI {
 
   render(dt: number): void {
     const s = this.scene;
-    const followers = s.villagers().filter(v => v.followingPlayer && !v.dead).length;
+    const followers = s.villagers().filter(v => v.role === 'gnome' && v.followingPlayer && !v.dead).length;
     const call = this.top.querySelector<HTMLButtonElement>('.summon-gnomes')!;
-    const label = followers ? `RELEASE GNOMES (${followers})` : 'CALL GNOMES';
+    const label = followers ? `SEND FORAGING (${followers})` : 'CALL GNOMES';
     if (call.textContent !== label) call.textContent = label;
     this.stage.classList.toggle('raid', s.raidActive);
     if (s.selectedBuilding !== this.lastBuilding) { this.lastBuilding = s.selectedBuilding; this.confirmDemolish = null; this.renderInspector(true); if (this.touch && s.selectedBuilding) { this.showTab('inspector'); this.side.classList.add('open'); } }
