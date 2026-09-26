@@ -231,14 +231,15 @@ export class UI {
           ['1 – 9', 'pick a tool'],
           ['Tab · wheel', 'next / previous tool'],
           ['Z', 'camera zoom'],
+          ['H', 'call the gnomes to your heels / send them foraging'],
           ['E · Esc', 'menu'],
           ['- · =', 'game speed'],
-          ['H', 'this panel'],
+          ['K', 'this panel'],
           ['M', 'sound on / off'],
           ['?', 'how to play'],
         ];
     const panel = h(`<div class="ctrl-panel">
-      <button class="ctrl-tab" title="Controls (H)">${spr('town', TOWN.iconKey, 16)} CONTROLS <span class="arrow">▴</span></button>
+      <button class="ctrl-tab" title="Controls (K)">${spr('town', TOWN.iconKey, 16)} CONTROLS <span class="arrow">▴</span></button>
       <div class="ctrl-card panel">
         <div class="ph">${spr('town', TOWN.iconKey, 24)}<h2>Controls</h2><button class="btn small ctrl-close">×</button></div>
         <div class="ctrl-rows">${rows.map(([k, d]) => `<kbd>${esc(k)}</kbd><span>${esc(d)}</span>`).join('')}</div>
@@ -261,7 +262,10 @@ export class UI {
     window.addEventListener('keydown', (e) => { if (e.key === 'm' || e.key === 'M') setTimeout(paintMute, 0); });
     setTimeout(paintMute, 0);
     window.addEventListener('keydown', (e) => {
-      if ((e.key === 'h' || e.key === 'H') && !(e.target as HTMLElement).closest('input')) set(!open);
+      const el = e.target as HTMLElement | null;
+      if (el?.closest?.('input')) return; // typing a village name is not a shortcut
+      if (e.key === 'k' || e.key === 'K') set(!open); // H is the gnome whistle (main.ts), and one key does one thing
+      if (e.key === '?') this.showHelp(); // the row below has always advertised it
     });
     (this.touch ? document.getElementById('game')! : this.overlay).append(panel);
     set(open);
