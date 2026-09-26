@@ -753,8 +753,8 @@ export function ensureFlora(scene: Phaser.Scene): void {
   for (let i = 0; i < 3; i++) drawPile(ctx, at(FLORA.pile.honey[i]), i, 'honey');
   drawHive(ctx, at(FLORA.hive));
   for (let i = 0; i < 3; i++) drawTallGrass(ctx, at(FLORA.tallGrass[i]), i);
-  tex.refresh();
   drawScrap(ctx, at(FLORA.scrap));
+  tex.refresh();
   for (let i = 0; i < FLORA.count; i++) tex.add(i, 0, at(i), 0, 16, 16); // frames, so items and fx can draw one tile as an image
 }
 /** Long grass: a dense stand of blades over dark ground, each variant leaning and tufted differently. */
