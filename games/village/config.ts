@@ -33,6 +33,16 @@ export const p = live(
     waveHpGrowth: [D.waveHpGrowth, 0, 0.3, 0.01, 'Raider HP multiplier grows this much per wave (0.08 = +8% each raid).'],
   }, 'pacing'),
   params({
+    adaptiveSpawns: [D.adaptiveSpawns, 'Health-driven spawning. Off resets the ramp; existing enemies remain. Independent of raids and peaceful mode.'],
+    adaptiveHp: [D.adaptiveHp, 0, 200, 1, 'Spawn only while raw HP is strictly above this value, not a percentage.'],
+    adaptiveEvery: [D.adaptiveEvery, 0.5, 60, 0.5, 'Simulation seconds between batches. Low HP and shelter restart the countdown.'],
+    adaptiveStart: [D.adaptiveStart, 1, 50, 1, 'Starting enemies per batch.'],
+    adaptiveGrowth: [D.adaptiveGrowth, 0, 5, 0.25, 'Extra enemies per successful batch, rounded down. 0.25 adds one every four batches.'],
+    adaptiveBatchCap: [D.adaptiveBatchCap, 1, 100, 1, 'Maximum enemies in a batch.'],
+    adaptiveAliveCap: [D.adaptiveAliveCap, 1, 500, 1, 'Living adaptive enemy cap; other enemies do not count.'],
+    adaptiveRadius: [D.adaptiveRadius, 8, 50, 1, 'Minimum spawn distance in tiles, spread across the next four tiles.'],
+  }, 'adaptive spawning'),
+  params({
     treeYield: [D.treeYield, 1, 30, 1, 'Wood a woodcutter gets from a young tree.'],
     oldYield: [D.oldYield, 1, 40, 1, 'Wood a woodcutter gets from old growth (trees older than 6 days).'],
     playerTreeYield: [D.playerTreeYield, 0, 12, 1, 'What the head\'s own axe brings in per tree. 0 = the axe only clears ground.'],

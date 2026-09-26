@@ -15,6 +15,7 @@ import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
 import { weaponMul } from './characters';
+import { AdaptiveSpawner } from './adaptive-spawn';
 
 const NAMES = ['Ada', 'Bram', 'Cass', 'Dov', 'Eli', 'Fen', 'Gil', 'Hana', 'Ivo', 'Juno', 'Kai', 'Lior', 'Mara', 'Nils', 'Orla', 'Pim', 'Quin', 'Rue', 'Sol', 'Tova', 'Uli', 'Vera', 'Wren', 'Xan', 'Yael', 'Zed'];
 
@@ -58,6 +59,31 @@ export type FxEvent =
 export type Screen = 'title' | 'playing' | 'paused' | 'over' | 'won';
 
 export class VillageScene extends SimScene {
+  readonly adaptive = new AdaptiveSpawner();
+  private adaptiveEnemies = new Set<Raider>();
+
+  tickAdaptiveSpawns(dt: number): void {
+    for (const enemy of this.adaptiveEnemies) if (enemy.dead) this.adaptiveEnemies.delete(enemy);
+    const pl = this.player;
+    this.adaptive.tick(dt, pl.hp, this.screen === 'playing' && !this.paused && !pl.dead && !pl.hidden && !this.interior.active,
+      this.adaptiveEnemies.size, p, n => {
+        let spawned = 0;
+        for (let attempt = 0; attempt < n * 12 && spawned < n; attempt++) {
+          const angle = this.rng.range(0, Math.PI * 2), radius = this.rng.range(p.adaptiveRadius, p.adaptiveRadius + 4) * TILE;
+          const tile = World.toTile(pl.x + Math.cos(angle) * radius, pl.y + Math.sin(angle) * radius);
+          if (!this.world.inBounds(tile.tx, tile.ty) || this.world.isBlocked(tile.tx, tile.ty, true)) continue;
+          const pos = World.center(tile.tx, tile.ty);
+          if (Math.hypot(pos.x - pl.x, pos.y - pl.y) < p.adaptiveRadius * TILE) continue;
+          const enemy = new Raider(pos.x, pos.y, { hpMul: this.mods.raiderHpMul, speedMul: this.mods.raiderSpeedMul });
+          enemy.lairBound = true; // Does not hold up raid completion or Warlord victory.
+          enemy.huntPlayer = true;
+          this.adaptiveEnemies.add(this.spawn(enemy));
+          spawned++;
+        }
+        return spawned;
+      });
+  }
+
   neighborRadius = 130; // soldier aggro radius = largest grid query
 
   world!: World;
@@ -215,6 +241,8 @@ export class VillageScene extends SimScene {
   }
 
   setup(): void {
+    this.adaptive.reset();
+    this.adaptiveEnemies.clear();
     this.interior.leave();
     this.posting = null;
     this.squad = []; this.drag = null;
@@ -487,6 +515,24 @@ export class VillageScene extends SimScene {
     // playtest buttons on the backtick panel (once: the scene is created a single time)
     if (!VillageScene.buttonsMade) {
       VillageScene.buttonsMade = true;
+      button('reset spawn ramp', () => this.adaptive.reset(), 'Restart adaptive batch size and countdown; existing enemies remain.');
+      const adaptiveScene = this;
+      const adaptiveStatus = {
+        get nextBatch() { return adaptiveScene.adaptive.nextBatch(p); },
+        get alive() { return [...adaptiveScene.adaptiveEnemies].filter(e => !e.dead).length; },
+        get state() {
+          if (!p.adaptiveSpawns) return 'off';
+          if (adaptiveScene.screen !== 'playing' || adaptiveScene.paused) return 'paused';
+          if (adaptiveScene.player.dead || adaptiveScene.player.hidden || adaptiveScene.interior.active) return 'sheltered / inactive';
+          if (adaptiveScene.player.hp <= p.adaptiveHp) return 'waiting for HP';
+          if (this.alive >= p.adaptiveAliveCap) return 'enemy cap reached';
+          return 'spawning in ' + Math.max(0, p.adaptiveEvery - adaptiveScene.adaptive.elapsed).toFixed(1) + 's';
+        },
+      };
+      const adaptiveFolder = getGui().addFolder('adaptive status');
+      adaptiveFolder.add(adaptiveStatus, 'state').listen().disable();
+      adaptiveFolder.add(adaptiveStatus, 'nextBatch').listen().disable();
+      adaptiveFolder.add(adaptiveStatus, 'alive').listen().disable();
       button('next day', () => { if (this.screen === 'playing') { this.day++; this.newDay(); } }, 'Jump to the next dawn: rations, hearths, births, raids on schedule.');
       button('spawn raid', () => { if (this.screen === 'playing') this.spawnRaid(); }, 'Start a raid now, sized for the current wave.');
       button('+50 wood', () => { this.wood = Math.min(this.woodCap, this.wood + 50); }, 'Wood into the woodyard, up to its cap.');
@@ -1145,6 +1191,7 @@ export class VillageScene extends SimScene {
     this.tidySelection();
     this.tickHives(dt);
     this.tickSkulks(dt);
+    this.tickAdaptiveSpawns(dt);
     this.tickTowers(dt);
     for (const a of this.agents) if (a.dead) this.onDeath(a as Mover);
     this.removeDead();

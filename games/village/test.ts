@@ -54,7 +54,9 @@ function step(s: VillageScene, seconds: number) {
 }
 document.getElementById('run-checks')!.addEventListener('click', () => {
   output.textContent = ''; summary.textContent = 'Running';
+  const savedAdaptiveSpawns = p.adaptiveSpawns;
   try {
+    p.adaptiveSpawns = false; // Legacy timed scenarios isolate their own enemies.
     assert(COLS * ROWS > 80 * 44 * 10, 'world is over ten times the old area');
     runPackChecks(scene(), assert);
     let dense = 0;
@@ -1347,7 +1349,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
 
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;
-  } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); }
+  } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); } finally { p.adaptiveSpawns = savedAdaptiveSpawns; }
 });
 document.querySelectorAll<HTMLButtonElement>('[data-preview]').forEach(btn => btn.addEventListener('click', () => {
   const s = fresh(), kind = btn.dataset.preview!;

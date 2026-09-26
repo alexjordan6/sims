@@ -1010,6 +1010,8 @@ export class Raider extends Mover {
     return true;
   }
   protected target: Mover | null = null;
+  /** Adaptive encounters pursue the head rather than villagers. */
+  huntPlayer = false;
   protected retarget = 0;
   protected bored = 0;
   readonly boss: boolean;
@@ -1056,7 +1058,7 @@ export class Raider extends Mover {
     this.retarget -= dt;
     if (this.retarget <= 0 || !this.target || this.target.dead || this.target.hidden) {
       this.retarget = 0.5;
-      this.target = s.nearestVictim(this.x, this.y);
+      this.target = this.huntPlayer ? (s.player.dead || s.player.hidden ? null : s.player) : s.nearestVictim(this.x, this.y);
     }
     if (!this.target) {
       this.bored += dt;

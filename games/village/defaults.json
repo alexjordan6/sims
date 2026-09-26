@@ -97,5 +97,13 @@
   "hungerPerDay": 4,
   "hungerMeal": 2,
   "starveHpPerDay": 60,
-  "hunger": true
+  "hunger": true,
+  "adaptiveSpawns": true,
+  "adaptiveHp": 50,
+  "adaptiveEvery": 8,
+  "adaptiveStart": 1,
+  "adaptiveGrowth": 0.25,
+  "adaptiveBatchCap": 20,
+  "adaptiveAliveCap": 100,
+  "adaptiveRadius": 18
 }
