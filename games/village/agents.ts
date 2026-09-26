@@ -339,12 +339,12 @@ export class Villager extends Mover {
   deathAt(s: VillageScene): number { return s.deathAge + ((this.id % 7) / 6 - 0.5) * p.elderDays * 0.5; }
   /** Training days needed to come of age skilled (War Drums lowers it). */
   static drillNeeded(s: VillageScene): number { return Math.max(1, p.cadetDays + s.mods.cadetDaysDelta); }
-  /** What this child will become as things stand — shown in the UI so nothing is a surprise. The pen decides; without one, nothing is decided yet. */
+  /** What this child will become as things stand — shown in the UI so nothing is a surprise. Explicit pen training overrides the soldier default. */
   outlook(s: VillageScene): { role: Calling | 'gnome' | null; skilled: boolean } {
     if (this.gnome) return { role: 'gnome', skilled: false }; // a gnome grows into a gnome; no pen has a say
     const daysLeft = Math.max(0, s.adultAge - this.age); // training days still possible, if fed all the way
     const skilled = s.mods.fullDrill || (!!this.pen && this.trained + daysLeft >= Villager.drillNeeded(s));
-    return { role: this.pen, skilled };
+    return { role: this.pen ?? 'soldier', skilled };
   }
   /** Care stars right now: five for averaging six care points a day. */
   starsNow(): number {

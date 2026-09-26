@@ -298,15 +298,14 @@ export class VillageScene extends SimScene {
       // skipped on purpose: addVillager makes anyone homed in a cottage a gnome, so they'd arrive wrong.
       this.foundGnomes(home);
     } else {
-      const ma = this.addVillager(home, 'farmer', grown);
-      const pa = this.addVillager(home, 'woodcutter', grown);
-      this.addVillager(home, 'kid', p.infantDays).parents = [ma, pa];
+      // Start with a lone defender; the player establishes farming and woodcutting.
+      this.addVillager(home, 'soldier', grown + 2);
       for (let i = 0; i < this.mods.startSoldiers; i++) this.addVillager(home, 'soldier', grown + 2);
       if (this.mods.extraAdults > 0) {
         // a second family, in the nearest open 2x2 to the left of the first house
         const spot = [[-5, 0], [-6, 0], [5, 0], [0, 5], [-5, 5], [5, 5]].map(([dx, dy]) => ({ tx: home.tx + dx, ty: home.ty + dy })).find((q) => this.world.canBuild('house', q.tx, q.ty)) ?? { tx: home.tx - 3, ty: home.ty };
         const h2 = this.world.placeHouse(spot.tx, spot.ty);
-        for (let i = 0; i < this.mods.extraAdults; i++) this.addVillager(h2, i % 2 ? 'woodcutter' : 'farmer', grown);
+        for (let i = 0; i < this.mods.extraAdults; i++) this.addVillager(h2, 'soldier', grown);
       }
     }
     const where = this.world.denseForests ? 'the deep woodland' : 'the open meadows';
@@ -1769,10 +1768,7 @@ export class VillageScene extends SimScene {
   }
 
   pickCivilRole(): Role {
-    const vs = this.villagers();
-    const farmers = vs.filter((v) => v.role === 'farmer').length;
-    const cutters = vs.filter((v) => v.role === 'woodcutter').length;
-    return farmers <= cutters ? 'farmer' : 'woodcutter';
+    return 'soldier';
   }
 
   // ---- buildings: beds, caps, upgrades ----------------------------------------------
