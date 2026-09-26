@@ -6,7 +6,7 @@ import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type Tool } from '../agents';
 import { Boar } from '../wildlife';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
-import { OGRE, BOAR, HAUL, COST, ORDER, GNOME_YARD, p, TOWER, HEARTH_WOOD, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, TRAITS, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, PEN_NAME, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, isDish, foodCount, hasInterior, type DishKind, CROP_KINDS, CALLINGS, DISMANTLE, DIET_CAP, DIET_STAT_NAME, type FoodKind, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS } from '../config';
+import { OGRE, BOAR, HAUL, COST, ORDER, GNOME_YARD, GNOME_PACK, p, TOWER, HEARTH_WOOD, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, TRAITS, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, PEN_NAME, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, isDish, foodCount, hasInterior, type DishKind, CROP_KINDS, CALLINGS, DISMANTLE, DIET_CAP, DIET_STAT_NAME, type FoodKind, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS } from '../config';
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
@@ -455,6 +455,7 @@ export class UI {
     this.renderFeed();
     this.inventory.render();
     if(this.scene.armoryFor)this.renderArmory();
+    if (this.scene.pouchOf) this.renderPouch();
     if (this.scene.cookingAt) this.renderCooking();
   }
 
@@ -778,6 +779,10 @@ export class UI {
       const pips = ARMOR_SLOTS.map((slot) => `<span class="pip t${m.armor[slot]}" title="${ARMOR[slot].tiers[m.armor[slot]].name}">${ARMOR[slot].name[0]}${m.armor[slot] ? '·'.repeat(m.armor[slot]) : ''}</span>`).join('');
       html += `<div class="raise"><div class="cap">ARMOR</div><div class="pips">${pips}</div><div class="d">${st.hp ? `+${st.hp} HP · ` : ''}${Math.round((1 - st.dmgMul) * 100)}% less damage · ${Math.round(st.block * 100)}% block${st.speedMul > 1 ? ` · +${Math.round((st.speedMul - 1) * 100)}% speed` : ''}</div><button class="btn small open-armory">ARMORY</button></div>`;
     }
+    if (m instanceof Villager && m.pouch) {
+      const held = m.pouch.slots.filter(Boolean).length;
+      html += `<div class="raise"><div class="cap">POUCH</div><div class="d">${held ? esc(m.pouch.slots.filter(Boolean).map((slot) => slotName(slot!)).join(` · `)) : 'empty'} · ${held}/${m.pouch.slots.length} slots</div><button class="btn small open-pouch">OPEN POUCH</button></div>`;
+    }
     if (m instanceof Villager && m.role === 'soldier') html += `<div class="raise"><div class="cap">EQUIPMENT & ORDERS</div><div class="seg"><button class="btn small ${m.weapon === 'sword' ? 'on' : ''}" data-weapon="sword">SWORD</button><button class="btn small ${m.weapon === 'bow' ? 'on' : ''}" data-weapon="bow">BOW</button></div><p>Carries a ${WEAPONS.melee.tiers[m.weapons.melee].name.toLowerCase()} and a ${WEAPONS.bow.tiers[m.weapons.bow].name.toLowerCase()} — forge better in the ARMORY. Arrows in shared quiver: ${s.arrows}. ${m.post ? `Post: ${m.post.tx}, ${m.post.ty}.` : m.order?.kind === 'hold' ? `Holding at ${m.order.tx}, ${m.order.ty} (wand).` : m.order?.kind === 'attack' ? `Hunting ${(m.order.target as Raider).name ?? 'a raider'} (wand).` : m.order?.kind === 'follow' ? 'Following you (wand).' : 'Patrolling on the ground.'}</p><button class="btn small post-soldier">${s.posting === m ? 'CANCEL PLACEMENT' : 'SET WALL POST'}</button><button class="btn small recall-soldier">RETURN TO PATROL</button></div>`;
     if (html !== this.lastInspector) {
       this.inspector.innerHTML = html;
@@ -785,6 +790,7 @@ export class UI {
       this.inspector.querySelector('.close')?.addEventListener('click', () => s.select(null));
       this.inspector.querySelector('.encourage')?.addEventListener('click', () => { if (m instanceof Villager) s.encourage(m); this.renderInspector(true); });
       this.inspector.querySelector('.open-armory')?.addEventListener('click', () => { s.openArmory(m); this.side.classList.remove('open'); });
+      this.inspector.querySelector('.open-pouch')?.addEventListener('click', () => { if (m instanceof Villager) s.openPouch(m); this.side.classList.remove('open'); });
       this.inspector.querySelectorAll<HTMLElement>('[data-weapon]').forEach(el => el.addEventListener('click', () => { if (m instanceof Villager) s.equipSoldier(m, el.dataset.weapon as 'bow' | 'sword'); this.renderInspector(true); }));
       this.inspector.querySelector('.post-soldier')?.addEventListener('click', () => { if (m instanceof Villager) s.posting = s.posting === m ? null : m; this.side.classList.remove('open'); this.renderInspector(true); });
       this.inspector.querySelector('.recall-soldier')?.addEventListener('click', () => { if (m instanceof Villager) { m.post = null; m.order = null; m.clearGoal(); s.posting = null; } this.renderInspector(true); });
@@ -992,6 +998,29 @@ export class UI {
     el.querySelectorAll<HTMLElement>('[data-dye]').forEach((b) => b.addEventListener('click', () => { s.setDye(who, Number(b.dataset.dye)); this.renderArmory(); }));
     el.querySelectorAll<HTMLElement>('[data-helm]').forEach((b) => b.addEventListener('click', () => { s.setHelmetStyle(who, Number(b.dataset.helm)); this.renderArmory(); }));
     el.querySelectorAll<HTMLElement>('[data-plume]').forEach((b) => b.addEventListener('click', () => { s.setPlume(who, Number(b.dataset.plume)); this.renderArmory(); }));
+  }
+
+  private pouchEl: HTMLElement | null = null;
+  private lastPouch = '';
+  /** A gnome’s little backpack, open beside your own pack: drag food and gear either way. */
+  renderPouch(): void {
+    const s = this.scene, v = s.pouchOf;
+    if (!v || !v.pouch || v.dead) { this.pouchEl?.remove(); this.pouchEl = null; this.lastPouch = ''; return; }
+    if (this.inventory.dragging) return;
+    const held = v.pouch.slots.filter(Boolean).length;
+    const key = `${v.id}|${held}/${v.pouch.slots.length}|${v.task}|${v.followingPlayer}`;
+    const html = `<div class="cooking panel">
+      <div class="ph"><img class="art" src="${charImg(lookFor(v)!)}" alt=""><h2>${esc(v.name)}’s pouch</h2><span class="cap">${held}/${v.pouch.slots.length} full · ${esc(v.task)}</span><button class="btn small close">CLOSE</button></div>
+      <div class="inventory-host" data-with-pouch="1"></div>
+      <p class="sub small">Gnomes forage into these while they trail you — only what grows within ${GNOME_PACK.leash} tiles of where you stand. Drag anything either way. Send them back to work (H) and whatever food is still in the pouch goes to the granary on their next trip; anything else stays with them.</p>
+    </div>`;
+    if (!this.pouchEl) this.pouchEl = h('<div class="screen cooking-screen"></div>');
+    if (!this.pouchEl.isConnected) { this.screens.append(this.pouchEl); this.lastPouch = ''; } // showScreen() empties #screens without asking
+    if (key === this.lastPouch) return; // rebuilding under the pointer would swallow every click and drag
+    this.lastPouch = key;
+    this.pouchEl.innerHTML = html;
+    this.inventory.mount(this.pouchEl.querySelector('.inventory-host')!);
+    this.pouchEl.querySelector('.close')!.addEventListener('click', () => s.openPouch(null));
   }
 
   private cookEl: HTMLElement | null = null;

@@ -232,6 +232,8 @@ export const HOUSE_BEDS = [0, 4, 6, 8] as const;
 export const GNOME_BEDS = [0, 3, 4, 6] as const;
 /** tiles from a gnome house's centre that count as its yard: food lying there feeds its children */
 export const GNOME_YARD = 4;
+/** A grown gnome's own little backpack: slots it holds, and how far from their head they stray to forage while following (tiles). */
+export const GNOME_PACK = { slots: 4, leash: 7 } as const;
 
 // ---- food and diet --------------------------------------------------------------------------
 /** What the gnomes' pot makes out of raw food: dishes are food like any other, only richer (see RECIPES and Food.power). */

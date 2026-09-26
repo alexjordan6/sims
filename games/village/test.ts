@@ -8,7 +8,7 @@ import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, Wrecker, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm } from './wildlife';
-import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS } from './config';
+import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, GNOME_PACK, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
 const output = document.getElementById('test-results')!, summary = document.getElementById('test-summary')!;
@@ -618,11 +618,30 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     gfoe.dead = true; s.removeDead(); step(s, 1);
     // foraging: a grown gnome picks one unit off the nearest wild plant, carries it to the granary and goes again
     for (const v of [gma, gpa, sprout]) { v.hidden = false; v.indoors = null; }
-    // gnomes keep to their head by default; H (SEND FORAGING) is what puts them to work
-    step(s, 1);
-    assert([gma, gpa, sprout].every((v) => v.followingPlayer && v.task === 'following you'), `grown gnomes trail the head by default (${gma.task})`);
+    // gnomes keep to their head by default, and forage into their own pouches while they trail you
+    for (const q of [...s.world.find((t) => !!WILD_FOOD[t.kind])]) s.world.set(q.tx, q.ty, 'grass'); // a bare map to plant one hazel in
+    Object.assign(s.player, World.center(126, 103));
+    for (let i = 0; i < 40 && [gma, gpa, sprout].some((v) => v.dist(s.player) > GNOME_PACK.leash * TILE); i++) step(s, 1); // called to heel, they close on you first
+    assert([gma, gpa, sprout].every((v) => v.followingPlayer && v.dist(s.player) < GNOME_PACK.leash * TILE), `grown gnomes trail the head by default (${[gma, gpa, sprout].map((v) => `${v.name} ${v.task} ${(v.dist(s.player) / TILE).toFixed(1)}t`).join(", ")})`);
+    assert(!!gma.pouch && gma.pouch.slots.length === GNOME_PACK.slots && !gma.pouch.bulk().length, 'and each one carries an empty pouch');
+    const nutsBefore = s.pantry.hazelnut;
+    const pocketed = () => [gma, gpa, sprout].reduce((n, v) => n + v.pouch!.countOf('food', 'hazelnut'), 0);
+    const underfoot = s.world.set(128, 103, 'hazel'); underfoot.stage = 99;
+    for (let i = 0; i < 40 && !pocketed(); i++) step(s, 1);
+    assert(pocketed() > 0 && ![gma, gpa, sprout].some((v) => v.load), `a follower forages into its own pouch, not its arms (${pocketed()} of ${FOODS.hazelnut.yield} · ${gma.task})`);
+    assert(s.pantry.hazelnut === nutsBefore, 'and walks nothing to the granary while it follows');
+    // the leash: what grows across the clearing is not a follower’s business
+    for (const q of [...s.world.find((t) => !!WILD_FOOD[t.kind])]) s.world.set(q.tx, q.ty, 'grass');
+    const across = s.world.set(126 + GNOME_PACK.leash + 5, 103, 'hazel'); across.stage = 99;
+    step(s, 4);
+    assert(s.wildLeft(across) === FOODS.hazelnut.yield && [gma, gpa, sprout].every((v) => v.dist(s.player) < GNOME_PACK.leash * TILE), `a plant beyond the leash is left standing (${gma.task})`);
+    // H sends them back to work, and the pouches go to the granary on the way (nothing left to pick, so a trip home is all there is to do)
+    for (const q of [...s.world.find((t) => !!WILD_FOOD[t.kind])]) s.world.set(q.tx, q.ty, 'grass');
+    const packed = pocketed();
     s.paused = false; s.summonGnomes(); s.paused = true;
-    assert(!s.gnomesFollow && ![gma, gpa, sprout].some((v) => v.followingPlayer) && gma.task === 'off foraging', `H sends the whole family off foraging (${gma.task})`);
+    assert(!s.gnomesFollow && ![gma, gpa, sprout].some((v) => v.followingPlayer), 'H sends the whole family off foraging');
+    for (let i = 0; i < 120 && s.pantry.hazelnut < nutsBefore + packed; i++) step(s, 1);
+    assert(s.pantry.hazelnut === nutsBefore + packed && !pocketed(), `sent back to work, the pouches are emptied into the granary (${s.pantry.hazelnut - nutsBefore} of ${packed})`);
     for (const v of [gpa, sprout]) v.update = () => {}; // one forager, so the plant isn't stripped before the first find lands
     for (const q of [...s.world.find((t) => !!WILD_FOOD[t.kind])]) s.world.set(q.tx, q.ty, 'grass');
     const hazel = s.world.set(128, 100, 'hazel'); hazel.stage = 99;

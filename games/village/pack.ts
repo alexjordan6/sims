@@ -39,7 +39,8 @@ function matches(s: Slot | null, kind: BulkKind, food?: FoodKind): s is Bulk {
 /** Pure inventory data. Every transfer reports the amount actually accepted/removed. */
 export class Pack {
   readonly slots: (Slot | null)[];
-  constructor(size = 12) { this.slots = Array.from({ length: Math.max(5, Math.floor(size)) }, () => null); }
+  /** `min` is the floor on slots: the head's pack never drops below five, a gnome's pouch is allowed to be tiny. */
+  constructor(size = 12, min = 5) { this.slots = Array.from({ length: Math.max(min, Math.floor(size)) }, () => null); }
   at(i: number): Slot | null { return this.slots[i] ?? null; }
   get emptySlots(): number { return this.slots.filter(s => !s).length; }
   get full(): boolean { return this.emptySlots === 0; }

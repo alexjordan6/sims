@@ -1,6 +1,6 @@
 import type { Agent } from '@shared/index';
 import { World, WILD_FOOD, doorstep, buildingCenter, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
-import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, CALLINGS, ORDER, GNOME_YARD, ITEM, MASS, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, zeroFood, BOAR, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
+import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, CALLINGS, ORDER, GNOME_YARD, GNOME_PACK, ITEM, MASS, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, zeroFood, BOAR, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
 import type { Mods } from './meta';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle } from './characters';
 import type { VillageScene } from './main';
@@ -272,6 +272,8 @@ export class Villager extends Mover {
   elder = false;
   /** born in a gnome house: a little person who never takes a pen or a calling, eats at the granary as a child and fights when grown */
   gnome = false;
+  /** a grown gnome's little backpack: what it forages into while it trails the head, and what you can open up */
+  pouch: Pack | null = null;
   /** the pen kind a child trains in (null: no pen painted — they play near home and eat at home) */
   pen: Calling | null = null;
   /** pen children: the day they last ate from the pile, and sim time their next meal is due */
@@ -372,7 +374,7 @@ export class Villager extends Mover {
       case 'kid': this.radius = 2; this.color = 0xf5d8a8; this.maxHp = 10; this.speed = 30; break;
       case 'farmer': this.radius = 3; this.color = 0x7fd37f; this.maxHp = 20; this.speed = 35; break;
       case 'woodcutter': this.radius = 3; this.color = 0xc9a26b; this.maxHp = 20; this.speed = 35; break;
-      case 'gnome': this.radius = 2; this.color = 0xd94a3a; this.maxHp = p.gnomeHp; this.speed = p.gnomeSpeed; break;
+      case 'gnome': this.radius = 2; this.color = 0xd94a3a; this.maxHp = p.gnomeHp; this.speed = p.gnomeSpeed; this.pouch ??= new Pack(GNOME_PACK.slots, 1); break;
       case 'soldier': this.radius = 3; this.color = 0x6f9bff; this.maxHp = p.soldierHp + mods.soldierHpBonus + this.barracksHp + (this.skilled ? 15 : 0) + armorStats(this.armor).hp; this.speed = 45 * armorStats(this.armor).speedMul; break;
     }
     // how they were raised follows them for life
@@ -581,19 +583,57 @@ export class Villager extends Mover {
   haul(kind: LoadKind): number { return this.gnome ? (kind === 'food' && this.load?.food === 'meat' ? BOAR.meat : 1) : Math.round(HAUL.villager[kind] * p.haulMul); }
   /** the meat lying in the wild this gnome is on its way to (claimed in `VillageScene.meatClaims`, so two never chase one ham) */
   private fetching: Item | null = null;
+  /** Arms and pouch together: what a granary trip hands in (see `VillageScene.deposit`), so a gnome sent back to work empties its pouch. */
+  override carriedLoads(): readonly { kind: BulkKind; n: number; food?: FoodKind }[] {
+    const arms = super.carriedLoads();
+    if (!this.pouch) return arms;
+    return [...arms, ...this.pouch.bulk().map(b => ({ kind: b.kind, n: b.n, food: b.kind === 'food' ? b.food : undefined }))];
+  }
+  /** The arms empty first, then the pouch. `carriedOf` deliberately stays arms-only: `Mover.takeOut` measures its own take by it, so counting the pouch there would hand out food it never removed. */
+  override takeOut(kind: BulkKind, n: number, food?: FoodKind): number {
+    const arms = super.takeOut(kind, n, food);
+    return arms + (this.pouch ? this.pouch.take(kind, n - arms, food) : 0);
+  }
+  /** A gnome at your heels forages into its own pouch instead of hauling armfuls to the granary. */
+  private get toPouch(): boolean { return this.followingPlayer && !!this.pouch; }
+  get pouchFull(): boolean { return !!this.pouch && this.pouch.full; }
+  /** Put a find where it goes: the pouch while following, the arms on a working trip. Returns what was taken. */
+  private stow(kind: BulkKind, n: number, food?: FoodKind): number {
+    return this.toPouch ? this.pouch!.add(kind, n, food) : this.pickUp(kind, n, food);
+  }
+  /** Room for one more find, wherever it would go. */
+  private canStow(kind: BulkKind, food?: FoodKind): boolean {
+    if (this.toPouch) return this.pouch!.room(kind, food) > 0;
+    return kind !== 'scrap' && this.canCarry(kind, food); // bare arms never hold scrap
+  }
   /** Gnomes keep to the head's heels by default; H (`VillageScene.summonGnomes`) sends them off foraging. Ignored by every other role. */
   followingPlayer = true;
 
   /** Cancel the current job without losing the carried food or leaving a meat claim behind. */
   followPlayer(s: VillageScene, follow: boolean): void {
     this.followingPlayer = follow;
+    // whatever the arms hold goes into the pouch: they are not walking it to the granary now
+    if (follow && this.pouch && this.load) {
+      const moved = this.pouch.add(this.load.kind, this.load.n, this.load.food);
+      this.load.n -= moved;
+      if (this.load.n < 1e-9) this.load = null;
+    }
     if (this.fetching) this.dropFetch(s);
     this.clearGoal();
     this.workTimer = 0;
     this.thinkTimer = 0;
     this.companyWait = 0;
-    this.delivering = false;
+    this.delivering = !follow && !!this.pouch?.bulk().length; // released with a full pouch: the granary first
     this.task = follow ? 'following you' : 'off foraging';
+  }
+  /** Walk to the head and keep station: what a follower does when there is nothing worth picking nearby. */
+  private walkToHead(dt: number, s: VillageScene, task: string): void {
+    const gap = (2 + this.id % 3 * 0.5) * TILE;
+    if (this.dist(s.player) > gap) {
+      this.setGoal(s, s.player.tile.tx, s.player.tile.ty);
+      this.followPath(dt);
+    } else { this.clearGoal(); this.vx = this.vy = 0; }
+    this.task = s.player.hidden ? 'waiting outside for you' : task;
   }
   private companyWait = 0;
   private companyRest = 0;
@@ -644,11 +684,13 @@ export class Villager extends Mover {
     if (!near && this.followPath(dt) && !near) { const d = this.dist(it) || 1; this.x += (it.x - this.x) / d * Math.min(d, this.speed * dt); this.y += (it.y - this.y) / d * Math.min(d, this.speed * dt); }
     if (!near && !this.path.length && this.dist(it) > TILE * 1.5) { this.dropFetch(s); this.unreachable.set(at.ty * s.world.cols + at.tx, s.simTime + 60); return false; } // no way there
     if (!near) return true;
-    const take = Math.min(it.n, BOAR.meat);
-    this.pickUp('food', take, 'meat'); it.n -= take;
+    const took = this.stow('food', Math.min(it.n, BOAR.meat), 'meat');
+    if (took <= 0) { this.dropFetch(s); return false; } // nowhere to put it after all
+    it.n -= took;
     if (it.n <= 1e-9) s.world.removeItem(it);
     this.dropFetch(s);
-    this.delivering = true; this.clearGoal();
+    if (!this.toPouch) this.delivering = true; // a follower keeps it in the pouch
+    this.clearGoal();
     return true;
   }
   private dropFetch(s: VillageScene): void { if (this.fetching) s.meatClaims.delete(this.fetching.id); this.fetching = null; this.clearGoal(); }
@@ -658,14 +700,16 @@ export class Villager extends Mover {
     const farmer = job === 'farm';
     if (s.nearestRaider(this.x, this.y, 90)) { this.task = 'fleeing'; this.delivering = false; if (this.fetching) this.dropFetch(s); this.goHome(s, dt); return; }
 
-    if (job === 'forage' && this.followingPlayer) {
-      const gap = (2 + this.id % 3 * 0.5) * TILE;
-      if (this.dist(s.player) > gap) {
-        this.setGoal(s, s.player.tile.tx, s.player.tile.ty);
-        this.followPath(dt);
-      } else { this.clearGoal(); this.vx = this.vy = 0; }
-      this.task = s.player.hidden ? 'waiting outside for you' : 'following you';
-      return;
+    // at the head’s heels: still foraging, but only what lies within a short walk of them
+    const heeling = job === 'forage' && this.followingPlayer;
+    if (heeling) {
+      this.delivering = false; // no granary trips while following; the pouch holds the finds
+      if (s.player.hidden || this.pouchFull || this.dist(s.player) > GNOME_PACK.leash * TILE) {
+        if (this.fetching) this.dropFetch(s);
+        this.workTimer = 0;
+        this.walkToHead(dt, s, this.pouchFull ? 'pouch full — following you' : 'following you');
+        return;
+      }
     }
 
     if (this.workTimer > 0) {
@@ -676,7 +720,7 @@ export class Villager extends Mover {
     }
 
     if (job === 'forage' && this.load && this.load.n >= this.haul(this.load.kind)) this.delivering = true;
-    if (job === 'forage' && this.waitForCompany(dt, s)) return;
+    if (job === 'forage' && !heeling && this.waitForCompany(dt, s)) return;
     if (this.delivering) { this.deliver(dt, s); return; }
     if (job === 'forage' && this.fetchMeat(dt, s)) return;
 
@@ -686,10 +730,11 @@ export class Villager extends Mover {
       const w = s.world;
       // arms full: take it in before looking for more work
       if (this.load && this.load.n >= this.haul(this.load.kind)) { this.delivering = true; this.deliver(dt, s); return; }
-      const ok = (tx: number, ty: number) => (this.unreachable.get(ty * w.cols + tx) ?? 0) <= s.simTime;
-      const patch = job === 'forage' ? this.companyPatch(s) : null;
+      const ok = (tx: number, ty: number) => (this.unreachable.get(ty * w.cols + tx) ?? 0) <= s.simTime
+        && (!heeling || Math.hypot((tx + 0.5) * TILE - s.player.x, (ty + 0.5) * TILE - s.player.y) <= GNOME_PACK.leash * TILE); // a follower picks what is near you, not what is near home
+      const patch = job === 'forage' && !heeling ? this.companyPatch(s) : null; // the head is the company now
       // meat lying in the wild comes before any plant: a gnome claims the nearest unclaimed piece and goes for it
-      if (job === 'forage' && (!this.load || this.load.food === 'meat') && s.food < s.foodCap) {
+      if (job === 'forage' && this.canStow('food', 'meat') && (heeling || s.food < s.foodCap)) {
         const it = w.nearestWildMeat(patch?.x ?? this.x, patch?.y ?? this.y, (m) => !s.meatClaims.has(m.id) && (!patch || Math.hypot(m.x - patch.x, m.y - patch.y) <= 6 * TILE) && ok(Math.floor(m.x / TILE), Math.floor(m.y / TILE)));
         if (it) { s.meatClaims.add(it.id); this.fetching = it; this.fetchMeat(dt, s); return; }
       }
@@ -714,6 +759,7 @@ export class Villager extends Mover {
         this.failedPicks = 0;
         this.task = job === 'forage' ? 'off foraging' : farmer ? (this.role === 'woodcutter' ? 'helping in the field' : 'heading to the field') : 'looking for a tree';
       }
+      else if (heeling) { this.walkToHead(dt, s, 'nothing to pick here'); }
       else if (this.load) { this.delivering = true; this.deliver(dt, s); return; } // nothing more to do: bring in what's carried
       else { this.wanderNear(s, this.home); this.task = job === 'forage' ? 'nothing wild to pick' : farmer ? 'no crops to tend' : 'leaving the last trees to regrow'; }
       return;
@@ -745,7 +791,7 @@ export class Villager extends Mover {
 
   /** Walk the load to its building and hand it in; falls back to the job loop if there is nowhere to take it. */
   private deliver(dt: number, s: VillageScene): void {
-    const load = this.load;
+    const load = this.carriedLoads()[0]; // arms first, then the pouch: a gnome sent back to work walks its finds in
     if (!load) { this.delivering = false; this.clearGoal(); return; }
     // wood goes to a hearth that needs it before the woodyard: the village stays warm on woodcutters' backs
     const hearth = load.kind === 'wood' ? (this.firewoodFor && !this.firewoodFor.ruined && this.firewoodFor.firewood < p.hearthNights ? this.firewoodFor : s.hearthNeeding(this.x, this.y, load.n)) : null;
@@ -761,7 +807,7 @@ export class Villager extends Mover {
       if (hearth) {
         if (there) s.stockFromLoad(hearth, this);
         this.firewoodFor = null; this.clearGoal();
-        if (this.load) return; // whatever is left goes on to the woodyard next tick
+        if (this.carriedLoads().length) return; // whatever is left goes on to the woodyard next tick
       } else if (there) s.deposit(this);
       this.delivering = false; this.clearGoal(); this.thinkTimer = 0.2; // no path or arrived: back to work either way
     }
@@ -776,7 +822,7 @@ export class Villager extends Mover {
     if (job === 'forage') {
       // one unit off the plant; the rest stays for the next trip (or the head's hands)
       const kind = WILD_FOOD[t.kind];
-      if (kind && s.wildLeft(t) > 0 && s.food < s.foodCap && this.canCarry('food', kind) && s.pickWild(g.tx, g.ty, 1)) this.pickUp('food', 1, kind);
+      if (kind && s.wildLeft(t) > 0 && (this.toPouch || s.food < s.foodCap) && this.canStow('food', kind) && s.pickWild(g.tx, g.ty, 1)) this.stow('food', 1, kind);
     }
     else if (farmer && t.kind === 'crop' && s.isRipe(t)) {
       // leave ripe crops standing while the granary is full or the arms hold wood / another crop

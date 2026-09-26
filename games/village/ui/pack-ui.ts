@@ -5,7 +5,7 @@ import { FLORA, frameDataUrl } from '../pixelart';
 import { STASH_SLOTS } from '../config';
 
 /** Where a dragged thing came from, and where it may go. */
-type Source = { k: 'pack'; i: number } | { k: 'equip'; slot: EquipmentSlot } | { k: 'stash'; i: number };
+type Source = { k: 'pack'; i: number } | { k: 'equip'; slot: EquipmentSlot } | { k: 'stash'; i: number } | { k: 'pouch'; i: number };
 const sameSource = (a: Source, b: Source): boolean =>
   a.k === b.k && (a.k === 'equip' ? a.slot === (b as typeof a).slot : a.i === (b as { i: number }).i);
 
@@ -33,14 +33,18 @@ export class PackUI {
   }
   /** The chest a host may reach: only the armory view, and only while one is open. */
   private chestFor(host: HTMLElement) { return host.dataset.withStash ? this.s.armoryChest : null; }
+  /** The gnome pouch a host may reach: only the pouch view, and only while one is open. */
+  private pouchFor(host: HTMLElement) { return host.dataset.withPouch ? this.s.pouchOf?.pouch ?? null : null; }
   private source(el: HTMLElement): Source {
     if (el.dataset.packIndex !== undefined) return { k: 'pack', i: Number(el.dataset.packIndex) };
     if (el.dataset.stashIndex !== undefined) return { k: 'stash', i: Number(el.dataset.stashIndex) };
+    if (el.dataset.pouchIndex !== undefined) return { k: 'pouch', i: Number(el.dataset.pouchIndex) };
     return { k: 'equip', slot: el.dataset.equipment as EquipmentSlot };
   }
   private item(source: Source, host: HTMLElement): Slot | null {
     if (source.k === 'pack') return this.s.player.pack.at(source.i);
     if (source.k === 'equip') return this.s.equipped(source.slot);
+    if (source.k === 'pouch') return this.pouchFor(host)?.at(source.i) ?? null;
     const chest = this.chestFor(host);
     return chest ? this.s.stashOf(chest)[source.i] ?? null : null;
   }
@@ -58,13 +62,17 @@ export class PackUI {
       if (!host.isConnected) { this.hosts.delete(host); continue; }
       const chest = this.chestFor(host);
       const stash = chest ? this.s.stashOf(chest) : null;
+      const pouch = this.pouchFor(host);
       const key = pack.slots.map(shape).join('|') + ';' + EQUIPMENT.map(e => slotKey(this.s.equipped(e))).join('|')
-        + (stash ? ';' + stash.map(slotKey).join('|') + '/' + stash.length : '');
+        + (stash ? ';' + stash.map(slotKey).join('|') + '/' + stash.length : '')
+        + (pouch ? ';' + pouch.slots.map(shape).join('|') : '');
       if (old === key) {
-        host.querySelectorAll<HTMLElement>('[data-pack-index]').forEach(c => {
-          const item = pack.at(Number(c.dataset.packIndex)), count = c.querySelector('b');
+        const retext = (sel: string, from: { at(i: number): Slot | null }, attr: string) => host.querySelectorAll<HTMLElement>(sel).forEach(c => {
+          const item = from.at(Number(c.dataset[attr])), count = c.querySelector('b');
           if (item && isBulk(item) && count) { const text = String(Number(item.n.toFixed(1))); if (count.textContent !== text) count.textContent = text; }
         });
+        retext('[data-pack-index]', pack, 'packIndex');
+        if (pouch) retext('[data-pouch-index]', pouch, 'pouchIndex');
         continue;
       }
       const clubs = stash ? stash.filter(g => g.kind === 'weapon' && g.tier <= 0).length : 0;
@@ -73,7 +81,13 @@ export class PackUI {
             Array.from({ length: STASH_SLOTS }, (_, i) => cell(stash[i] ?? null, `data-stash-index="${i}"`, `${i + 1}`)).join('')
           }</div><button class="btn small break-clubs" ${clubs ? '' : 'disabled'}>BREAK DOWN ${clubs || ''} CLUBS</button></div>`
         : '';
+      const pouchHtml = pouch
+        ? `<div><div class="cap">POUCH &middot; ${pouch.slots.length - pouch.emptySlots}/${pouch.slots.length}</div><div class="pack-grid">${
+            pouch.slots.map((item, i) => cell(item, `data-pouch-index="${i}"`, `${i + 1}`)).join('')
+          }</div></div>`
+        : '';
       host.innerHTML = `<div><div class="cap">PACK &middot; ${pack.slots.length - pack.emptySlots}/${pack.slots.length}</div><div class="pack-grid">${pack.slots.map((item, i) => cell(item, `data-pack-index="${i}"`, `${i + 1}`)).join('')}</div></div>`
+        + pouchHtml
         + `<div><div class="cap">EQUIPMENT</div><div class="equipment-grid">${EQUIPMENT.map(e => cell(this.s.equipped(e), `data-equipment="${e}"`, e)).join('')}</div></div>`
         + stashHtml
         + `<small class="pack-help">Drag to move, equip${stash ? ', stow' : ''} or drop &middot; G throws largest supply stack</small>`;
@@ -113,7 +127,11 @@ export class PackUI {
       const chest = this.chestFor(d.host);
       if (cellEl) {
         const dest = this.source(cellEl);
+        const pouch = this.pouchFor(d.host);
         if (d.source.k === 'pack' && dest.k === 'pack') this.s.player.pack.move(d.source.i, dest.i);
+        else if (pouch && d.source.k === 'pack' && dest.k === 'pouch') this.s.movePackSlot(this.s.player.pack, d.source.i, pouch, dest.i);
+        else if (pouch && d.source.k === 'pouch' && dest.k === 'pack') this.s.movePackSlot(pouch, d.source.i, this.s.player.pack, dest.i);
+        else if (pouch && d.source.k === 'pouch' && dest.k === 'pouch') pouch.move(d.source.i, dest.i);
         else if (d.source.k === 'pack' && dest.k === 'equip') this.s.swapEquipment(d.source.i, dest.slot);
         else if (d.source.k === 'equip' && dest.k === 'pack') this.s.swapEquipment(dest.i, d.source.slot);
         else if (d.source.k === 'pack' && dest.k === 'stash' && chest) this.s.storeGear(d.source.i, chest);
@@ -122,7 +140,7 @@ export class PackUI {
           const stash = this.s.stashOf(chest), [g] = stash.splice(d.source.i, 1);
           stash.splice(Math.min(dest.i, stash.length), 0, g);
         }
-      } else if (target === this.s.game.canvas && !this.s.interior.active && d.source.k !== 'stash') {
+      } else if (target === this.s.game.canvas && !this.s.interior.active && (d.source.k === 'pack' || d.source.k === 'equip')) {
         const rect = this.s.game.canvas.getBoundingClientRect();
         const point = this.s.cameras.main.getWorldPoint((e.clientX - rect.left) * this.s.scale.width / rect.width, (e.clientY - rect.top) * this.s.scale.height / rect.height);
         this.s.dropPackItem(d.source.k === 'pack' ? d.source.i : d.source.slot, point);

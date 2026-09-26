@@ -1,5 +1,5 @@
 import { STACK, SKULK, STASH_SLOTS, type BulkKind } from './config';
-import { isImplement, IMPLEMENTS, TOOL_NAME, type Gear, type EquipmentSlot, isBulk, slotName } from './pack';
+import { isImplement, IMPLEMENTS, TOOL_NAME, Pack, type Gear, type EquipmentSlot, isBulk, slotName } from './pack';
 import Phaser from 'phaser';
 import { SimScene, launch, button, getGui, Rng, SpatialGrid } from '@shared/index';
 import { launch as throwItem, type Item } from './items';
@@ -96,6 +96,8 @@ export class VillageScene extends SimScene {
   armoryFor: Mover | null = null;
   /** the barracks whose chest the open armory restocks */
   armoryChest: Building | null = null;
+  /** the gnome whose pouch is open, if any: `UI.renderPouch` draws it beside the head's pack */
+  pouchOf: Villager | null = null;
   /** the COOKING panel's cottage, or null when the panel is closed */
   cookingAt: Building | null = null;
   /** the one dish still warming the head: a new meal replaces the last, and sim time runs it out */
@@ -219,6 +221,7 @@ export class VillageScene extends SimScene {
     this.arrows = 30; this.feverWas = null;
     this.scrap = 0;
     this.armoryFor = null;
+    this.pouchOf = null;
     this.cookingAt = null;
     this.buff = null;
     this.mods = this.meta.mods();
@@ -500,7 +503,7 @@ export class VillageScene extends SimScene {
       const b = this.facedBuilding() ?? this.world.get(this.player.tile.tx, this.player.tile.ty)?.building ?? null;
       if (b) this.selectBuilding(b); else this.select(null);
     });
-    const closePanel = (): void => { if (this.cookingAt) this.openCooking(null); else if (this.armoryFor) this.openArmory(null); else this.togglePause(); };
+    const closePanel = (): void => { if (this.cookingAt) this.openCooking(null); else if (this.pouchOf) this.openPouch(null); else if (this.armoryFor) this.openArmory(null); else this.togglePause(); };
     kb.on('keydown-E', closePanel);
     kb.on('keydown-ESC', closePanel);
     kb.on('keydown-V', () => this.openArmory(this.armoryFor ? null : this.player));
@@ -885,6 +888,13 @@ export class VillageScene extends SimScene {
   setHelmetStyle(who: Mover, style: number): void { who.helmetStyle = (Math.max(0, Math.min(2, style)) as 0 | 1 | 2); }
   setPlume(who: Mover, plume: number): void { who.plume = ((plume % PLUMES.length) + PLUMES.length) % PLUMES.length; }
   /** Open the armory (needs a barracks) for a wearer, or close it. */
+  /** Open a gnome’s pouch (or close the open one). Only a grown gnome carries one. */
+  openPouch(v: Villager | null): void {
+    if (v && (!v.pouch || v.dead)) return;
+    this.pouchOf = v;
+    if (v) { this.openArmory(null); this.openCooking(null); }
+    this.ui?.renderPouch();
+  }
   openArmory(who: Mover | null, chest?: Building | null): void {
     if (who && !this.world.barracks.length) { this.event('info', 'Build a barracks to open an armory', true); return; }
     this.armoryFor = who;
@@ -1594,6 +1604,15 @@ export class VillageScene extends SimScene {
     if (a === this.hovered) this.hovered = null;
     if (a instanceof Villager) this.squad = this.squad.filter((v) => v !== a);
     if (a instanceof Mover && a.load && a.load.n > 0 && !(a instanceof Player)) this.world.dropItem(a.load.kind, a.load.n, a.x, a.y, a.load.food, this.rng); // the armful falls where they fell
+    if (a instanceof Villager && a.pouch) { // and the pouch spills beside it
+      if (a === this.pouchOf) this.openPouch(null);
+      for (const slot of a.pouch.slots) {
+        if (!slot) continue;
+        if (slot.kind === 'wood' || slot.kind === 'food' || slot.kind === 'scrap') this.world.dropItem(slot.kind, slot.n, a.x, a.y, slot.kind === 'food' ? slot.food : undefined, this.rng);
+        else { const it = this.world.dropItem('gear', 1, a.x, a.y, undefined, this.rng); it.gear = slot; }
+      }
+      a.pouch.clear();
+    }
     if (a instanceof Villager) {
       a.home.residents--;
       for (const k of this.villagers()) if (k.isChild && k.parents.includes(a)) k.care -= 1; // losing a parent
@@ -1996,6 +2015,23 @@ export class VillageScene extends SimScene {
     }
   }
   /** The gear parked in a barracks chest, made on first use. */
+  /** Move one slot between two packs (the head's and a gnome's pouch). Bulk stacks where it fits; gear needs an empty slot. */
+  movePackSlot(from: Pack, i: number, to: Pack, j?: number): boolean {
+    const item = from.at(i);
+    if (!item || from === to) return false;
+    if (isBulk(item)) {
+      const took = to.add(item.kind, item.n, item.kind === 'food' ? item.food : undefined);
+      if (took <= 0) return false;
+      item.n -= took;
+      if (item.n < 1e-9) from.removeAt(i);
+      return true;
+    }
+    const at = j !== undefined && !to.at(j) ? j : to.slots.indexOf(null);
+    if (at < 0) return false;
+    to.slots[at] = item;
+    from.removeAt(i);
+    return true;
+  }
   stashOf(b: Building): Gear[] { return (b.stash ??= []); }
   /** Move pack slot `i` into `b`'s chest. Gear only — supplies belong in the granary and woodyard. */
   storeGear(i: number, b: Building): boolean {
