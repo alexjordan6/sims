@@ -845,16 +845,53 @@ export class UI {
     Array.from(this.feed.children).forEach((el, i) => el.classList.toggle('old', i >= 4));
   }
 
+  /**
+   * Toasts are capped and deduplicated. The feed has always trimmed itself to six; this stack never
+   * did, so a burst — the same dawn warning at 16x speed, a raid's worth of deaths — could grow a
+   * column tall enough to bury the screen. Nothing is lost by dropping one: every toast is already
+   * in the journal beside it.
+   */
+  private static readonly MAX_TOASTS = 4;
+  private toastTimers = new Map<HTMLElement, number>();
+
   toast(text: string, kind: EventKind): void {
+    // the same line again counts up in place rather than stacking a second copy
+    const same = Array.from(this.toasts.children).find((el) => (el as HTMLElement).dataset.toast === text) as HTMLElement | undefined;
+    if (same) {
+      const n = Number(same.dataset.n ?? '1') + 1;
+      same.dataset.n = String(n);
+      same.textContent = `${text} \u00d7${n}`;
+      this.holdToast(same);
+      return;
+    }
     const el = h(`<div class="toast panel ${kind === 'raid' ? 'red raid' : kind === 'soldier' ? 'grey' : 'tan'}">${esc(text)}</div>`);
+    el.dataset.toast = text;
     this.toasts.append(el);
-    setTimeout(() => el.remove(), 3300);
+    while (this.toasts.children.length > UI.MAX_TOASTS) this.dropToast(this.toasts.firstElementChild as HTMLElement);
+    this.holdToast(el);
+  }
+  /** Start (or restart) a toast's life, rewinding the CSS fade so a repeat reads as fresh. */
+  private holdToast(el: HTMLElement): void {
+    const prev = this.toastTimers.get(el);
+    if (prev) clearTimeout(prev);
+    el.style.animation = 'none';
+    void el.offsetWidth; // reflow, or the fade never replays
+    el.style.animation = '';
+    this.toastTimers.set(el, window.setTimeout(() => this.dropToast(el), 3300));
+  }
+  private dropToast(el: HTMLElement | null): void {
+    if (!el) return;
+    const t = this.toastTimers.get(el);
+    if (t) clearTimeout(t);
+    this.toastTimers.delete(el);
+    el.remove();
   }
 
   /** Reset transient DOM state after a scene reset. */
   clear(): void {
     this.minimap.invalidate();
     this.feed.innerHTML = '';
+    for (const el of Array.from(this.toasts.children)) this.dropToast(el as HTMLElement);
     this.feedSeen = 0;
     this.lastTop = this.lastRoster = this.lastInspector = '';
     this.renderInspector(true);

@@ -1307,6 +1307,20 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       s.stashOf(barracks).length = 0;
     }
 
+    // ---- toasts never bury the screen ----------------------------------------------------
+    {
+      const ui = (s as unknown as { ui: { toast(t: string, k: string): void } }).ui;
+      const count = () => document.querySelectorAll('.toast').length;
+      for (const el of Array.from(document.querySelectorAll('.toast'))) el.remove();
+      for (let i = 0; i < 30; i++) ui.toast(`Villager ${i} was killed`, 'death');
+      assert(count() <= 4, `thirty different warnings leave at most four toasts on screen (${count()})`);
+      for (const el of Array.from(document.querySelectorAll('.toast'))) el.remove();
+      for (let i = 0; i < 30; i++) ui.toast('Hearths burned 0 wood', 'wood');
+      assert(count() === 1, 'and the same warning thirty times is one toast, not thirty');
+      assert((document.querySelector('.toast') as HTMLElement).textContent!.endsWith('30'), 'which counts itself up instead');
+      for (const el of Array.from(document.querySelectorAll('.toast'))) el.remove();
+    }
+
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;
   } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); }
