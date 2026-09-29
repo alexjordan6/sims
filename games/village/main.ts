@@ -293,16 +293,14 @@ export class VillageScene extends SimScene {
 
     // the founders are young adults: a few days past coming of age, well short of growing old
     const grown = this.adultAge + 3;
-    if (p.gnomeStart) {
-      // a gnome couple and nothing else. The Legacy boons that hand out soldiers and second families are
-      // skipped on purpose: addVillager makes anyone homed in a cottage a gnome, so they'd arrive wrong.
-      this.foundGnomes(home);
-    } else {
-      // Start with a small working village and two defenders.
-      this.addVillager(home, 'farmer', grown);
-      this.addVillager(home, 'woodcutter', grown);
-      this.addVillager(home, 'soldier', grown + 2);
-      this.addVillager(home, 'soldier', grown + 2);
+    // The same opening roster either way, under a roof to match: a village of people, or a band of
+    // gnomes. Founders are spawned as written rather than drawn from the caps -- the caps gate births.
+    for (let i = 0; i < p.startFarmers; i++) this.addVillager(home, 'farmer', grown);
+    for (let i = 0; i < p.startWoodcutters; i++) this.addVillager(home, 'woodcutter', grown);
+    for (let i = 0; i < p.startWarriors; i++) this.addVillager(home, 'soldier', grown + 2);
+    if (!p.gnomeStart) {
+      // the Legacy boons are skipped in a gnome start on purpose: addVillager makes anyone homed in a
+      // cottage a gnome, so a boon's soldiers and second family would arrive under the wrong roof.
       for (let i = 0; i < this.mods.startSoldiers; i++) this.addVillager(home, 'soldier', grown + 2);
       if (this.mods.extraAdults > 0) {
         // a second family, in the nearest open 2x2 to the left of the first house

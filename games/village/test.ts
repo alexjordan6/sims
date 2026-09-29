@@ -987,16 +987,34 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert((s.player.tool as string) === 'gnomehouse' && s.world.gnomeHouses.length === before + 1 && s.wood === wood - COST.gnomehouse, 'and now you can raise your own');
       assert(s.villagers().filter((v) => v.gnome).length === 4, 'which comes with a couple of its own');
     }
+    // a village of people opens with the same roster, and every one of them has a place
+    {
+      const v0 = fresh(), grown = v0.villagers().filter((x) => x.isAdult);
+      assert(grown.filter((x) => x.role === 'farmer').length === p.startFarmers
+        && grown.filter((x) => x.role === 'woodcutter').length === p.startWoodcutters
+        && grown.filter((x) => x.role === 'soldier').length === p.startWarriors + v0.mods.startSoldiers,
+        `a village opens ${p.startFarmers} farmer, ${p.startWoodcutters} woodcutter, ${p.startWarriors} warriors (${CALLINGS.map((c) => `${c} ${grown.filter((x) => x.role === c).length}`).join(', ')})`);
+      assert(CALLINGS.every((c) => v0.callingFilled(c) <= v0.callingCap(c)), 'and none of them is over its cap');
+    }
     // ---- the gnome start ------------------------------------------------------------------
     const wasGnome = p.gnomeStart, wasPeace = p.peaceful;
     p.gnomeStart = true; s = fresh();
-    assert(s.world.houses.length === 0 && s.world.allBarracks.length === 0, 'the gnome start raises no house and no barracks');
+    assert(s.world.houses.length === 0, 'the gnome start raises no house');
+    assert(s.world.barracks.length === 1, 'but a barracks stands, so the band may raise warriors from the first frame');
     assert(!s.world.wildGnomeHouse, 'and leaves no hidden cottage to find twice');
     assert(!!s.world.granary && !!s.world.woodyard, 'but the granary and woodyard still stand');
     assert(!s.world.tiles.some((t) => t.kind === 'crop'), 'and no field is sown');
     const cot = s.world.gnomeStart!;
     assert(!!cot && !cot.wild && cot.kind === 'gnomehouse', 'a toadstool cottage stands in the clearing, already yours');
-    assert(s.villagers().filter((v) => v.gnome && v.isAdult).length === 2, 'with its two founders');
+    // the same opening roster as a village of people, in gnomes
+    const band = s.villagers().filter((v) => v.gnome && v.isAdult);
+    const roster = (vs: Villager[]) => CALLINGS.map((c) => `${c} ${vs.filter((v) => v.role === c).length}`).join(', ');
+    assert(band.length === p.startFarmers + p.startWoodcutters + p.startWarriors
+      && band.filter((v) => v.role === 'farmer').length === p.startFarmers
+      && band.filter((v) => v.role === 'woodcutter').length === p.startWoodcutters
+      && band.filter((v) => v.role === 'soldier').length === p.startWarriors,
+      `with its founding band: ${p.startFarmers} forager, ${p.startWoodcutters} woodcutter, ${p.startWarriors} warriors (${roster(band)})`);
+    assert(CALLINGS.every((c) => s.callingFilled(c) <= s.callingCap(c)), `and every one of them has a place (${CALLINGS.map((c) => `${s.callingFilled(c)}/${s.callingCap(c)}`).join(', ')})`);
     assert(s.gnomesFound && !s.toolLocked('gnomehouse'), 'and the craft already learned');
     const step0 = World.center(doorstep(cot).tx, doorstep(cot).ty);
     assert(Math.hypot(s.player.x - step0.x, s.player.y - step0.y) < 24, 'the head starts on its doorstep');

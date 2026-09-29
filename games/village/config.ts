@@ -100,6 +100,9 @@ export const p = live(
     farmerCap: [D.farmerCap, 0, 40, 1, 'Farmers one granary can keep in work (a foraging gnome fills the same place). With no free place anywhere in the village, no child is born at all.'],
     woodcutterCap: [D.woodcutterCap, 0, 40, 1, 'Woodcutters one woodyard can keep in work.'],
     soldierCap: [D.soldierCap, 0, 60, 1, 'Warriors one barracks can keep under arms. Build a second barracks and the village may raise that many again.'],
+    startFarmers: [D.startFarmers, 0, 10, 1, 'Farmers the village opens with (foragers in a gnome start). Founders are spawned as written, so an opening roster may sit over its cap.'],
+    startWoodcutters: [D.startWoodcutters, 0, 10, 1, 'Woodcutters the village opens with.'],
+    startWarriors: [D.startWarriors, 0, 20, 1, 'Warriors the village opens with. Both starts ship a barracks, so these are within the cap at ordinary settings.'],
   }, 'callings'),
   params({
     playerHp: [D.playerHp, 10, 200, 5, 'The head\'s base HP before armor and boons. Applies at NEW VILLAGE or the next armor change.'],

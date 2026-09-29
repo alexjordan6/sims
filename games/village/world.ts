@@ -502,7 +502,7 @@ export class World {
 
   /**
    * Starting map: tree clusters, a house, a barracks, the field, and the two supply buildings.
-   * In the 'gnome' start there is no house, barracks or field — a toadstool cottage stands in the
+   * In the 'gnome' start there is no house or field — a toadstool cottage stands in the
    * clearing instead, and the hidden one out in the woods is left ungenerated (there is nothing left
    * to discover). The supply buildings stand either way: hauling and storage work the same.
    */
@@ -536,7 +536,10 @@ export class World {
     // clear the village centre
     for (let ty = hy - 7; ty <= hy + 4; ty++)
       for (let tx = hx - 11; tx <= hx + 10; tx++) this.set(tx, ty, 'grass');
-    if (start === 'village') { this.placeHouse(hx - 9, hy - 5); this.placeBarracks(hx + 5, hy - 5); }
+    // the barracks stands in both starts: its places are what the village may raise warriors into, and a
+    // gnome band opens with three. Only the house is the village start's own (gnomes live under a toadstool).
+    if (start === 'village') this.placeHouse(hx - 9, hy - 5);
+    this.placeBarracks(hx + 5, hy - 5);
     const half = Math.floor(fieldW / 2);
     // the starting field: a row of each crop. The gnome start sows nothing, but still draws — this loop
     // is the block's only rng consumer, so skipping the draws would shift the whole wilderness downstream.
