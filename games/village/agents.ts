@@ -912,6 +912,10 @@ export class Villager extends Mover {
       return;
     }
     this.target = null;
+    // out of combat they mend, whatever their orders: on patrol, escorting, holding ground or up on the wall.
+    // (a cold barracks mends nobody, and the fighting branches above have already returned)
+    const regen = s.world.barracks.some((b) => b.warm) ? s.mods.soldierRegen + (s.world.barracksLevel >= 3 ? 1 : 0) : 0;
+    if (regen && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + regen * dt);
     if (this.post) { this.setGoal(s, this.post.tx, this.post.ty); this.followPath(dt); this.task = 'watching from the wall'; return; }
     if (this.order?.kind === 'hold') {
       const o = this.order;
@@ -926,9 +930,6 @@ export class Villager extends Mover {
       this.task = 'following you'; return;
     }
     this.task = 'on patrol';
-    // a cold barracks mends nobody
-    const regen = s.world.barracks.some((b) => b.warm) ? s.mods.soldierRegen + (s.world.barracksLevel >= 3 ? 1 : 0) : 0;
-    if (regen && this.hp < this.maxHp) this.hp = Math.min(this.maxHp, this.hp + regen * dt);
     this.thinkTimer -= dt;
     if (this.followPath(dt) && this.thinkTimer <= 0) {
       this.thinkTimer = s.rng.range(3, 7);
