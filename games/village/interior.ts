@@ -142,7 +142,7 @@ export class Interior {
   hint(): string {
     if (this.y > 175 && Math.abs(this.x - 160) < 30) return 'E: exit to the village';
     const f = this.nearby();
-    if (f?.kind === 'crib' && this.building) { const b = this.building, why = this.s.birthProblem(b); f.label = `Nursery · ${this.s.infantsOf(b).length} of ${this.s.cribs(b)} cribs${why ? ` · no births: ${why}` : ` · next birth roll in ${Math.ceil(this.s.birthIn(b))}s (${Math.round(100 * this.s.birthChance(b))}%)`} · infants walk out to a pen after ${p.infantDays} days`; }
+    if (f?.kind === 'crib' && this.building) { const b = this.building, why = this.s.birthProblem(b); f.label = `Nursery · ${this.s.infantsOf(b).length} of ${this.s.cribs(b)} cribs${why ? ` · no births: ${why}` : ` · next birth roll in ${Math.ceil(this.s.birthIn(b))}s (${Math.round(100 * this.s.birthChance(b))}%)`} · infants walk out into the yard after ${p.infantDays} days`; }
     if (f?.kind === 'pot' && this.building) f.label = this.s.cookHint(this.building);
     if (f?.kind === 'chest' && this.building) f.label = `Armor chest · tower arrows ${this.building.ammo ?? 0} / ${this.s.towerCap(this.building)} · restock 10 for 2 wood · forge armor`;
     if (f?.kind === 'hearth' && this.building) {

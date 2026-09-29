@@ -7,7 +7,7 @@ import type { Item } from './items';
 import { Boar, Swarm } from './wildlife';
 import { TOWN, CHAR } from './atlas';
 import { ensureCharacter, seedLook, type Look } from './characters';
-import { p, TILE, COLS, ROWS, CAPS, WALL_HEIGHT, OGRE, BOAR, ITEM, PEN_COLOUR } from './config';
+import { p, TILE, COLS, ROWS, CAPS, WALL_HEIGHT, OGRE, BOAR, ITEM } from './config';
 import type { VillageScene } from './main';
 import { Fx } from './fx';
 import { ensureBuildingArt, ensureFlora, FLORA, BUILDING_TEXTURE, LIT_TEXTURE, STACK_ROWS } from './pixelart';
@@ -540,7 +540,6 @@ export class Renderer {
       } else {
         // gold when the held tool can act here ("E: …"), white otherwise; a dim box marks an out-of-reach hover
         const can = s.hint().startsWith('E:');
-        if (s.player.tool === 'pen' && can) { u.fillStyle(PEN_COLOUR[s.player.penKind], 0.35); u.fillRect(f.tx * TILE, f.ty * TILE, TILE, TILE); }
         // the basket's throw: an arc from the head to the pile
         if (s.player.tool === 'basket' && can) { const q = s.hoverTile ?? f; u.lineStyle(1, 0xffe066, 0.5); u.lineBetween(s.player.x, s.player.y - 8, (q.tx + 0.5) * TILE, (q.ty + 0.5) * TILE); }
         u.lineStyle(2, can ? 0xffe066 : 0xffffff, can ? 0.95 : 0.55);
@@ -653,7 +652,6 @@ function cropPhase(t: Tile, cropDays: number, dayTime: number): number {
 }
 
 /** Ground + object gids for a tile (and the crown-top for the tile above, for tall trees). */
-const PEN_INDEX: Record<string, number> = { farmer: 0, woodcutter: 1, soldier: 2 };
 /** The picture the map draws for a tile, for the inspector's portrait: a flora frame (object over ground), the fort sheet for defences, or a town grass frame. */
 export function tileArt(t: Tile, s: VillageScene): { key: string; frame: number } {
   if (t.defense) return { key: 'fort', frame: t.defense.kind === 'stairs' ? 3 : t.defense.kind === 'gate' ? (t.defense.open ? 2 : 1) : 0 };
@@ -662,7 +660,6 @@ export function tileArt(t: Tile, s: VillageScene): { key: string; frame: number 
   if (pick >= GID.flora) return { key: 'flora', frame: pick - GID.flora };
   return { key: 'town', frame: pick - GID.town };
 }
-function penGround(kind: string): number { return GID.flora + FLORA.pen[PEN_INDEX[kind] ?? 0]; }
 /** the five growth frames of the crop sown on a tile */
 function cropFrames(t: Tile): readonly number[] {
   return t.food === 'wheat' ? FLORA.wheat : t.food === 'carrot' ? FLORA.carrot : t.v % 2 ? FLORA.crop2 : FLORA.crop;
@@ -671,7 +668,7 @@ function tileFrames(t: Tile, cropDays: number, dayTime: number, oldDays: number,
   const grass = GID.town + TOWN.grass[t.v % TOWN.grass.length];
   const F = GID.flora;
   switch (t.kind) {
-    case 'grass': return { ground: t.pen ? penGround(t.pen) : t.tall ? F + FLORA.tallGrass[t.v % 3] : grass, object: EMPTY };
+    case 'grass': return { ground: t.tall ? F + FLORA.tallGrass[t.v % 3] : grass, object: EMPTY };
     case 'tree': {
       if (t.work >= 2) return { ground: grass, object: F + FLORA.bare };
       const old = t.stage >= oldDays;
@@ -679,7 +676,7 @@ function tileFrames(t: Tile, cropDays: number, dayTime: number, oldDays: number,
       const pine = t.v % 3 === 1;
       return { ground: grass, object: F + (t.work === 1 ? FLORA.oakChopped : pine ? FLORA.pineTrunk : FLORA.oakTrunk), canopy: F + (pine ? FLORA.pineTop : FLORA.oakTop) };
     }
-    case 'tilled': return { ground: t.pen ? penGround(t.pen) : F + FLORA.tilled, object: EMPTY };
+    case 'tilled': return { ground: F + FLORA.tilled, object: EMPTY };
     case 'crop': return { ground: F + FLORA.tilled, object: F + cropFrames(t)[cropPhase(t, cropDays, dayTime)] };
     case 'bush': return { ground: grass, object: F + FLORA.bush[wildRipe ? 1 : 0] };
     case 'mushroom': return { ground: grass, object: F + FLORA.mushroom[wildRipe ? 1 : 0] };

@@ -1,5 +1,5 @@
 import { Pack, IMPLEMENTS, isBulk, slotKey } from './pack';
-import { STACK, p, TILE, ITEM, GNOME_YARD, ARMOR } from './config';
+import { STACK, p, TILE, ITEM, YARD, ARMOR } from './config';
 import { Villager } from './agents';
 import { World, buildingCenter } from './world';
 import type { VillageScene } from './main';
@@ -73,11 +73,13 @@ export function runPackChecks(s: VillageScene, assert: (ok:unknown,msg:string)=>
       const it=s.world.dropItem('food',2,s.player.x+32,s.player.y,'meat'),x=it.x;protect(it);s.pickUpItems(1);assert(it.x===x,label+' excludes attraction');
       Object.assign(s.player,{x:it.x,y:it.y});s.pickUpItems(0);assert(!s.world.items.includes(it),label+' still allows walk-over pickup');unprotect();Object.assign(s.player,World.center(124,100));
     };
-    protectedItem('pen items',()=>s.world.paintPen(126,100,'farmer'),()=>s.world.paintPen(126,100,null));
     protectedItem('claimed meat',it=>s.meatClaims.add(it.id),()=>s.meatClaims.clear());
     s.agents.push(v);protectedItem('food being eaten',it=>v.eatingFrom=it,()=>v.eatingFrom=null);s.agents=[s.player];
-    const house=s.world.place('gnomehouse',120,94)!,c=buildingCenter(house);Object.assign(s.player,{x:c.tx*TILE+GNOME_YARD*TILE-33,y:c.ty*TILE});
+    const house=s.world.place('gnomehouse',120,94)!,c=buildingCenter(house);Object.assign(s.player,{x:c.tx*TILE+YARD*TILE-33,y:c.ty*TILE});
     it=s.world.dropItem('food',2,s.player.x+32,s.player.y,'berry');x=it.x;s.pickUpItems(1);assert(it.x===x,'gnome yard food is not attracted');s.world.items.length=0;
+    // every home's yard is its children's larder, not only a gnome cottage's
+    const hh=s.world.place('house',128,94)!,hcc=buildingCenter(hh);Object.assign(s.player,{x:hcc.tx*TILE+YARD*TILE-33,y:hcc.ty*TILE});
+    it=s.world.dropItem('food',2,s.player.x+32,s.player.y,'berry');x=it.x;s.pickUpItems(1);assert(it.x===x,'house yard food is not attracted either');s.world.items.length=0;
     Object.assign(s.player,World.center(124,100));while(!s.player.pack.full)s.player.pack.put({kind:'tool',tool:'axe'});
     it=s.world.dropItem('scrap',10,s.player.x+32,s.player.y);x=it.x;s.pickUpItems(1);assert(it.x===x,'no attraction without room');s.world.items.length=0;
     fresh();const wood=s.player.pickUp('wood',STACK.wood-2);while(!s.player.pack.full)s.player.pack.put({kind:'tool',tool:'axe'});

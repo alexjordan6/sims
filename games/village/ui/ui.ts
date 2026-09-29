@@ -6,7 +6,7 @@ import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type Tool } from '../agents';
 import { Boar } from '../wildlife';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
-import { OGRE, BOAR, HAUL, COST, ORDER, GNOME_YARD, GNOME_PACK, p, TOWER, HEARTH_WOOD, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, TRAITS, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, PEN_NAME, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, isDish, foodCount, hasInterior, type DishKind, CROP_KINDS, CALLINGS, DISMANTLE, DIET_CAP, DIET_STAT_NAME, type FoodKind, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS } from '../config';
+import { OGRE, BOAR, HAUL, COST, ORDER, YARD, GNOME_PACK, p, TOWER, HEARTH_WOOD, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, TRAITS, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, isDish, foodCount, hasInterior, type DishKind, CROP_KINDS, CALLINGS, DISMANTLE, DIET_CAP, DIET_STAT_NAME, type FoodKind, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS } from '../config';
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
@@ -38,7 +38,7 @@ const ROLE_LABEL: Record<string, string> = { infant: 'Infant', kid: 'Child', far
 /** a grown gnome's portrait, for chips and outlooks */
 const GNOME_LOOK = { body: 'gnome', skin: 0, hair: 0, hairStyle: 0, outfit: 'gnome', held: 'club', armor: { helmet: 0, chest: 0, legs: 0, shield: 0 }, dye: 0, helmetStyle: 0, plume: 0 } as const;
 /** the GNOME HOUSE slot's tooltip once the craft is learned (locked, it says how to learn it) */
-const GNOME_TITLE = 'A toadstool cottage: a gnome couple moves in and raises a family like any house. Gnomes take no pen or calling; the grown ones forage wild plants for the granary, one find at a time';
+const GNOME_TITLE = 'A toadstool cottage: a gnome couple moves in and raises a family like any house. Gnomes take no calling; the grown ones forage wild plants for the granary, one find at a time';
 
 const ENEMY_LABEL: Record<string, string> = { raider: 'Raider', warlord: 'Warlord', rat: 'Rat — eats crops', snatcher: 'Snatcher — steals children', brute: 'Brute — heavy', shaman: 'Shaman — ranged', wrecker: 'Wrecker — tears down buildings', boar: 'Boar — wild game, fights back', troll: 'Troll — prowls the wild', skulk: 'Skulk — creeps from long grass, hunts gnomes' };
 
@@ -136,17 +136,16 @@ export class UI {
         ${slot('axe', 'town', TOWN.iconAxe, 'AXE', 'Chop trees for wood (3 hits); clears stumps and saplings')}
         ${slot('sword', 'dungeon', DUNGEON.sword, 'SWORD', 'Swing at raiders in front of you. You start with a club — forge a real blade at the barracks chest')}
         ${slot('house', 'town', TOWN.wallWoodDoor, 'HOUSE', 'A family of 4 lives here and has children', COST.house)}
-        ${slot('barracks', 'town', TOWN.wallStoneDoor, 'BARRACKS', 'Drills the drill yard: children in one become soldiers while a warm barracks stands. Its tower shoots arrows at raiders in range; restock the chest inside with wood', COST.barracks)}
+        ${slot('barracks', 'town', TOWN.wallStoneDoor, 'BARRACKS', `Room for ${p.soldierCap} more warriors, and what drills them: a child promised a sword needs a warm barracks standing. Its tower shoots arrows at raiders in range; restock the chest inside with wood`, COST.barracks)}
         ${slot('hammer', 'town', TOWN.iconHammer, 'HAMMER', 'Upgrade the building in front of you (3 hits)')}
         ${slot('bow', 'dungeon', DUNGEON.sword, 'BOW', 'Fire physical arrows. Shared ammunition is made at the barracks; a better bow is forged at its chest')}
         ${slot('wall', 'town', TOWN.wallStoneDoor, 'WALL', 'Build a connected stone perimeter. 4 wood per segment', 4)}
         ${slot('gate', 'town', TOWN.wallWoodDoor, 'GATE', 'Friendly villagers pass; X toggles opening to everyone', 12)}
         ${slot('stairs', 'town', TOWN.iconHammer, 'STAIRS', 'Connect stairs to your walls. Use hands or X to climb and descend', 10)}
         ${slot('tavern', 'town', TOWN.wallWoodDoor, 'TAVERN', 'A cozy place to eat, rest and gather', COST.tavern)}
-        ${slot('pen', 'farm', FARM.grassTuft, 'PEN', 'Paint a training pen on open ground: children leave the nursery for it and train there until they come of age. F cycles farm / wood / drill; painting the same kind again erases')}
         ${slot('gnomehouse', 'town', TOWN.wallWoodDoor, 'GNOME HOUSE', GNOME_TITLE, COST.gnomehouse)}
         ${slot('wand', 'dungeon', DUNGEON.wizard, 'WAND', 'Shaman wand: left click or drag a box to pick soldiers, right click to send them — open ground = go there and hold, a raider = attack it, a wall top = take that archer post. F = follow me (again to stop). With no one picked, orders go to everyone')}
-        ${slot('basket', 'farm', FARM.crate, 'BASKET', 'F picks a kind of food; walk up to the granary to fill the basket with it, then throw toward a pen. It flies where you point, bounces and rolls; children only eat what lies inside their pen, and what they eat is who they become')}
+        ${slot('basket', 'farm', FARM.crate, 'BASKET', 'F picks a kind of food; walk up to the granary to fill the basket with it, then throw it into a home yard. It flies where you point, bounces and rolls; children only eat what lies in the yard of the home they live in, and what they eat is who they become')}
       </div>
       <div class="inventory-host panel"></div>
       <div class="hint"><kbd>click / C</kbd><span class="hint-text"></span></div>
@@ -448,7 +447,7 @@ export class UI {
       if (s.selected) { this.showTab('inspector'); this.side.classList.add('open'); }
     }
     const pickKey = s.selectedItem ? `item${s.selectedItem.id}` : s.selectedTile ? `tile${s.selectedTile.tx},${s.selectedTile.ty}` : '';
-    if (pickKey !== this.lastPick) { this.lastPick = pickKey; this.confirmErase = null; this.renderInspector(true); if (this.touch && pickKey) { this.showTab('inspector'); this.side.classList.add('open'); } }
+    if (pickKey !== this.lastPick) { this.lastPick = pickKey; this.renderInspector(true); if (this.touch && pickKey) { this.showTab('inspector'); this.side.classList.add('open'); } }
     this.topT += dt; this.rosterT += dt;
     this.minimap.render(dt, s.tilesChanged);
     if (this.topT > 0.1) {
@@ -474,11 +473,13 @@ export class UI {
     const exit = this.side.querySelector<HTMLButtonElement>('.leave-room'); if (exit) exit.hidden = !s.interior.active;
     const vs = s.villagers();
     const count = (r: string) => r === 'elder' ? vs.filter((v) => v.elder).length : vs.filter((v) => v.role === r).length;
+    // a trade's chip counts the children already promised it too: what it shows is what the cap allows
+    const filled = (c: Calling) => s.callingFilled(c), cap = (c: Calling) => s.callingCap(c);
     const hour = Math.floor(s.dayTime * 24);
     const night = s.dayTime < 0.22 || s.dayTime > 0.8;
     const raidIn = s.nextRaidDay - s.day;
     const held = s.player.pack.slots.map(slotKey).join('|');
-    const key = `${s.day}|${hour}|${held}|${s.food | 0}/${s.foodCap}|${s.surplusDays().toFixed(1)}|${s.feverActive()}|${s.wood | 0}/${s.woodCap}|${s.scrap}|${count('farmer')}|${count('woodcutter')}|${count('infant')}|${count('kid')}|${count('soldier')}|${count('gnome')}|${count('elder')}|${Math.round(s.player.hp / Math.max(1, s.player.maxHp) * 12)}|${p.hunger ? Math.ceil(s.player.hunger * 2) / 2 : 'off'}/${p.hungerMax}|${s.raidActive}|${s.boss?.hp ?? ''}|${raidIn}|${s.speed}|${s.paused}|${night}|${s.buff?.dish ?? ''}${Math.ceil(s.buffLeft())}`;
+    const key = `${s.day}|${hour}|${held}|${s.food | 0}/${s.foodCap}|${s.surplusDays().toFixed(1)}|${s.feverActive()}|${s.wood | 0}/${s.woodCap}|${s.scrap}|${CALLINGS.map((c) => `${filled(c)}/${cap(c)}`).join('|')}|${count('infant')}|${count('kid')}|${count('gnome')}|${count('elder')}|${Math.round(s.player.hp / Math.max(1, s.player.maxHp) * 12)}|${p.hunger ? Math.ceil(s.player.hunger * 2) / 2 : 'off'}/${p.hungerMax}|${s.raidActive}|${s.boss?.hp ?? ''}|${raidIn}|${s.speed}|${s.paused}|${night}|${s.buff?.dish ?? ''}${Math.ceil(s.buffLeft())}`;
     if (key === this.lastTop) return;
     this.lastTop = key;
 
@@ -494,11 +495,18 @@ export class UI {
     const days = s.surplusDays(), fever = s.feverActive();
     const feverBadge = s.mods.babyFever ? `<span class="badge fever ${fever ? 'on' : ''}" title="${fever ? `Baby fever: births ${Math.round(100 * p.feverBonus)}% more likely while the larder holds ${p.feverDays}+ days of food` : `Baby fever needs ${p.feverDays} days of food in store — ${Math.ceil(p.feverDays * s.dailyRation() - s.food)} more`}">FEVER</span>` : '';
     q('.food').innerHTML = `${s.food | 0}<small>/${s.foodCap} · ${Number.isFinite(days) ? `${days.toFixed(days < 10 ? 1 : 0)} days` : '∞'}</small>${feverBadge}${inHand('food')}`;
-    q('.t-food').title = `${FOOD_KINDS.filter((k) => s.pantry[k] >= 1).map((k) => `${s.pantry[k] | 0} ${FOODS[k].one}`).join(' · ') || 'empty'} — each grown villager eats ${p.foodPerDay} a day${s.headRation() ? `, and you eat ${s.headRation()} on top when you eat from the granary` : ''}; the small number is how many days the larder would last for the villagers. Pen children eat only what the basket tosses in.`;
+    q('.t-food').title = `${FOOD_KINDS.filter((k) => s.pantry[k] >= 1).map((k) => `${s.pantry[k] | 0} ${FOODS[k].one}`).join(' · ') || 'empty'} — each grown villager eats ${p.foodPerDay} a day${s.headRation() ? `, and you eat ${s.headRation()} on top when you eat from the granary` : ''}; the small number is how many days the larder would last for the villagers. Children eat only what the basket tosses into their home yard.`;
     q('.scrap').textContent = String(s.scrap);
-    q('.pop').innerHTML = ([
-      ['farmer', CHAR.farmer, 'FARM'], ['woodcutter', CHAR.woodcutter, 'WOOD'], ['infant', CHAR.kid, 'CRIBS'], ['kid', CHAR.kid, 'KIDS'], ['soldier', CHAR.soldier, 'ARMY'], ['gnome', CHAR.gnome, 'GNOMES'], ['elder', CHAR.woodcutter, 'OLD'],
-    ] as [string, { key: string; frame: number }, string][]).map(([r, c, lbl]) => `<span class="chip ${r}" title="${r === 'elder' ? 'Elders' : ROLE_LABEL[r] + 's'} · ${vs.length} villagers in all">${spr(c.key, c.frame, 24)}<b>${count(r)}</b><i>${lbl}</i></span>`).join('');
+    // the three trades read n/cap (a full one births nobody); the rest are plain counts
+    const trade = (c: Calling, art: { key: string; frame: number }, lbl: string) => {
+      const grown = vs.filter((v) => v.role === c && !v.dead).length, n = filled(c), max = cap(c);
+      const per = c === 'soldier' ? `${p.soldierCap} per barracks` : c === 'farmer' ? `${p.farmerCap} per granary` : `${p.woodcutterCap} per woodyard`;
+      const title = `${ROLE_LABEL[c]}s · ${grown} grown${n > grown ? `, ${n - grown} promised to children still growing` : ''} · ${max} places (${per})${n >= max ? ' · full: no child will be born for this trade' : ''} · ${vs.length} villagers in all`;
+      return `<span class="chip ${c}${n >= max ? ' full' : ''}" title="${title}">${spr(art.key, art.frame, 24)}<b>${n}<small>/${max}</small></b><i>${lbl}</i></span>`;
+    };
+    q('.pop').innerHTML = trade('farmer', CHAR.farmer, 'FARM') + trade('woodcutter', CHAR.woodcutter, 'WOOD') + trade('soldier', CHAR.soldier, 'ARMY')
+      + ([['infant', CHAR.kid, 'CRIBS'], ['kid', CHAR.kid, 'KIDS'], ['gnome', CHAR.gnome, 'GNOMES'], ['elder', CHAR.woodcutter, 'OLD']] as [string, { key: string; frame: number }, string][])
+        .map(([r, c, lbl]) => `<span class="chip ${r}" title="${r === 'elder' ? 'Elders' : ROLE_LABEL[r] + 's'} · ${vs.length} villagers in all">${spr(c.key, c.frame, 24)}<b>${count(r)}</b><i>${lbl}</i></span>`).join('');
     const raid = q('.raid');
     const bossNext = s.nextRaidDay === p.bossDay;
     const orc = spr('dungeon', DUNGEON.orc, 24, 'flip');
@@ -538,7 +546,6 @@ export class UI {
       el.classList.toggle('on', s.player.tool === tool);
       el.classList.toggle('off', !!s.toolLocked(tool) || ((tool === 'house' || tool === 'barracks') && s.wood < COST[tool]));
       if (tool === 'gnomehouse') { const want = s.toolLocked(tool) ? 'Somewhere in these woods a gnome family keeps house. Warm motes drift over their glade — walk into it and they will teach you the craft.' : GNOME_TITLE; if (el.title !== want) el.title = want; }
-      if (tool === 'pen') { const lbl = el.querySelector('.lbl')!, want = s.player.penKind === 'farmer' ? 'FARM PEN' : s.player.penKind === 'woodcutter' ? 'WOOD PEN' : 'DRILL PEN'; if (lbl.textContent !== want) lbl.textContent = want; }
       if (tool === 'basket') { const lbl = el.querySelector('.lbl')!, want = `BASKET · ${s.player.carriedOf('food',s.player.basketKind)} ${FOODS[s.player.basketKind].name.toUpperCase()}`; if (lbl.textContent !== want) lbl.textContent = want; }
       if (tool === 'seeds') { const lbl = el.querySelector('.lbl')!, want = FOODS[s.player.cropKind].name.toUpperCase(); if (lbl.textContent !== want) lbl.textContent = want; }
     });
@@ -564,7 +571,6 @@ export class UI {
   }
 
   private lastPick = '';
-  private confirmErase: string | null = null;
   /** Portrait for a tile or a thing on the ground, from the same art the map draws. */
   private tilePortrait(art: { key: string; frame: number }): string {
     if (art.key === 'flora' || art.key === 'fort') return `<img class="art" src="${frameDataUrl(this.scene, art.key, art.frame)}" alt="" style="image-rendering:pixelated;width:48px;height:${art.key === 'fort' ? 'auto' : '48px'}">`;
@@ -577,17 +583,17 @@ export class UI {
     const name = it.kind === 'gear' && it.gear ? slotName(it.gear) : it.kind === 'scrap' ? 'Scrap iron' : it.kind === 'wood' ? 'Wood' : FOODS[it.food ?? 'wheat'].name;
     const amount = it.n % 1 ? it.n.toFixed(1) : String(it.n);
     const q = { tx: Math.floor(it.x / 16), ty: Math.floor(it.y / 16) }, t = s.world.get(q.tx, q.ty);
-    const where = !it.rest ? 'in the air' : t?.pen ? `in the ${PEN_NAME[t.pen]}` : t?.kind === 'crop' || t?.kind === 'tilled' ? 'on the field' : 'on open ground';
+    const where = !it.rest ? 'in the air' : s.world.inYard(it.x, it.y) ? 'in a home yard' : t?.kind === 'crop' || t?.kind === 'tilled' ? 'on the field' : 'on open ground';
     const eaters = it.kind === 'food' ? s.villagers().filter((v) => v.eatingFrom === it && !v.dead).length : 0;
     let html = `${head}<div class="head">${art}<div><div class="name">${amount} ${name.toLowerCase()}</div><span class="badge ${it.kind === 'scrap' ? 'soldier' : 'farmer'}">${it.kind === 'scrap' ? 'loot' : it.kind === 'wood' ? 'supplies' : it.kind === 'gear' ? 'equipment' : 'food on the ground'}</span></div><button class="btn small close">x</button></div><div class="rows">`;
     html += `<b>Where</b><span>${where} · tile ${q.tx}, ${q.ty}${it.rest ? '' : ' <em>· still moving</em>'}</span>`;
-    if (it.kind === 'food') html += `<b>Feeds</b><span>${FOODS[it.food ?? 'wheat'].blurb}${t?.pen ? ` · ${eaters ? `${eaters} eating from it now` : 'children here will eat it'}` : ' · <em class="warn">not in a pen — children only eat inside their pen</em>'}</span>`;
+    if (it.kind === 'food') html += `<b>Feeds</b><span>${FOODS[it.food ?? 'wheat'].blurb}${s.world.inYard(it.x, it.y) ? ` · ${eaters ? `${eaters} eating from it now` : 'the children of this home will eat it'}` : ' · <em class="warn">no home yard here — children only eat what lands by the home they live in</em>'}</span>`;
     html += `<b>Pick up</b><span>${it.kind === 'scrap' ? 'walk over it' : 'approach to collect into your pack when space is available'}</span></div>`;
     html += `<p class="d">Thrown things fly where you point, bounce off walls and trees, and lie where they stop.</p>`;
     this.inspector.innerHTML = html;
     this.inspector.querySelector('.close')?.addEventListener('click', () => s.selectItem(null));
   }
-  /** A card for a tile: crop, soil, tree, wild food, pen, wall, gate, stairs, or plain grass. */
+  /** A card for a tile: crop, soil, tree, wild food, wall, gate, stairs, or plain grass. */
   private renderTileCard(q: TilePos, head: string): void {
     const s = this.scene, w = s.world, t = w.get(q.tx, q.ty);
     if (!t) { s.selectTile(null); return; }
@@ -604,16 +610,6 @@ export class UI {
       if (d.kind === 'stairs') { const reach = s.stairsReach(q); rows += `<b>Serves</b><span>${reach} connected battlement${reach === 1 ? '' : 's'} · ${s.villagers().filter((v) => v.post && Math.abs(v.post.tx - q.tx) + Math.abs(v.post.ty - q.ty) <= 12).length} soldiers posted along it</span>`; }
       if (d.kind === 'gate') extra = `<div class="raise"><div class="cap">GATE</div><div class="seg"><button class="btn small ${d.open ? '' : 'on'}" data-gate="closed">GUARDED</button><button class="btn small ${d.open ? 'on' : ''}" data-gate="open">OPEN</button></div><div class="d">Guarded: allies pass, enemies must break it. Open: everyone walks through.</div></div>`;
       rows += `<b>Take down</b><span>${DISMANTLE.hits} hammer hits for half the wood back</span>`;
-    } else if (t.pen) {
-      const pc = s.penCard(q)!;
-      title = `Training pen · ${PEN_NAME[pc.kind]}`; badge = `${pc.tiles.length} tile${pc.tiles.length === 1 ? '' : 's'}`; badgeCls = pc.kind === 'soldier' ? 'soldier' : 'farmer';
-      rows += `<b>Children</b><span>${pc.kids.length} training here${pc.hungry ? ` · <em class="warn">${pc.hungry} hungry</em>` : ''}</span>`;
-      rows += `<b>Food lying</b><span>${pc.piles || '<em class="warn">nothing — throw some in with the BASKET</em>'}</span>`;
-      rows += `<b>Barracks</b><span>${pc.kind === 'soldier' ? (s.world.barracks.some((b) => b.warm) ? 'a warm barracks drills them' : '<em class="warn">needs a warm barracks to drill anyone</em>') : 'not needed'}</span>`;
-      rows += `<b>Teaches</b><span>${pc.kind === 'soldier' ? 'soldiering — a skilled soldier after' : pc.kind === 'farmer' ? 'farming — a skilled farmer after' : 'the axe — a skilled woodcutter after'} ${Villager.drillNeeded(s)} fed days</span>`;
-      const arming = this.confirmErase === `${q.tx},${q.ty}`;
-      extra = `<div class="raise"><div class="cap">REPAINT AS</div><div class="seg">${CALLINGS.map((c) => `<button class="btn small ${pc.kind === c ? 'on' : ''}" data-repaint="${c}">${PEN_NAME[c].toUpperCase()}</button>`).join('')}</div><div class="d">Repaints the whole pen; its children switch with it.</div></div>
-        <div class="raise"><button class="btn small ${arming ? 'danger' : ''} erase-pen">${arming ? 'ERASE — SURE?' : 'ERASE PEN'}</button><div class="d">Removes every tile of this pen; the children look for another.</div></div>`;
     } else if (t.kind === 'crop' || t.kind === 'tilled') {
       const fk = t.food ?? 'wheat', days = s.cropDaysOf(t), ripe = s.isRipe(t);
       title = t.kind === 'crop' ? `${ripe ? 'Ripe' : 'Growing'} ${FOODS[fk].name.toLowerCase()}` : 'Tilled soil'; badge = t.kind === 'crop' ? (ripe ? 'harvest with hands' : `ripens in ${Math.max(0, days - t.stage)} day${days - t.stage === 1 ? '' : 's'}`) : t.food ? `farmers will sow ${FOODS[t.food].name.toLowerCase()}` : 'sow with seeds';
@@ -644,12 +640,6 @@ export class UI {
     this.inspector.querySelectorAll<HTMLElement>('.pick-item').forEach((el) => el.addEventListener('click', (e) => { e.preventDefault(); const it = w.items.find((i) => i.id === Number(el.dataset.id)); if (it) s.selectItem(it); }));
     this.inspector.querySelectorAll<HTMLButtonElement>('[data-plan]').forEach((el) => el.addEventListener('click', () => { s.setFieldPlan(q, el.dataset.plan as FoodKind); this.renderInspector(true); }));
     this.inspector.querySelectorAll<HTMLButtonElement>('[data-gate]').forEach((el) => el.addEventListener('click', () => { if (t.defense) w.setGateOpen(t.defense, el.dataset.gate === 'open'); this.renderInspector(true); }));
-    this.inspector.querySelectorAll<HTMLButtonElement>('[data-repaint]').forEach((el) => el.addEventListener('click', () => { const pc = s.penCard(q); if (pc) s.repaintPen(pc.tiles, el.dataset.repaint as Calling); this.renderInspector(true); }));
-    this.inspector.querySelector('.erase-pen')?.addEventListener('click', () => {
-      const key = `${q.tx},${q.ty}`;
-      if (this.confirmErase !== key) { this.confirmErase = key; this.renderInspector(true); return; }
-      this.confirmErase = null; const pc = s.penCard(q); if (pc) s.erasePen(pc.tiles); s.selectTile(null);
-    });
   }
 
   private renderInspector(force = false): void {
@@ -684,7 +674,7 @@ export class UI {
       if (b.kind === 'house' || b.kind === 'gnomehouse') {
         const infants = s.infantsOf(b).length, why = s.birthProblem(b);
         html += `<b>Beds</b><span>${s.bedsTaken(b)} / ${s.beds(b)}${s.bedsTaken(b) > s.beds(b) ? ' <em class="warn">· crowded</em>' : ''}</span>`;
-        html += `<b>Nursery</b><span>${infants} / ${s.cribs(b)} cribs${b.ruined ? '' : why ? ` · <em class="warn">no births: ${esc(why)}</em>` : ` · ${Math.round(100 * s.birthChance(b))}% every ${p.birthEvery}s · next roll in ${Math.ceil(s.birthIn(b))}s${s.feverActive() ? ' <em class="fever-txt">· baby fever</em>' : ''}`}<em class="d"> infants walk out to a pen after ${p.infantDays} days</em></span>`;
+        html += `<b>Nursery</b><span>${infants} / ${s.cribs(b)} cribs${b.ruined ? '' : why ? ` · <em class="warn">no births: ${esc(why)}</em>` : ` · ${Math.round(100 * s.birthChance(b))}% every ${p.birthEvery}s · next roll in ${Math.ceil(s.birthIn(b))}s${s.feverActive() ? ' <em class="fever-txt">· baby fever</em>' : ''}`}<em class="d"> infants walk out into the yard after ${p.infantDays} days</em></span>`;
       }
       if (b.kind === 'granary') {
         const bin = (ks: readonly FoodKind[]) => ks.filter((k) => s.pantry[k] >= 1).map((k) => `<span style="color:${FOODS[k].colour}">${s.pantry[k] | 0}</span> ${FOODS[k].one}`).join(' · ');
@@ -729,7 +719,7 @@ export class UI {
       return;
     }
     if (!m || m.dead) {
-      const html = `${head}<p class="empty">Click or tap anything: a villager, a building, a crop, a tree, a pen, a wall, or something lying on the ground.<br>Children are the point: pick each house's <b>calling</b>, feed them well, keep them safe, and <b>encourage</b> them — how they're raised is who they become.</p>`;
+      const html = `${head}<p class="empty">Click or tap anything: a villager, a building, a crop, a tree, a wall, or something lying on the ground.<br>Children are the point: feed them well in the yard, keep them safe, and <b>encourage</b> them — how they're raised is who they become.</p>`;
       if (force || this.lastInspector !== html) { this.inspector.innerHTML = html; this.lastInspector = html; }
       return;
     }
@@ -744,11 +734,11 @@ export class UI {
     html += `<b>Health</b><div class="bar hp ${hpPct < 40 ? 'low' : ''}"><i style="width:${hpPct}%"></i><span class="bar-txt">${Math.max(0, m.hp | 0)} / ${m.maxHp}</span></div>`;
     if (m instanceof Villager) {
       const stage = m.role === 'infant' ? ` <em>· infant, leaves the nursery in ${Math.max(0, p.infantDays - m.age).toFixed(1)} days</em>`
-        : m.role === 'kid' ? ` <em>· child, comes of age in ${Math.max(0, s.adultAge - m.age).toFixed(1)} days${m.gnome ? ' by the gnome house' : m.pen ? ` at the ${PEN_NAME[m.pen]}` : ' — no pen to train in'}</em>`
+        : m.role === 'kid' ? ` <em>· child, comes of age in ${Math.max(0, s.adultAge - m.age).toFixed(1)} days${m.gnome ? ' by the gnome house' : m.calling ? ` learning the ${m.calling}'s trade at home` : ''}</em>`
         : m.elder ? ` <em>· elder</em>` : ` <em>· grows old at ${Math.round(s.elderAge)}</em>`;
       html += `<b>Age</b><span>${m.age.toFixed(1)} days${stage}</span>`;
       html += `<b>Home</b><span>${s.bedsTaken(m.home)} of ${s.beds(m.home)} beds</span>`;
-      html += `<b>Fed</b><span>${m.role === 'infant' ? (m.hungerDays ? `<em class="warn">hungry for ${m.hungerDays} days — nobody at home was fed; ${p.kidStarveDays} days starve an infant</em>` : 'nursed — a fed grown-up at home feeds the nursery') : m.role === 'kid' ? (m.ateDay >= s.day ? (m.gnome ? 'ate today from food by the gnome house' : 'ate today from a pen pile') : m.hungerDays ? `<em class="warn">hungry for ${m.hungerDays} days — ${m.gnome ? 'throw food by the gnome house' : m.pen ? `throw food into the ${PEN_NAME[m.pen]}` : 'paint a pen and throw food in'}</em>` : 'not yet today') : m.hungerDays === 0 ? 'yes' : `<em class="warn">hungry for ${m.hungerDays} days</em>`}</span>`;
+      html += `<b>Fed</b><span>${m.role === 'infant' ? (m.hungerDays ? `<em class="warn">hungry for ${m.hungerDays} days — nobody at home was fed; ${p.kidStarveDays} days starve an infant</em>` : 'nursed — a fed grown-up at home feeds the nursery') : m.role === 'kid' ? (m.ateDay >= s.day ? `ate today from a pile by ${m.gnome ? 'the gnome house' : 'the house'}` : m.hungerDays ? `<em class="warn">hungry for ${m.hungerDays} days — throw food in the yard (BASKET)</em>` : 'not yet today') : m.hungerDays === 0 ? 'yes' : `<em class="warn">hungry for ${m.hungerDays} days</em>`}</span>`;
     }
     if (m instanceof Player) html += `<b>Belly</b><span>${!p.hunger ? 'hunger is off' : m.hunger <= 0 ? `<em class="warn">empty — starving, ${p.starveHpPerDay} HP a day and no mending</em>` : `${m.hunger.toFixed(1)} / ${p.hungerMax} · about ${(m.hunger / Math.max(1e-6, p.hungerPerDay)).toFixed(1)} days · T eats a meal`}</span>`;
     if(m instanceof Player)html += `<b>Pack</b><span>${m.pack.slots.length-m.pack.emptySlots} / ${m.pack.slots.length} slots used</span>`;
@@ -762,19 +752,19 @@ export class UI {
     if (m instanceof Villager && m.role === 'kid') {
       const o = m.outlook(s), need = Villager.drillNeeded(s);
       const stars = m.starsNow();
-      const line = !m.pen ? `no pen to train in — they stay a child until one is painted · ${need} fed days in a pen to be skilled`
-        : `training at the ${PEN_NAME[m.pen]} · ${m.trained.toFixed(1)}/${need} days`;
+      const line = !m.calling ? 'no place was open when they were born — they stay a child until one is'
+        : `learning at home · ${m.trained.toFixed(1)}/${need} fed days to be skilled`;
       const list = s.careToday(m).map((c) => `<li class="${c.ok ? 'ok' : ''}">${c.ok ? '✓' : '✗'} ${c.label}${!c.ok && c.note ? ` <small>· ${esc(c.note)}</small>` : ''}</li>`).join('');
       const why = s.encourageProblem(m);
       html += `<div class="upbring"><div class="cap">UPBRINGING</div>
         <div class="stars">${'★'.repeat(stars)}<span class="dim">${'☆'.repeat(5 - stars)}</span> <small>${stars === 5 ? 'gifted' : stars >= 3 ? 'well raised' : stars >= 2 ? 'getting by' : m.careDays ? 'neglected' : 'a fresh start'}</small></div>
-        <div class="lean ${o.role === 'soldier' ? 'm' : 'c'}">${o.role ? `will be ${o.skilled ? 'a skilled' : 'a plain'} ${o.role.toUpperCase()} at age ${s.adultAge.toFixed(1)}` : 'the pen they train in decides what they become'}</div><div class="d">${line}</div>
+        <div class="lean ${o.role === 'soldier' ? 'm' : 'c'}">${o.role ? `will be ${o.skilled ? 'a skilled' : 'a plain'} ${o.role.toUpperCase()} at age ${s.adultAge.toFixed(1)}` : 'no place open for them yet'}</div><div class="d">${line}</div>
         <ul class="care">${list}</ul>
         <button class="btn small ok encourage" ${why ? 'disabled' : ''}>ENCOURAGE${why ? ` · ${esc(why)}` : ''}</button></div>`;
       const d = s.dietReport(m);
       html += `<div class="upbring diet"><div class="cap">DIET</div>
         ${d.kinds.filter((k) => k.n > 0 || !isDish(k.kind)).map((k) => `<div class="lbl"><span>${FOODS[k.kind].name}</span><span>${k.n % 1 ? k.n.toFixed(1) : k.n} · ${FOODS[k.kind].stat === 'care' ? 'care' : `+${Math.round(DIET_CAP[FOODS[k.kind].stat as keyof typeof DIET_CAP] * (FOODS[k.kind].power ?? 1) * p.dietMul * k.share * 100)}% ${DIET_STAT_NAME[FOODS[k.kind].stat]}`}</span></div><div class="bar diet"><i style="width:${Math.round(k.share * 100)}%;background:${FOODS[k.kind].colour}"></i></div>`).join('')}
-        <div class="d">${d.bonuses ? `growing up: ${d.bonuses}` : `nothing eaten from the pen yet — ${p.dietFull} of one food for its full bonus`}</div></div>`;
+        <div class="d">${d.bonuses ? `growing up: ${d.bonuses}` : `nothing eaten from the yard yet — ${p.dietFull} of one food for its full bonus`}</div></div>`;
     } else if (m instanceof Villager) {
       const d = s.dietReport(m);
       html += `<div class="upbring"><div class="cap">RAISED</div><div class="stars">${'★'.repeat(m.stars)}<span class="dim">${'☆'.repeat(5 - m.stars)}</span> <small>${m.skilled ? 'skilled' : 'plain'}${m.trait ? ` · ${TRAITS[m.trait].name} — ${TRAITS[m.trait].blurb}` : ''}</small></div>${d.bonuses ? `<div class="d">fed on ${d.kinds.filter((k) => k.n > 0).sort((a, b) => b.n - a.n).slice(0, 2).map((k) => FOODS[k.kind].name.toLowerCase()).join(' and ')}: ${d.bonuses}</div>` : ''}</div>`;
@@ -815,7 +805,7 @@ export class UI {
     let html = '';
     for (const [label, cls, list] of groups) {
       if (!list.length) continue;
-      html += `<div class="grp ${cls}">${label} <b>${list.length}</b>${cls === 'kid' ? '<span class="grp-note">pen · care stars</span>' : ''}</div>`;
+      html += `<div class="grp ${cls}">${label} <b>${list.length}</b>${cls === 'kid' ? '<span class="grp-note">trade · care stars</span>' : ''}</div>`;
       for (const v of list) {
         const c = CHAR[v.role];
         let bar = '';
@@ -1180,7 +1170,7 @@ export class UI {
           ${who('dungeon', DUNGEON.hero, 'player', 'You', 'Equip a tool, then click: hoe tills, seeds plant, hands harvest, axe chops, sword fights, hammer upgrades.')}
           ${who('farm', FARM.farmerHat, 'farmer', 'Farmer', 'Plants and harvests the fields on their own.')}
           ${who('dungeon', DUNGEON.man, 'woodcutter', 'Woodcutter', 'Fells trees for wood — old growth first, thinning a grove from its edge so the core keeps spreading. Leaves the last ' + TREE_RESERVE + ' standing. Helps in the field when the woodyard is full.')}
-          ${who('dungeon', DUNGEON.villager, 'kid', 'Child', 'Born into the house nursery; walks out to a painted pen and trains there, eating only what you toss in. Comes of age as what the pen teaches.')}
+          ${who('dungeon', DUNGEON.villager, 'kid', 'Child', 'Born into the house nursery; walks out into the yard and learns the trade the village had a place for, eating only what you toss in.')}
           ${who('dungeon', DUNGEON.knight, 'soldier', 'Soldier', 'Guards the barracks and fights raiders.')}
           <p><b>The shaman wand.</b> Pick it from the belt and the fighters answer like an army: <b>left click</b> a soldier (shift adds), or <b>drag a box</b> over several; then <b>right click</b> open ground to send them there — they <b>hold</b> that spot, fighting whatever comes within ${ORDER.leash} tiles and drifting back after — a <b>raider</b> to hunt it down (they hold where it fell), or a <b>wall top</b> to man the battlements (it hands them a bow). <b>F</b> makes the squad follow you; F again and they hold where they stand. With nobody picked, an order goes to every soldier. RETURN TO PATROL on a fighter's card cancels their order.</p>
           ${who('dungeon', DUNGEON.orc, 'raider', 'Raider', 'Walks at the nearest person and hits them. Tramples crops.')}
@@ -1195,21 +1185,22 @@ export class UI {
           <h3>BUILDINGS</h3>
           <p>Every building can be wrecked. The <b>HAMMER</b> mends a damaged one (1 wood = 60 HP) and raises a ruin again for half its build cost; on a sound building, 3 hits upgrade it for wood. Every building has three levels — the brass studs on the sign by the door count them, and each level changes the building itself:</p>
           ${building('house', 'House · ' + COST.house + ' wood', 'A couple here has children.')}
-          ${building('gnomehouse', 'Gnome House · ' + COST.gnomehouse + ' wood', 'Comes with a gnome couple, who raise a family like any house (cribs, a hearth, food to spare). Gnome children need no pen: they play by the cottage, eat only what you throw within a few tiles of it (BASKET), and grow into gnomes. Grown gnomes forage: they walk to the nearest ripe wild plant, pick one unit, carry it to the granary and go again. They never fight — raiders send them running home like anyone else. <b>You start without the craft:</b> one cottage stands out in the woods, ringed by mushrooms, with a glade of warm motes drifting over it. Walk into the glade and keep going until the cottage itself comes into sight — the family is yours, and they teach you to raise more.')}
-          ${building('barracks', 'Barracks · ' + COST.barracks + ' wood', 'Drills the drill yard; its tower shoots raiders.')}
-          ${building('granary', 'Granary', 'Holds your food; the harvest is carried here. The crate stack beside it climbs as the store fills.')}
-          ${building('woodyard', 'Woodyard', 'Holds your wood; chopped logs are carried here. The log stack beside the cabin climbs as it fills.')}
+          ${building('gnomehouse', 'Gnome House · ' + COST.gnomehouse + ' wood', 'Comes with a gnome couple, who raise a family like any house (cribs, a hearth, food to spare). Gnome children take no calling: they play by the cottage, eat only what you throw within a few tiles of it (BASKET), and grow into gnomes. Grown gnomes forage: they walk to the nearest ripe wild plant, pick one unit, carry it to the granary and go again. They never fight — raiders send them running home like anyone else. <b>You start without the craft:</b> one cottage stands out in the woods, ringed by mushrooms, with a glade of warm motes drifting over it. Walk into the glade and keep going until the cottage itself comes into sight — the family is yours, and they teach you to raise more.')}
+          ${building('barracks', 'Barracks · ' + COST.barracks + ' wood', 'Keeps ' + p.soldierCap + ' warriors under arms and drills the children promised a sword; its tower shoots raiders.')}
+          ${building('granary', 'Granary', 'Holds your food and keeps ' + p.farmerCap + ' farmers in work. The crate stack beside it climbs as the store fills.')}
+          ${building('woodyard', 'Woodyard', 'Holds your wood and keeps ' + p.woodcutterCap + ' woodcutters in work. The log stack beside the cabin climbs as it fills.')}
           <h3>FOOD & DIET</h3>
           <p><b>Three crops.</b> Take <b>SEEDS</b> and press <b>F</b> to choose: ${CROP_KINDS.map((k) => `<b>${FOODS[k].name.toLowerCase()}</b> (${FOODS[k].blurb})`).join(', ')}. Sow on tilled soil; farmers harvest what is ripe and <b>replant the same crop</b>, so the field stays what you made it. The starting field has a row of each.</p>
           <p><b>Foraging.</b> Five wild plants regrow after picking: <b>berry bushes</b> at the forest edge, <b>mushrooms</b> in the shade of old growth, <b>hazels</b> where the trees thin out, <b>wild garlic</b> dotted over the meadow and <b>burdock</b> along the trails (hazelnuts +HP, garlic +work, burdock +speed). Grown <b>gnomes forage for you</b>: one unit at a time, carried to the granary, so a gnome house by the woods is a slow but steady larder. You can also pick by hand: <b>Berry bushes</b> grow at the forest edge and <b>mushrooms</b> in the shade of old growth. Pick them with <b>HANDS</b> (${FOODS.berry.yield} berries, ${FOODS.mushroom.yield} mushrooms); they grow back in ${s.regrowDays('berry')} / ${s.regrowDays('mushroom')} days, and old trees seed new patches now and then. Berries make <b>fierce</b> children (+damage); a mushroom meal is worth a <b>care point</b>. <b>Boar meat</b> is the hunter's food: it does nothing for grown-ups, but children raised on it come of age with twice the damage bonus berries give.</p>
-          <p><b>What they eat is who they become.</b> The granary keeps each kind apart. The <b>BASKET</b> takes one kind (F to choose) and what lands in a pen is what its children eat. Every unit of a food moves that child toward its bonus — ${p.dietFull} units of one kind for the full ${Math.round(DIET_CAP.hp * p.dietMul * 100)}% HP (wheat), ${Math.round(DIET_CAP.speed * p.dietMul * 100)}% speed (carrots), ${Math.round(DIET_CAP.work * p.dietMul * 100)}% work speed (tomatoes) or ${Math.round(DIET_CAP.dmg * p.dietMul * 100)}% damage (berries) — and a mixed diet gives a little of each. The bonuses <b>lock in at coming of age</b> and last for life; the child's card shows the diet as it builds. Adults eat whatever is in store and it changes nothing.</p>
+          <p><b>What they eat is who they become.</b> The granary keeps each kind apart. The <b>BASKET</b> takes one kind (F to choose) and what lands in a home's yard is what its children eat. Every unit of a food moves that child toward its bonus — ${p.dietFull} units of one kind for the full ${Math.round(DIET_CAP.hp * p.dietMul * 100)}% HP (wheat), ${Math.round(DIET_CAP.speed * p.dietMul * 100)}% speed (carrots), ${Math.round(DIET_CAP.work * p.dietMul * 100)}% work speed (tomatoes) or ${Math.round(DIET_CAP.dmg * p.dietMul * 100)}% damage (berries) — and a mixed diet gives a little of each. The bonuses <b>lock in at coming of age</b> and last for life; the child's card shows the diet as it builds. Adults eat whatever is in store and it changes nothing.</p>
           <h3>RAISING CHILDREN</h3>
-          <p><b>Life.</b> Everyone is born an <b>infant</b> in the house nursery (${p.infantDays} days), walks out a <b>child</b> to a training pen until age ${s.adultAge.toFixed(1)}, works as an <b>adult</b> for ${p.adultDays} days, then grows <b>old</b> — slower and grey — and passes away about ${p.elderDays} days later. The sliders (backtick) under <b>lifecycle</b> set every one of these.</p>
+          <p><b>Life.</b> Everyone is born an <b>infant</b> in the house nursery (${p.infantDays} days), walks out a <b>child</b> into the yard until age ${s.adultAge.toFixed(1)}, works as an <b>adult</b> for ${p.adultDays} days, then grows <b>old</b> — slower and grey — and passes away about ${p.elderDays} days later. The sliders (backtick) under <b>lifecycle</b> set every one of these.</p>
           <p><b>Births.</b> Every ${p.birthEvery} seconds a couple in a warm house with a free <b>crib</b> (${p.cribs} in a Lv1 nursery, +1 per level) has a ${Math.round(100 * p.birthChance)}% chance of a child (needs food to spare). A house can raise at most cribs ÷ infantDays children a day, so more houses and bigger nurseries mean more children. The <b>Baby Fever</b> legacy boon adds ${Math.round(100 * p.feverBonus)}% while the larder holds <b>${p.feverDays}+ days of food</b> for everyone — the FOOD tile shows the days, and a FEVER badge glows while it holds. More mouths shrink the surplus, so it only lasts if the fields keep up.</p>
-          <p><b>Pens.</b> Take the <b>PEN</b> tool (F picks the kind: <b>training field</b>, <b>wood lot</b> or <b>drill yard</b>) and paint it over open grass; painting the same kind again erases it. A child leaving the nursery walks to the <b>nearest pen</b> and lives there day and night. <b>The pen decides what they become</b> — a field makes farmers, a wood lot woodcutters, a drill yard soldiers (while a warm barracks stands) — and ${Villager.drillNeeded(s)} fed days there make them <b>skilled</b>: faster work, bigger harvests and loads, tougher soldiers. A child with no pen stays a child until one is painted.</p>
-          <p><b>Every child can starve.</b> Nobody young eats from the granary. Infants are nursed: they eat only when a fed grown-up lives at home, so an empty larder or an empty house starves the nursery. Children eat only what lies in their pen — or, for gnome children, what lies within ${GNOME_YARD} tiles of their cottage. ${p.kidStarveDays} hungry days are fatal.</p>
-          <p><b>Feeding the pens.</b> Pen children eat nothing from the granary — only what you throw in. Take the <b>BASKET</b>, walk up to the granary to fill it (${STACK.food} food), point anywhere within ${p.tossRange} tiles and throw: ${p.tossSize} food flies there, bounces off walls and trees, rolls and stops wherever it stops. Children eat only what lies <b>inside their pen</b> (${p.kidFood} a day each) — a throw that rolls out is wasted until you walk over it. A child that misses a day stops training; after ${p.kidStarveDays} hungry days they starve. The basket's hint and the pen's hover tell you how many are there and how much food is left.</p>
-          <p><b>Care.</b> Each dawn a child earns care for the day before: fed · <b>well fed</b> (ate from the pen that day) · both parents alive · another child at home · a Lv2+ house · your <b>encouragement</b>. Running from raiders, going hungry or losing a parent costs care. It averages into <b>stars</b> (★ to ★★★★★) that are fixed at coming of age and last for life: each star is +6% HP and work speed; five stars make a <b>gifted</b> adult with a trait (Hardy, Quick, Brave, Green Thumb, Tireless); a neglected child grows up frail.</p>
+          <p><b>The trades, and what they cost you.</b> <b>Your buildings decide what your village is.</b> Each one keeps a fixed number of people in work — a granary ${p.farmerCap} farmers, a woodyard ${p.woodcutterCap} woodcutters, a barracks ${p.soldierCap} warriors — and that counts per building, so a <b>second barracks</b> makes room for ${p.soldierCap} more. Every newborn is promised the trade with the most places open, and holds that place while it grows, so the village fills out on its own about ${p.farmerCap}:${p.woodcutterCap}:${p.soldierCap} — want an army, build barracks. ${Villager.drillNeeded(s)} fed days at home make a child <b>skilled</b>: faster work, bigger harvests and loads, tougher warriors. A child promised a sword also needs a <b>warm barracks</b> standing to learn it.</p>
+          <p><b>No room, no child.</b> When every trade in the village is full, <b>no child is born at all</b> — the village raises nobody it cannot put to work. A house card says so when it happens, and the FARM / WOOD / ARMY tiles at the top show how full each trade is. Build (or lose) a building and the places change with it: a ruined granary closes its farmers' places until the hammer raises it again. The <b>callings</b> sliders (backtick) set all three caps, to trial different village shapes.</p>
+          <p><b>Every child can starve.</b> Nobody young eats from the granary. Infants are nursed: they eat only when a fed grown-up lives at home, so an empty larder or an empty house starves the nursery. Children eat only what lies within ${YARD} tiles of the home they live in. ${p.kidStarveDays} hungry days are fatal.</p>
+          <p><b>Feeding the yard.</b> Children eat nothing from the granary — only what you throw down for them. Take the <b>BASKET</b>, walk up to the granary to fill it (${STACK.food} food), point anywhere within ${p.tossRange} tiles and throw: ${p.tossSize} food flies there, bounces off walls and trees, rolls and stops wherever it stops. Children eat only what lies <b>within ${YARD} tiles of the home they live in</b> (${p.kidFood} a day each) — a throw that rolls short is wasted until you walk over it, and what lies in a yard is the children's: you will not pick it up by walking past, and no foraging gnome will take it. A child that misses a day stops training; after ${p.kidStarveDays} hungry days they starve. The basket's hint tells you how many children a yard holds and how much food is lying in it.</p>
+          <p><b>Care.</b> Each dawn a child earns care for the day before: fed · <b>well fed</b> (ate from the yard that day) · both parents alive · another child at home · a Lv2+ house · your <b>encouragement</b>. Running from raiders, going hungry or losing a parent costs care. It averages into <b>stars</b> (★ to ★★★★★) that are fixed at coming of age and last for life: each star is +6% HP and work speed; five stars make a <b>gifted</b> adult with a trait (Hardy, Quick, Brave, Green Thumb, Tireless); a neglected child grows up frail.</p>
           <p><b>Encourage.</b> Walk up to a child and press X (or tap them, or the button on their card): a moment together, once a day, worth a care point and a day of apprenticeship. During a raid it also sends them inside.</p>
           <p><b>Children go to bed at dusk</b> and sleep indoors until dawn, and they <b>run for the nearest door</b> when raiders are near. Snatchers take children caught in the open.</p>
           <p><b>Renown</b> comes from children raised: 20 each, plus 8 per star.</p>
@@ -1218,7 +1209,7 @@ export class UI {
           <h3>ARMOR</h3>
           <p>You and your soldiers have four armor slots — <b>helmet</b> (HP), <b>chest</b> (less damage taken), <b>legs</b> (speed) and <b>shield</b> (a chance to block melee hits outright; archers can't carry one). Each has three tiers: <b>leather</b> for wood, <b>iron</b> and <b>steel</b> for wood plus <b>scrap iron</b> dropped by slain raiders — walk over it (needs a Lv2 / Lv3 barracks). Open the ARMORY with <kbd>V</kbd>, from the barracks card, or from a soldier's card; dye tabards and pick helmets and plumes there too — what they wear is what you see.</p>
           <h3>SOLDIERS</h3>
-          <p>Paint a <b>drill yard</b> (PEN tool, F until it says drill yard) and throw food into it: every child who lives there comes of age a <b>soldier</b>, skilled after ${Villager.drillNeeded(s)} fed days of drill. A warm barracks is needed to drill anyone. Every child's outlook is shown in the inspector and the villagers list — no surprises.</p>
+          <p><b>Build barracks.</b> Each one standing makes room for ${p.soldierCap} warriors, and children are promised the trade with the most places open — so barracks are how you raise an army, and a village with none raises none. A child promised a sword drills at home and comes of age <b>skilled</b> after ${Villager.drillNeeded(s)} fed days, but only while a <b>warm barracks</b> stands to teach them. Every child's outlook is shown in the inspector and the villagers list — no surprises.</p>
           <h3>FOG & THE OGRE</h3>
           <p>The world is dark until someone sees it. You see 10 tiles, buildings light 8, soldiers 6 and other villagers 4; what you've seen stays on the map, dimmed, but raiders in the dark are invisible until they step into sight — walls with people on them are your eyes. The minimap shows how much you've explored.</p>
           <p>Somewhere 50–85 tiles out in the woods is <b>the Ogre's lair</b>. On day 2 the woodcutters give you a direction. The Ogre is huge — far bigger than any raider — sleeps in his lair by day and prowls the woods around it at night, hunting anyone within ${OGRE.hunt} tiles. He has three telegraphed attacks — a wide swing (${OGRE.swing.dmg}), a ground smash (${OGRE.smash.dmg}, cracks walls and buildings) and a charge (${OGRE.charge.dmg}, batters whatever stops it) — shrugs off knockback and heals a quarter of his ${OGRE.hp} HP each day he sleeps. Once he has your scent he never sleeps again and will follow you home, so don't rouse him until you can finish him: iron mail, a shield, a few archers. Slaying him is worth ${OGRE.scrap} scrap and ${OGRE.renown} renown.</p>

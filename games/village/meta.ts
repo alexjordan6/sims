@@ -130,7 +130,7 @@ export const NODES: Node[] = [
   { id: 'hearth2b', branch: 'hearth', tier: 2, side: 'b', requires: 'hearth1', name: 'Second Couple', cost: 100, blurb: 'Start with a second family and house', icon: { key: 'dungeon', frame: 99 }, apply: (m) => (m.extraAdults += 2) },
   { id: 'hearth3b', branch: 'hearth', tier: 3, side: 'b', requires: 'hearth2b', name: 'Quick to Grow', cost: 200, blurb: 'Children come of age 2 days sooner', icon: { key: 'dungeon', frame: 85 }, apply: (m) => (m.adultAgeDelta -= 2) },
   // ---- War
-  { id: 'war1', branch: 'war', tier: 1, name: 'Drill Yard', cost: 50, blurb: 'Soldiers +15 HP', icon: { key: 'dungeon', frame: 102 }, apply: (m) => (m.soldierHpBonus += 15) },
+  { id: 'war1', branch: 'war', tier: 1, name: 'Weapon Drills', cost: 50, blurb: 'Soldiers +15 HP', icon: { key: 'dungeon', frame: 102 }, apply: (m) => (m.soldierHpBonus += 15) },
   { id: 'war2a', branch: 'war', tier: 2, side: 'a', requires: 'war1', name: 'War Drums', cost: 100, blurb: 'Cadets need 2 days of drill instead of 3', icon: { key: 'town', frame: 95 }, apply: (m) => (m.cadetDaysDelta -= 1) },
   { id: 'war3a', branch: 'war', tier: 3, side: 'a', requires: 'war2a', name: 'Blooded', cost: 250, blurb: 'Soldiers deal +50%', icon: { key: 'dungeon', frame: 105 }, apply: (m) => { m.soldierDmgMul *= 1.5; m.sponsorBonus += 1; } },
   { id: 'war2b', branch: 'war', tier: 2, side: 'b', requires: 'war1', name: 'Veteran', cost: 150, blurb: 'Start with a trained soldier', icon: { key: 'dungeon', frame: 96 }, apply: (m) => (m.startSoldiers += 1) },

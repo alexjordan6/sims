@@ -370,6 +370,10 @@ kbd { font-family: var(--font-head); font-size: 8px; background: #0009; padding:
 .topbar .chip b { font-size: 15px; }
 .topbar .chip i { font-family: var(--font-head); font-style: normal; font-size: 6px; color: var(--ink-dim); margin-left: 2px; }
 .topbar .chip.farmer b { color: var(--farmer); } .topbar .chip.woodcutter b { color: var(--woodcutter); } .topbar .chip.kid b { color: var(--kid); } .topbar .chip.soldier b { color: var(--soldier); }
+/* a trade whose buildings are full: no child will be born for it until you build */
+.topbar .chip.full { border-color: var(--warn, #d9a02e); }
+.topbar .chip.full b small { color: var(--warn, #d9a02e); }
+.topbar .chip b small { font-size: 10px; color: var(--ink-dim); }
 .topbar .raid { font-family: var(--font-head); font-size: 8px; color: var(--ink-dim); gap: 6px; }
 .topbar .raid.soon { color: var(--gold); }
 .topbar .raid.now { color: var(--danger); animation: pulse .6s infinite alternate; }

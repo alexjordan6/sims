@@ -10,7 +10,7 @@ import { Interior } from './interior';
 import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, Bolt, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm, type Sounder } from './wildlife';
 import { Fog } from './fog';
-import { p, TILE, COLS, ROWS, ZOOM, COST, BOAR, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, GNOME_BEDS, GNOME_YARD, ORDER, LEVEL_PERKS, PEN_NAME, TROLL, HIVE, ITEM, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, zeroFood, isDish, foodCount, hasInterior, type Recipe, type DishKind, DIET_STAT_NAME, type DietStat, type FoodKind, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, BOAR, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, GNOME_BEDS, YARD, ORDER, LEVEL_PERKS, CALLING_NAME, CALLINGS, TROLL, HIVE, ITEM, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, zeroFood, isDish, foodCount, hasInterior, type Recipe, type DishKind, DIET_STAT_NAME, type DietStat, type FoodKind, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
@@ -37,7 +37,7 @@ export type FxEvent =
   | { kind: 'hearts'; who: Mover }
   | { kind: 'melee'; who: Mover; x: number; y: number }
   | { kind: 'arrow'; who: Mover }
-  /** a handful of food lobbed from the basket onto a pen tile */
+  /** a handful of food lobbed from the basket into a home's yard */
   | { kind: 'thud'; who: Mover }
   | { kind: 'snore'; x: number; y: number }
   | { kind: 'deposit'; x: number; y: number; text: string; colour: string }
@@ -142,7 +142,7 @@ export class VillageScene extends SimScene {
   selected: Mover | null = null;
   /** a building picked with X / right-click / tap */
   selectedBuilding: Building | null = null;
-  /** the inspector can also show a tile (crop, tree, pen, wall…) or a thing lying on the ground */
+  /** the inspector can also show a tile (crop, tree, wall…) or a thing lying on the ground */
   selectedTile: TilePos | null = null;
   selectedItem: Item | null = null;
   journal: GameEvent[] = [];
@@ -807,31 +807,8 @@ export class VillageScene extends SimScene {
     if (b) this.selectBuilding(b); else this.selectTile(q);
   }
 
-  // ---- the inspector's take on tiles, pens and things on the ground -------------------------
+  // ---- the inspector's take on tiles and things on the ground -------------------------------
 
-  /** The connected pen a tile belongs to, and who is in it. */
-  penCard(q: TilePos): { kind: Calling; tiles: number[]; kids: Villager[]; hungry: number; piles: string } | null {
-    const kind = this.world.get(q.tx, q.ty)?.pen;
-    if (!kind) return null;
-    const tiles = this.world.penRegion(q.tx, q.ty), inRegion = new Set(tiles);
-    const kids = this.villagers().filter((v) => v.role === 'kid' && v.pen === kind && !v.dead && inRegion.has(v.tile.ty * this.world.cols + v.tile.tx));
-    const piles = FOOD_KINDS.map((k) => [k, this.world.items.filter((it) => it.rest && it.kind === 'food' && it.food === k && inRegion.has(Math.floor(it.y / TILE) * this.world.cols + Math.floor(it.x / TILE))).reduce((n, it) => n + it.n, 0)] as const)
-      .filter(([, n]) => n > 0).map(([k, n]) => `${n % 1 ? n.toFixed(1) : n} ${FOODS[k].one}`).join(', ');
-    return { kind, tiles, kids, hungry: kids.filter((v) => v.hungerDays > 0 || v.task.startsWith('hungry')).length, piles };
-  }
-  /** Repaint a whole pen as another kind (children there switch with it). */
-  repaintPen(tiles: number[], kind: Calling): void {
-    const cols = this.world.cols;
-    for (const i of tiles) { const tx = i % cols, ty = (i / cols) | 0, t = this.world.get(tx, ty); if (t?.pen && t.pen !== kind) this.world.paintPen(tx, ty, kind); }
-    for (const v of this.villagers()) if (v.role === 'kid' && v.pen && !this.world.pens.get(v.pen)?.size) v.pen = v.findPen(this);
-    this.event('build', `The pen is now a ${PEN_NAME[kind]}`);
-  }
-  /** Erase a whole pen; its children go looking for another. */
-  erasePen(tiles: number[]): void {
-    const cols = this.world.cols;
-    for (const i of tiles) { const tx = i % cols, ty = (i / cols) | 0; if (this.world.get(tx, ty)?.pen) this.world.paintPen(tx, ty, null); }
-    this.event('build', 'Pen erased');
-  }
   /** What farmers will sow on this soil next (the crop's plan for the tile). */
   setFieldPlan(q: TilePos, kind: FoodKind): void {
     const t = this.world.get(q.tx, q.ty);
@@ -858,16 +835,14 @@ export class VillageScene extends SimScene {
     if (navigator.clipboard?.writeText) navigator.clipboard.writeText(json).then(done, () => window.prompt('Copy these settings:', json));
     else window.prompt('Copy these settings:', json);
   }
-  /** F: the held tool's variant — the pen's kind, the crop the seeds sow, the food the basket takes; any other tool picks up the pen. */
+  /** F: the held tool's variant — the crop the seeds sow, the food the basket takes, the wand's standing order. */
   cycleVariant(): void {
     const pl = this.player;
-    if (pl.tool === 'pen') pl.cyclePen();
-    else if (pl.tool === 'seeds') pl.cycleCrop();
+    if (pl.tool === 'seeds') pl.cycleCrop();
     else if (pl.tool === 'basket') pl.cycleBasket(this.pantry);
     else if (pl.tool === 'wand') this.orderFollow();
-    else pl.tool = 'pen';
   }
-  /** Age in days a child comes of age: the nursery, then the pen (Quick to Grow shortens it). */
+  /** Age in days a child comes of age: the nursery, then the years in the yard (Quick to Grow shortens it). */
   get adultAge(): number { return Math.max(p.infantDays + 0.1, p.infantDays + p.childDays + this.mods.adultAgeDelta); }
   /** Age from which a villager is an elder, and the age they pass away. */
   get elderAge(): number { return this.adultAge + p.adultDays; }
@@ -1099,7 +1074,7 @@ export class VillageScene extends SimScene {
     const parents = kid.parents.filter((q) => !q.dead).length;
     return [
       { label: 'Fed', ok: kid.hungerDays === 0 },
-      { label: 'Well fed', ok: kid.ateDay >= this.day, note: 'ate from the pen today' },
+      { label: 'Well fed', ok: kid.ateDay >= this.day, note: 'ate in the yard today' },
       { label: 'Family', ok: parents >= 2, note: parents === 1 ? 'one parent' : parents === 0 ? 'no parents' : undefined },
       { label: 'Company', ok: sibling, note: 'another child at home' },
       { label: 'Warm', ok: kid.home.warm, note: kid.home.warm ? 'the hearth is lit' : 'their house is cold — stock its hearth' },
@@ -1295,19 +1270,17 @@ export class VillageScene extends SimScene {
     if (this.mods.babyFever && this.feverWas !== null && fever !== this.feverWas) this.event('birth', fever ? 'Baby fever: full larders, and the village knows it.' : 'The surplus is gone — births return to normal.', true);
     this.feverWas = fever;
 
-    // villagers: eat (pen children from their pile, everyone else from the granary), tally the children's day
-    const villagers = this.villagers(), warnedPens = new Set<Calling>();
+    // villagers: eat (children from the piles in their yard, everyone else from the granary), tally the children's day
+    const villagers = this.villagers(), warnedHomes = new Set<Building>();
     for (const v of villagers) {
       if (v.role === 'infant') continue; // nursed: judged after the grown have eaten, below
       const ration = this.rationOf(v);
       let wellFed = false;
       if (v.role === 'kid') {
-        // children eat nothing but what lands in a pen: yesterday's meal came off a pile, or it didn't
+        // children eat nothing but what lands in their home yard: yesterday's meal came off a pile, or it didn't
         if (p.kidFood <= 0 || v.ateDay >= this.day - 1) { v.hungerDays = 0; wellFed = true; }
-        else if (++v.hungerDays >= p.kidStarveDays) { v.dead = true; v.hp = 0; v.starved = true; this.event('death', `${v.name} starved${v.gnome ? ' by the gnome house' : v.pen ? ` in the ${PEN_NAME[v.pen]}` : ' with no pen to eat in'}`, true); continue; }
-        else if (v.gnome && !warnedPens.has('gnome' as Calling)) { warnedPens.add('gnome' as Calling); this.event('food', 'Gnome children are going hungry — throw food by their cottage', true); }
-        else if (v.pen && !warnedPens.has(v.pen)) { warnedPens.add(v.pen); this.event('food', `Children in the ${PEN_NAME[v.pen]} are going hungry — toss food in`, true); }
-        else if (!v.pen && !warnedPens.has('none' as Calling)) { warnedPens.add('none' as Calling); this.event('food', 'Children with no pen are going hungry — paint one and throw food in', true); }
+        else if (++v.hungerDays >= p.kidStarveDays) { v.dead = true; v.hp = 0; v.starved = true; this.event('death', `${v.name} starved in the yard at ${v.gnome ? 'the gnome house' : 'home'}`, true); continue; }
+        else if (!warnedHomes.has(v.home)) { warnedHomes.add(v.home); this.event('food', `Children at ${v.gnome ? 'the gnome house' : 'a house'} are going hungry — throw food in their yard (BASKET)`, true); }
       }
       else if (this.food >= ration) { this.food -= ration; v.hungerDays = 0; }
       else if (++v.hungerDays >= 3 + this.mods.starveDaysDelta) { v.dead = true; v.hp = 0; v.starved = true; this.event('death', `${v.name} starved`, true); continue; }
@@ -1363,6 +1336,39 @@ export class VillageScene extends SimScene {
   hasBed(h: Building): boolean { return this.bedsTaken(h) < this.beds(h); }
   /** Seconds until this house next rolls for a birth (0 when due). */
   birthIn(h: Building): number { return Math.max(0, (h.nextBirth ?? 0) - this.simTime); }
+  /**
+   * Places one building keeps in work, times the standing buildings of that kind: a second barracks
+   * allows another p.soldierCap warriors. A ruin keeps nobody, so losing a granary closes its places.
+   */
+  callingCap(c: Calling): number {
+    if (c === 'soldier') return p.soldierCap * this.world.barracks.length;
+    if (c === 'woodcutter') return p.woodcutterCap * this.world.woodyards.length;
+    return p.farmerCap * this.world.granaries.length;
+  }
+  /** Places taken: the grown who hold one, plus every child already promised one (see Villager.calling). */
+  callingFilled(c: Calling): number {
+    return this.villagers().filter((v) => !v.dead && (v.isAdult ? v.role === c : v.calling === c)).length;
+  }
+  /** Callings with a place still open. */
+  freeCallings(): Calling[] {
+    return CALLINGS.filter((c) => this.callingFilled(c) < this.callingCap(c));
+  }
+  /**
+   * The calling a newborn is promised: the trade standing emptiest as a share of its own cap, ties in
+   * CALLINGS order. A 5/5/10 village therefore fills out about 1:1:2 and opens farmer, woodcutter,
+   * warrior, warrior — where picking by free places alone would promise the first five children to the
+   * barracks (10 open beats 5) and starve the village before a field was ever worked.
+   */
+  pickCalling(): Calling | null {
+    let best: Calling | null = null, bestShare = Infinity;
+    for (const c of CALLINGS) {
+      const cap = this.callingCap(c), filled = this.callingFilled(c);
+      if (cap <= 0 || filled >= cap) continue;
+      const share = filled / cap;
+      if (share < bestShare - 1e-9) { bestShare = share; best = c; }
+    }
+    return best;
+  }
   /** Why no child will be born in this house right now, or null. */
   birthProblem(h: Building): string | null {
     if (h.ruined) return 'in ruins';
@@ -1370,6 +1376,8 @@ export class VillageScene extends SimScene {
     if (this.villagers().filter((v) => v.home === h && v.isAdult && !v.dead).length < 2) return 'needs a couple living here';
     if (this.infantsOf(h).length >= this.cribs(h)) return 'the nursery is full';
     if (this.food <= 10) return 'food to spare first';
+    // no place to grow into, no child: the village raises nobody it cannot put to work
+    if (!this.freeCallings().length) return `no work for another villager — ${CALLINGS.map((c) => `${this.callingFilled(c)}/${this.callingCap(c)} ${CALLING_NAME[c]}`).join(', ')}`;
     return null;
   }
   /** Every house rolls for a birth every p.birthEvery seconds: a couple, a warm hearth, a free crib, food to spare. */
@@ -1407,9 +1415,12 @@ export class VillageScene extends SimScene {
       if (this.birthProblem(h) || !this.rng.chance(this.birthChance(h, fever))) continue;
       const adults = this.villagers().filter((v) => v.home === h && v.isAdult && !v.dead);
       const kid = this.addVillager(h, 'infant', 0);
+      kid.calling = h.kind === 'gnomehouse' ? null : this.pickCalling(); // the place is theirs from birth; a gnome grows into a gnome
       kid.parents = [adults[0], adults[1]];
-      if (this.infantsOf(h).length < this.cribs(h) && this.rng.chance(this.mods.twinChance)) {
+      // a twin needs a place of their own: the first child has just taken one
+      if (this.infantsOf(h).length < this.cribs(h) && (h.kind === 'gnomehouse' || this.freeCallings().length) && this.rng.chance(this.mods.twinChance)) {
         const twin = this.addVillager(h, 'infant', 0);
+        twin.calling = h.kind === 'gnomehouse' ? null : this.pickCalling();
         twin.parents = [adults[0], adults[1]];
         this.event('birth', `Twins! ${kid.name} and ${twin.name} were born`);
       } else this.event('birth', `${kid.name} was born`);
@@ -1427,14 +1438,13 @@ export class VillageScene extends SimScene {
       else if (v.age >= v.deathAt(this)) { v.dead = true; v.hp = 0; this.event('death', `${v.name} passed away at ${Math.floor(v.age)}`); }
     }
   }
-  /** An infant walks out of the house to the nearest pen (or plays by the door until one is painted). */
+  /** An infant walks out of the house into the yard, to be fed and to learn the trade they were promised. */
   leaveNursery(v: Villager): void {
     v.role = 'kid'; v.applyRole(this.mods); v.hp = v.maxHp;
     v.unhide(this);
-    v.pen = v.gnome ? null : v.findPen(this);
     v.mealAt = this.simTime + p.dayLength / 4;
     v.ateDay = this.day;
-    this.event('grow', v.gnome ? `${v.name} toddled out of the gnome house` : v.pen ? `${v.name} left the nursery for the ${PEN_NAME[v.pen]}` : `${v.name} left the nursery — no pen to train in`);
+    this.event('grow', v.gnome ? `${v.name} toddled out of the gnome house` : v.calling ? `${v.name} left the nursery to learn the ${v.calling}'s trade` : `${v.name} left the nursery`);
   }
   /** A new adult takes a bed near where they trained, else the least crowded house. */
   rehouse(v: Villager): void {
@@ -1510,9 +1520,8 @@ export class VillageScene extends SimScene {
       let d = Math.hypot(it.x-pl.x, it.y-pl.y);
       if (it.playerDropPending) { if (it.rest && d > Math.max(range, ITEM.reach)) it.playerDropPending = false; else continue; }
       if (!it.rest || !this.itemRoom(it)) continue;
-      const q = World.toTile(it.x,it.y);
-      const protectedFood = it.kind === 'food' && (this.world.gnomeHouses.some(h => Math.hypot(it.x-buildingCenter(h).tx*TILE,it.y-buildingCenter(h).ty*TILE)<=GNOME_YARD*TILE) || this.villagers().some(v=>v.eatingFrom===it));
-      if (d > ITEM.reach && d <= range && !this.world.get(q.tx,q.ty)?.pen && !this.meatClaims.has(it.id) && !protectedFood) {
+      const protectedFood = it.kind === 'food' && (this.world.inYard(it.x, it.y) || this.villagers().some(v=>v.eatingFrom===it)); // a child's dinner stays where it was thrown
+      if (d > ITEM.reach && d <= range && !this.meatClaims.has(it.id) && !protectedFood) {
         let left = Math.min(p.pickupPull * dt, d - ITEM.reach);
         while (left > 0.001) {
           const step = Math.min(2,left), x=it.x+(pl.x-it.x)/d*step, y=it.y+(pl.y-it.y)/d*step;
@@ -1572,11 +1581,11 @@ export class VillageScene extends SimScene {
     return false;
   }
 
-  /** Children in a pen and the food waiting on it. */
-  penReport(kind: Calling): { kids: number; hungry: number; food: number; piles: string } {
-    const kids = this.villagers().filter((v) => v.role === 'kid' && v.pen === kind && !v.dead);
-    const piles = FOOD_KINDS.map((k) => [k, this.world.penFoodTotal(kind, k)] as const).filter(([, n]) => n > 0).map(([k, n]) => `${n % 1 ? n.toFixed(1) : n} ${FOODS[k].one}`).join(', ');
-    return { kids: kids.length, hungry: kids.filter((v) => v.hungerDays > 0 || v.task.startsWith('hungry')).length, food: this.world.penFoodTotal(kind), piles };
+  /** The children raised in a home and the food waiting in its yard. */
+  yardReport(b: Building): { kids: number; hungry: number; food: number; piles: string } {
+    const kids = this.villagers().filter((v) => v.role === 'kid' && v.home === b && !v.dead);
+    const piles = FOOD_KINDS.map((k) => [k, this.world.yardFoodTotal(b, YARD, k)] as const).filter(([, n]) => n > 0).map(([k, n]) => `${n % 1 ? n.toFixed(1) : n} ${FOODS[k].one}`).join(', ');
+    return { kids: kids.length, hungry: kids.filter((v) => v.hungerDays > 0 || v.task.startsWith('hungry')).length, food: this.world.yardFoodTotal(b, YARD), piles };
   }
   /** A child's diet so far and what it will give them, for the UI. */
   dietReport(v: Villager): { kinds: { kind: FoodKind; n: number; share: number }[]; bonuses: string } {
@@ -1794,9 +1803,6 @@ export class VillageScene extends SimScene {
     return best;
   }
 
-  pickCivilRole(): Role {
-    return 'soldier';
-  }
 
   // ---- buildings: beds, caps, upgrades ----------------------------------------------
 
@@ -1804,7 +1810,7 @@ export class VillageScene extends SimScene {
 
   /** What one villager eats from the granary at dawn: grown villagers only (infants are nursed, children eat from the pens). */
   rationOf(v: Villager): number {
-    if (v.isChild) return 0; // infants are nursed, children eat only what lies in a pen or by the gnome house
+    if (v.isChild) return 0; // infants are nursed, children eat only what lies in their home yard
     return p.foodPerDay * this.mods.foodPerDayMul;
   }
   /** Everyone's rations for one dawn. */
@@ -2573,11 +2579,6 @@ export class VillageScene extends SimScene {
         return;
       }
       case 'wall': case 'gate': case 'stairs': this.buildDefense(pl.tool); return;
-      case 'pen': {
-        if (this.world.paintPen(tx, ty, pl.penKind)) this.fx.push({ kind: 'tool', tool: 'hoe', tx, ty });
-        else this.event('build', 'Pens go on open grass or soil');
-        return;
-      }
       case 'basket': this.toss(); return;
       case 'sword': {
         const stage = pl.pressAttack();
@@ -2694,10 +2695,6 @@ export class VillageScene extends SimScene {
           : `E: attack the ${game.name.toLowerCase()} (${game instanceof Troll ? game.meat : 0} meat)`;
         return t?.tall ? 'E: mow the long grass (a swing clears its arc)' : 'E: swing sword';
       }
-      case 'pen': {
-        const r = this.penReport(pl.penKind), where = t?.pen ? (t.pen === pl.penKind ? 'E: erase' : `E: repaint as ${PEN_NAME[pl.penKind]}`) : `E: paint ${PEN_NAME[pl.penKind]}`;
-        return `${where} · F: next pen kind · ${r.kids} training here, ${r.piles || 'nothing'} on the ground`;
-      }
       case 'wand': {
         const n = this.squad.length, all = this.fighters().length;
         if (!all) return 'wand: nobody to command — grown soldiers answer it';
@@ -2707,12 +2704,12 @@ export class VillageScene extends SimScene {
         const why = this.tossProblem();
         const carry = `basket: ${pl.carriedOf('food', pl.basketKind)} ${FOODS[pl.basketKind].one} · F: change food`;
         if (why) return `${carry} — ${why}`;
-        const aim = this.tossAim, pen = this.world.get(Math.floor(aim.x / TILE), Math.floor(aim.y / TILE))?.pen;
-        const yard = !pen ? this.world.gnomeHouses.find((b) => { const c = buildingCenter(b); return Math.hypot(c.tx * TILE - aim.x, c.ty * TILE - aim.y) <= GNOME_YARD * TILE; }) : undefined;
-        if (yard) { const kids = this.villagers().filter((v) => v.role === 'kid' && v.home === yard && !v.dead); return `E: throw ${Math.min(pl.carriedOf('food', pl.basketKind), p.tossSize)} ${FOODS[pl.basketKind].one} by the gnome house (${carry} · ${kids.length} children, ${kids.filter((v) => v.hungerDays > 0 || v.task.startsWith('hungry')).length} hungry · ${this.world.yardFoodTotal(yard, GNOME_YARD) || 'nothing'} lying there)`; }
-        if (!pen) return `E: throw ${Math.min(pl.carriedOf('food', pl.basketKind), p.tossSize)} ${FOODS[pl.basketKind].one} — no pen there: children only eat what lies inside their pen or by a gnome house (${carry})`;
-        const r = this.penReport(pen);
-        return `E: throw ${Math.min(pl.carriedOf('food', pl.basketKind), p.tossSize)} ${FOODS[pl.basketKind].one} toward the ${PEN_NAME[pen]} (${carry} · ${r.kids} children, ${r.hungry} hungry · ${r.piles || 'nothing'} lying there)`;
+        const aim = this.tossAim;
+        const throwing = `E: throw ${Math.min(pl.carriedOf('food', pl.basketKind), p.tossSize)} ${FOODS[pl.basketKind].one}`;
+        const home = this.world.familyHouses.find((b) => { const c = buildingCenter(b); return Math.hypot(c.tx * TILE - aim.x, c.ty * TILE - aim.y) <= YARD * TILE; });
+        if (!home) return `${throwing} — no yard there: children only eat what lands within ${YARD} tiles of the home they live in (${carry})`;
+        const r = this.yardReport(home);
+        return `${throwing} into the ${home.kind === 'gnomehouse' ? 'gnome house' : 'house'} yard (${carry} · ${r.kids} children, ${r.hungry} hungry · ${r.piles || 'nothing'} lying there)`;
       }
       case 'house':
       case 'tavern':

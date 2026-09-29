@@ -1,5 +1,5 @@
 import type { Rng } from '@shared/index';
-import { TILE, COLS, ROWS, BUILDING_HP, HEARTH_WOOD, ITEM, GNOME_HOME, p, CROP_KINDS, type Calling, type FoodKind, type BuildingKind, type StartKind } from './config';
+import { TILE, COLS, ROWS, BUILDING_HP, HEARTH_WOOD, ITEM, GNOME_HOME, YARD, p, CROP_KINDS, type FoodKind, type BuildingKind, type StartKind } from './config';
 export type { BuildingKind } from './config';
 import { tickItem, hop, type Item, type ItemKind } from './items';
 import type { Gear } from './pack';
@@ -26,8 +26,6 @@ export const BUILDABLE: ReadonlySet<TileKind> = new Set<TileKind>(['grass', 'sap
 export const CROP_GROUND: ReadonlySet<TileKind> = new Set<TileKind>(['crop', 'tilled']);
 /** what a wild tile yields, and the pile kind it makes */
 export const WILD_FOOD: Partial<Record<TileKind, FoodKind>> = { bush: 'berry', mushroom: 'mushroom', hazel: 'hazelnut', garlic: 'garlic', burdock: 'burdock' };
-/** ground a training pen can be painted on */
-export const PEN_GROUND: ReadonlySet<TileKind> = new Set<TileKind>(['grass', 'tilled']);
 
 export interface Building {
   kind: BuildingKind;
@@ -104,8 +102,6 @@ export interface Tile {
   trail?: boolean;
   /** long grass: slows anyone wading through it (see p.grassSlow) until the sword mows it; never grows back */
   tall?: boolean;
-  /** painted training pen this tile belongs to (grass or soil underneath) */
-  pen?: Calling;
 }
 
 export interface TilePos { tx: number; ty: number }
@@ -139,8 +135,6 @@ export class World {
   tallCount = 0;
   /** tile indices changed since the renderer last drained this */
   dirty = new Set<number>();
-  /** painted pen tiles by kind (tile indices) and the food piled on them */
-  pens = new Map<Calling, Set<number>>();
   /** things lying on the ground: thrown food, dropped armfuls, loot */
   items: Item[] = [];
   private nextItemId = 1;
@@ -164,6 +158,9 @@ export class World {
   get allBarracks(): Building[] { return this.buildings.filter((b) => b.kind === 'barracks'); }
   get granary(): Building | undefined { return this.buildings.find((b) => b.kind === 'granary'); }
   get woodyard(): Building | undefined { return this.buildings.find((b) => b.kind === 'woodyard'); }
+  /** standing granaries and woodyards: a ruin keeps nobody in work (see VillageScene.callingCap) */
+  get granaries(): Building[] { return this.buildings.filter((b) => b.kind === 'granary' && !b.ruined && !b.wild); }
+  get woodyards(): Building[] { return this.buildings.filter((b) => b.kind === 'woodyard' && !b.ruined && !b.wild); }
   /** The best barracks level in the village (0 if none). */
   get barracksLevel(): number { return this.barracks.reduce((m, b) => Math.max(m, b.level), 0); }
 
@@ -186,41 +183,11 @@ export class World {
     const fort = (k: TileKind) => k === 'wall' || k === 'gate' || k === 'stairs';
     if (BLOCKING[t.kind] !== BLOCKING[kind] || fort(t.kind) || fort(kind)) this.revision++;
     t.kind = kind; t.stage = 0; t.work = 0; t.building = undefined; t.part = undefined; t.tall = undefined; t.v = (t.v + 31) % 97;
-    // a pen dies with its ground: a building, tree or crop on the tile takes it out of the pen (and its pile)
-    if (t.pen && !PEN_GROUND.has(kind)) { this.pens.get(t.pen)?.delete(i); t.pen = undefined; }
     if (!CROP_GROUND.has(kind)) t.food = undefined;
     this.dirty.add(i);
     return t;
   }
 
-  // ---- training pens ------------------------------------------------------------------------
-  /** Paint (or with null / the same kind, erase) a pen tile. Only open ground takes paint. */
-  paintPen(tx: number, ty: number, kind: Calling | null): boolean {
-    const t = this.get(tx, ty), i = ty * this.cols + tx;
-    if (!t || t.building || t.defense || !PEN_GROUND.has(t.kind)) return false;
-    if (kind === t.pen) kind = null;
-    if (t.pen) this.pens.get(t.pen)?.delete(i);
-    if (t.tall) this.tallCount--;
-    t.pen = kind ?? undefined; t.tall = undefined; // the rope goes up over trampled earth
-    if (kind) { if (!this.pens.has(kind)) this.pens.set(kind, new Set()); this.pens.get(kind)!.add(i); }
-    this.dirty.add(i);
-    return true;
-  }
-  penTiles(kind?: Calling): number[] {
-    if (kind) return [...(this.pens.get(kind) ?? [])];
-    return [...this.pens.values()].flatMap((set) => [...set]);
-  }
-  private nearestOf(x: number, y: number, idx: Iterable<number>): TilePos | null {
-    let best: TilePos | null = null, bd = Infinity;
-    for (const i of idx) {
-      const tx = i % this.cols, ty = (i / this.cols) | 0, c = World.center(tx, ty);
-      const d = (c.x - x) ** 2 + (c.y - y) ** 2;
-      if (d < bd) { bd = d; best = { tx, ty }; }
-    }
-    return best;
-  }
-  /** Nearest pen tile of a kind (any kind when omitted). */
-  nearestPen(x: number, y: number, kind?: Calling): TilePos | null { return this.nearestOf(x, y, this.penTiles(kind)); }
   // ---- long grass ---------------------------------------------------------------------------
   /** Mow a tile of long grass. Walkability is unchanged, so no path goes stale. */
   cutGrass(tx: number, ty: number): boolean {
@@ -258,33 +225,27 @@ export class World {
     return this.isBlocked(tx, ty, true);
   };
   tickItems(dt: number): void { for (const it of this.items) tickItem(it, dt, this.itemBlocked); }
-  /** Is this item lying inside a pen of that kind? */
-  inPen(it: { x: number; y: number }, pen: Calling): boolean { return this.get(Math.floor(it.x / TILE), Math.floor(it.y / TILE))?.pen === pen; }
-  /** Resting food items inside a pen (all kinds, or one). */
-  penItems(pen: Calling, kind?: FoodKind): Item[] { return this.items.filter((it) => it.rest && it.kind === 'food' && (!kind || it.food === kind) && this.inPen(it, pen)); }
-  penFoodTotal(pen: Calling, kind?: FoodKind): number { return this.penItems(pen, kind).reduce((n, it) => n + it.n, 0); }
-  /** The nearest resting food item lying inside the pen. */
-  nearestPenItem(x: number, y: number, pen: Calling): Item | null {
-    let best: Item | null = null, bd = Infinity;
-    for (const it of this.items) {
-      if (!it.rest || it.kind !== 'food' || !this.inPen(it, pen)) continue;
-      const d = (it.x - x) ** 2 + (it.y - y) ** 2;
-      if (d < bd) { bd = d; best = it; }
+  /** Is this spot inside a home's yard, where the food thrown to its children lies? */
+  inYard(x: number, y: number, r = YARD): boolean {
+    const rr = (r * TILE) ** 2;
+    for (const b of this.familyHouses) {
+      const c = buildingCenter(b);
+      if ((c.tx * TILE - x) ** 2 + (c.ty * TILE - y) ** 2 <= rr) return true;
     }
-    return best;
+    return false;
   }
-  /** The nearest resting meat lying outside any pen (what a gnome goes to fetch), among those `ok` allows. */
+  /** The nearest resting meat lying outside every home's yard (what a gnome goes to fetch), among those `ok` allows. */
   nearestWildMeat(x: number, y: number, ok: (it: Item) => boolean = () => true): Item | null {
     let best: Item | null = null, bd = Infinity;
     for (const it of this.items) {
       if (!it.rest || it.kind !== 'food' || it.food !== 'meat' || it.n <= 0 || !ok(it)) continue;
-      if (this.get(Math.floor(it.x / TILE), Math.floor(it.y / TILE))?.pen) continue;
+      if (this.inYard(it.x, it.y)) continue; // a child's dinner is not forage
       const d = (it.x - x) ** 2 + (it.y - y) ** 2;
       if (d < bd) { bd = d; best = it; }
     }
     return best;
   }
-  /** The nearest resting food item within `r` tiles of a building's centre (a gnome house's yard). */
+  /** The nearest resting food item within `r` tiles of a building's centre (its yard). */
   nearestYardItem(x: number, y: number, b: Building, r: number): Item | null {
     const c = buildingCenter(b), cx = c.tx * TILE, cy = c.ty * TILE, rr = (r * TILE) ** 2;
     let best: Item | null = null, bd = Infinity;
@@ -296,24 +257,9 @@ export class World {
     return best;
   }
   /** Resting food lying in a building's yard, in units. */
-  yardFoodTotal(b: Building, r: number): number {
+  yardFoodTotal(b: Building, r: number, kind?: FoodKind): number {
     const c = buildingCenter(b), cx = c.tx * TILE, cy = c.ty * TILE, rr = (r * TILE) ** 2;
-    return this.items.reduce((n, it) => n + (it.rest && it.kind === 'food' && (it.x - cx) ** 2 + (it.y - cy) ** 2 <= rr ? it.n : 0), 0);
-  }
-  /** The whole pen this tile belongs to: every same-kind pen tile reachable through neighbours (4-connected). */
-  penRegion(tx: number, ty: number): number[] {
-    const kind = this.get(tx, ty)?.pen;
-    if (!kind) return [];
-    const start = ty * this.cols + tx, seen = new Set<number>([start]), out = [start];
-    for (let qi = 0; qi < out.length; qi++) {
-      const i = out[qi], cx = i % this.cols, cy = (i / this.cols) | 0;
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const nx = cx + dx, ny = cy + dy, k = ny * this.cols + nx;
-        if (seen.has(k) || this.get(nx, ny)?.pen !== kind) continue;
-        seen.add(k); out.push(k);
-      }
-    }
-    return out;
+    return this.items.reduce((n, it) => n + (it.rest && it.kind === 'food' && (!kind || it.food === kind) && (it.x - cx) ** 2 + (it.y - cy) ** 2 <= rr ? it.n : 0), 0);
   }
   /** Resting items within r px of a point. */
   itemsNear(x: number, y: number, r: number): Item[] { return this.items.filter((it) => it.rest && (it.x - x) ** 2 + (it.y - y) ** 2 <= r * r); }

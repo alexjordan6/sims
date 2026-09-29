@@ -53,7 +53,7 @@ export const p = live(
     haulMul: [D.haulMul, 0.25, 3, 0.25, 'Villagers\' armfuls (16 wood / 12 food) scale by this. Bigger arms = fewer trips.'],
     cropYield: [D.cropYield, 1, 20, 1, 'Food per harvested crop before boons. Applies at NEW VILLAGE.'],
     cropDays: [D.cropDays, 1, 10, 1, 'Days from seed to harvest.'],
-    foodPerDay: [D.foodPerDay, 0, 3, 'Ration each grown villager eats at dawn (children eat only what lands in their pen).'],
+    foodPerDay: [D.foodPerDay, 0, 3, 'Ration each grown villager eats at dawn (children eat only what lands in their home yard).'],
     hungerMax: [D.hungerMax, 1, 30, 1, 'Food units the head\'s belly holds. It empties as the day passes; empty, you lose HP.'],
     hungerPerDay: [D.hungerPerDay, 0, 12, 0.5, 'Food units the head burns a day (a grown villager eats foodPerDay). 0 = the belly never empties.'],
     hungerMeal: [D.hungerMeal, 1, 10, 1, 'Food units one press of T eats. Meat and honey fill twice as much per unit, a cooked dish three or four times.'],
@@ -72,30 +72,35 @@ export const p = live(
     birthChance: [D.birthChance, 0, 1, 0.05, 'Base birth rate: chance per birth roll (every birthEvery seconds) for a couple in a warm house with a free crib and food to spare.'],
     feverDays: [D.feverDays, 1, 15, 1, 'Baby Fever: days of food in store (at today\'s rations) that count as a surplus.'],
     feverBonus: [D.feverBonus, 0, 0.9, 0.05, 'Baby Fever: birth chance added while the surplus holds.'],
-    cadetDays: [D.cadetDays, 0.5, 8, 0.5, 'Days in the pen, fed, a child needs to come of age skilled (a drill-yard child needs them to be a soldier at all). Must fit inside childDays.'],
+    cadetDays: [D.cadetDays, 0.5, 8, 0.5, 'Days at home, fed, a child needs to come of age skilled. Must fit inside childDays.'],
     bedBonus: [D.bedBonus, -2, 6, 1, 'Beds added to every house on top of its level (4 / 6 / 8). Beds no longer gate births — cribs do.'],
     coldKidCare: [D.coldKidCare, -3, 0, 1, 'Care points a child loses after a night in a cold house.'],
     fleeRange: [D.fleeRange, 20, 300, 5, 'Pixels: children run for the nearest door when a raider is this close.'],
   }, 'growth'),
   params({
-    infantDays: [D.infantDays, 0.1, 10, 0.1, 'Days an infant spends in the nursery before walking out to a pen. A house births at most cribs / infantDays children a day.'],
-    childDays: [D.childDays, 0.25, 20, 0.25, 'Days from leaving the nursery to coming of age (Quick to Grow takes 2 off). Give them at least cadetDays in the pen, or nobody comes of age skilled — or a soldier.'],
+    infantDays: [D.infantDays, 0.1, 10, 0.1, 'Days an infant spends in the nursery before walking out into the yard. A house births at most cribs / infantDays children a day.'],
+    childDays: [D.childDays, 0.25, 20, 0.25, 'Days from leaving the nursery to coming of age (Quick to Grow takes 2 off). Feed them for at least cadetDays of it, or nobody comes of age skilled.'],
     adultDays: [D.adultDays, 1, 100, 1, 'Days of adulthood before a villager grows old.'],
     elderDays: [D.elderDays, 0.5, 30, 0.5, 'Days an elder lives on (slower, grey) before passing away.'],
     birthEvery: [D.birthEvery, 1, 120, 1, 'Real seconds between birth rolls in each house (needs a couple, a warm hearth, a free crib and food to spare; birthChance decides the roll).'],
     cribs: [D.cribs, 1, 12, 1, 'Cribs in a Lv1 house nursery (+1 per level). A full nursery stalls births there.'],
-    kidFood: [D.kidFood, 0, 4, 0.25, 'Food a pen child eats per day (two half-meals) from the pile the head tosses in. Unfed: no training, then starvation. 0 = pens feed themselves.'],
-    kidStarveDays: [D.kidStarveDays, 1, 10, 1, 'Hungry days a child survives. Children eat nothing but what lands in a pen.'],
-    tossSize: [D.tossSize, 1, 12, 1, 'Food landing on the pen per throw from the basket.'],
+    kidFood: [D.kidFood, 0, 4, 0.25, 'Food a child eats per day (two half-meals) from the piles the head tosses into their home yard. Unfed: no training, then starvation. 0 = children feed themselves.'],
+    kidStarveDays: [D.kidStarveDays, 1, 10, 1, 'Hungry days a child survives. Children eat nothing but what lands in their home yard.'],
+    tossSize: [D.tossSize, 1, 12, 1, 'Food landing on the ground per throw from the basket.'],
     tossRange: [D.tossRange, 2, 12, 1, 'Tiles the head can lob a handful of food. It lands near the cursor, bounces and rolls; walls and trees stop it.'],
     itemBounce: [D.itemBounce, 0, 0.9, 0.05, 'How much of its fall a thrown item bounces back up. 0 = it sticks where it lands.'],
     itemFriction: [D.itemFriction, 1, 20, 0.5, 'How fast a rolling item slows on the ground (higher = shorter rolls).'],
-    penPace: [D.penPace, 0.5, 2, 0.05, 'How fast children run about the pen, as a multiple of their walking speed.'],
+    kidPace: [D.kidPace, 0.5, 2, 0.05, 'How fast children scamper about the yard, as a multiple of their walking speed.'],
     dietFull: [D.dietFull, 1, 30, 1, 'Units of one food a child must eat for its full stat bonus (about three days of a single crop).'],
     dietMul: [D.dietMul, 0, 3, 0.25, 'Scales every diet bonus (wheat +25% HP, carrots +15% speed, tomatoes +25% work, berries +25% damage at ×1).'],
     wildRegrowMul: [D.wildRegrowMul, 0.25, 4, 0.25, 'Scales how long picked bushes and mushrooms take to regrow (3 / 4 days at ×1).'],
     wildSprout: [D.wildSprout, 0, 0.1, 0.005, 'Daily chance each old-growth tree sprouts a berry bush or mushrooms on a grass tile beside it.'],
   }, 'lifecycle'),
+  params({
+    farmerCap: [D.farmerCap, 0, 40, 1, 'Farmers one granary can keep in work (a foraging gnome fills the same place). With no free place anywhere in the village, no child is born at all.'],
+    woodcutterCap: [D.woodcutterCap, 0, 40, 1, 'Woodcutters one woodyard can keep in work.'],
+    soldierCap: [D.soldierCap, 0, 60, 1, 'Warriors one barracks can keep under arms. Build a second barracks and the village may raise that many again.'],
+  }, 'callings'),
   params({
     playerHp: [D.playerHp, 10, 200, 5, 'The head\'s base HP before armor and boons. Applies at NEW VILLAGE or the next armor change.'],
     starveHpPerDay: [D.starveHpPerDay, 0, 200, 5, 'HP the head loses over a full day on an empty belly (60 = a whole bar a day). A starving head does not mend overnight and does not regenerate. 0 = the belly empties but never hurts.'],
@@ -214,7 +219,7 @@ export const LEVEL_LOOKS: Record<BuildingKind, readonly [string, string, string,
   woodyard: ['', 'cabin', 'chimney', 'lantern and loft window'],
 };
 // ---- children ------------------------------------------------------------------------------
-/** a pen child trains every fed day and needs p.cadetDays of it to come of age skilled */
+/** a child trains at home every fed day and needs p.cadetDays of it to come of age skilled */
 /** care stars: +6% HP and work speed per star for life */
 export const STAR_BONUS = 0.06;
 /** children are asleep indoors between these times of day */
@@ -222,9 +227,6 @@ export const BEDTIME = { start: 0.8, end: 0.28 } as const;
 export type Calling = 'farmer' | 'woodcutter' | 'soldier';
 export const CALLING_NAME: Record<Calling, string> = { farmer: 'farmers', woodcutter: 'woodcutters', soldier: 'soldiers' };
 export const CALLINGS: readonly Calling[] = ['farmer', 'woodcutter', 'soldier'];
-/** painted training pens, one kind per calling: children live and train there until they come of age */
-export const PEN_NAME: Record<Calling, string> = { farmer: 'training field', woodcutter: 'wood lot', soldier: 'drill yard' };
-export const PEN_COLOUR: Record<Calling, number> = { farmer: 0x6fd36f, woodcutter: 0xd6a35c, soldier: 0x6f9bff };
 /** elders work and walk at this share of their adult pace */
 export const ELDER_MUL = 0.75;
 /** gifted traits: a five-star child gets one for life */
@@ -240,8 +242,8 @@ export const TRAITS: Record<Trait, { name: string; blurb: string }> = {
 export const HOUSE_BEDS = [0, 4, 6, 8] as const;
 /** beds in a gnome house by level; a gnome family breeds like a human one (cribs are p.cribs + level - 1) */
 export const GNOME_BEDS = [0, 3, 4, 6] as const;
-/** tiles from a gnome house's centre that count as its yard: food lying there feeds its children */
-export const GNOME_YARD = 4;
+/** tiles from a home's centre that count as its yard: food lying there feeds the children raised in it */
+export const YARD = 4;
 /** A grown gnome's own little backpack: slots it holds, and how far from their head they stray to forage while following (tiles). */
 export const GNOME_PACK = { slots: 4, leash: 7 } as const;
 

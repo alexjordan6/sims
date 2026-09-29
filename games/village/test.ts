@@ -8,7 +8,7 @@ import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, Wrecker, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm } from './wildlife';
-import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, GNOME_PACK, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS } from './config';
+import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, GNOME_PACK, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS, YARD, CALLINGS } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
 const output = document.getElementById('test-results')!, summary = document.getElementById('test-summary')!;
@@ -341,11 +341,10 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     const careBefore = kid2.care, trainedBefore = kid2.trained; s.food = 200;
     s.newDay();
     assert(!home2.warm && !keep2.warm, 'an empty pile leaves the building cold the next dawn');
-    // fed +1, well fed from the pen +1 and two parents +1 would make 3; the cold night takes one back
+    // fed +1, well fed from the yard +1 and two parents +1 would make 3; the cold night takes one back
     assert(kid2.care - careBefore === 2, `a cold night costs the child a care point (${kid2.care - careBefore} instead of 3)`);
-    assert(kid2.trained === trainedBefore, 'a child with no pen trains nowhere');
-    s.world.paintPen(123, 98, 'soldier');
-    const cadet = s.spawn(new Villager(World.center(123, 98).x, World.center(123, 98).y, home2, 'kid', 1, 'Cadet', s.mods)); cadet.pen = 'soldier'; cadet.ateDay = s.day; cadet.mealAt = 1e9; home2.residents = 4;
+    assert(kid2.trained === trainedBefore, 'a child promised nothing trains nowhere');
+    const cadet = s.spawn(new Villager(World.center(123, 98).x, World.center(123, 98).y, home2, 'kid', 1, 'Cadet', s.mods)); cadet.calling = 'soldier'; cadet.ateDay = s.day; cadet.mealAt = 1e9; home2.residents = 4;
     step(s, 2); assert(cadet.trained === 0, 'a cold barracks drills nobody');
     assert(births(s, 25) === 0, 'no children are born in a cold house');
     s.wood = 1; assert(!s.stockHearth(home2) && home2.firewood === 0, 'stocking a hearth needs the wood');
@@ -356,7 +355,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     const soldier2 = s.spawn(new Villager(World.center(125, 100).x, World.center(125, 100).y, home2, 'soldier', 20, 'Guard', s.mods)); soldier2.hp = 10; soldier2.trained = 3;
     s.mods.soldierRegen = 5; step(s, 2); assert(soldier2.hp === 10, 'soldiers do not mend while the barracks is cold');
     keep2.firewood = 1; cadet.ateDay = s.day; s.newDay(); step(s, 2); assert(soldier2.hp > 10, 'a warm barracks mends them again');
-    assert(cadet.trained > 0 && Math.abs(cadet.trained - 2 / (p.dayLength * 0.52)) < 0.01, `a fed child in the drill yard drills by the waking hour once the barracks is warm (${cadet.trained.toFixed(3)} days after 2 s)`);
+    assert(cadet.trained > 0 && Math.abs(cadet.trained - 2 / (p.dayLength * 0.52)) < 0.01, `a fed child promised a sword drills by the waking hour once the barracks is warm (${cadet.trained.toFixed(3)} days after 2 s)`);
     cadet.dead = true; s.removeDead();
     for (const b of s.hearthBuildings()) b.firewood = p.hearthNights;
     const cabin = s.world.place('house', 122, 96); cabin.firewood = 0; // the one empty pile in the village, in the clearing
@@ -379,7 +378,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     const dawns = 30, tally = (fever: boolean) => { s.reset(7); s.screen = 'playing'; s.paused = true; s.agents = [s.player]; Object.assign(s.player, { x: -400, y: -400 }); const h = s.world.houses[0]; h.firewood = 99; const a = s.spawn(new Villager(0, 0, h, 'farmer', 20, 'A', s.mods)), b = s.spawn(new Villager(0, 0, h, 'farmer', 20, 'B', s.mods)); a.update = b.update = () => {}; h.residents = 2; s.mods.babyFever = fever; let born = 0; for (let i = 0; i < dawns; i++) { s.food = 1000; h.firewood = 99; h.warm = true; h.residents = 2; born += births(s, 1); for (const k of s.villagers()) if (k.role === 'infant') k.dead = true; s.removeDead(); } return born; };
     const plain = tally(false), fevered = tally(true);
     assert(fevered > plain, `over ${dawns} well-fed birth rolls the fever brought ${fevered} births against ${plain} without it`);
-    // the breeding program: nurseries, pens, the basket, the stages of life
+    // the breeding program: nurseries, callings and their caps, the basket, the stages of life
     s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(124, 100)); s.mods.babyFever = false;
     const hearth = s.world.houses[0]; hearth.firewood = 99; hearth.warm = true;
     const mum = s.spawn(new Villager(0, 0, hearth, 'farmer', 20, 'Mum', s.mods)), dad = s.spawn(new Villager(0, 0, hearth, 'farmer', 20, 'Dad', s.mods));
@@ -391,23 +390,31 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(bornNow === s.cribs(hearth) && infants.length === s.cribs(hearth) && infants.every((v) => v.role === 'infant' && v.hidden && v.indoors === hearth), `births fill the nursery and stop at ${s.cribs(hearth)} cribs (${bornNow} born)`);
     assert(s.birthProblem(hearth) === 'the nursery is full', 'a full nursery stalls births');
     p.birthChance = chanceWas;
-    assert(s.world.paintPen(123, 96, 'soldier') && s.world.get(123, 96)!.pen === 'soldier', 'the pen tool paints a drill yard on grass');
-    s.world.set(130, 96, 'tree'); assert(!s.world.paintPen(130, 96, 'farmer'), 'pens only go on open ground');
-    s.world.paintPen(124, 96, 'soldier'); s.world.paintPen(124, 96, 'soldier'); assert(!s.world.get(124, 96)!.pen && s.world.pens.get('soldier')!.size === 1, 'painting the same kind again erases it');
+    // every newborn is promised a trade with a place open, and holds that place while it grows
+    assert(infants.every((v) => !!v.calling && CALLINGS.includes(v.calling)), `a newborn is promised a calling (${infants.map((v) => v.calling).join(', ')})`);
+    assert(CALLINGS.every((c) => s.callingFilled(c) >= infants.filter((v) => v.calling === c).length), 'and an infant already fills its place');
     const first = infants[0]; first.age = p.infantDays; s.tickAges(0);
-    assert(first.role === 'kid' && !first.hidden && first.pen === 'soldier', `an infant of age ${p.infantDays} walks out of the nursery to the house's pen (${first.role}, ${first.pen})`);
+    assert(first.role === 'kid' && !first.hidden && !!first.calling, `an infant of age ${p.infantDays} walks out of the nursery into the yard (${first.role}, ${first.calling})`);
     assert(s.villagers().filter((v) => v.role === 'infant').length === s.cribs(hearth) - 1 && !s.birthProblem(hearth), 'the crib frees up for the next birth');
-    // the basket: fill at the granary, toss onto the pen
+    // the basket: fill at the granary, toss into a home's yard
     s.player.tool = 'basket'; clearBulk(s); s.food = 100;
     const g = s.world.granary!; Object.assign(s.player, World.center(g.tx + 1, g.ty + BUILDINGS[g.kind].h)); s.fillBasket();
     const basket = s.player.pack.bulk()[0] as { kind: string; n: number } | null; assert(basket?.kind === 'food' && basket.n === STACK.food && s.food === 100 - STACK.food, 'the basket fills with food from the granary');
     // a throw is a thing in the world: it flies where you point, bounces, rolls and lies where it stops
-    for (let y = 95; y <= 97; y++) for (let x = 122; x <= 124; x++) if (s.world.get(x, y)!.pen !== 'soldier') s.world.paintPen(x, y, 'soldier');
-    Object.assign(s.player, World.center(123, 100)); const aim = World.center(123, 96); s.hoverPoint = aim;
+    // the yard is YARD tiles round the house the children live in: find open ground in it to throw at
+    const hc = buildingCenter(hearth), hcx = Math.round(hc.tx), hcy = Math.round(hc.ty);
+    const yardSpot = ([[0, 3], [1, 3], [-1, 3], [2, 3], [3, 2], [-3, 2], [0, -3], [3, 0]] as const)
+      .map(([dx, dy]) => ({ tx: hcx + dx, ty: hcy + dy }))
+      .find((q) => !s.world.isBlocked(q.tx, q.ty)) ?? { tx: hcx, ty: hcy + 3 };
+    const standAt = ([[0, 2], [1, 2], [-1, 2], [0, 1], [2, 0], [-2, 0]] as const)
+      .map(([dx, dy]) => ({ tx: yardSpot.tx + dx, ty: yardSpot.ty + dy }))
+      .find((q) => !s.world.isBlocked(q.tx, q.ty)) ?? yardSpot;
+    Object.assign(s.player, World.center(standAt.tx, standAt.ty));
+    const aim = World.center(yardSpot.tx, yardSpot.ty); s.hoverPoint = aim;
     const thrown = s.toss()!;
-    assert(!!thrown && !thrown.rest && thrown.vz > 0 && thrown.n === p.tossSize && thrown.food === 'wheat' && s.player.pack.bulk()[0].n === STACK.food - p.tossSize, `a throw launches ${p.tossSize} food into the air`);
+    assert(!!thrown && !thrown.rest && thrown.vz > 0 && thrown.n === p.tossSize && thrown.food === 'wheat' && s.player.pack.bulk()[0].n === STACK.food - p.tossSize, `a throw launches ${p.tossSize} food into the air (aim ${(aim.x/16).toFixed(1)},${(aim.y/16).toFixed(1)} head ${(s.player.x/16).toFixed(1)},${(s.player.y/16).toFixed(1)} house ${hearth.tx},${hearth.ty} centre ${hc.tx},${hc.ty} why ${s.tossProblem(aim)} basket ${s.player.carriedOf("food", s.player.basketKind)})`);
     settle(s);
-    assert(thrown.rest && thrown.z === 0 && Math.hypot(thrown.x - aim.x, thrown.y - aim.y) < 1.5 * 16 && s.world.inPen(thrown, 'soldier'), `it comes down near the aim and lies there (${Math.hypot(thrown.x - aim.x, thrown.y - aim.y).toFixed(0)} px off, in the pen)`);
+    assert(thrown.rest && thrown.z === 0 && Math.hypot(thrown.x - aim.x, thrown.y - aim.y) < 1.5 * 16 && s.world.inYard(thrown.x, thrown.y), `it comes down near the aim and lies there (${Math.hypot(thrown.x - aim.x, thrown.y - aim.y).toFixed(0)} px off, in the yard)`);
     s.hoverPoint = { x: aim.x, y: aim.y - (p.tossRange + 3) * 16 }; assert(s.tossProblem() === 'too far to throw', 'the throw has a range');
     for (let x = 121; x <= 125; x++) s.world.placeDefense('wall', x, 94);
     Object.assign(s.player, World.center(123, 97)); s.hoverPoint = World.center(123, 92); const atWall = s.toss()!; settle(s);
@@ -429,38 +436,92 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     const spill = s.tossLoad()!;
     assert(spill.kind === 'food' && spill.food === 'carrot' && spill.n === 9 && !s.player.pack.bulk().length, 'with no cursor it throws the way you face');
     settle(s); s.world.removeItem(logs); s.world.removeItem(spill); s.player.tool = 'basket';
-    // a pen child walks to food lying in the pen and eats; food stray the pen is not theirs
+    // a child walks to food lying in its own yard and eats; what lies beyond it is not theirs
     s.world.removeItem(thrown);
-    const stray = s.world.dropItem('food', 5, World.center(119, 99).x, World.center(119, 99).y, 'wheat');
-    Object.assign(first, World.center(123, 97)); first.mealAt = 0; first.ateDay = 0; s.day = 5;
-    step(s, 3); assert(first.ateDay === 0 && first.task === 'hungry — nothing in the pen' && stray.n === 5, 'a child ignores food lying stray the pen');
-    const meal = s.world.dropItem('food', p.tossSize, World.center(124, 96).x + 5, World.center(124, 96).y - 3, 'wheat');
+    const strayAt = World.center(hcx + YARD + 6, hcy + YARD + 6); // well clear of every home
+    const stray = s.world.dropItem('food', 5, strayAt.x, strayAt.y, 'wheat');
+    assert(!s.world.inYard(stray.x, stray.y), 'a pile thrown well clear of every house is in no yard at all');
+    Object.assign(first, World.center(yardSpot.tx, yardSpot.ty)); first.mealAt = 0; first.ateDay = 0; s.day = 5;
+    step(s, 3); assert(first.ateDay === 0 && first.task === 'hungry — nothing by the house' && stray.n === 5, `a child ignores food lying outside its yard (${first.task})`);
+    const mealAt = World.center(yardSpot.tx, yardSpot.ty);
+    const meal = s.world.dropItem('food', p.tossSize, mealAt.x + 5, mealAt.y - 3, 'wheat');
     step(s, 6);
-    assert(first.ateDay === 5 && Math.abs(meal.n - (p.tossSize - p.kidFood / 2)) < 1e-9, `a hungry pen child eats half of ${p.kidFood} per meal from food lying in the pen (${meal.n} left, ate day ${first.ateDay})`);
+    assert(first.ateDay === 5 && Math.abs(meal.n - (p.tossSize - p.kidFood / 2)) < 1e-9, `a hungry child eats half of ${p.kidFood} per meal from food lying in its yard (${meal.n} left, ate day ${first.ateDay})`);
     s.world.removeItem(meal); s.world.removeItem(stray);
-    s.world.set(123, 96, 'tree'); assert(!s.world.get(123, 96)!.pen && !s.world.pens.get('soldier')!.has(96 * s.world.cols + 123), 'a tree on a pen tile takes it out of the pen');
-    s.world.set(123, 96, 'grass'); s.world.paintPen(123, 96, 'soldier');
-    first.trained = 0; s.world.barracks[0].firewood = 99; s.world.barracks[0].warm = true; Object.assign(first, World.center(123, 96)); first.mealAt = 1e9;
-    step(s, 3); assert(first.trained > 0 && first.hungerDays === 0, 'time in the drill yard, fed, is drill');
-    const drilled = first.trained; first.ateDay = 0; s.newDay(); assert(first.hungerDays === 1, 'a day without food from the pile is a hungry day');
-    first.mealAt = 0; step(s, 2); assert(first.trained === drilled && first.task === 'hungry — nothing in the pen', 'a hungry child with nothing to eat stops training');
+    // the sword is the one trade that needs a building: a warm barracks, or no lesson
+    first.calling = 'soldier'; first.trained = 0; s.world.barracks[0].firewood = 99; s.world.barracks[0].warm = true; first.mealAt = 1e9;
+    step(s, 3); assert(first.trained > 0 && first.hungerDays === 0, 'a fed child at home, with a warm barracks, drills');
+    const drilled = first.trained; first.ateDay = 0; s.newDay(); assert(first.hungerDays === 1, 'a day without food from the yard is a hungry day');
+    first.mealAt = 0; step(s, 2); assert(first.trained === drilled && first.task === 'hungry — nothing by the house', 'a hungry child with nothing to eat stops training');
     first.update = () => {};
     for (let i = 1; i < p.kidStarveDays && !first.dead; i++) s.newDay();
-    assert(first.dead, `${p.kidStarveDays} hungry days starve a pen child`);
+    assert(first.dead, `${p.kidStarveDays} hungry days starve a child in the yard`);
     s.removeDead();
-    // coming of age takes the pen's role; old age slows, then ends
-    const second = s.infantsOf(hearth)[0]; second.age = p.infantDays; s.tickAges(0); second.update = () => {};
+    // coming of age takes the calling they were promised; old age slows, then ends
+    const second = s.infantsOf(hearth)[0]; second.age = p.infantDays; s.tickAges(0); second.update = () => {}; second.calling = 'soldier';
     second.trained = Villager.drillNeeded(s); second.age = s.adultAge; second.ateDay = s.day; s.tickAges(0);
-    assert(second.role === 'soldier' && second.skilled && second.isAdult, `a drilled child of the drill yard comes of age a skilled soldier (${second.role})`);
-    const third = s.infantsOf(hearth)[0]; third.age = p.infantDays; s.tickAges(0); third.update = () => {}; third.trained = 0; third.age = s.adultAge; s.tickAges(0);
-    assert(third.role === 'soldier' && !third.skilled, `an undrilled drill-yard child still comes of age a soldier, just a plain one (${third.role})`);
-    const nopen = s.infantsOf(hearth)[0]; nopen.age = p.infantDays; for (const i of [...s.world.pens.get('soldier') ?? []]) s.world.paintPen(i % s.world.cols, (i / s.world.cols) | 0, null); s.tickAges(0); nopen.update = () => {}; nopen.pen = null; nopen.age = s.adultAge + 1; s.tickAges(0);
-    assert(nopen.role === 'kid', 'a child with no pen never comes of age: nothing decided what they are');
-    nopen.dead = true; s.removeDead(); s.world.paintPen(123, 96, 'soldier');
+    assert(second.role === 'soldier' && second.skilled && second.isAdult, `a drilled child promised a sword comes of age a skilled soldier (${second.role})`);
+    const third = s.infantsOf(hearth)[0]; third.age = p.infantDays; s.tickAges(0); third.update = () => {}; third.calling = 'woodcutter'; third.trained = 0; third.age = s.adultAge; s.tickAges(0);
+    assert(third.role === 'woodcutter' && !third.skilled, `an untaught child still comes of age to its trade, just a plain one (${third.role})`);
+    const nopen = s.infantsOf(hearth)[0]; nopen.age = p.infantDays; s.tickAges(0); nopen.update = () => {}; nopen.calling = null; nopen.age = s.adultAge + 1; s.tickAges(0);
+    assert(nopen.role === 'kid', 'a child promised nothing never comes of age: no place, no trade');
+    nopen.dead = true; s.removeDead();
     const speedWas = second.speed; second.age = s.elderAge; s.tickAges(0);
     assert(second.elder && second.speed < speedWas, 'past adultDays a villager grows old and slows');
     second.age = second.deathAt(s); s.tickAges(0); assert(second.dead, 'an elder passes away at the end of elderDays');
     s.removeDead();
+    // the callings and their caps: the buildings decide what the village may raise
+    s = fresh(); clearing(s); s.agents = [s.player]; s.mods.babyFever = false;
+    const cHome = s.world.houses[0]; cHome.firewood = 99; cHome.warm = true;
+    const cMum = s.spawn(new Villager(0, 0, cHome, 'farmer', 20, 'CapMum', s.mods)), cDad = s.spawn(new Villager(0, 0, cHome, 'farmer', 20, 'CapDad', s.mods));
+    cMum.update = cDad.update = () => {}; cHome.residents = 2; s.food = 500;
+    const wasChance = p.birthChance, wasTwins = s.mods.twinChance; p.birthChance = 1; s.mods.twinChance = 0;
+    assert(s.callingCap('soldier') === p.soldierCap * s.world.barracks.length && s.callingCap('farmer') === p.farmerCap * 1 && s.callingCap('woodcutter') === p.woodcutterCap * 1,
+      `each building keeps its own number in work (${CALLINGS.map((c) => `${c} ${s.callingCap(c)}`).join(', ')})`);
+    assert(s.callingFilled('farmer') === 2 && s.callingFilled('soldier') === 0, 'the grown fill their own places');
+    // a place is reserved at birth: an infant holds it while it grows
+    const filledWas = CALLINGS.map((c) => s.callingFilled(c));
+    cHome.nextBirth = 0; // the very first roll on a house only schedules the next one
+    assert(births(s, 1) === 1, 'a house with a free place bears a child');
+    const baby = s.infantsOf(cHome)[0];
+    assert(!!baby.calling && s.callingFilled(baby.calling) === filledWas[CALLINGS.indexOf(baby.calling)] + 1,
+      `a newborn takes its place from the cap while it is still an infant (${baby.calling})`);
+    // no place anywhere, no child at all
+    const capsWere = [p.farmerCap, p.woodcutterCap, p.soldierCap];
+    p.farmerCap = p.woodcutterCap = p.soldierCap = 0;
+    assert(s.freeCallings().length === 0 && (s.birthProblem(cHome) ?? '').startsWith('no work for another villager'),
+      `with every trade full the house says so (${s.birthProblem(cHome)})`);
+    assert(births(s, 30) === 0, 'and bears nobody');
+    // building room makes children again
+    p.soldierCap = 4;
+    assert(!s.birthProblem(cHome) && births(s, 1) === 1, 'room for a warrior and the house bears one');
+    assert(s.infantsOf(cHome).slice(-1)[0].calling === 'soldier', 'promised the only trade with a place');
+    // a second barracks doubles the warrior places
+    const capOne = s.callingCap('soldier');
+    const capBx = s.world.houses[0].tx + 10;
+    const second2 = s.world.canBuild('barracks', capBx, 96) ? s.world.place('barracks', capBx, 96) : null;
+    assert(!!second2 && s.callingCap('soldier') === capOne * 2, `a second barracks makes room for ${p.soldierCap} more warriors (${s.callingCap('soldier')})`);
+    // a ruin keeps nobody in work
+    s.world.granary!.ruined = true; p.farmerCap = 5;
+    assert(s.callingCap('farmer') === 0, 'a ruined granary closes its farmers\u2019 places');
+    s.world.granary!.ruined = false;
+    // a death frees the place it held
+    const capDoomed = s.infantsOf(cHome).find((v) => v.calling === 'soldier')!;
+    const heldBy = s.callingFilled('soldier');
+    capDoomed.dead = true; s.removeDead();
+    assert(s.callingFilled('soldier') === heldBy - 1, 'a child that dies gives its place back');
+    // the emptiest trade by share of its cap: a 5/5/10 village opens farmer, woodcutter, warrior, warrior
+    s = fresh(); clearing(s); s.agents = [s.player]; s.mods.babyFever = false; s.mods.twinChance = 0;
+    const rHome = s.world.houses[0]; rHome.firewood = 99; rHome.warm = true; s.food = 500;
+    const rMum = s.spawn(new Villager(0, 0, rHome, 'farmer', 20, 'RatioMum', s.mods)), rDad = s.spawn(new Villager(0, 0, rHome, 'farmer', 20, 'RatioDad', s.mods));
+    rMum.update = rDad.update = () => {}; rHome.residents = 2; rHome.nextBirth = 0; p.birthChance = 1;
+    p.farmerCap = 5; p.woodcutterCap = 5; p.soldierCap = 10;
+    const order: string[] = [];
+    for (let i = 0; i < 4; i++) { const before = s.villagers().length; births(s, 1); if (s.villagers().length > before) order.push(s.villagers()[s.villagers().length - 1].calling ?? '?'); }
+    // the couple already hold 2 of the 5 farmer places, so farming is the fullest trade and waits its turn:
+    // picking by free places alone would have promised all four to the barracks (10 open beats 5).
+    assert(order.join(',') === 'woodcutter,soldier,soldier,woodcutter', `the emptiest trade by share of its cap goes first (${order.join(', ')})`);
+    p.farmerCap = capsWere[0]; p.woodcutterCap = capsWere[1]; p.soldierCap = capsWere[2]; p.birthChance = wasChance; s.mods.twinChance = wasTwins;
     // diet: the pantry keeps kinds apart
     // diet: the pantry keeps kinds apart, crops and wild food have kinds, and what a child eats is who they become
     const held = () => s.player.pack.bulk()[0] as { kind: string; n: number; food?: string } | null;
@@ -485,14 +546,19 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     for (let i = 0; i < s.regrowDays('berry'); i++) s.newDay(); assert(s.wildRipe(bush), `a bush bears again after ${s.regrowDays('berry')} days`);
     s.hoverTile = null; clearBulk(s);
     // the basket takes one kind; a child's bites build a diet that freezes at coming of age
-    s.world.paintPen(123, 96, 'farmer'); s.player.tool = 'basket'; s.player.basketKind = 'carrot'; s.pantry.carrot = 40;
+    s.player.tool = 'basket'; s.player.basketKind = 'carrot'; s.pantry.carrot = 40;
     const g2 = s.world.granary!; Object.assign(s.player, World.center(g2.tx + 1, g2.ty + BUILDINGS[g2.kind].h)); s.fillBasket();
     assert(held()?.food === 'carrot' && held()!.n === STACK.food && s.pantry.carrot === 40 - STACK.food, 'the basket fills with the chosen kind');
-    for (let y = 95; y <= 97; y++) for (let x = 122; x <= 124; x++) if (s.world.get(x, y)!.pen !== 'farmer') s.world.paintPen(x, y, 'farmer');
-    Object.assign(s.player, World.center(123, 100)); s.hoverPoint = World.center(123, 96); const carrots = s.toss()!; s.hoverPoint = null; settle(s);
-    assert(carrots.food === 'carrot' && carrots.n === p.tossSize && s.world.inPen(carrots, 'farmer'), 'a throw carries its kind');
-    s.world.dropItem('food', 1, World.center(122, 96).x, World.center(122, 96).y, 'mushroom');
-    const eater = s.spawn(new Villager(World.center(123, 97).x, World.center(123, 97).y, s.world.houses[0], 'kid', 1, 'Eater', s.mods)); eater.pen = 'farmer'; eater.mealAt = 0; s.day = 9;
+    const yc = buildingCenter(s.world.houses[0]), yx = Math.round(yc.tx), yy = Math.round(yc.ty);
+    const dSpot = ([[0, 3], [1, 3], [-1, 3], [2, 3], [3, 2], [-3, 2], [0, -3], [3, 0]] as const)
+      .map(([dx, dy]) => ({ tx: yx + dx, ty: yy + dy })).find((q) => !s.world.isBlocked(q.tx, q.ty)) ?? { tx: yx, ty: yy + 3 };
+    const dStand = ([[0, 2], [1, 2], [-1, 2], [0, 1], [2, 0], [-2, 0]] as const)
+      .map(([dx, dy]) => ({ tx: dSpot.tx + dx, ty: dSpot.ty + dy })).find((q) => !s.world.isBlocked(q.tx, q.ty)) ?? dSpot;
+    Object.assign(s.player, World.center(dStand.tx, dStand.ty)); s.hoverPoint = World.center(dSpot.tx, dSpot.ty); const carrots = s.toss()!; s.hoverPoint = null; settle(s);
+    assert(carrots.food === 'carrot' && carrots.n === p.tossSize && s.world.inYard(carrots.x, carrots.y), 'a throw carries its kind');
+    const carrotAt = World.center(dSpot.tx, dSpot.ty); // where the throw landed: the eater stands on it
+    const shroomAt = World.center(dSpot.tx + 2, dSpot.ty); s.world.dropItem('food', 1, shroomAt.x, shroomAt.y, 'mushroom');
+    const eater = s.spawn(new Villager(carrotAt.x, carrotAt.y, s.world.houses[0], 'kid', 1, 'Eater', s.mods)); eater.calling = 'farmer'; eater.mealAt = 0; s.day = 9;
     const careWas = eater.care; step(s, 8);
     assert(eater.diet.carrot > 0 && eater.ateDay === 9, `bites go on the diet (${JSON.stringify(eater.diet)})`);
     eater.update = () => {}; eater.diet = zeroFood();
@@ -500,7 +566,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     eater.diet.carrot = p.dietFull; eater.diet.wheat = p.dietFull / 2;
     const live = eater.dietNow(); assert(Math.abs(live.speed - DIET_CAP.speed * p.dietMul) < 1e-9 && Math.abs(live.hp - DIET_CAP.hp * p.dietMul / 2) < 1e-9 && live.work === 0, `the diet projects its bonuses (${JSON.stringify(live)})`);
     const plainKid = s.spawn(new Villager(0, 0, s.world.houses[0], 'kid', 1, 'Plain', s.mods)); plainKid.update = () => {};
-    for (const k of [eater, plainKid]) { k.age = s.adultAge; k.pen = 'farmer'; } s.tickAges(0);
+    for (const k of [eater, plainKid]) { k.age = s.adultAge; k.calling = 'farmer'; } s.tickAges(0);
     assert(eater.isAdult && plainKid.isAdult && eater.dietBonus.speed === live.speed && eater.speed > plainKid.speed && eater.maxHp > plainKid.maxHp && plainKid.dietBonus.hp === 0, `the diet freezes at coming of age: ${eater.speed.toFixed(1)} vs ${plainKid.speed.toFixed(1)} speed, ${eater.maxHp} vs ${plainKid.maxHp} HP`);
     eater.diet.wheat = 99; assert(eater.dietNow().hp === eater.dietBonus.hp, 'the bonuses of a grown villager no longer move');
     s.removeDead();
@@ -546,7 +612,13 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     twinA.update = twinB.update = () => {};
     s.tick(1 / 60); s.tick(1 / 60);
     assert(twinA.dist(twinB) >= twinA.radius + twinB.radius - 0.01, `two bodies on one spot push apart (${twinA.dist(twinB).toFixed(1)} px)`);
-    assert(Math.abs(twinA.x - World.center(128, 100).x) > 0.5 && Math.abs(twinB.x - World.center(128, 100).x) > 0.5, 'equals share the push');
+    // dead centre, separate() picks its direction from the two ids, so test the shares and not the axis:
+    // both move, equally and opposite. (Checking the x offset alone broke whenever an earlier block
+    // changed how many agents had been spawned and the pair drew a near-vertical push.)
+    const twinAt = World.center(128, 100);
+    const offA = { x: twinA.x - twinAt.x, y: twinA.y - twinAt.y }, offB = { x: twinB.x - twinAt.x, y: twinB.y - twinAt.y };
+    assert(Math.hypot(offA.x, offA.y) > 0.5 && Math.hypot(offB.x, offB.y) > 0.5 && Math.abs(offA.x + offB.x) < 0.01 && Math.abs(offA.y + offB.y) < 0.01,
+      `equals share the push, equally and opposite (${offA.x.toFixed(2)},${offA.y.toFixed(2)} vs ${offB.x.toFixed(2)},${offB.y.toFixed(2)})`);
     const giant = s.ogre!; s.agents.push(giant); giant.hidden = false; giant.state = 'hunting'; giant.update = () => {}; Object.assign(giant, World.center(132, 100));
     const tot = s.spawn(new Villager(giant.x + 2, giant.y, home3, 'kid', 1, 'Tot', s.mods)); tot.update = () => {};
     const ogreWas = giant.x; s.tick(1 / 60); s.tick(1 / 60); s.tick(1 / 60);
@@ -559,10 +631,13 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(pinned.x < 135 * 16 && pusher.x < pinned.x && pinned.dist(pusher) >= 5.9, `a body against a wall is not pushed into it; the other gives way (${pinned.x.toFixed(1)} / ${pusher.x.toFixed(1)})`);
     // a crowd at one pile all get to eat
     s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(124, 104)); s.world.items.length = 0;
-    for (let y = 95; y <= 99; y++) for (let x = 120; x <= 126; x++) if (s.world.get(x, y)!.pen !== 'farmer') s.world.paintPen(x, y, 'farmer');
     const crowd: Villager[] = [];
-    for (let i = 0; i < 8; i++) { const k = s.spawn(new Villager(World.center(120 + i % 4, 95 + (i >> 2)).x, World.center(120 + i % 4, 95 + (i >> 2)).y, s.world.houses[0], 'kid', 1, 'C' + i, s.mods)); k.pen = 'farmer'; k.mealAt = 0; crowd.push(k); }
-    const pile = s.world.dropItem('food', 40, World.center(123, 97).x, World.center(123, 97).y, 'wheat'); s.day = 4;
+    const cc = buildingCenter(s.world.houses[0]), ccx = Math.round(cc.tx), ccy = Math.round(cc.ty);
+    for (let i = 0; i < 8; i++) { const at = World.center(ccx - 2 + i % 4, ccy + 3 + (i >> 2)); const k = s.spawn(new Villager(at.x, at.y, s.world.houses[0], 'kid', 1, 'C' + i, s.mods)); k.calling = 'farmer'; k.mealAt = 0; crowd.push(k); }
+    const ch = buildingCenter(s.world.houses[0]);
+    const pileAt = World.center(Math.round(ch.tx), Math.round(ch.ty) + 3); // in their own home's yard
+    const pile = s.world.dropItem('food', 40, pileAt.x, pileAt.y, 'wheat'); s.day = 4;
+    assert(s.world.inYard(pile.x, pile.y), 'the pile lies in the yard of the house they live in');
     for (let i = 0; i < 12 * 60; i++) s.tick(1 / 60);
     assert(crowd.every((k) => k.ateDay === 4), `eight children round one pile all get a bite (${crowd.filter((k) => k.ateDay === 4).length} of 8 ate, ${pile.n} left)`);
     let minGap = 99; for (const a1 of crowd) for (const b1 of crowd) if (a1 !== b1) minGap = Math.min(minGap, a1.dist(b1));
@@ -581,14 +656,6 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     pickAt(126, 100, 2); assert(s.selectedItem === lump && !s.selectedTile, 'a thing on the ground under the pointer beats the tile');
     const hut = s.world.houses[0]; pickAt(hut.tx + 1, hut.ty + 1); assert(s.selectedBuilding === hut && !s.selectedItem && !s.selectedTile, 'a building beats the tile');
     s.selectItem(lump); s.world.removeItem(lump); s.tick(1 / 60); assert(!s.selectedItem, 'a vanished thing leaves the inspector');
-    for (let y = 95; y <= 97; y++) for (let x = 121; x <= 123; x++) if (s.world.get(x, y)!.pen !== 'farmer') s.world.paintPen(x, y, 'farmer');
-    for (let y = 95; y <= 96; y++) for (let x = 126; x <= 127; x++) if (s.world.get(x, y)!.pen !== 'farmer') s.world.paintPen(x, y, 'farmer');
-    const region = s.world.penRegion(122, 96);
-    assert(region.length === 9 && !region.includes(95 * s.world.cols + 126), 'a pen region is the connected pen, not every pen of the kind');
-    const card = s.penCard({ tx: 122, ty: 96 })!; assert(card.kind === 'farmer' && card.tiles.length === 9, 'the pen card describes the connected pen');
-    s.repaintPen(region, 'soldier');
-    assert(region.every((i) => s.world.get(i % s.world.cols, (i / s.world.cols) | 0)!.pen === 'soldier') && s.world.get(126, 95)!.pen === 'farmer', 'repainting changes every tile of the pen and nothing outside it');
-    s.erasePen(region); assert(region.every((i) => !s.world.get(i % s.world.cols, (i / s.world.cols) | 0)!.pen) && s.world.get(126, 95)!.pen === 'farmer', 'erasing clears the whole pen and leaves the other alone');
     s.world.set(120, 100, 'tilled'); s.setFieldPlan({ tx: 120, ty: 100 }, 'tomato');
     const planter = s.spawn(new Villager(World.center(120, 101).x, World.center(120, 101).y, hut, 'farmer', 20, 'Planter', s.mods));
     for (const q of s.world.find((t) => t.kind === 'crop' || t.kind === 'tilled')) if (q.tx !== 120 || q.ty !== 100) s.world.set(q.tx, q.ty, 'grass');
@@ -607,9 +674,9 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     const sprout = s.villagers().find((v) => v.role === 'infant')!;
     assert(sprout.gnome && sprout.home === den && sprout.parents.includes(gma), 'a gnome infant is born a gnome, at home in the gnome house');
     sprout.age = p.infantDays; s.tickAges(0);
-    assert(sprout.role === 'kid' && sprout.pen === null && !sprout.hidden && sprout.outlook(s).role === 'gnome', 'a gnome child leaves the nursery without looking for a pen');
+    assert(sprout.role === 'kid' && sprout.calling === null && !sprout.hidden && sprout.outlook(s).role === 'gnome', 'a gnome child leaves the nursery promised no calling: it grows into a gnome');
     assert(s.rationOf(sprout) === 0, 'a gnome child takes nothing from the granary');
-    step(s, 2); assert(sprout.pen === null && sprout.task === 'playing by the gnome house', 'a gnome child plays by the cottage');
+    step(s, 2); assert(sprout.calling === null && sprout.task === 'playing by the gnome house', 'a gnome child plays by the cottage');
     s.world.dropItem('food', 4, 126 * 16, 103 * 16, 'carrot'); settle(s); sprout.mealAt = 0; step(s, 8);
     assert(sprout.ateDay === s.day && sprout.diet.carrot > 0, `a hungry gnome child eats what lies by the cottage (ate day ${sprout.ateDay}, day ${s.day})`);
     sprout.age = s.adultAge; s.tickAges(0);
@@ -742,9 +809,6 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(s.world.get(119, 100)!.tall && s.world.get(121, 98)!.tall, 'the grass behind and out of reach stands');
       s.world.get(124, 100)!.tall = true; s.world.set(124, 100, 'tilled');
       assert(!s.world.get(124, 100)!.tall, 'tilling (or anything replacing the ground) clears the grass');
-      s.world.get(125, 100)!.tall = true; s.world.paintPen(125, 100, 'farmer');
-      assert(!s.world.get(125, 100)!.tall, 'painting a pen tramples it');
-      s.world.paintPen(125, 100, 'farmer');
       const before = s.world.count((t) => !!t.tall); for (let d = 0; d < 5; d++) s.newDay();
       assert(s.world.count((t) => !!t.tall) <= before, 'mown grass never grows back');
     }
@@ -1207,10 +1271,6 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
         s.world.get(151, 150)!.tall = true; s.world.tallCount++;
         s.world.set(151, 150, 'tilled');
         assert(s.world.tallCount === raised - 1, 'and so does tilling it');
-        s.world.get(152, 150)!.tall = true; s.world.tallCount++;
-        s.world.paintPen(152, 150, 'farmer');
-        assert(s.world.tallCount === raised - 1, 'and so does painting a pen over it');
-        s.world.paintPen(152, 150, null);
 
         // the ceiling is the standing grass, bounded by the slider
         p.skulks = 100; p.skulkTiles = 10; s.world.tallCount = 55;

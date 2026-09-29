@@ -604,8 +604,8 @@ export const FLORA = {
   crop: [14, 15, 16, 17, 18] as const,
   crop2: [19, 20, 21, 22, 23] as const,
   tilled: 24,
-  /** painted training pens (farm / wood / drill) and the food piles tossed onto them (small / medium / heap) */
-  pen: [25, 26, 27] as const,
+  /** frames 25-27 are spare: the painted training pens that used to live here are gone (children are raised in their home yard) */
+  /** food piles lying on the ground (small / medium / heap) */
   feed: [28, 29, 30] as const,
   /** the other crops, five growth phases each; wild food, picked / ripe; and piles of each kind (small / medium / heap) */
   wheat: [31, 32, 33, 34, 35] as const,
@@ -739,7 +739,6 @@ export function ensureFlora(scene: Phaser.Scene): void {
   drawYoung(ctx, at(FLORA.saplingBig), 2); // a sheltered sapling is already a small tree
   for (let i = 0; i < 5; i++) { drawCrop(ctx, at(FLORA.crop[i]), i, false); drawCrop(ctx, at(FLORA.crop2[i]), i, true); }
   drawTilled(ctx, at(FLORA.tilled));
-  PEN_ROPES.forEach((rope, i) => drawPen(ctx, at(FLORA.pen[i]), rope, i));
   for (let i = 0; i < 3; i++) drawFeed(ctx, at(FLORA.feed[i]), i);
   for (let i = 0; i < 5; i++) { drawWheat(ctx, at(FLORA.wheat[i]), i); drawCarrot(ctx, at(FLORA.carrot[i]), i); }
   drawBush(ctx, at(FLORA.bush[0]), false); drawBush(ctx, at(FLORA.bush[1]), true);
@@ -771,15 +770,6 @@ function drawTallGrass(ctx: Ctx, ox: number, v: number): void {
   // a couple of seed heads catching the light
   for (let k = 0; k < 2; k++) px(ctx, ox + ((k * 9 + v * 5) % 15), 3 + ((k * 3 + v) % 4), LEAF_HI);
   px(ctx, ox, 15, LEAF_DARK, 16, 1);
-}
-/** rope colours of the three pens, in Calling order: farmer, woodcutter, soldier */
-const PEN_ROPES = ['#6fd36f', '#d6a35c', '#6f9bff'] as const;
-/** Trampled earth ringed by a coloured rope on posts. */
-function drawPen(ctx: Ctx, ox: number, rope: string, v: number): void {
-  px(ctx, ox, 0, '#8a6a46', 16, 16);
-  for (let i = 0; i < 10; i++) px(ctx, ox + ((i * 7 + v * 3) % 16), (i * 5 + 2) % 16, i % 2 ? '#7a5a38' : '#9a7a52');
-  px(ctx, ox, 0, rope, 16, 1); px(ctx, ox, 15, rope, 16, 1); px(ctx, ox, 0, rope, 1, 16); px(ctx, ox + 15, 0, rope, 1, 16);
-  for (const [x, y] of [[0, 0], [15, 0], [0, 15], [15, 15]] as const) px(ctx, ox + x, y, '#3e2c23');
 }
 /** Wheat: a sprout, blades, a tall green stand, heading out, golden ears. */
 function drawWheat(ctx: Ctx, ox: number, phase: number): void {
