@@ -227,6 +227,8 @@ export const BEDTIME = { start: 0.8, end: 0.28 } as const;
 export type Calling = 'farmer' | 'woodcutter' | 'soldier';
 export const CALLING_NAME: Record<Calling, string> = { farmer: 'farmers', woodcutter: 'woodcutters', soldier: 'soldiers' };
 export const CALLINGS: readonly Calling[] = ['farmer', 'woodcutter', 'soldier'];
+/** what each calling is called when a gnome takes it: the wild is their field, and a gnome under arms is a warrior */
+export const GNOME_CALLING: Record<Calling, string> = { farmer: 'gnome forager', woodcutter: 'gnome woodcutter', soldier: 'gnome warrior' };
 /** elders work and walk at this share of their adult pace */
 export const ELDER_MUL = 0.75;
 /** gifted traits: a five-star child gets one for life */

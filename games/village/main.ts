@@ -489,10 +489,10 @@ export class VillageScene extends SimScene {
     this.event('grow', 'You found the gnomes! Their cottage is yours, they fall in at your heels — and they will show you how to raise another. H sends them foraging.', true);
   }
 
-  /** A new gnome house comes with its founders: a grown couple, who breed like any family. */
+  /** A new gnome house comes with its founders: a grown couple who can feed themselves, and who breed like any family. */
   foundGnomes(b: Building): [Villager, Villager] {
     const grown = this.adultAge + 3;
-    return [this.addVillager(b, 'gnome', grown), this.addVillager(b, 'gnome', grown)];
+    return [this.addVillager(b, 'farmer', grown), this.addVillager(b, 'woodcutter', grown)];
   }
 
   private addVillager(home: (typeof this.world.houses)[number], role: Role, age: number): Villager {
@@ -1415,12 +1415,12 @@ export class VillageScene extends SimScene {
       if (this.birthProblem(h) || !this.rng.chance(this.birthChance(h, fever))) continue;
       const adults = this.villagers().filter((v) => v.home === h && v.isAdult && !v.dead);
       const kid = this.addVillager(h, 'infant', 0);
-      kid.calling = h.kind === 'gnomehouse' ? null : this.pickCalling(); // the place is theirs from birth; a gnome grows into a gnome
+      kid.calling = this.pickCalling(); // the place is theirs from birth, gnome or not
       kid.parents = [adults[0], adults[1]];
       // a twin needs a place of their own: the first child has just taken one
-      if (this.infantsOf(h).length < this.cribs(h) && (h.kind === 'gnomehouse' || this.freeCallings().length) && this.rng.chance(this.mods.twinChance)) {
+      if (this.infantsOf(h).length < this.cribs(h) && this.freeCallings().length && this.rng.chance(this.mods.twinChance)) {
         const twin = this.addVillager(h, 'infant', 0);
-        twin.calling = h.kind === 'gnomehouse' ? null : this.pickCalling();
+        twin.calling = this.pickCalling();
         twin.parents = [adults[0], adults[1]];
         this.event('birth', `Twins! ${kid.name} and ${twin.name} were born`);
       } else this.event('birth', `${kid.name} was born`);
@@ -2017,23 +2017,31 @@ export class VillageScene extends SimScene {
 
   /**
    * H / the whistle button. Gnomes trail their head by default (`gnomesFollow`), so the first press sends
-   * them off foraging; the next calls the ones within 20 tiles back to your heels. The standing order sticks,
-   * so gnomes coming of age fall in with the rest (see `Villager.comeOfAge`).
+   * them back to their trades; the next calls the ones within 20 tiles to your heels. Workers move by
+   * `followingPlayer`, warriors by their standing order. The order sticks, so gnomes coming of age fall in
+   * with the rest (see `Villager.comeOfAge`).
    */
   summonGnomes(): void {
     if (this.screen !== 'playing' || this.paused || this.interior.active) return;
-    const adults = this.villagers().filter(v => v.role === 'gnome' && !v.dead);
-    const following = adults.filter(v => v.followingPlayer);
-    if (following.length) {
+    const adults = this.villagers().filter(v => v.gnome && v.isAdult && !v.dead);
+    const workers = adults.filter(v => v.role !== 'soldier');
+    // only warriors whose orders are ours to move: a wand hold or attack, and a wall post, are not
+    const warriors = adults.filter(v => v.role === 'soldier' && !v.post && (!v.order || v.order.kind === 'follow'));
+    const following = workers.filter(v => v.followingPlayer).length + warriors.filter(v => v.order?.kind === 'follow').length;
+    if (following) {
       this.gnomesFollow = false;
-      for (const v of following) v.followPlayer(this, false);
-      this.event('info', 'The gnomes go off foraging. H or CALL GNOMES brings them back.', true);
+      for (const v of workers) v.followPlayer(this, false);
+      for (const v of warriors) { v.order = null; v.clearGoal(); } // back to patrolling the barracks
+      this.event('info', 'The gnomes go back to work. H or CALL GNOMES brings them to your heels.', true);
       return;
     }
-    const nearby = adults.filter(v => !v.hidden && !v.carriedBy && v.dist(this.player) <= 20 * TILE);
+    const nearby = [...workers, ...warriors].filter(v => !v.hidden && !v.carriedBy && v.dist(this.player) <= 20 * TILE);
     if (nearby.length) this.gnomesFollow = true; // a call nobody heard changes no standing order
-    for (const v of nearby) v.followPlayer(this, true);
-    this.event('info', nearby.length ? `${nearby.length} gnome${nearby.length === 1 ? ' answers' : 's answer'} your call. H or SEND FORAGING puts them back to work.` : 'No grown gnomes within calling distance (20 tiles).', true);
+    for (const v of nearby) {
+      if (v.role === 'soldier') { v.order = { kind: 'follow' }; v.clearGoal(); }
+      else v.followPlayer(this, true);
+    }
+    this.event('info', nearby.length ? `${nearby.length} gnome${nearby.length === 1 ? ' answers' : 's answer'} your call. H or SEND TO WORK puts them back to it.` : 'No grown gnomes within calling distance (20 tiles).', true);
   }
 
   shoot(who: Mover, dx: number, dy: number, dmg: number): boolean {

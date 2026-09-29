@@ -1,6 +1,6 @@
 import type { Agent } from '@shared/index';
 import { World, WILD_FOOD, doorstep, buildingCenter, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
-import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, ORDER, YARD, GNOME_PACK, ITEM, MASS, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, zeroFood, BOAR, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
+import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, GNOME_CALLING, ORDER, YARD, GNOME_PACK, ITEM, MASS, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, zeroFood, BOAR, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
 import type { Mods } from './meta';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle } from './characters';
 import type { VillageScene } from './main';
@@ -253,8 +253,13 @@ export abstract class Mover implements Agent {
 // ---------------------------------------------------------------------------
 // villagers
 
-/** 'infant' lives unseen in the house nursery; 'kid' is raised in its home's yard; the rest are grown (an elder keeps their role, see Villager.elder). 'gnome' is a grown gnome: no calling, fights like a soldier (see Villager.gnome) */
-export type Role = 'infant' | 'kid' | 'farmer' | 'woodcutter' | 'soldier' | 'gnome';
+/**
+ * 'infant' lives unseen in the house nursery; 'kid' is raised in its home's yard; the rest are the three
+ * grown callings (an elder keeps theirs, see Villager.elder). Being a gnome is not a role: it is
+ * `Villager.gnome`, and a gnome takes one of these callings like anyone else — its food calling is
+ * foraging where a human's is farming.
+ */
+export type Role = 'infant' | 'kid' | Calling;
 
 /** A standing order from the shaman wand: hold a spot (fight what comes within ORDER.leash of it), hunt one enemy, or shadow the head. A wall post is the other stance; the two never coexist. */
 export type Order = { kind: 'hold'; tx: number; ty: number } | { kind: 'attack'; target: Mover } | { kind: 'follow' };
@@ -271,7 +276,7 @@ export class Villager extends Mover {
   hungerDays = 0;
   /** grown old: slower, grey, and living on borrowed time (see p.elderDays) */
   elder = false;
-  /** born in a gnome house: a little person who takes no calling, eats in the cottage yard as a child and fights when grown */
+  /** born in a gnome house: a little person for life, whatever calling they take (see `applyRole` and the `forage` dispatch) */
   gnome = false;
   /** a grown gnome's little backpack: what it forages into while it trails the head, and what you can open up */
   pouch: Pack | null = null;
@@ -345,8 +350,7 @@ export class Villager extends Mover {
   /** Training days needed to come of age skilled (War Drums lowers it). */
   static drillNeeded(s: VillageScene): number { return Math.max(1, p.cadetDays + s.mods.cadetDaysDelta); }
   /** What this child will become — the calling reserved for them at birth, shown in the UI so nothing is a surprise. */
-  outlook(s: VillageScene): { role: Calling | 'gnome' | null; skilled: boolean } {
-    if (this.gnome) return { role: 'gnome', skilled: false }; // a gnome grows into a gnome
+  outlook(s: VillageScene): { role: Calling | null; skilled: boolean } {
     const daysLeft = Math.max(0, s.adultAge - this.age); // training days still possible, if fed all the way
     const teaching = this.calling !== 'soldier' || s.world.barracks.some((b) => b.warm); // no warm barracks, no sword lesson
     const skilled = s.mods.fullDrill || (!!this.calling && teaching && this.trained + daysLeft >= Villager.drillNeeded(s));
@@ -381,8 +385,18 @@ export class Villager extends Mover {
       case 'kid': this.radius = 2; this.color = 0xf5d8a8; this.maxHp = 10; this.speed = 30; break;
       case 'farmer': this.radius = 3; this.color = 0x7fd37f; this.maxHp = 20; this.speed = 35; break;
       case 'woodcutter': this.radius = 3; this.color = 0xc9a26b; this.maxHp = 20; this.speed = 35; break;
-      case 'gnome': this.radius = 2; this.color = 0xd94a3a; this.maxHp = p.gnomeHp; this.speed = p.gnomeSpeed; this.pouch ??= new Pack(GNOME_PACK.slots, 1); break;
       case 'soldier': this.radius = 3; this.color = 0x6f9bff; this.maxHp = p.soldierHp + mods.soldierHpBonus + this.barracksHp + (this.skilled ? 15 : 0) + armorStats(this.armor).hp; this.speed = 45 * armorStats(this.armor).speedMul; break;
+    }
+    // A gnome is a little person whatever its calling: its own base, and for a warrior only what the
+    // village earned it on top — never a human soldier's. A gnome warrior at a Lv1 barracks with no
+    // armor has exactly the HP of its foraging sister.
+    if (this.gnome && this.isAdult) {
+      const armor = armorStats(this.armor);
+      this.radius = 2; this.color = 0xd94a3a;
+      this.pouch ??= new Pack(GNOME_PACK.slots, 1);
+      const earned = this.role === 'soldier' ? this.barracksHp + (this.skilled ? 15 : 0) + armor.hp : 0;
+      this.maxHp = p.gnomeHp + earned;
+      this.speed = p.gnomeSpeed * (this.role === 'soldier' ? armor.speedMul : 1);
     }
     // how they were raised follows them for life
     if (this.isAdult) {
@@ -390,7 +404,7 @@ export class Villager extends Mover {
       this.maxHp *= stars * (this.trait === 'hardy' ? 1.25 : 1) * (this.stars <= 1 ? 0.9 : 1) * (1 + this.dietBonus.hp);
       this.speed *= stars * (this.trait === 'quick' ? 1.2 : 1) * (1 + this.dietBonus.speed) * (this.elder ? ELDER_MUL : 1);
     }
-    this.maxHp = Math.round(this.maxHp * mods.hpMul * (this.role === 'soldier' ? 1 : mods.villagerHpMul));
+    this.maxHp = Math.round(this.maxHp * mods.hpMul * (this.role === 'soldier' && !this.gnome ? 1 : mods.villagerHpMul));
     this.hp = Math.min(this.hp, this.maxHp);
     this.clearGoal();
   }
@@ -406,12 +420,16 @@ export class Villager extends Mover {
     this.role = role;
     this.calling = null; // spent: their role holds it now, and they eat at the granary like everyone else
     this.barracksHp = s.world.barracksLevel >= 3 ? 30 : s.world.barracksLevel >= 2 ? 15 : 0;
-    if (this.role === 'gnome') this.followingPlayer = s.gnomesFollow; // a young gnome falls in with whatever the grown ones are doing
+    // a young gnome falls in with whatever the grown ones are doing: at your heels, or off at work
+    if (this.gnome) {
+      this.followingPlayer = s.gnomesFollow;
+      if (this.role === 'soldier' && !s.gnomesFollow) this.order = null; // sent to work: patrol like any soldier
+    }
     this.applyRole(s.mods);
     this.hp = this.maxHp;
     const star = '★'.repeat(this.stars) + '☆'.repeat(5 - this.stars);
     // with a breeding program running, only the gifted are worth a toast; the rest go to the journal
-    s.event(this.role === 'soldier' ? 'soldier' : 'grow', `${this.name} came of age — ${this.role === 'gnome' ? 'a grown gnome' : `${skilled ? 'a skilled ' : 'a '}${this.role}`}, ${star}${this.trait ? ` (${TRAITS[this.trait].name})` : ''}`);
+    s.event(this.role === 'soldier' ? 'soldier' : 'grow', `${this.name} came of age — ${skilled ? 'a skilled ' : 'a '}${this.gnome ? GNOME_CALLING[this.role as Calling] : this.role}, ${star}${this.trait ? ` (${TRAITS[this.trait].name})` : ''}`);
     s.stats.childrenRaised++;
     s.stats.starsTotal += this.stars;
     if (this.role === 'soldier') s.stats.soldiersRaised++;
@@ -444,9 +462,8 @@ export class Villager extends Mover {
     switch (this.role) {
       case 'infant': return;
       case 'kid': this.kidUpdate(dt, s); break;
-      case 'farmer': this.civilUpdate(dt, s, 'farm'); break;
-      case 'woodcutter': this.civilUpdate(dt, s, this.helpingFarm(s) ? 'farm' : 'wood'); break;
-      case 'gnome': this.civilUpdate(dt, s, 'forage'); break;
+      case 'farmer': this.civilUpdate(dt, s, this.gnome ? 'forage' : 'farm'); break; // gnomes never work the crops: the wild is their field
+      case 'woodcutter': this.civilUpdate(dt, s, this.helpingFarm(s) ? (this.gnome ? 'forage' : 'farm') : 'wood'); break;
       case 'soldier': this.soldierUpdate(dt, s); break;
     }
   }
@@ -479,7 +496,7 @@ export class Villager extends Mover {
     const yard = this.gnome ? 'the gnome house' : 'the house';
     this.task = hungry ? `hungry — nothing by ${yard}`
       : lesson === 'soldier' ? 'drilling in the yard'
-      : lesson === 'farmer' ? 'learning to farm'
+      : lesson === 'farmer' ? (this.gnome ? 'learning to forage' : 'learning to farm')
       : lesson === 'woodcutter' ? 'learning the axe'
       : `playing by ${yard}`;
     // training accrues by the waking hour, every hour they are home and fed (the night asleep costs them nothing)
@@ -609,7 +626,7 @@ export class Villager extends Mover {
 
   /** Stable parties of up to three adults from one cottage; regroup when the household changes. */
   private foragingParty(s: VillageScene): Villager[] {
-    const adults = s.villagers().filter(v => v.role === 'gnome' && !v.dead && v.home === this.home).sort((a, b) => a.id - b.id);
+    const adults = s.villagers().filter(v => v.gnome && v.isAdult && v.role !== 'soldier' && !v.dead && v.home === this.home).sort((a, b) => a.id - b.id);
     const start = Math.floor(adults.indexOf(this) / 3) * 3;
     return adults.slice(start, start + 3).filter(v => v !== this && !v.hidden && !v.carriedBy && !v.followingPlayer && v.task !== 'fleeing');
   }
@@ -684,8 +701,8 @@ export class Villager extends Mover {
     }
     if (wasFleeing) { this.clearGoal(); this.thinkTimer = 0; }
 
-    // at the head’s heels: still foraging, but only what lies within a short walk of them
-    const heeling = job === 'forage' && this.followingPlayer;
+    // at the head’s heels: still working — foraging or chopping — but only what lies within a short walk
+    const heeling = this.gnome && this.followingPlayer && !!this.pouch;
     if (heeling) {
       this.delivering = false; // no granary trips while following; the pouch holds the finds
       if (s.player.hidden || this.pouchFull || this.dist(s.player) > GNOME_PACK.leash * TILE) {
@@ -819,7 +836,12 @@ export class Villager extends Mover {
       }
     }
     else if (farmer && t.kind === 'tilled') { s.world.sow(g.tx, g.ty, t.food ?? 'wheat'); }
-    else if (!farmer && t.kind === 'tree' && (!this.load || this.load.kind === 'wood')) { const wood = s.treeYield(t) + (this.skilled ? 4 : 0); s.world.set(g.tx, g.ty, 'sapling'); this.pickUp('wood', wood); }
+    else if (!farmer && t.kind === 'tree' && this.canStow('wood')) {
+      const wood = s.treeYield(t) + (this.skilled ? 4 : 0);
+      s.world.set(g.tx, g.ty, 'sapling');
+      const took = this.stow('wood', wood);
+      if (took < wood) this.pickUp('wood', wood - took); // a nearly full pouch loses none of the tree
+    }
     this.clearGoal();
   }
 

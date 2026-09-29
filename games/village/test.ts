@@ -8,7 +8,7 @@ import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, Wrecker, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm } from './wildlife';
-import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, GNOME_PACK, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS, YARD, CALLINGS } from './config';
+import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, GNOME_PACK, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS, YARD, CALLINGS, TREE_RESERVE } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
 const output = document.getElementById('test-results')!, summary = document.getElementById('test-summary')!;
@@ -663,10 +663,10 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     planter.dead = true; s.removeDead();
     s.world.placeDefense('stairs', 130, 100); for (let x = 131; x <= 134; x++) s.world.placeDefense('wall', x, 100);
     assert(s.stairsReach({ tx: 130, ty: 100 }) === 4, 'stairs report the battlements they serve');
-    // gnome house: a founding couple, a family raised without a pen, grown gnomes who fight
+    // gnome house: a founding couple, a family raised in the cottage yard, and gnomes of every calling
     s = fresh(); clearing(s); s.agents = [s.player]; s.food = 100;
     const den = s.world.place('gnomehouse', 125, 100), [gma, gpa] = s.foundGnomes(den);
-    assert(gma.gnome && gpa.gnome && gma.role === 'gnome' && gma.isAdult && den.residents === 2 && gma.home === den, 'a new gnome house comes with a grown gnome couple');
+    assert(gma.gnome && gpa.gnome && gma.isAdult && gma.role === 'farmer' && gpa.role === 'woodcutter' && den.residents === 2 && gma.home === den, 'a new gnome house comes with a grown couple: one for the wild, one for the axe');
     { const hp0 = gma.maxHp, was = p.gnomeHp; p.gnomeHp = was * 2; gma.applyRole(s.mods); assert(gma.maxHp > hp0 && gma.speed === p.gnomeSpeed, 'grown gnomes take their stats from the sliders'); p.gnomeHp = was; gma.applyRole(s.mods); gma.hp = gma.maxHp; }
     assert(s.beds(den) === 3 && s.rationOf(gma) === p.foodPerDay * s.mods.foodPerDayMul, 'a Lv1 gnome house has 3 beds and its gnomes eat a full ration');
     den.nextBirth = 0;
@@ -674,13 +674,22 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     const sprout = s.villagers().find((v) => v.role === 'infant')!;
     assert(sprout.gnome && sprout.home === den && sprout.parents.includes(gma), 'a gnome infant is born a gnome, at home in the gnome house');
     sprout.age = p.infantDays; s.tickAges(0);
-    assert(sprout.role === 'kid' && sprout.calling === null && !sprout.hidden && sprout.outlook(s).role === 'gnome', 'a gnome child leaves the nursery promised no calling: it grows into a gnome');
+    assert(sprout.role === 'kid' && !!sprout.calling && !sprout.hidden && sprout.outlook(s).role === sprout.calling, `a gnome child is promised a trade like anyone else (${sprout.calling})`);
+    sprout.calling = 'farmer'; // the wild is a gnome's field: take that one, so the rest of the block is fixed
     assert(s.rationOf(sprout) === 0, 'a gnome child takes nothing from the granary');
-    step(s, 2); assert(sprout.calling === null && sprout.task === 'playing by the gnome house', 'a gnome child plays by the cottage');
+    step(s, 2); assert(sprout.task === 'learning to forage', `a gnome child promised the wild learns to forage by the cottage (${sprout.task})`);
     s.world.dropItem('food', 4, 126 * 16, 103 * 16, 'carrot'); settle(s); sprout.mealAt = 0; step(s, 8);
     assert(sprout.ateDay === s.day && sprout.diet.carrot > 0, `a hungry gnome child eats what lies by the cottage (ate day ${sprout.ateDay}, day ${s.day})`);
     sprout.age = s.adultAge; s.tickAges(0);
-    assert(sprout.role === 'gnome' && sprout.gnome && sprout.home === den && sprout.isAdult, 'a gnome child comes of age a gnome and stays under the toadstool');
+    assert(sprout.role === 'farmer' && sprout.gnome && sprout.home === den && sprout.isAdult, 'a gnome child comes of age to its calling and stays under the toadstool');
+    // a gnome warrior is a gnome first: its HP starts at gnomeHp, never a human soldier's
+    const warden = s.spawn(new Villager(World.center(126, 101).x, World.center(126, 101).y, den, 'soldier', s.adultAge + 3, 'Warden', s.mods));
+    warden.gnome = true; warden.applyRole(s.mods); warden.hp = warden.maxHp; warden.update = () => {};
+    const manAtArms = s.spawn(new Villager(0, 0, s.world.houses[0], 'soldier', s.adultAge + 3, 'Tall', s.mods)); manAtArms.update = () => {};
+    assert(warden.maxHp < manAtArms.maxHp && warden.radius === 2 && !!warden.pouch,
+      `a gnome warrior stays a little person with a pouch (${warden.maxHp} HP against a man-at-arms' ${manAtArms.maxHp})`);
+    { const was = p.gnomeHp; p.gnomeHp = was * 2; warden.applyRole(s.mods); assert(warden.maxHp > was, 'and takes its base from gnomeHp, not soldierHp'); p.gnomeHp = was; warden.applyRole(s.mods); warden.hp = warden.maxHp; }
+    warden.dead = true; manAtArms.dead = true; s.removeDead();
     const gfoe = s.spawn(new Raider(...Object.values(World.center(128, 102)) as [number, number])); gfoe.update = () => {};
     step(s, 1);
     assert([gma, gpa, sprout].some((v) => v.task === 'fleeing' || v.hidden), 'grown gnomes run home from a raider instead of fighting');
@@ -699,6 +708,13 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     for (let i = 0; i < 40 && !pocketed(); i++) step(s, 1);
     assert(pocketed() > 0 && ![gma, gpa, sprout].some((v) => v.load), `a follower forages into its own pouch, not its arms (${pocketed()} of ${FOODS.hazelnut.yield} · ${gma.task})`);
     assert(s.pantry.hazelnut === nutsBefore, 'and walks nothing to the granary while it follows');
+    // gnomes do woodcutting too: a gnome woodcutter at your heels fells what is near you, into its pouch
+    s.wood = 0;
+    const gnomeWoodBefore = s.wood, inPouch = () => gpa.pouch!.countOf('wood');
+    for (let i = 0; i < TREE_RESERVE + 6; i++) s.world.set(160 + i, 150, 'tree'); // a forest well away: at its floor the axe goes to the fields instead
+    s.world.set(129, 104, 'tree'); // and one within the leash, by you
+    for (let i = 0; i < 60 && !inPouch(); i++) step(s, 1);
+    assert(inPouch() > 0 && s.wood === gnomeWoodBefore, `a gnome woodcutter at your heels chops into its pouch, not the woodyard (${inPouch()} wood · ${gpa.task})`);
     // the leash: what grows across the clearing is not a follower’s business
     for (const q of [...s.world.find((t) => !!WILD_FOOD[t.kind])]) s.world.set(q.tx, q.ty, 'grass');
     const across = s.world.set(126 + GNOME_PACK.leash + 5, 103, 'hazel'); across.stage = 99;
@@ -711,6 +727,8 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(!s.gnomesFollow && ![gma, gpa, sprout].some((v) => v.followingPlayer), 'H sends the whole family off foraging');
     for (let i = 0; i < 120 && s.pantry.hazelnut < nutsBefore + packed; i++) step(s, 1);
     assert(s.pantry.hazelnut === nutsBefore + packed && !pocketed(), `sent back to work, the pouches are emptied into the granary (${s.pantry.hazelnut - nutsBefore} of ${packed})`);
+    step(s, 3);
+    assert(inPouch() > 0 && /firewood|woodyard/.test(gpa.task), `sent back to work, the logs in its pouch are a load to walk in (${inPouch()} wood · ${gpa.task})`);
     for (const v of [gpa, sprout]) v.update = () => {}; // one forager, so the plant isn't stripped before the first find lands
     for (const q of [...s.world.find((t) => !!WILD_FOOD[t.kind])]) s.world.set(q.tx, q.ty, 'grass');
     const hazel = s.world.set(128, 100, 'hazel'); hazel.stage = 99;

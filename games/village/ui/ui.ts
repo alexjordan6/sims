@@ -36,9 +36,8 @@ export function spr(key: string, frame: number, size = 32, extra = ''): string {
 
 const ROLE_LABEL: Record<string, string> = { infant: 'Infant', kid: 'Child', farmer: 'Farmer', woodcutter: 'Woodcutter', soldier: 'Soldier', gnome: 'Gnome' };
 /** a grown gnome's portrait, for chips and outlooks */
-const GNOME_LOOK = { body: 'gnome', skin: 0, hair: 0, hairStyle: 0, outfit: 'gnome', held: 'club', armor: { helmet: 0, chest: 0, legs: 0, shield: 0 }, dye: 0, helmetStyle: 0, plume: 0 } as const;
 /** the GNOME HOUSE slot's tooltip once the craft is learned (locked, it says how to learn it) */
-const GNOME_TITLE = 'A toadstool cottage: a gnome couple moves in and raises a family like any house. Gnomes take no calling; the grown ones forage wild plants for the granary, one find at a time';
+const GNOME_TITLE = 'A toadstool cottage: a gnome couple moves in and raises a family like any house. Their grown ones take a calling like anyone else — the wild instead of the fields, the axe, or the club — and H calls the whole train to your heels';
 
 const ENEMY_LABEL: Record<string, string> = { raider: 'Raider', warlord: 'Warlord', rat: 'Rat — eats crops', snatcher: 'Snatcher — steals children', brute: 'Brute — heavy', shaman: 'Shaman — ranged', wrecker: 'Wrecker — tears down buildings', boar: 'Boar — wild game, fights back', troll: 'Troll — prowls the wild', skulk: 'Skulk — creeps from long grass, hunts gnomes' };
 
@@ -436,7 +435,7 @@ export class UI {
 
   render(dt: number): void {
     const s = this.scene;
-    const followers = s.villagers().filter(v => v.role === 'gnome' && v.followingPlayer && !v.dead).length;
+    const followers = s.villagers().filter(v => v.gnome && v.isAdult && !v.dead && (v.role === 'soldier' ? v.order?.kind === 'follow' : v.followingPlayer)).length;
     const call = this.top.querySelector<HTMLButtonElement>('.summon-gnomes')!;
     const label = followers ? `SEND FORAGING (${followers})` : 'CALL GNOMES';
     if (call.textContent !== label) call.textContent = label;
@@ -472,7 +471,9 @@ export class UI {
     if (tower) { const t = s.towerAmmo(); tower.textContent = s.world.barracks.length ? `TOWER CHESTS · ${t.ammo} / ${t.cap} arrows${t.ammo ? '' : ' · EMPTY'}` : ''; tower.classList.toggle('dry', !t.ammo); tower.classList.toggle('low', t.ammo > 0 && t.ammo / Math.max(1, t.cap) <= 0.25); }
     const exit = this.side.querySelector<HTMLButtonElement>('.leave-room'); if (exit) exit.hidden = !s.interior.active;
     const vs = s.villagers();
-    const count = (r: string) => r === 'elder' ? vs.filter((v) => v.elder).length : vs.filter((v) => v.role === r).length;
+    const count = (r: string) => r === 'elder' ? vs.filter((v) => v.elder).length
+      : r === 'gnome' ? vs.filter((v) => v.gnome && v.isAdult).length
+      : vs.filter((v) => v.role === r).length;
     // a trade's chip counts the children already promised it too: what it shows is what the cap allows
     const filled = (c: Calling) => s.callingFilled(c), cap = (c: Calling) => s.callingCap(c);
     const hour = Math.floor(s.dayTime * 24);
@@ -798,9 +799,9 @@ export class UI {
     const groups: [string, string, Villager[]][] = [
       ['Infants', 'kid', vs.filter((v) => v.role === 'infant').sort((a, b) => b.age - a.age)],
       ['Children', 'kid', vs.filter((v) => v.role === 'kid').sort((a, b) => b.age - a.age)],
-      ['Soldiers', 'soldier', vs.filter((v) => v.role === 'soldier')],
-      ['Gnomes', 'gnome', vs.filter((v) => v.role === 'gnome')],
-      ['Workers', 'farmer', vs.filter((v) => v.role === 'farmer' || v.role === 'woodcutter')],
+      ['Soldiers', 'soldier', vs.filter((v) => v.role === 'soldier' && !v.gnome)],
+      ['Gnomes', 'gnome', vs.filter((v) => v.gnome && v.isAdult)], // listed by blood, once: their calling shows on the row
+      ['Workers', 'farmer', vs.filter((v) => (v.role === 'farmer' || v.role === 'woodcutter') && !v.gnome)],
     ];
     let html = '';
     for (const [label, cls, list] of groups) {
@@ -811,7 +812,7 @@ export class UI {
         let bar = '';
         if (v.role === 'kid') {
           const o = v.outlook(s);
-          const icon = o.role === 'soldier' ? spr('dungeon', DUNGEON.sword, 16) : o.role === 'woodcutter' ? spr('town', TOWN.iconAxe, 16) : o.role === 'farmer' ? spr('town', TOWN.iconHoe, 16) : o.role === 'gnome' ? `<img class="art" src="${charImg(GNOME_LOOK)}" alt="" style="height:16px">` : '?';
+          const icon = o.role === 'soldier' ? spr('dungeon', DUNGEON.sword, 16) : o.role === 'woodcutter' ? spr('town', TOWN.iconAxe, 16) : o.role === 'farmer' ? spr('town', TOWN.iconHoe, 16) : '?';
           bar = `<span class="outlook ${o.role === 'soldier' ? 'm' : 'c'}">${icon}${v.apprenticeAt(s) ? ` ${v.trained.toFixed(1)}/${Villager.drillNeeded(s)}` : ''} <span class="rstars">${'★'.repeat(v.starsNow())}</span></span>`;
         } else {
           const pct = Math.max(0, v.hp / v.maxHp * 100);
@@ -1185,7 +1186,7 @@ export class UI {
           <h3>BUILDINGS</h3>
           <p>Every building can be wrecked. The <b>HAMMER</b> mends a damaged one (1 wood = 60 HP) and raises a ruin again for half its build cost; on a sound building, 3 hits upgrade it for wood. Every building has three levels — the brass studs on the sign by the door count them, and each level changes the building itself:</p>
           ${building('house', 'House · ' + COST.house + ' wood', 'A couple here has children.')}
-          ${building('gnomehouse', 'Gnome House · ' + COST.gnomehouse + ' wood', 'Comes with a gnome couple, who raise a family like any house (cribs, a hearth, food to spare). Gnome children take no calling: they play by the cottage, eat only what you throw within a few tiles of it (BASKET), and grow into gnomes. Grown gnomes forage: they walk to the nearest ripe wild plant, pick one unit, carry it to the granary and go again. They never fight — raiders send them running home like anyone else. <b>You start without the craft:</b> one cottage stands out in the woods, ringed by mushrooms, with a glade of warm motes drifting over it. Walk into the glade and keep going until the cottage itself comes into sight — the family is yours, and they teach you to raise more.')}
+          ${building('gnomehouse', 'Gnome House · ' + COST.gnomehouse + ' wood', 'Comes with a gnome couple — one for the wild, one for the axe — who raise a family like any house (cribs, a hearth, food to spare). Gnome children are raised in the cottage yard, eating only what you throw within a few tiles of it (BASKET), and take a calling like anyone else, out of the same places your buildings keep in work. A gnome <b>forager</b> fills a granary place: the wild is their field, so they walk to the nearest ripe plant, pick one unit and carry it in. A gnome <b>woodcutter</b> fells trees like any other. A gnome <b>warrior</b> fills a barracks place and fights — though it is a little person, with a little person’s HP, whatever armor you forge it. Workers still run home from raiders. <b>You start without the craft:</b> one cottage stands out in the woods, ringed by mushrooms, with a glade of warm motes drifting over it. Walk into the glade and keep going until the cottage itself comes into sight — the family is yours, and they teach you to raise more.')}
           ${building('barracks', 'Barracks · ' + COST.barracks + ' wood', 'Keeps ' + p.soldierCap + ' warriors under arms and drills the children promised a sword; its tower shoots raiders.')}
           ${building('granary', 'Granary', 'Holds your food and keeps ' + p.farmerCap + ' farmers in work. The crate stack beside it climbs as the store fills.')}
           ${building('woodyard', 'Woodyard', 'Holds your wood and keeps ' + p.woodcutterCap + ' woodcutters in work. The log stack beside the cabin climbs as it fills.')}
