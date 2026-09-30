@@ -1,13 +1,13 @@
 import { gearTexture } from './gear-art';
 import Phaser from 'phaser';
-import { World, BUILDINGS, doorstep, type Tile, type Building, type BuildingKind } from './world';
+import { World, BUILDINGS, WILD_FOOD, doorstep, type Tile, type Building, type BuildingKind } from './world';
 import { Mover, Villager, Raider, Player, Arrow, type EnemyKind } from './agents';
 import { Bolt } from './enemies';
 import type { Item } from './items';
 import { Boar, Swarm } from './wildlife';
 import { TOWN, CHAR } from './atlas';
 import { ensureCharacter, seedLook, type Look } from './characters';
-import { p, TILE, COLS, ROWS, CAPS, WALL_HEIGHT, OGRE, BOAR, ITEM } from './config';
+import { p, TILE, COLS, ROWS, CAPS, WALL_HEIGHT, OGRE, BOAR, ITEM, POT_INGREDIENTS } from './config';
 import type { VillageScene } from './main';
 import { Fx } from './fx';
 import { ensureBuildingArt, ensureFlora, FLORA, BUILDING_TEXTURE, LIT_TEXTURE, STACK_ROWS } from './pixelart';
@@ -47,6 +47,8 @@ export class Renderer {
   private carries = new Map<number, Phaser.GameObjects.Image>();
   /** the standing blades of each visible tall-grass tile, drawn over whatever is in them */
   private grass = new Map<number, Phaser.GameObjects.Image>();
+  /** motes over ripe wild plants the great pot has a use for, one sprite per visible tile */
+  private motes = new Map<number, Phaser.GameObjects.Image>();
   /** things lying (or flying) on the ground */
   private items = new Map<number, Phaser.GameObjects.Image>();
   /** each building's sprite (frame = level - 1) and, for the supply buildings, its climbing stock column */
@@ -114,6 +116,7 @@ export class Renderer {
     this.tintTiles();
     this.syncTrees();
     this.syncGrass();
+    this.syncMotes();
     this.syncSprites();
     this.syncItems();
     for (const ev of this.scene.fx) {
@@ -315,6 +318,40 @@ export class Renderer {
       blade.setDepth(DEPTH.agents + ((ty + 1) * TILE) / 1000).setTint(this.tint);
     }
     for (const [id, blade] of this.grass) if (!seen.has(id)) { blade.destroy(); this.grass.delete(id); }
+  }
+
+  /**
+   * A few motes drift off every ripe wild plant some recipe calls for, so you can tell at a glance
+   * what is worth carrying to the pot. Hazel gets none: nothing is cooked with hazelnuts. Built the
+   * way syncGrass is — one sprite per visible tile, destroyed as it scrolls away — and deliberately
+   * faint, so the woods stay woods.
+   */
+  private syncMotes(): void {
+    const s = this.scene, w = s.world, view = s.cameras.main.worldView;
+    const seen = new Set<number>();
+    const left = Math.max(0, Math.floor(view.left / TILE) - 1);
+    const right = Math.min(w.cols - 1, Math.ceil(view.right / TILE) + 1);
+    const top = Math.max(0, Math.floor(view.top / TILE) - 1);
+    const bottom = Math.min(w.rows - 1, Math.ceil(view.bottom / TILE) + 1);
+    for (let ty = top; ty <= bottom; ty++) for (let tx = left; tx <= right; tx++) {
+      const t = w.get(tx, ty)!;
+      const food = WILD_FOOD[t.kind];
+      if (!food || !POT_INGREDIENTS.has(food) || !s.wildRipe(t)) continue;
+      const id = ty * w.cols + tx;
+      seen.add(id);
+      let m = this.motes.get(id);
+      if (!m) {
+        m = s.add.image(tx * TILE, ty * TILE, 'flora', FLORA.motes[0]).setOrigin(0, 0);
+        this.motes.set(id, m);
+      }
+      // each tile drifts on its own phase (t.v), and the whole thing breathes rather than blinks
+      const phase = this.t * 1.6 + t.v * 0.7;
+      m.setFrame(FLORA.motes[Math.floor(phase) % 3]);
+      m.setDepth(DEPTH.agents + ((ty + 1) * TILE) / 1000 + 0.0003)
+        .setAlpha(0.28 + 0.16 * Math.sin(phase))
+        .setTint(this.tint);
+    }
+    for (const [id, m] of this.motes) if (!seen.has(id)) { m.destroy(); this.motes.delete(id); }
   }
 
   private syncSprites(): void {

@@ -643,7 +643,8 @@ export const FLORA = {
   crop: [14, 15, 16, 17, 18] as const,
   crop2: [19, 20, 21, 22, 23] as const,
   tilled: 24,
-  /** frames 25-27 are spare: the painted training pens that used to live here are gone (children are raised in their home yard) */
+  /** a few motes drifting off a ripe plant the great pot has a use for (three phases, so neighbours shimmer out of step) */
+  motes: [25, 26, 27] as const,
   /** food piles lying on the ground (small / medium / heap) */
   feed: [28, 29, 30] as const,
   /** the other crops, five growth phases each; wild food, picked / ripe; and piles of each kind (small / medium / heap) */
@@ -791,10 +792,25 @@ export function ensureFlora(scene: Phaser.Scene): void {
   for (let i = 0; i < 3; i++) drawPile(ctx, at(FLORA.pile.honey[i]), i, 'honey');
   drawHive(ctx, at(FLORA.hive));
   for (let i = 0; i < 3; i++) drawTallGrass(ctx, at(FLORA.tallGrass[i]), i);
+  for (let i = 0; i < 3; i++) drawMotes(ctx, at(FLORA.motes[i]), i);
   drawScrap(ctx, at(FLORA.scrap));
   tex.refresh();
   for (let i = 0; i < FLORA.count; i++) tex.add(i, 0, at(i), 0, 16, 16); // frames, so items and fx can draw one tile as an image
 }
+/**
+ * The motes over a ripe pot ingredient: warm specks lifting off it, three frames apart so a patch
+ * does not pulse as one. Nothing but a hint — the plant underneath is what you actually read.
+ */
+function drawMotes(ctx: Ctx, ox: number, v: number): void {
+  const specks = [[4, 9], [8, 6], [11, 10], [6, 3], [10, 2]] as const;
+  for (let i = 0; i < specks.length; i++) {
+    const [x, y] = specks[i];
+    const lift = (i + v) % 3; // each frame has the same motes a little further up
+    px(ctx, ox + x, y - lift, lift === 0 ? '#fff4c4' : lift === 1 ? '#ffe89a' : '#ffd76a', 1, 1);
+  }
+  px(ctx, ox + 7, 12 - v, '#fffbe6', 1, 1);
+}
+
 /** Long grass: a dense stand of blades over dark ground, each variant leaning and tufted differently. */
 function drawTallGrass(ctx: Ctx, ox: number, v: number): void {
   px(ctx, ox, 0, '#5aa848', 16, 16);

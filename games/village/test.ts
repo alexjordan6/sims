@@ -8,7 +8,7 @@ import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, Wrecker, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm } from './wildlife';
-import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, GNOME_PACK, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS, YARD, CALLINGS, TREE_RESERVE, MOODS, SERVE_RANGE } from './config';
+import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, GNOME_PACK, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS, YARD, CALLINGS, TREE_RESERVE, MOODS, SERVE_RANGE, POT_INGREDIENTS } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
 const output = document.getElementById('test-results')!, summary = document.getElementById('test-summary')!;
@@ -1067,6 +1067,11 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(s.pantry.stew === 0, 'nothing of it goes to the granary — it is ladled out, not stored');
     assert(/needs/.test(s.cookProblem(RECIPES.roast) ?? ''), 'a dish never started says what it wants');
 
+    // the woods tell you what the pot wants: every wild plant some recipe calls for shimmers when ripe
+    assert((['berry', 'mushroom', 'garlic', 'burdock'] as const).every((k) => POT_INGREDIENTS.has(k)),
+      `every wild plant a recipe calls for is a pot ingredient (${[...POT_INGREDIENTS].join(', ')})`);
+    assert(!POT_INGREDIENTS.has('hazelnut'), 'hazelnuts are in no recipe, so nothing marks a hazel');
+    assert(Object.values(WILD_FOOD).filter((k) => POT_INGREDIENTS.has(k!)).length === 4, 'four of the five wild plants are worth carrying to the pot');
     // ladling it out: every gnome round the pot gets a bowl, and the bowl takes them somewhere
     for (const v of s.villagers()) if (v.gnome) Object.assign(v, { x: -900, y: -900 }); // the founders are stood well clear of the square
     assert(/no grown gnome/.test(s.servingProblem() ?? ''), `with nobody at the pot there is nobody to serve (${s.servingProblem()})`);

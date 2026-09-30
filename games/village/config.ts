@@ -373,6 +373,8 @@ export const MOODS: Record<DishKind, Mood> = {
   soup: { dish: 'soup', name: 'Keen', blurb: 'works half again as fast and carries twice as much home', colour: '#f0a040', secs: 180, workMul: 1.5, haulMul: 2 },
   cake: { dish: 'cake', name: 'Stout', blurb: 'shrugs off a beating, hauls three times its load, and drops crumbs for the children', colour: '#f0d060', secs: 200, hpAdd: 12, haulMul: 3, quirk: 'crumb' },
 };
+/** Every raw food some recipe calls for: what is worth carrying to the great pot. */
+export const POT_INGREDIENTS: ReadonlySet<FoodKind> = new Set<FoodKind>(DISHES.flatMap((d) => Object.keys(RECIPES[d].needs) as FoodKind[]));
 /** How far from the pot a gnome has to be to get a bowl, in tiles. */
 export const SERVE_RANGE = 8;
 
