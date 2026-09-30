@@ -6,7 +6,7 @@ import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type Tool } from '../agents';
 import { Boar } from '../wildlife';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
-import { OGRE, BOAR, HAUL, COST, ORDER, YARD, GNOME_PACK, p, TOWER, HEARTH_WOOD, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, TRAITS, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, SERVE_RANGE, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, isDish, foodCount, hasInterior, type DishKind, CROP_KINDS, CALLINGS, DISMANTLE, DIET_CAP, DIET_STAT_NAME, type FoodKind, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS } from '../config';
+import { OGRE, BOAR, HAUL, COST, ORDER, YARD, GNOME_PACK, p, TOWER, HEARTH_WOOD, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, TRAITS, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, SERVE_RANGE, MOODS, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, isDish, foodCount, hasInterior, type DishKind, CROP_KINDS, CALLINGS, DISMANTLE, DIET_CAP, DIET_STAT_NAME, type FoodKind, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS } from '../config';
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
@@ -1035,7 +1035,8 @@ export class UI {
         <div class="acur">${needs} <small>→ ${r.makes} servings</small></div>
         <button class="btn small ${why ? '' : 'ok'} cook" data-cook="${d}" ${why ? 'disabled' : ''}>COOK · ${foodCount(r.makes, d)}</button>
         <div class="d">${why ? `<em class="warn">${esc(why)}</em>` : `raised on it, a child gains up to +${Math.round(DIET_CAP[food.stat as keyof typeof DIET_CAP] * (food.power ?? 1) * p.dietMul * 100)}% ${DIET_STAT_NAME[food.stat]} for life`}</div>
-        <button class="btn small ${have < 1 ? '' : 'ok'} eat" data-eat="${d}" ${have < 1 ? 'disabled' : ''}>EAT ONE · ${eat}</button></div>`;
+        <button class="btn small ${have < 1 ? '' : 'ok'} eat" data-eat="${d}" ${have < 1 ? 'disabled' : ''}>EAT ONE · ${eat}</button>
+        <div class="d"><b style="color:${MOODS[d].colour}">${MOODS[d].name}</b> — a gnome given this ${esc(MOODS[d].blurb)}, for ${MOODS[d].secs}s</div></div>`;
     }).join('');
     const inPot = (Object.entries(stock) as [FoodKind, number][]).filter(([, n]) => n >= 0.05)
       .map(([k, n]) => `<span style="color:${FOODS[k].colour}">${foodCount(Math.round(n * 10) / 10, k)}</span>`).join(' · ');
@@ -1047,7 +1048,7 @@ export class UI {
       <div class="aslots">${rows}</div>
       ${on}
       ${ready ? `<div class="raise"><div class="cap">LADLE IT OUT</div><button class="btn ${s.servingProblem() ? '' : 'ok'} serve" ${s.servingProblem() ? 'disabled' : ''}>DISH OUT TO THE GNOMES · ${ready} serving${ready === 1 ? '' : 's'}</button><div class="d">${esc(s.servingProblem() ?? `every grown gnome within ${SERVE_RANGE} tiles gets a bowl, and whatever it does to them`)}</div></div>` : ''}
-      <p class="sub small">Throw food in with the <b>BASKET</b> (or <b>G</b> to tip in a whole armful) and it goes in the pot rather than on the ground. What comes out is not for the granary — it is ladled straight out to the gnomes, and each dish takes them a different way.</p>
+      <p class="sub small">Throw food in with the <b>BASKET</b> (or <b>G</b> to tip in a whole armful) and it goes in the pot rather than on the ground. What comes out is not for the granary — it is ladled straight out to the gnomes. <b>Every dish is a way of fighting</b>, never a bonus to their day's work: a fed gnome stops running from raiders altogether and meets them with whatever the bowl gave it.</p>
     </div>`;
     if (!this.cookEl) this.cookEl = h('<div class="screen cooking-screen"></div>');
     if (!this.cookEl.isConnected) { this.screens.append(this.cookEl); this.lastCooking = ''; } // showScreen() empties #screens without asking

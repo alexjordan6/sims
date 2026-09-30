@@ -378,7 +378,8 @@ export class Renderer {
       const hurt = m.hp < m.maxHp * 0.4;
       const bob = moving ? Math.abs(Math.sin(this.t * (hurt ? 9 : 14) + m.id)) * 1.5 : 0;
       const a = this.fx.anims.get(m.id);
-      const base = m instanceof Villager && m.gnome ? (m.role === 'kid' ? 0.6 : 0.75) : m instanceof Villager && m.role === 'kid' ? 0.85 : m instanceof Boar ? (m.young ? BOAR.youngScale : 1) : m instanceof Raider ? ENEMY_SCALE[m.kind] : m instanceof Bolt ? 3 : m instanceof Swarm ? 4 : 1;
+      const swollen = m instanceof Villager ? m.moodNow?.bulk?.scale ?? 1 : 1; // a gnome full of honey cake stands half again as big
+      const base = (m instanceof Villager && m.gnome ? (m.role === 'kid' ? 0.6 : 0.75) : m instanceof Villager && m.role === 'kid' ? 0.85 : m instanceof Boar ? (m.young ? BOAR.youngScale : 1) : m instanceof Raider ? ENEMY_SCALE[m.kind] : m instanceof Bolt ? 3 : m instanceof Swarm ? 4 : 1) * swollen;
       const height = m instanceof Arrow ? (m.elevated ? WALL_HEIGHT * Math.max(0, 1 - m.travelled / m.dropDistance) : 0) : m.elevated ? WALL_HEIGHT : 0;
       sp.setPosition(Math.round(m.x + (a?.ox ?? 0)), Math.round(m.y - height - bob + (a?.oy ?? 0)));
       sp.setFlipX(m.dir < 0);

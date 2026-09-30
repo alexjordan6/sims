@@ -1048,6 +1048,40 @@ export class VillageScene extends SimScene {
     this.event('food', `${v.name}: ${m.name} — ${m.blurb}.`);
   }
   /**
+   * A gnome full of toadstool stew, struck: the cap bursts and every raider in the cloud is left
+   * reeling and thrown off. It costs the gnome nothing but the blow it just took, so a line of them
+   * round the pot is a minefield rather than a militia.
+   */
+  sporeBurst(v: Villager, spores: { radius: number; freeze: number }): void {
+    const r = spores.radius * TILE;
+    let caught = 0;
+    for (const a of this.agents) {
+      if (!(a instanceof Raider) || a.dead || a.hidden) continue;
+      const d = Math.hypot(a.x - v.x, a.y - v.y);
+      if (d > r) continue;
+      a.freeze = Math.max(a.freeze, spores.freeze);
+      a.shove((a.x - v.x) / (d || 1), (a.y - v.y) / (d || 1), 7);
+      a.attack = null; // whatever it was winding up is lost
+      caught++;
+    }
+    this.fx.push({ kind: 'impact', x: v.x, y: v.y });
+    this.fx.push({ kind: 'deposit', x: v.x, y: v.y - TILE, text: 'SPORES', colour: MOODS.stew.colour });
+    if (caught) this.event('soldier', `${v.name} bursts — ${caught} raider${caught === 1 ? ' is' : 's are'} left reeling in the spores.`, true);
+  }
+  /**
+   * Sharp-eyed: the gnome picks up a stone and slings it. It is an arrow in everything but name, and
+   * deliberately not `shoot()` — no bow, and it never touches the village's quiver.
+   */
+  slingStone(v: Villager, sling: { range: number; dmg: number }): void {
+    const mark = this.bestTarget(v.x, v.y, sling.range * TILE);
+    if (!mark || v.hidden || v.carriedBy) return;
+    const dx = mark.x - v.x, dy = mark.y - v.y, len = Math.hypot(dx, dy) || 1;
+    v.dir = dx < 0 ? -1 : 1;
+    this.spawn(new Arrow(v.x, v.y - 4, dx / len, dy / len, sling.dmg, v, sling.range * TILE));
+    this.fx.push({ kind: 'arrow', who: v });
+    v.task = 'slinging stones';
+  }
+  /**
    * The odd thing a fed gnome does now and then. Called from `Villager.tickMood` on its own timer,
    * so each of these fires a handful of times over a bowl rather than every frame.
    */

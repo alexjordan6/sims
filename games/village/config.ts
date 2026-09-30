@@ -343,9 +343,11 @@ export const RECIPES: Record<DishKind, Recipe> = {
 };
 
 /**
- * What a bowl out of the great pot does to a gnome. Every dish takes them a different way, and most
- * leave them doing something they would never do sober (`quirk`). The head gets the plainer buff from
- * RECIPES instead — a serving is worth more to a little person than to you.
+ * What a bowl out of the great pot does to a gnome. Every dish is a way of fighting, never a number:
+ * a fed gnome stops running from raiders altogether (see `Villager.civilUpdate`) and sees the fight
+ * through with whatever the dish gave it —
+ * each one gives a little person something it did not have — a physical change, or something it does
+ * that nothing else in the village can. The head gets the plainer buff from RECIPES instead.
  */
 export interface Mood {
   dish: DishKind;
@@ -354,29 +356,37 @@ export interface Mood {
   colour: string;
   /** seconds of sim time it lasts */
   secs: number;
+  /** it swells: this much bigger and heavier on its feet, and this much of a blow shrugged off */
+  bulk?: { scale: number; dmgMul: number };
+  /** it moves at this multiple of its pace */
   speedMul?: number;
-  workMul?: number;
-  haulMul?: number;
-  /** HP added on top while it lasts (and healed on the spot) */
-  hpAdd?: number;
-  /** shines like a lantern at night and sees further through the fog */
+  /** this share of the melee blows aimed at it miss entirely */
+  evade?: number;
+  /** its own blows throw what they land on this hard (3 is an ordinary swing) */
+  knockback?: number;
+  /** struck, it bursts: every raider within `radius` tiles is dazed for `freeze` seconds and thrown off */
+  spores?: { radius: number; freeze: number };
+  /** it slings stones: one every `every` seconds at a raider up to `range` tiles off, for `dmg` */
+  sling?: { every: number; range: number; dmg: number };
+  /** shines like a lantern and sees further through the fog */
   glow?: boolean;
-  /** stands and fights raiders instead of running home */
+  /** goes out and picks the fight, rather than standing its ground and meeting it */
   bold?: boolean;
   /** the odd thing it does now and then while the mood is on it */
-  quirk?: 'sprout' | 'caper' | 'crumb' | 'holler';
+  quirk?: 'sprout' | 'holler';
 }
 export const MOODS: Record<DishKind, Mood> = {
-  stew: { dish: 'stew', name: 'Toadstool Glow', blurb: 'shines like a lantern, sees further through the dark, and leaves toadstools where it treads', colour: '#b6e36a', secs: 180, glow: true, workMul: 1.25, quirk: 'sprout' },
-  roast: { dish: 'roast', name: 'Emboldened', blurb: 'stands its ground and goes at raiders with whatever it is holding, instead of running home', colour: '#d9643a', secs: 150, bold: true, speedMul: 1.1, quirk: 'holler' },
-  tart: { dish: 'tart', name: 'Giddy', blurb: 'tears about at half again its pace, and capers when it forgets itself', colour: '#e06a9a', secs: 120, speedMul: 1.55, quirk: 'caper' },
-  soup: { dish: 'soup', name: 'Keen', blurb: 'works half again as fast and carries twice as much home', colour: '#f0a040', secs: 180, workMul: 1.5, haulMul: 2 },
-  cake: { dish: 'cake', name: 'Stout', blurb: 'shrugs off a beating, hauls three times its load, and drops crumbs for the children', colour: '#f0d060', secs: 200, hpAdd: 12, haulMul: 3, quirk: 'crumb' },
+  stew: { dish: 'stew', name: 'Sporeburst', blurb: 'shines like a lantern, and bursts in a cloud of spores when struck — raiders round it are left reeling', colour: '#b6e36a', secs: 180, glow: true, spores: { radius: 3.5, freeze: 0.9 }, quirk: 'sprout' },
+  roast: { dish: 'roast', name: 'Emboldened', blurb: 'goes at raiders instead of running home, and swings hard enough to throw them off their feet', colour: '#d9643a', secs: 150, bold: true, knockback: 11, quirk: 'holler' },
+  tart: { dish: 'tart', name: 'Giddy', blurb: 'tears about at half again its pace, too quick to lay a hand on — near half the blows aimed at it find nothing', colour: '#e06a9a', secs: 120, speedMul: 1.55, evade: 0.45 },
+  soup: { dish: 'soup', name: 'Sharp-eyed', blurb: 'holds its ground and slings stones at raiders from clear across the clearing', colour: '#f0a040', secs: 180, sling: { every: 1.4, range: 7, dmg: 7 } },
+  cake: { dish: 'cake', name: 'Swollen', blurb: 'swells to half again its size, shoulders raiders aside, and shrugs off half of what lands on it', colour: '#f0d060', secs: 200, bulk: { scale: 1.55, dmgMul: 0.5 } },
 };
-/** Every raw food some recipe calls for: what is worth carrying to the great pot. */
-export const POT_INGREDIENTS: ReadonlySet<FoodKind> = new Set<FoodKind>(DISHES.flatMap((d) => Object.keys(RECIPES[d].needs) as FoodKind[]));
 /** How far from the pot a gnome has to be to get a bowl, in tiles. */
 export const SERVE_RANGE = 8;
+
+/** Every raw food some recipe calls for: what is worth carrying to the great pot. */
+export const POT_INGREDIENTS: ReadonlySet<FoodKind> = new Set<FoodKind>(DISHES.flatMap((d) => Object.keys(RECIPES[d].needs) as FoodKind[]));
 
 /** How a run begins: the founding family in their house, or a gnome family in their cottage (p.gnomeStart / ?start=gnome). */
 export type StartKind = 'village' | 'gnome';

@@ -172,6 +172,8 @@ export abstract class Mover implements Agent {
     if (this.hp <= 0) this.dead = true;
   }
 
+  /** How hard this body's blows throw what they land on. An ordinary swing is 3. */
+  protected get blowPush(): number { return 3; }
   /** Shove this body: the impulse plays out over the next few ticks (see tickTimers). */
   shove(ux: number, uy: number, px: number): void {
     this.pushX += ux * px * this.pushScale * 6;
@@ -204,7 +206,7 @@ export abstract class Mover implements Agent {
         this.dir = t.x < this.x ? -1 : 1;
         t.hit(a.dmg, true, this);
         const d = this.dist(t) || 1;
-        t.shove((t.x - this.x) / d, (t.y - this.y) / d, 3);
+        t.shove((t.x - this.x) / d, (t.y - this.y) / d, this.blowPush);
         s.fx.push({ kind: 'hit', attacker: this, target: t, dmg: a.dmg, crit: false, killed: !!t.dead });
       } else {
         s.fx.push({ kind: 'miss', who: this });
@@ -348,7 +350,6 @@ export class Villager extends Mover {
   get isAdult(): boolean {
     return this.role !== 'kid' && this.role !== 'infant';
   }
-  override get mass(): number { return this.isChild ? MASS.kid : MASS.villager; }
   get isChild(): boolean { return this.role === 'kid' || this.role === 'infant'; }
   /** Learning a trade at home (every child promised a calling trains, every day they are fed). */
   apprenticeAt(_s?: VillageScene): boolean {
@@ -387,10 +388,28 @@ export class Villager extends Mover {
   get moodNow(): Mood | null {
     return this.mood && this.mood.until > this.moodAt ? MOODS[this.mood.dish] : null;
   }
-  /** Work-speed multiplier from upbringing — and from whatever came out of the pot. */
+  /** Work-speed multiplier from upbringing. */
   get workMul(): number {
-    return (this.skilled ? 1.4 : 1) * (1 + STAR_BONUS * this.stars) * (this.trait === 'tireless' ? 1.25 : 1) * (1 + this.dietBonus.work) * (this.elder ? ELDER_MUL : 1) * (this.moodNow?.workMul ?? 1);
+    return (this.skilled ? 1.4 : 1) * (1 + STAR_BONUS * this.stars) * (this.trait === 'tireless' ? 1.25 : 1) * (1 + this.dietBonus.work) * (this.elder ? ELDER_MUL : 1);
   }
+  /** A swollen gnome shoulders bodies aside instead of giving way. */
+  override get mass(): number { return (this.isChild ? MASS.kid : MASS.villager) * (this.moodNow?.bulk ? 3 : 1); }
+  /** Emboldened, its swings throw a raider off its feet. */
+  protected override get blowPush(): number { return this.moodNow?.knockback ?? 3; }
+  /**
+   * Take a blow with whatever the pot left in you: a giddy gnome is too quick to be caught, a swollen
+   * one shrugs half of it off, and a sporeburst answers it (the burst itself fires from `tickMood`,
+   * which has the scene to find raiders with).
+   */
+  override hit(dmg: number, melee = true, by?: Mover): void {
+    const m = this.moodNow;
+    if (m?.evade && melee && Math.random() < m.evade) { this.blocked = true; this.hurtT = 0.2; return; }
+    const before = this.hp;
+    super.hit(m?.bulk ? dmg * m.bulk.dmgMul : dmg, melee, by);
+    if (m?.spores && this.hp < before) this.sporePending = true;
+  }
+  /** struck while full of toadstool stew: the cloud goes up on the next tick */
+  sporePending = false;
 
   applyRole(mods: Mods): void {
     switch (this.role) {
@@ -413,7 +432,10 @@ export class Villager extends Mover {
     }
     // and whatever came out of the pot, until it wears off
     const mood = this.moodNow;
-    if (mood && this.isAdult) { this.speed *= mood.speedMul ?? 1; this.maxHp += mood.hpAdd ?? 0; }
+    if (mood && this.isAdult) {
+      this.speed *= mood.speedMul ?? 1;
+      if (mood.bulk) this.radius = Math.round(this.radius * mood.bulk.scale); // it takes up more room, and bodies feel it
+    }
     // how they were raised follows them for life
     if (this.isAdult) {
       const stars = 1 + STAR_BONUS * this.stars;
@@ -464,14 +486,22 @@ export class Villager extends Mover {
       s.event('food', `${this.name} comes back to ${was.name === 'Giddy' ? 'their senses' : 'themselves'}.`);
       return;
     }
-    const q = MOODS[this.mood.dish].quirk;
-    if (!q) return;
+    const m = MOODS[this.mood.dish];
+    // struck last tick, and full of spores: the cloud goes up now
+    if (this.sporePending) { this.sporePending = false; if (m.spores) s.sporeBurst(this, m.spores); }
+    // sharp-eyed: a stone every so often at whatever is closest
+    if (m.sling) {
+      this.slingTimer -= dt;
+      if (this.slingTimer <= 0) { this.slingTimer = m.sling.every; s.slingStone(this, m.sling); }
+    }
+    if (!m.quirk) return;
     this.quirkTimer -= dt;
     if (this.quirkTimer > 0) return;
     this.quirkTimer = s.rng.range(6, 14);
-    s.gnomeQuirk(this, q);
+    s.gnomeQuirk(this, m.quirk);
   }
   private quirkTimer = 4;
+  private slingTimer = 0.5;
 
   update(dt: number, s: VillageScene): void {
     this.tickTimers(dt);
@@ -605,10 +635,7 @@ export class Villager extends Mover {
   private failedPicks = 0;
 
   /** How much of a kind these arms hold: a gnome brings home one find at a time — but drags a whole boar's meat in one go. */
-  haul(kind: LoadKind): number {
-    const mul = this.moodNow?.haulMul ?? 1;
-    return Math.round(mul * (this.gnome ? (kind === 'food' && this.load?.food === 'meat' ? BOAR.meat : 1) : HAUL.villager[kind] * p.haulMul));
-  }
+  haul(kind: LoadKind): number { return this.gnome ? (kind === 'food' && this.load?.food === 'meat' ? BOAR.meat : 1) : Math.round(HAUL.villager[kind] * p.haulMul); }
   /** the meat lying in the wild this gnome is on its way to (claimed in `VillageScene.meatClaims`, so two never chase one ham) */
   private fetching: Item | null = null;
   /** Arms and pouch together: what a granary trip hands in (see `VillageScene.deposit`), so a gnome sent back to work empties its pouch. */
@@ -726,7 +753,9 @@ export class Villager extends Mover {
   /** Farmers, woodcutters and foraging gnomes: find a job tile, walk there, work it, carry the take home. */
   private civilUpdate(dt: number, s: VillageScene, job: 'farm' | 'wood' | 'forage'): void {
     const farmer = job === 'farm';
-    const danger = !!s.nearestRaider(this.x, this.y, WORKER_DANGER);
+    // a bowl out of the great pot steadies them: a fed gnome holds its ground whatever the dish, and
+    // sees the fight through with whatever that dish gave it. Only a roast sends it at them (Mood.bold).
+    const danger = !this.moodNow && !!s.nearestRaider(this.x, this.y, WORKER_DANGER);
     const wasFleeing = this.workerSafety.fleeing;
     const nearby = danger || (wasFleeing && !!s.nearestRaider(this.x, this.y, WORKER_CLEAR));
     if (this.workerSafety.update(dt, danger, nearby)) {

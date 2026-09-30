@@ -1087,24 +1087,64 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(s.serveGnomes() === 1 && (s.potServings(pot).stew ?? 0) === stewWas - 1, 'one bowl, one gnome, one serving gone');
     assert(diner.mood?.dish === 'stew' && diner.moodNow === MOODS.stew && diner.hp > hurt, 'the gnome takes the mood of what it ate, and the meal heals it');
     assert(!farGnome.mood, 'and the one across the square gets nothing');
-    // what the stew does: it works faster, shines, and sees further
-    const plainWork = farGnome.workMul;
-    assert(diner.workMul > plainWork && Math.abs(diner.workMul / plainWork - MOODS.stew.workMul!) < 1e-9, `toadstool stew is worth ${MOODS.stew.workMul}x the work (${(diner.workMul / plainWork).toFixed(2)}x)`);
-    assert(!!diner.moodNow?.glow, 'and it glows');
+    // every bowl is a way of fighting, not a number: none of them touches how fast it works
+    assert(Math.abs(diner.workMul - farGnome.workMul) < 1e-9 && diner.haul('wood') === farGnome.haul('wood'),
+      'a bowl out of the pot is no help at all with the day job');
+    assert(!!diner.moodNow?.glow && !!diner.moodNow?.spores, 'toadstool stew makes a lantern of it, and a cloud waiting to go up');
+    // struck, it bursts: the raiders round it are dazed and thrown off
+    const sporeFoe = s.spawn(new Raider(diner.x + 2 * TILE, diner.y)); sporeFoe.update = () => {};
+    const foeWasX = sporeFoe.x;
+    diner.hit(3, true, sporeFoe);
+    assert(diner.sporePending, 'a blow that lands on it sets the spores off');
+    diner.update = Villager.prototype.update;
+    step(s, 0.05);
+    diner.update = () => {};
+    assert(sporeFoe.freeze >= MOODS.stew.spores!.freeze - 1e-9 && sporeFoe.pushX !== 0 && Math.abs(sporeFoe.x - foeWasX) >= 0,
+      `the cloud leaves the raider reeling (${sporeFoe.freeze.toFixed(2)}s) and shoved off`);
+    sporeFoe.dead = true; s.removeDead();
     // it wears off, and everything it wrote is put back
+    const plainRadius = farGnome.radius;
     s.simTime += MOODS.stew.secs + 1;
     diner.update = Villager.prototype.update; // the mood clock runs in update(), so let it tick
     step(s, 0.2);
     diner.update = () => {};
-    assert(!diner.mood && diner.moodNow === null && Math.abs(diner.workMul - plainWork) < 1e-9, 'when the bowl wears off the gnome is itself again');
-    // a stout gnome hauls farGnome more home, and a giddy one runs
+    assert(!diner.mood && diner.moodNow === null, 'when the bowl wears off the gnome is itself again');
+    // honey cake swells it: bigger, heavier on its feet, and half of a blow bounces off
     s.serveOne(diner, 'cake');
-    assert(diner.haul('wood') === Math.round(MOODS.cake.haulMul! * 1) && diner.maxHp > farGnome.maxHp, `cake makes it stout: ${diner.haul('wood')} wood a trip and ${diner.maxHp} HP against ${farGnome.maxHp}`);
+    assert(diner.radius > plainRadius && diner.mass > farGnome.mass, `cake swells it (radius ${diner.radius} against ${plainRadius}, mass ${diner.mass} against ${farGnome.mass})`);
+    { const before = diner.hp; diner.hit(10, true); const took = before - diner.hp;
+      const plainBefore = farGnome.hp; farGnome.hit(10, true); const plainTook = plainBefore - farGnome.hp;
+      assert(took < plainTook, `and half of what lands on it bounces off (${took} against ${plainTook})`); }
+    // a berry tart makes it too quick to lay a hand on
     s.serveOne(diner, 'tart');
-    assert(diner.speed > farGnome.speed, `a tart sends it tearing about (${diner.speed.toFixed(0)} against ${farGnome.speed.toFixed(0)})`);
+    assert(diner.speed > farGnome.speed && !!diner.moodNow?.evade, `a tart sends it tearing about (${diner.speed.toFixed(0)} against ${farGnome.speed.toFixed(0)})`);
+    { let missed = 0; for (let i = 0; i < 200; i++) { diner.hp = diner.maxHp; diner.hit(1, true); if (diner.hp === diner.maxHp) missed++; }
+      assert(missed > 200 * MOODS.tart.evade! * 0.5 && missed < 200 * MOODS.tart.evade! * 1.6, `and near half the blows find nothing (${missed} of 200)`); }
+    // garden soup: it slings stones at whatever comes near, with no bow and no arrows from the quiver
+    s.serveOne(diner, 'soup');
+    const quiverWas = s.arrows;
+    const mark = s.spawn(new Raider(diner.x + 3 * TILE, diner.y)); mark.update = () => {};
+
+    Object.assign(s.player, { x: diner.x, y: diner.y }); // at the head it keeps station, so the stone is the only thing that moves
+    // it reaches for a stone on its own, on the mood's own clock
+    let slings = 0; const realSling = s.slingStone.bind(s); (s as unknown as { slingStone: typeof s.slingStone }).slingStone = (v, sl) => { slings++; realSling(v, sl); };
+    diner.update = Villager.prototype.update;
+    step(s, MOODS.soup.sling!.every + 0.5);
+    diner.update = () => {};
+    assert(slings >= 1, `a sharp-eyed gnome reaches for a stone on its own (${slings} in ${(MOODS.soup.sling!.every + 0.5).toFixed(1)}s)`);
+    assert(diner.task !== 'fleeing', 'and does not run from the raider at all — the bowl is what steadies it');
+    // and what it slings is a real stone in the air, owned by the gnome, off its own arm: the village
+    // quiver is never touched, and no bow is needed.
+    s.grid.rebuild(s.agents);
+    s.slingStone(diner, MOODS.soup.sling!);
+    const stone = s.agents.find((x) => x instanceof Arrow) as Arrow | undefined;
+    assert(!!stone && stone.owner === diner && stone.dmg === MOODS.soup.sling!.dmg && s.arrows === quiverWas,
+      `the stone is loosed off its own arm for ${MOODS.soup.sling!.dmg} and costs the village no arrow (${s.arrows} left)`);
+    if (stone) stone.dead = true;
+    mark.dead = true; s.removeDead();
     // and a roast makes it stand and fight instead of running home
     s.serveOne(diner, 'roast');
-    assert(!!diner.moodNow?.bold, 'a roast emboldens it');
+    assert(!!diner.moodNow?.bold && MOODS.roast.knockback! > 3, 'a roast emboldens it, and puts weight behind its swing');
     const bully = s.spawn(new Raider(diner.x + 3 * TILE, diner.y)); bully.update = () => {};
     diner.update = Villager.prototype.update;
     step(s, 1.5);
