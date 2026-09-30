@@ -169,7 +169,7 @@ export const TOWER = {
 } as const;
 
 /** Every kind of building on the map (world.ts re-exports this; the per-kind tables below key on it so a new kind can't be forgotten). */
-export type BuildingKind = 'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern' | 'lair' | 'gnomehouse';
+export type BuildingKind = 'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern' | 'lair' | 'gnomehouse' | 'cookpot';
 /** The shaman wand's orders, in tiles: how far a holding squad engages from its spot, how close followers keep to the head, and the ring a squad spreads over when sent somewhere. */
 export const ORDER = { leash: 5, followGap: 2.5, spread: 1 } as const;
 export const COST = { house: 20, barracks: 30, tavern: 50, gnomehouse: 25 } as const;
@@ -197,6 +197,7 @@ export const LEGACY_TEST_MODE = true;
 /** wood to upgrade a building to level 2 / 3 (index = current level) */
 export const UPGRADE_COST: Record<BuildingKind, readonly number[]> = {
   lair: [0, 0, 0],
+  cookpot: [0, 0, 0], // the great pot was here before you and takes no hammer
   gnomehouse: [0, 20, 40],
   tavern: [0, 40, 80],
   house: [0, 30, 60], barracks: [0, 40, 80], granary: [0, 30, 60], woodyard: [0, 30, 60],
@@ -204,7 +205,8 @@ export const UPGRADE_COST: Record<BuildingKind, readonly number[]> = {
 /** what each level of a building gives, in a few words (index = level); shown in tooltips, hints and help */
 export const LEVEL_PERKS: Record<BuildingKind, readonly [string, string, string, string]> = {
   lair: ['', 'the Ogre sleeps here by day', '', ''],
-  gnomehouse: ['', '3 beds · a cooking pot by the hearth', '4 beds', '6 beds'],
+  cookpot: ['', 'throw food in, cook it, ladle it out to the gnomes', '', ''],
+  gnomehouse: ['', '3 beds', '4 beds', '6 beds'],
   tavern: ['', 'hearth meals restore 20 HP', 'hearth meals restore 35 HP', 'hearth meals restore 50 HP · family hall'],
   house: ['', '4 beds', '6 beds', '8 beds · births +15%'],
   barracks: ['', 'fires arrows at raiders · drills the drill yard', 'soldiers +15 HP · iron forge · tower +1.5 dmg', 'soldiers +30 HP · +20% dmg · regen · steel forge · tower +3 dmg'],
@@ -214,6 +216,7 @@ export const LEVEL_PERKS: Record<BuildingKind, readonly [string, string, string,
 /** what changes on the building itself at each level, for the help screen */
 export const LEVEL_LOOKS: Record<BuildingKind, readonly [string, string, string, string]> = {
   lair: ['', 'a cave mouth, bones, a fire', '', ''],
+  cookpot: ['', 'a black cauldron over a fire, steaming when there is something in it', '', ''],
   gnomehouse: ['', 'a toadstool cottage', 'a lantern and a second cap', 'a chimney and a fairy ring'],
   tavern: ['', 'green roof, hanging mug sign', 'flower boxes and second chimney', 'guest loft and lanterns'],
   house: ['', 'cottage', 'chimney, flower boxes, porch', 'second storey'],
@@ -338,6 +341,40 @@ export const RECIPES: Record<DishKind, Recipe> = {
   soup: { dish: 'soup', needs: { carrot: 2, tomato: 1 }, makes: 3, heal: 20, buffAdd: 0.35, buffSecs: 90 },
   cake: { dish: 'cake', needs: { honey: 2, wheat: 1 }, makes: 3, heal: 45, buffAdd: 0.3, buffSecs: 150 },
 };
+
+/**
+ * What a bowl out of the great pot does to a gnome. Every dish takes them a different way, and most
+ * leave them doing something they would never do sober (`quirk`). The head gets the plainer buff from
+ * RECIPES instead — a serving is worth more to a little person than to you.
+ */
+export interface Mood {
+  dish: DishKind;
+  name: string;
+  blurb: string;
+  colour: string;
+  /** seconds of sim time it lasts */
+  secs: number;
+  speedMul?: number;
+  workMul?: number;
+  haulMul?: number;
+  /** HP added on top while it lasts (and healed on the spot) */
+  hpAdd?: number;
+  /** shines like a lantern at night and sees further through the fog */
+  glow?: boolean;
+  /** stands and fights raiders instead of running home */
+  bold?: boolean;
+  /** the odd thing it does now and then while the mood is on it */
+  quirk?: 'sprout' | 'caper' | 'crumb' | 'holler';
+}
+export const MOODS: Record<DishKind, Mood> = {
+  stew: { dish: 'stew', name: 'Toadstool Glow', blurb: 'shines like a lantern, sees further through the dark, and leaves toadstools where it treads', colour: '#b6e36a', secs: 180, glow: true, workMul: 1.25, quirk: 'sprout' },
+  roast: { dish: 'roast', name: 'Emboldened', blurb: 'stands its ground and goes at raiders with whatever it is holding, instead of running home', colour: '#d9643a', secs: 150, bold: true, speedMul: 1.1, quirk: 'holler' },
+  tart: { dish: 'tart', name: 'Giddy', blurb: 'tears about at half again its pace, and capers when it forgets itself', colour: '#e06a9a', secs: 120, speedMul: 1.55, quirk: 'caper' },
+  soup: { dish: 'soup', name: 'Keen', blurb: 'works half again as fast and carries twice as much home', colour: '#f0a040', secs: 180, workMul: 1.5, haulMul: 2 },
+  cake: { dish: 'cake', name: 'Stout', blurb: 'shrugs off a beating, hauls three times its load, and drops crumbs for the children', colour: '#f0d060', secs: 200, hpAdd: 12, haulMul: 3, quirk: 'crumb' },
+};
+/** How far from the pot a gnome has to be to get a bowl, in tiles. */
+export const SERVE_RANGE = 8;
 
 /** How a run begins: the founding family in their house, or a gnome family in their cottage (p.gnomeStart / ?start=gnome). */
 export type StartKind = 'village' | 'gnome';
@@ -580,6 +617,7 @@ export const HEARTH_WOOD: Record<BuildingKind, readonly [number, number, number,
   granary: [0, 0, 0, 0],
   woodyard: [0, 0, 0, 0],
   lair: [0, 0, 0, 0],
+  cookpot: [0, 0, 0, 0], // its fire is never out; no woodcutter stocks it
   gnomehouse: [0, 1, 1, 2],
 };
 /** scrap iron looted from slain raiders */
@@ -594,6 +632,7 @@ export const BUILDING_HP: Record<BuildingKind, readonly [number, number, number,
   woodyard: [0, 300, 420, 540],
   barracks: [0, 400, 560, 720],
   lair: [0, 0, 0, 0],
+  cookpot: [0, 0, 0, 0], // iron and older than the village: raiders can tip it about but never break it
   gnomehouse: [0, 180, 260, 340],
 };
 /** hammer on a damaged building: HP per wood; rebuilding a ruin costs this share of the build cost (buildings without a shop price use `rebuildDefault`) */

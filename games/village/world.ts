@@ -1,5 +1,5 @@
 import type { Rng } from '@shared/index';
-import { TILE, COLS, ROWS, BUILDING_HP, HEARTH_WOOD, ITEM, GNOME_HOME, YARD, p, CROP_KINDS, type FoodKind, type BuildingKind, type StartKind } from './config';
+import { TILE, COLS, ROWS, BUILDING_HP, HEARTH_WOOD, ITEM, GNOME_HOME, YARD, p, CROP_KINDS, type DishKind, type FoodKind, type BuildingKind, type StartKind } from './config';
 export type { BuildingKind } from './config';
 import { tickItem, hop, type Item, type ItemKind } from './items';
 import type { Gear } from './pack';
@@ -18,6 +18,7 @@ export const BUILDINGS: Record<BuildingKind, { w: number; h: number; door: numbe
   tavern: { w: 4, h: 4, door: 1, name: 'The Copper Acorn' },
   lair: { w: 5, h: 4, door: 2, name: "The Ogre's Lair" },
   gnomehouse: { w: 2, h: 2, door: 0, name: 'Gnome House' },
+  cookpot: { w: 3, h: 3, door: 1, name: 'The Great Pot' },
 };
 export const MAX_LEVEL = 3;
 /** ground a building can go on (flattened when it goes up) */
@@ -53,6 +54,9 @@ export interface Building {
   alarmed?: boolean;
   /** nights of firewood stacked by the hearth (buildings without a hearth keep 0) */
   firewood: number;
+  /** the great pot: raw food thrown in and waiting to be cooked, and the servings standing ready in it */
+  stock?: Partial<Record<FoodKind, number>>;
+  servings?: Partial<Record<DishKind, number>>;
   /** a wild place, not the village's: no hearth, no fog sight, no raider cares, until it is found */
   wild?: boolean;
   /** the hearth burned last night; a cold building stalls births, drill, regen and meals */
@@ -115,7 +119,7 @@ export interface Hive {
 
 export const BLOCKING: Record<TileKind, boolean> = {
   grass: false, tilled: false, crop: false, sapling: false, bush: false, mushroom: false, hazel: false, garlic: false, burdock: false, tree: true, house: true, barracks: true, granary: true, woodyard: true,
-  tavern: true, lair: true, gnomehouse: true, wall: true, gate: false, stairs: false,
+  tavern: true, lair: true, gnomehouse: true, cookpot: true, wall: true, gate: false, stairs: false,
 };
 
 export class World {
@@ -156,6 +160,8 @@ export class World {
   /** standing barracks: a ruined one sponsors nothing, fires nothing and forges nothing */
   get barracks(): Building[] { return this.buildings.filter((b) => b.kind === 'barracks' && !b.ruined); }
   get allBarracks(): Building[] { return this.buildings.filter((b) => b.kind === 'barracks'); }
+  /** the great pot in the village square */
+  get cookpot(): Building | undefined { return this.buildings.find((b) => b.kind === 'cookpot'); }
   get granary(): Building | undefined { return this.buildings.find((b) => b.kind === 'granary'); }
   get woodyard(): Building | undefined { return this.buildings.find((b) => b.kind === 'woodyard'); }
   /** standing granaries and woodyards: a ruin keeps nobody in work (see VillageScene.callingCap) */
@@ -222,6 +228,7 @@ export class World {
     const tx = Math.floor(x / TILE), ty = Math.floor(y / TILE), t = this.get(tx, ty);
     if (!t) return true;
     if (t.kind === 'tree') return z < ITEM.treeHeight; // lobbed over the crown
+    if (t.kind === 'cookpot') return false; // solid to walk into, open to throw into: that is the whole point of it
     return this.isBlocked(tx, ty, true);
   };
   tickItems(dt: number): void { for (const it of this.items) tickItem(it, dt, this.itemBlocked); }
@@ -549,6 +556,8 @@ export class World {
         if (start !== 'village') continue;
         this.sow(tx, ty, CROP_KINDS[(ty - hy - 1) % CROP_KINDS.length]).stage = stage;
       }
+    // the great pot in the middle of the village, in both starts: older than the houses round it
+    this.place('cookpot', hx - 1, hy - 3);
     this.place('granary', hx + half + 2, hy + 1);
     this.place('woodyard', hx - 9, hy + 1);
     // the gnome start's own cottage: yours from the first frame, where the house would have stood

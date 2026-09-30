@@ -10,7 +10,7 @@ import { Interior } from './interior';
 import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, Bolt, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm, type Sounder } from './wildlife';
 import { Fog } from './fog';
-import { p, TILE, COLS, ROWS, ZOOM, COST, BOAR, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, GNOME_BEDS, YARD, ORDER, LEVEL_PERKS, CALLING_NAME, CALLINGS, TROLL, HIVE, ITEM, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, zeroFood, isDish, foodCount, hasInterior, type Recipe, type DishKind, DIET_STAT_NAME, type DietStat, type FoodKind, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, BOAR, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, GNOME_BEDS, YARD, ORDER, LEVEL_PERKS, CALLING_NAME, CALLINGS, MOODS, SERVE_RANGE, TROLL, HIVE, ITEM, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, zeroFood, isDish, foodCount, hasInterior, type Recipe, type DishKind, DIET_STAT_NAME, type DietStat, type FoodKind, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { Renderer, preloadArt } from './render';
 import { UI } from './ui/ui';
@@ -311,7 +311,7 @@ export class VillageScene extends SimScene {
     }
     const where = this.world.denseForests ? 'the deep woodland' : 'the open meadows';
     this.event('info', p.gnomeStart
-      ? `A gnome family keeps house in ${where}. Forage what grows wild, then cook it at the pot inside — walk up into the door.`
+      ? `A gnome family keeps house in ${where}. Forage what grows wild, then throw it in the great pot in the square and cook it.`
       : `A new village in ${where}. Follow trails to explore. Build walls and stairs, then station archers.`);
   }
 
@@ -943,29 +943,143 @@ export class VillageScene extends SimScene {
     this.cookingAt = b;
     this.ui?.renderCooking();
   }
+  /** What is lying in the pot waiting to be cooked, by kind. */
+  potStock(b = this.world.cookpot): Partial<Record<FoodKind, number>> { return (b && (b.stock ??= {})) || {}; }
+  /** What the pot has cooked and not yet ladled out. */
+  potServings(b = this.world.cookpot): Partial<Record<DishKind, number>> { return (b && (b.servings ??= {})) || {}; }
+  /** Units of everything in the pot, cooked and raw — what the steam over it is scaled to. */
+  potFullness(b = this.world.cookpot): number {
+    if (!b) return 0;
+    const sum = (o: Record<string, number | undefined>) => Object.values(o).reduce<number>((n, v) => n + (v ?? 0), 0);
+    return sum(this.potStock(b)) + sum(this.potServings(b));
+  }
+  /**
+   * Food thrown into the pot goes in the pot, not on the ground: this runs after the items have
+   * settled and before the head's pickup magnet, so a throw that lands in it is the pot's.
+   */
+  potAbsorb(): void {
+    const b = this.world.cookpot;
+    if (!b) return;
+    const f = BUILDINGS[b.kind], stock = this.potStock(b);
+    for (const it of [...this.world.items]) {
+      if (!it.rest || it.kind !== 'food' || !it.food || it.playerDropPending) continue;
+      const tx = Math.floor(it.x / TILE), ty = Math.floor(it.y / TILE);
+      if (tx < b.tx || tx >= b.tx + f.w || ty < b.ty || ty >= b.ty + f.h) continue;
+      stock[it.food] = (stock[it.food] ?? 0) + it.n;
+      this.world.removeItem(it);
+      this.fx.push({ kind: 'deposit', x: it.x, y: it.y - TILE, text: `+${foodCount(it.n, it.food)}`, colour: FOODS[it.food].colour });
+      this.event('food', `${foodCount(it.n, it.food)} into the pot.`);
+    }
+  }
   /** Why this dish can't be made right now, or null. */
   cookProblem(r: Recipe): string | null {
     const b = this.cookingAt;
     if (!b) return 'no pot here';
-    if (b.ruined) return 'the cottage is in ruins — rebuild it with the hammer';
-    if (!b.warm) return 'the hearth is cold — stock it with firewood and it lights at dawn';
+    if (b.ruined) return 'the pot is tipped over — set it right with the hammer';
+    const stock = this.potStock(b);
     for (const [k, n] of Object.entries(r.needs) as [FoodKind, number][]) {
-      const have = this.pantry[k];
-      if (have < n) return `need ${foodCount(n, k)} (${Math.floor(have)} in store)`;
+      const have = stock[k] ?? 0;
+      if (have < n) return `needs ${foodCount(n, k)} in the pot (${Math.floor(have)} of it so far)`;
     }
-    if (this.food >= this.foodCap) return 'the granary is full — upgrade it with the hammer';
     return null;
   }
-  /** Spend the ingredients and put the servings in the granary. */
+  /** Spend what is in the pot and leave the servings standing in it. */
   cook(r: Recipe): boolean {
     const b = this.cookingAt;
     if (!b || this.cookProblem(r)) return false;
-    // paid bin by bin rather than through `food`, whose setter would drain whatever the granary holds most of
-    for (const [k, n] of Object.entries(r.needs) as [FoodKind, number][]) this.pantry[k] -= n;
-    this.addFood(r.makes, r.dish);
+    const stock = this.potStock(b), made = this.potServings(b);
+    for (const [k, n] of Object.entries(r.needs) as [FoodKind, number][]) {
+      stock[k] = Math.max(0, (stock[k] ?? 0) - n);
+      if ((stock[k] ?? 0) < 1e-9) delete stock[k];
+    }
+    made[r.dish] = (made[r.dish] ?? 0) + r.makes;
     const c = buildingCenter(b);
     this.fx.push({ kind: 'deposit', x: c.tx * TILE, y: (b.ty + BUILDINGS[b.kind].h) * TILE - 6, text: `+${foodCount(r.makes, r.dish)}`, colour: FOODS[r.dish].colour });
-    this.event('food', `${FOODS[r.dish].name} out of the pot — ${r.makes} servings. A child raised on it grows far past one raised on raw food.`, true);
+    this.event('food', `${FOODS[r.dish].name} in the pot — ${r.makes} servings, ready to ladle out.`, true);
+    return true;
+  }
+  /** The grown gnomes standing near enough the pot to be handed a bowl. */
+  gnomesAtPot(b = this.world.cookpot): Villager[] {
+    if (!b) return [];
+    const c = buildingCenter(b);
+    return this.villagers().filter((v) => v.gnome && v.isAdult && !v.dead && !v.hidden && !v.carriedBy
+      && Math.hypot(v.x - c.tx * TILE, v.y - c.ty * TILE) <= SERVE_RANGE * TILE);
+  }
+  /** Why nobody can be served right now, or null. */
+  servingProblem(b = this.world.cookpot): string | null {
+    if (!b) return 'there is no pot';
+    const made = this.potServings(b);
+    if (!DISHES.some((d) => (made[d] ?? 0) >= 1)) return 'nothing cooked to ladle out yet';
+    if (!this.gnomesAtPot(b).length) return `no grown gnome within ${SERVE_RANGE} tiles of the pot — call them (H) and serve them here`;
+    return null;
+  }
+  /**
+   * Ladle the pot out: every grown gnome standing round it gets a bowl, and whatever that dish does
+   * to a little person for the next few minutes (see MOODS). The oldest dish in the pot goes first.
+   */
+  serveGnomes(b = this.world.cookpot): number {
+    if (!b || this.servingProblem(b)) return 0;
+    const made = this.potServings(b), taken: Record<string, number> = {};
+    let served = 0;
+    for (const v of this.gnomesAtPot(b)) {
+      const dish = DISHES.find((d) => (made[d] ?? 0) >= 1);
+      if (!dish) break;
+      made[dish] = (made[dish] ?? 0) - 1;
+      if ((made[dish] ?? 0) < 1e-9) delete made[dish];
+      this.serveOne(v, dish);
+      taken[dish] = (taken[dish] ?? 0) + 1;
+      served++;
+    }
+    const what = Object.entries(taken).map(([d, n]) => `${n} ${FOODS[d as DishKind].name.toLowerCase()}`).join(', ');
+    if (served) this.event('food', `${what} ladled out — ${served} gnome${served === 1 ? '' : 's'} fed.`, true);
+    return served;
+  }
+  /** One bowl into one gnome: the mood takes hold, and its stats are rewritten to match. */
+  serveOne(v: Villager, dish: DishKind): void {
+    const m = MOODS[dish];
+    v.mood = { dish, until: this.simTime + m.secs };
+    v.hungerDays = 0;
+    const frac = v.hp / Math.max(1, v.maxHp);
+    v.applyRole(this.mods); // the mood is folded in by applyRole, so it has to run again to take
+    v.hp = Math.min(v.maxHp, Math.max(Math.round(v.maxHp * frac), v.hp) + RECIPES[dish].heal);
+    v.hp = Math.min(v.hp, v.maxHp);
+    this.fx.push({ kind: 'deposit', x: v.x, y: v.y - TILE, text: m.name, colour: m.colour });
+    this.fx.push({ kind: 'hearts', who: v });
+    this.event('food', `${v.name}: ${m.name} — ${m.blurb}.`);
+  }
+  /**
+   * The odd thing a fed gnome does now and then. Called from `Villager.tickMood` on its own timer,
+   * so each of these fires a handful of times over a bowl rather than every frame.
+   */
+  gnomeQuirk(v: Villager, quirk: 'sprout' | 'caper' | 'crumb' | 'holler'): void {
+    const here = v.tile;
+    if (quirk === 'sprout') {
+      // toadstools spring up in its footprints
+      const spot = [[0, 1], [1, 0], [-1, 0], [0, -1], [1, 1], [-1, -1]]
+        .map(([dx, dy]) => ({ tx: here.tx + dx, ty: here.ty + dy }))
+        .find((q) => this.world.get(q.tx, q.ty)?.kind === 'grass' && !this.world.get(q.tx, q.ty)?.building);
+      if (!spot) return;
+      this.world.set(spot.tx, spot.ty, 'mushroom').stage = this.regrowDays('mushroom');
+      this.fx.push({ kind: 'tool', tool: 'seed', tx: spot.tx, ty: spot.ty, who: v });
+      return;
+    }
+    if (quirk === 'caper') { this.fx.push({ kind: 'hearts', who: v }); return; }
+    if (quirk === 'holler') { this.fx.push({ kind: 'swing', who: v, dx: v.dir, dy: 0, stage: 0 }); return; }
+    // a crumb of cake falls where the children will find it
+    const c = World.center(here.tx, here.ty);
+    if (this.world.itemsNear(c.x, c.y, TILE).length) return; // one crumb at a time
+    this.world.dropItem('food', 1, v.x, v.y, 'cake');
+  }
+  /** One serving out of the pot for the head: the same meal a gnome gets, and the same warm glow after. */
+  eatFromPot(dish: DishKind): boolean {
+    const b = this.cookingAt ?? this.world.cookpot;
+    if (!b) return false;
+    const made = this.potServings(b);
+    if ((made[dish] ?? 0) < 1) return false;
+    made[dish] = (made[dish] ?? 0) - 1;
+    if ((made[dish] ?? 0) < 1e-9) delete made[dish];
+    this.player.hunger = Math.min(p.hungerMax, this.player.hunger + this.hungerOf(dish));
+    this.dishBuff(dish);
     return true;
   }
   /** Eat one serving: a big meal now, and the dish's stat raised for a while. */
@@ -1031,12 +1145,15 @@ export class VillageScene extends SimScene {
   buffLeft(): number { return this.buff ? Math.max(0, this.buff.until - this.simTime) : 0; }
   /** Swings a tool needs, with a stew inside you. */
   workHits(base: number): number { return Math.max(1, Math.round(base / this.buffMul('work'))); }
-  /** The line shown when the head stands at the pot. */
+  /** The line shown when the head stands at the great pot. */
   cookHint(b: Building): string {
-    if (!b.warm) return 'Cooking pot · the hearth is cold — stock the pile and it lights at dawn';
-    const can = DISHES.filter((d) => { const was = this.cookingAt; this.cookingAt = b; const why = this.cookProblem(RECIPES[d]); this.cookingAt = was; return !why; });
-    const held = DISHES.filter((d) => this.pantry[d] >= 1).map((d) => foodCount(this.pantry[d] | 0, d)).join(', ');
-    return `Cooking pot · ${can.length ? `${can.length} dish${can.length === 1 ? '' : 'es'} you can make` : 'nothing you have the ingredients for'}${held ? ` · ${held} in store` : ''}`;
+    const was = this.cookingAt; this.cookingAt = b;
+    const can = DISHES.filter((d) => !this.cookProblem(RECIPES[d]));
+    this.cookingAt = was;
+    const made = this.potServings(b);
+    const ready = DISHES.filter((d) => (made[d] ?? 0) >= 1).map((d) => foodCount(made[d] ?? 0, d)).join(', ');
+    const inPot = (Object.entries(this.potStock(b)) as [FoodKind, number][]).filter(([, n]) => n >= 0.05).map(([k, n]) => foodCount(Math.round(n * 10) / 10, k)).join(', ');
+    return `The Great Pot · ${ready ? `${ready} ready to ladle out` : can.length ? `${can.length} dish${can.length === 1 ? '' : 'es'} you can cook` : inPot ? 'not enough of anything yet' : 'empty — throw food in (BASKET, or G with an armful)'}${inPot ? ` · holding ${inPot}` : ''}`;
   }
 
   // ---- child rearing ----------------------------------------------------------------------
@@ -1173,6 +1290,7 @@ export class VillageScene extends SimScene {
     this.tickHunger(dt);
     this.tickBirths();
     this.world.tickItems(dt);
+    this.potAbsorb();
     this.validateTool();
     this.pickUpItems(dt);
     this.tidySelection();
@@ -2001,7 +2119,7 @@ export class VillageScene extends SimScene {
     const fx = (from.tx + 0.5) * TILE, fy = (from.ty + 0.5) * TILE;
     const out: { b: Building; d: number }[] = [];
     for (const b of this.world.buildings) {
-      if (b.kind === 'lair' || b.wild || b.ruined || (kinds && !kinds.includes(b.kind))) continue;
+      if (b.kind === 'lair' || b.wild || b.ruined || !b.maxHp || (kinds && !kinds.includes(b.kind))) continue; // nothing to gain from battering what cannot break
       const f = BUILDINGS[b.kind];
       const adjacent = from.tx >= b.tx - 1 && from.tx <= b.tx + f.w && from.ty >= b.ty - 1 && from.ty <= b.ty + f.h;
       if (!adjacent && !this.world.bfs(from, doorstep(b), true).length) continue;
@@ -2651,6 +2769,7 @@ export class VillageScene extends SimScene {
         this.fx.push({ kind: 'tool', tool: 'axe', tx, ty });
         return;
       case 'hands':
+        if (t?.kind === 'cookpot') { this.openCooking(t.building ?? this.world.cookpot ?? null); return; }
         if (t && this.isRipe(t)) {
           const kind = t.food ?? 'wheat', why = this.loadProblem('food', kind, this.cropYieldOf(kind));
           if (why) { this.event('food', why + '.'); return; }
@@ -2750,6 +2869,7 @@ export class VillageScene extends SimScene {
         if (kind === 'sapling') return t!.stage < 2 ? 'E: clear the stump' : 'E: cut down the sapling';
         return 'axe: face a tree';
       case 'hands':
+        if (t?.kind === 'cookpot') return `E: ${this.cookHint(t.building ?? this.world.cookpot!)}`;
         if (t?.defense?.kind === 'stairs' || this.world.get(pl.tile.tx, pl.tile.ty)?.kind === 'stairs') return `E: ${pl.elevated ? 'descend' : 'climb'} stairs`;
         if (t?.defense?.kind === 'gate') return `E: ${t.defense.open ? 'close' : 'open'} gate`;
         if (kind === 'crop') { const fk = t!.food ?? 'wheat', why = this.loadProblem('food', fk, this.cropYieldOf(fk)); return this.isRipe(t!) ? (why ?? `E: harvest ${FOODS[fk].name.toLowerCase()} (${this.cropYieldOf(fk)}) · ${pl.carriedOf('food',fk)} in pack`) : `${FOODS[fk].name.toLowerCase()} growing (${t!.stage}/${this.cropDaysOf(t!)} days)`; }

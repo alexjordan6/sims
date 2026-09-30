@@ -457,6 +457,7 @@ function buildingTexture(scene: Phaser.Scene, key: string, w: number, h: number,
  */
 export const LIGHTS: Record<BuildingKind, readonly (readonly { x: number; y: number; r: number; warm?: boolean }[])[]> = {
   gnomehouse: [[], [{ x: 19, y: 33, r: 12 }], [{ x: 19, y: 33, r: 12 }, { x: 26, y: 36, r: 10 }], [{ x: 19, y: 33, r: 12 }, { x: 26, y: 36, r: 10 }, { x: 19, y: 43, r: 12 }, { x: 9, y: 46, r: 14, warm: true }]],
+  cookpot: [[], [{ x: 24, y: 56, r: 26, warm: true }], [{ x: 24, y: 56, r: 26, warm: true }], [{ x: 24, y: 56, r: 26, warm: true }]], // the fire under it lights the square
   tavern: [[], [{ x: 14, y: 48, r: 22 }, { x: 45, y: 48, r: 22 }], [{ x: 14, y: 48, r: 24 }, { x: 45, y: 48, r: 24 }], [{ x: 14, y: 48, r: 24 }, { x: 45, y: 48, r: 24 }, { x: 31, y: 19, r: 16 }, { x: 7, y: 65, r: 20, warm: true }]],
   // the lair's fire pit (level 0 = the Ogre is dead and the fire is out)
   lair: [[], [{ x: 66, y: 66, r: 26, warm: true }], [{ x: 66, y: 66, r: 26, warm: true }], []],
@@ -483,6 +484,7 @@ export const LIGHTS: Record<BuildingKind, readonly (readonly { x: number; y: num
 /** Chimney tops (smoke rises from here), per level. */
 export const CHIMNEYS: Record<BuildingKind, readonly (readonly { x: number; y: number }[])[]> = {
   gnomehouse: [[], [], [], [{ x: 23, y: 1 }]],
+  cookpot: [[], [{ x: 24, y: 30 }], [{ x: 24, y: 30 }], [{ x: 24, y: 30 }]], // steam off the pot reads like smoke
   tavern: [[], [{ x: 50, y: 7 }], [{ x: 50, y: 7 }, { x: 11, y: 15 }], [{ x: 50, y: 7 }, { x: 11, y: 15 }]],
   lair: [[], [{ x: 66, y: 60 }], [{ x: 66, y: 60 }], []],
   house: [[], [], [{ x: 48, y: 9 }], [{ x: 48, y: 5 }]],
@@ -514,9 +516,9 @@ export function ensureGlowTexture(scene: Phaser.Scene): void {
 }
 
 /** Texture key for a building kind; frame = level - 1. */
-export const BUILDING_TEXTURE = { house: 'bld-house', barracks: 'bld-barracks', granary: 'bld-granary', woodyard: 'cabin', tavern: 'bld-tavern', lair: 'bld-lair', gnomehouse: 'bld-gnomehouse' } as const;
+export const BUILDING_TEXTURE: Record<BuildingKind, string> = { house: 'bld-house', barracks: 'bld-barracks', granary: 'bld-granary', woodyard: 'cabin', tavern: 'bld-tavern', lair: 'bld-lair', gnomehouse: 'bld-gnomehouse', cookpot: 'bld-cookpot' };
 /** The same buildings' windows, lanterns and torches alone — laid over the body at night. */
-export const LIT_TEXTURE = { house: 'bld-house-lit', barracks: 'bld-barracks-lit', granary: 'bld-granary-lit', woodyard: 'cabin-lit', tavern: 'bld-tavern-lit', lair: 'bld-lair-lit', gnomehouse: 'bld-gnomehouse-lit' } as const;
+export const LIT_TEXTURE: Record<BuildingKind, string> = { house: 'bld-house-lit', barracks: 'bld-barracks-lit', granary: 'bld-granary-lit', woodyard: 'cabin-lit', tavern: 'bld-tavern-lit', lair: 'bld-lair-lit', gnomehouse: 'bld-gnomehouse-lit', cookpot: 'bld-cookpot-lit' };
 
 /** Create every building and stock texture (safe to call more than once). */
 /** What people carry: a bundle of logs on the shoulder, a basket of produce. 14x8 each. */
@@ -534,6 +536,41 @@ export function ensureCarryArt(scene: Phaser.Scene): void {
   f.refresh();
 }
 
+/** The great pot: 3x3 of village square, the sprite standing one tile proud of its footprint. */
+export const POT_W = 48, POT_H = 64;
+const POT_IRON = '#2e2a2b', POT_IRON_LIGHT = '#4b4444', POT_IRON_DARK = '#1d1a1b', EMBER = '#e2641f', EMBER_HOT = '#ffb347', ASH = '#6b625c';
+/**
+ * A black cauldron on a stone ring, big enough for the whole village to eat out of. Level is
+ * ignored (the pot has none) but the three frames are drawn all the same, as buildingTexture asks.
+ */
+function drawCookPot(ctx: Ctx, ox: number): void {
+  const cx = ox + 24, base = 56;
+  // the stone ring it stands in, and the ash inside it
+  for (let i = 0; i < 12; i++) {
+    const a = (i / 12) * Math.PI * 2, x = cx + Math.round(Math.cos(a) * 19) - 2, y = base + Math.round(Math.sin(a) * 7) - 1;
+    px(ctx, x, y, i % 2 ? '#8d857d' : '#6f6760', 4, 3); px(ctx, x, y, '#a49c94', 4, 1);
+  }
+  px(ctx, cx - 14, base - 1, ASH, 28, 4);
+  // the fire under it
+  for (const [x, y, w, h] of [[-9, -2, 5, 5], [-2, -4, 6, 7], [5, -2, 5, 5]] as const) {
+    litPx(ctx, cx + x, base + y, EMBER, w, h); litPx(ctx, cx + x + 1, base + y + 1, EMBER_HOT, Math.max(1, w - 2), Math.max(1, h - 3));
+  }
+  // three legs
+  for (const dx of [-13, 0, 13]) px(ctx, cx + dx - 1, base - 8, POT_IRON_DARK, 3, 9);
+  // the belly: a wide iron bowl
+  px(ctx, cx - 17, base - 22, POT_IRON, 34, 14);
+  px(ctx, cx - 15, base - 10, POT_IRON, 30, 4);
+  px(ctx, cx - 12, base - 7, POT_IRON_DARK, 24, 3);
+  px(ctx, cx - 16, base - 20, POT_IRON_LIGHT, 4, 9); // the light off its left shoulder
+  // the rim, and the handle hooped over it
+  px(ctx, cx - 19, base - 25, POT_IRON_DARK, 38, 4);
+  px(ctx, cx - 18, base - 24, POT_IRON_LIGHT, 36, 1);
+  px(ctx, cx - 16, base - 22, '#191617', 32, 2); // the dark of what is inside
+  for (let i = 0; i < 9; i++) { const a = Math.PI * (i / 8); px(ctx, cx - Math.round(Math.cos(a) * 20) - 1, base - 25 - Math.round(Math.sin(a) * 9), POT_IRON_DARK, 2, 2); }
+  // the ladle, hung on the rim
+  px(ctx, cx + 15, base - 33, '#8a5a2a', 2, 10); px(ctx, cx + 13, base - 24, '#b8b0a6', 5, 3); px(ctx, cx + 14, base - 23, '#7e766e', 3, 1);
+}
+
 export function ensureBuildingArt(scene: Phaser.Scene): void {
   ensureFortArt(scene);
   ensureCarryArt(scene);
@@ -542,6 +579,8 @@ export function ensureBuildingArt(scene: Phaser.Scene): void {
   buildingTexture(scene, 'bld-lair', 80, 80, (ctx, ox, level) => drawLair(ctx, ox, level < 3 ? 1 : 0));
   buildingTexture(scene, 'bld-lair-lit', 80, 80, (ctx, ox, level) => drawLair(ctx, ox, level < 3 ? 1 : 0), true);
   buildingTexture(scene, 'bld-tavern-lit', BIG_W, BIG_H, drawTavern, true);
+  buildingTexture(scene, 'bld-cookpot', POT_W, POT_H, (ctx, ox) => drawCookPot(ctx, ox));
+  buildingTexture(scene, 'bld-cookpot-lit', POT_W, POT_H, (ctx, ox) => drawCookPot(ctx, ox), true);
   buildingTexture(scene, 'bld-gnomehouse', CABIN_W, CABIN_H, drawGnomeHouse);
   buildingTexture(scene, 'bld-gnomehouse-lit', CABIN_W, CABIN_H, drawGnomeHouse, true);
   buildingTexture(scene, 'bld-house', BIG_W, BIG_H, drawHouse);

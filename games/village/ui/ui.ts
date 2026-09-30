@@ -6,7 +6,7 @@ import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type Tool } from '../agents';
 import { Boar } from '../wildlife';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
-import { OGRE, BOAR, HAUL, COST, ORDER, YARD, GNOME_PACK, p, TOWER, HEARTH_WOOD, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, TRAITS, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, isDish, foodCount, hasInterior, type DishKind, CROP_KINDS, CALLINGS, DISMANTLE, DIET_CAP, DIET_STAT_NAME, type FoodKind, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS } from '../config';
+import { OGRE, BOAR, HAUL, COST, ORDER, YARD, GNOME_PACK, p, TOWER, HEARTH_WOOD, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, TRAITS, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, SERVE_RANGE, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, isDish, foodCount, hasInterior, type DishKind, CROP_KINDS, CALLINGS, DISMANTLE, DIET_CAP, DIET_STAT_NAME, type FoodKind, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS } from '../config';
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
@@ -1021,13 +1021,14 @@ export class UI {
 
   private cookEl: HTMLElement | null = null;
   private lastCooking = '';
-  /** The COOKING POT: what the gnomes can make from the granary, and what one serving does for the head. */
+  /** THE GREAT POT: what is in it, what it can be cooked into, and who gets a bowl. */
   renderCooking(): void {
     const s = this.scene, b = s.cookingAt;
     if (!b) { this.cookEl?.remove(); this.cookEl = null; this.lastCooking = ''; return; }
+    const stock = s.potStock(b), made = s.potServings(b);
     const rows = DISHES.map((d) => {
-      const r = RECIPES[d], why = s.cookProblem(r), have = s.pantry[d] | 0, food = FOODS[d];
-      const needs = (Object.entries(r.needs) as [FoodKind, number][]).map(([k, n]) => `<span style="color:${FOODS[k].colour}">${foodCount(n, k)}</span> <small>(${Math.floor(s.pantry[k])})</small>`).join(' + ');
+      const r = RECIPES[d], why = s.cookProblem(r), have = Math.floor(made[d] ?? 0), food = FOODS[d];
+      const needs = (Object.entries(r.needs) as [FoodKind, number][]).map(([k, n]) => `<span style="color:${FOODS[k].colour}">${foodCount(n, k)}</span> <small>(${Math.floor(stock[k] ?? 0)} in)</small>`).join(' + ');
       const eat = `+${r.heal} HP · +${Math.round(r.buffAdd * 100)}% ${DIET_STAT_NAME[food.stat]} for ${r.buffSecs}s`;
       return `<div class="aslot">
         <div class="aname">${this.tilePortrait({ key: 'flora', frame: FLORA.pile[d][2] })} ${food.name} <span class="tier">×${have}</span></div>
@@ -1036,14 +1037,17 @@ export class UI {
         <div class="d">${why ? `<em class="warn">${esc(why)}</em>` : `raised on it, a child gains up to +${Math.round(DIET_CAP[food.stat as keyof typeof DIET_CAP] * (food.power ?? 1) * p.dietMul * 100)}% ${DIET_STAT_NAME[food.stat]} for life`}</div>
         <button class="btn small ${have < 1 ? '' : 'ok'} eat" data-eat="${d}" ${have < 1 ? 'disabled' : ''}>EAT ONE · ${eat}</button></div>`;
     }).join('');
-    const warm = b.warm ? `the fire is lit · ${b.firewood} night${b.firewood === 1 ? '' : 's'} of wood` : '<em class="warn">COLD HEARTH</em>';
+    const inPot = (Object.entries(stock) as [FoodKind, number][]).filter(([, n]) => n >= 0.05)
+      .map(([k, n]) => `<span style="color:${FOODS[k].colour}">${foodCount(Math.round(n * 10) / 10, k)}</span>`).join(' · ');
+    const ready = DISHES.reduce((n, d) => n + Math.floor(made[d] ?? 0), 0);
     const on = s.buff && s.buffLeft() > 0 ? `<p class="sub small">Still warming you: <b>${FOODS[s.buff.dish].name}</b>, +${Math.round((s.buff.mul - 1) * 100)}% ${DIET_STAT_NAME[s.buff.stat]} for <span class="warmleft">${Math.ceil(s.buffLeft())}</span>s more.</p>` : '';
-    const key = `${b.tx},${b.ty}|${b.warm}|${b.ruined}|${b.firewood}|${s.food | 0}/${s.foodCap}|${FOOD_KINDS.map((k) => s.pantry[k] | 0).join(',')}|${s.buff && s.buffLeft() > 0 ? s.buff.dish : ''}`;
+    const key = `${b.tx},${b.ty}|${b.ruined}|${FOOD_KINDS.map((k) => Math.round((stock[k as FoodKind] ?? 0) * 10)).join(',')}|${DISHES.map((d) => Math.floor(made[d] ?? 0)).join(',')}|${s.servingProblem() ?? ''}|${s.buff && s.buffLeft() > 0 ? s.buff.dish : ''}`;
     const html = `<div class="cooking panel">
-      <div class="ph"><h2>Cooking pot</h2><span class="cap">${warm} · ${s.food | 0}/${s.foodCap} in store</span><button class="btn small close">CLOSE</button></div>
+      <div class="ph"><h2>The Great Pot</h2><span class="cap">${inPot ? `holding ${inPot}` : 'empty'}</span><button class="btn small close">CLOSE</button></div>
       <div class="aslots">${rows}</div>
       ${on}
-      <p class="sub small">Dishes are food like any other: the granary holds them, the basket carries them (F), and a child fed on them grows far past one raised on raw. Cooking needs a lit hearth — woodcutters keep the pile stocked.</p>
+      ${ready ? `<div class="raise"><div class="cap">LADLE IT OUT</div><button class="btn ${s.servingProblem() ? '' : 'ok'} serve" ${s.servingProblem() ? 'disabled' : ''}>DISH OUT TO THE GNOMES · ${ready} serving${ready === 1 ? '' : 's'}</button><div class="d">${esc(s.servingProblem() ?? `every grown gnome within ${SERVE_RANGE} tiles gets a bowl, and whatever it does to them`)}</div></div>` : ''}
+      <p class="sub small">Throw food in with the <b>BASKET</b> (or <b>G</b> to tip in a whole armful) and it goes in the pot rather than on the ground. What comes out is not for the granary — it is ladled straight out to the gnomes, and each dish takes them a different way.</p>
     </div>`;
     if (!this.cookEl) this.cookEl = h('<div class="screen cooking-screen"></div>');
     if (!this.cookEl.isConnected) { this.screens.append(this.cookEl); this.lastCooking = ''; } // showScreen() empties #screens without asking
@@ -1056,7 +1060,8 @@ export class UI {
       el.innerHTML = html;
       el.querySelector('.close')!.addEventListener('click', () => s.openCooking(null));
       el.querySelectorAll<HTMLElement>('[data-cook]').forEach((btn) => btn.addEventListener('click', () => { s.cook(RECIPES[btn.dataset.cook as DishKind]); this.renderCooking(); }));
-      el.querySelectorAll<HTMLElement>('[data-eat]').forEach((btn) => btn.addEventListener('click', () => { s.eatDish(btn.dataset.eat as FoodKind); this.renderCooking(); }));
+      el.querySelectorAll<HTMLElement>('[data-eat]').forEach((btn) => btn.addEventListener('click', () => { s.eatFromPot(btn.dataset.eat as DishKind); this.renderCooking(); }));
+      el.querySelector('.serve')?.addEventListener('click', () => { s.serveGnomes(); this.renderCooking(); });
     }
     const left = el.querySelector('.warmleft');
     if (left) left.textContent = String(Math.ceil(s.buffLeft()));

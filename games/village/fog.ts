@@ -102,7 +102,7 @@ export class Fog {
     for (const a of s.agents as Mover[]) {
       if (a.dead) continue;
       if (a instanceof Player) out.push({ tx: a.x / TILE, ty: a.y / TILE, r: SIGHT.player });
-      else if (a instanceof Villager && !a.hidden) out.push({ tx: a.x / TILE, ty: a.y / TILE, r: a.role === 'soldier' ? SIGHT.soldier : SIGHT.villager });
+      else if (a instanceof Villager && !a.hidden) out.push({ tx: a.x / TILE, ty: a.y / TILE, r: a.moodNow?.glow ? SIGHT.soldier + 3 : a.role === 'soldier' ? SIGHT.soldier : SIGHT.villager }); // the glow shows them more of the dark
     }
     return out;
   }

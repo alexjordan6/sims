@@ -5,7 +5,7 @@ import { ensureCharacter, frameSize } from './characters';
 import { lookFor } from './render';
 import type { Mover } from './agents';
 
-type Furnishing = { x: number; y: number; w: number; h: number; kind: 'bed' | 'table' | 'hearth' | 'rack' | 'bar' | 'shelf' | 'chest' | 'crib' | 'pot'; label: string };
+type Furnishing = { x: number; y: number; w: number; h: number; kind: 'bed' | 'table' | 'hearth' | 'rack' | 'bar' | 'shelf' | 'chest' | 'crib'; label: string };
 
 /** The colours one kind of room is built from; draw() reads nothing else, so a new interior is a new row here. */
 interface Room {
@@ -74,8 +74,6 @@ export class Interior {
       this.furniture.push({ x: 220, y: 42, w: 59, h: 29, kind: 'rack', label: 'Fletch 10 arrows · 2 wood' }, { x: 208, y: 112, w: 62, h: 27, kind: 'table', label: 'Command table · inspect soldiers to equip bows and set posts' });
       this.furniture.push({ x: 226, y: 162, w: 36, h: 24, kind: 'chest', label: 'Armor chest' }); // label is filled in live by hint()
     } else if (b.kind === 'gnomehouse') {
-      // the pot hangs beside the hearth, so you cook where the fire is (label is refreshed live by hint())
-      this.furniture.push({ x: 194, y: 34, w: 32, h: 23, kind: 'pot', label: 'Cooking pot' });
       for (let i = 0; i < Math.min(6, this.s.beds(b)); i++) this.furniture.push({ x: 30 + i % 3 * 26, y: 84 + Math.floor(i / 3) * 44, w: 18, h: 26, kind: 'bed', label: 'A little bed under the cap' });
       this.furniture.push({ x: 124, y: 141, w: 46, h: 22, kind: 'table', label: 'The family table' });
       // gnome cottages breed like any house, so their nursery needs cribs to show the infants in
@@ -143,7 +141,6 @@ export class Interior {
     if (this.y > 175 && Math.abs(this.x - 160) < 30) return 'E: exit to the village';
     const f = this.nearby();
     if (f?.kind === 'crib' && this.building) { const b = this.building, why = this.s.birthProblem(b); f.label = `Nursery · ${this.s.infantsOf(b).length} of ${this.s.cribs(b)} cribs${why ? ` · no births: ${why}` : ` · next birth roll in ${Math.ceil(this.s.birthIn(b))}s (${Math.round(100 * this.s.birthChance(b))}%)`} · infants walk out into the yard after ${p.infantDays} days`; }
-    if (f?.kind === 'pot' && this.building) f.label = this.s.cookHint(this.building);
     if (f?.kind === 'chest' && this.building) f.label = `Armor chest · tower arrows ${this.building.ammo ?? 0} / ${this.s.towerCap(this.building)} · restock 10 for 2 wood · forge armor`;
     if (f?.kind === 'hearth' && this.building) {
       const b = this.building, pile = `${b.firewood} / ${p.hearthNights} nights of wood · burns ${hearthCost(b)} a night`;
@@ -157,7 +154,6 @@ export class Interior {
     const f = this.nearby(); if (!f) return;
     if (f.kind === 'rack') { this.s.craftArrows(); return; }
     if (f.kind === 'chest') { this.s.openArmory(this.s.player, this.building); return; }
-    if (f.kind === 'pot') { this.s.openCooking(this.building); return; } // a cold hearth is explained by the panel, not refused here
     if (f.kind === 'hearth' || f.kind === 'bar' || f.kind === 'bed') {
       if (!this.building.warm) { this.s.event('info', 'The hearth is cold — there is no fire to rest by until the pile is stocked and dawn lights it.', true); return; }
       if (this.time - this.mealAt < 8) { this.s.event('info', 'Enjoy the warmth a little longer before resting again.'); return; }
@@ -218,15 +214,6 @@ export class Interior {
         rect(x + w / 2 - 3, y + 6, 6, 6, '#d9b25a'); rect(x + w / 2 - 1, y + 8, 2, 3, '#3e2c23');
         const stock = Math.min(4, Math.ceil((b.ammo ?? 0) / (this.s.towerCap(b) / 4)));
         for (let i = 0; i < stock; i++) { rect(x + 8 + i * 5, y - 6, 1, 9, '#d3ab6d'); rect(x + 7 + i * 5, y - 7, 3, 3, i % 2 ? '#d2d8d8' : '#c9564a'); }
-      } else if (kind === 'pot') {
-        // a black cauldron on a tripod; it only bubbles while the hearth is lit
-        rect(x + 4, y + h - 10, 3, 10, '#4a3b30'); rect(x + w - 7, y + h - 10, 3, 10, '#4a3b30');
-        rect(x + 2, y + 4, w - 4, h - 12, '#2e2a2b'); rect(x + 4, y + 6, w - 8, h - 15, '#46403f');
-        rect(x, y + 2, w, 4, '#3a3536'); rect(x + 1, y + 3, w - 2, 1, '#6d6462');
-        if (b.warm) {
-          rect(x + 4, y + 5, w - 8, 2, '#c98a3a');
-          for (let i = 0; i < 3; i++) { const lift = 4 + Math.sin(this.time * 3 + i * 2) * 2; rect(x + 7 + i * 7, y - lift, 2, 2, '#e8d9b8'); }
-        } else rect(x + 4, y + 5, w - 8, 2, '#3f3a34');
       } else if (kind === 'crib') {
         rect(x, y + 4, w, h - 4, '#5a3a28'); rect(x + 2, y + 6, w - 4, h - 8, '#c9a26b'); rect(x + 2, y + 6, w - 4, 4, '#eee0bd');
         for (let i = 0; i < w; i += 3) rect(x + i, y, 1, h, '#8a5c34');

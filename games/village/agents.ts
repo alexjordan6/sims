@@ -1,6 +1,6 @@
 import type { Agent } from '@shared/index';
 import { World, WILD_FOOD, doorstep, buildingCenter, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
-import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, GNOME_CALLING, ORDER, YARD, GNOME_PACK, ITEM, MASS, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, zeroFood, BOAR, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
+import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, GNOME_CALLING, MOODS, type Mood, type DishKind, ORDER, YARD, GNOME_PACK, ITEM, MASS, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, zeroFood, BOAR, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
 import type { Mods } from './meta';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle } from './characters';
 import type { VillageScene } from './main';
@@ -278,6 +278,15 @@ export class Villager extends Mover {
   elder = false;
   /** born in a gnome house: a little person for life, whatever calling they take (see `applyRole` and the `forage` dispatch) */
   gnome = false;
+  /**
+   * A bowl out of the great pot and the sim time it wears off (see MOODS). It is set by
+   * `VillageScene.serveGnomes`, spent down in `update`, and every stat it touches is either a getter
+   * or re-applied through `applyRole` when it starts and ends.
+   */
+  mood: { dish: DishKind; until: number } | null = null;
+  /** seconds of the bowl left, and the mood itself while it lasts */
+  moodLeft(s: VillageScene): number { return this.mood ? Math.max(0, this.mood.until - s.simTime) : 0; }
+  private moodAt = -1;
   /** a grown gnome's little backpack: what it forages into while it trails the head, and what you can open up */
   pouch: Pack | null = null;
   /**
@@ -374,9 +383,13 @@ export class Villager extends Mover {
     this.diet[kind] += n;
     if (kind === 'mushroom' && !this.shroomMeal) { this.shroomMeal = true; this.care += 1; }
   }
-  /** Work-speed multiplier from upbringing: skill, stars, traits and diet. */
+  /** What the last bowl is still doing to them, or null. */
+  get moodNow(): Mood | null {
+    return this.mood && this.mood.until > this.moodAt ? MOODS[this.mood.dish] : null;
+  }
+  /** Work-speed multiplier from upbringing — and from whatever came out of the pot. */
   get workMul(): number {
-    return (this.skilled ? 1.4 : 1) * (1 + STAR_BONUS * this.stars) * (this.trait === 'tireless' ? 1.25 : 1) * (1 + this.dietBonus.work) * (this.elder ? ELDER_MUL : 1);
+    return (this.skilled ? 1.4 : 1) * (1 + STAR_BONUS * this.stars) * (this.trait === 'tireless' ? 1.25 : 1) * (1 + this.dietBonus.work) * (this.elder ? ELDER_MUL : 1) * (this.moodNow?.workMul ?? 1);
   }
 
   applyRole(mods: Mods): void {
@@ -398,6 +411,9 @@ export class Villager extends Mover {
       this.maxHp = p.gnomeHp + earned;
       this.speed = p.gnomeSpeed * (this.role === 'soldier' ? armor.speedMul : 1);
     }
+    // and whatever came out of the pot, until it wears off
+    const mood = this.moodNow;
+    if (mood && this.isAdult) { this.speed *= mood.speedMul ?? 1; this.maxHp += mood.hpAdd ?? 0; }
     // how they were raised follows them for life
     if (this.isAdult) {
       const stars = 1 + STAR_BONUS * this.stars;
@@ -435,8 +451,31 @@ export class Villager extends Mover {
     if (this.role === 'soldier') s.stats.soldiersRaised++;
   }
 
+  /** The bowl wears off: the stats it wrote are put back, and the quirk stops. */
+  private tickMood(dt: number, s: VillageScene): void {
+    this.moodAt = s.simTime;
+    if (!this.mood) return;
+    if (this.mood.until <= s.simTime) {
+      const was = MOODS[this.mood.dish];
+      this.mood = null;
+      const frac = this.hp / Math.max(1, this.maxHp);
+      this.applyRole(s.mods);
+      this.hp = Math.min(this.maxHp, Math.round(this.maxHp * frac));
+      s.event('food', `${this.name} comes back to ${was.name === 'Giddy' ? 'their senses' : 'themselves'}.`);
+      return;
+    }
+    const q = MOODS[this.mood.dish].quirk;
+    if (!q) return;
+    this.quirkTimer -= dt;
+    if (this.quirkTimer > 0) return;
+    this.quirkTimer = s.rng.range(6, 14);
+    s.gnomeQuirk(this, q);
+  }
+  private quirkTimer = 4;
+
   update(dt: number, s: VillageScene): void {
     this.tickTimers(dt);
+    this.tickMood(dt, s);
     if (this.frozen(dt)) return;
     if (this.carriedBy) {
       if (this.carriedBy.dead) { this.carriedBy = null; this.clearGoal(); }
@@ -462,8 +501,8 @@ export class Villager extends Mover {
     switch (this.role) {
       case 'infant': return;
       case 'kid': this.kidUpdate(dt, s); break;
-      case 'farmer': this.civilUpdate(dt, s, this.gnome ? 'forage' : 'farm'); break; // gnomes never work the crops: the wild is their field
-      case 'woodcutter': this.civilUpdate(dt, s, this.helpingFarm(s) ? (this.gnome ? 'forage' : 'farm') : 'wood'); break;
+      case 'farmer': if (this.moodNow?.bold) { this.soldierUpdate(dt, s); break; } this.civilUpdate(dt, s, this.gnome ? 'forage' : 'farm'); break; // gnomes never work the crops: the wild is their field
+      case 'woodcutter': if (this.moodNow?.bold) { this.soldierUpdate(dt, s); break; } this.civilUpdate(dt, s, this.helpingFarm(s) ? (this.gnome ? 'forage' : 'farm') : 'wood'); break;
       case 'soldier': this.soldierUpdate(dt, s); break;
     }
   }
@@ -566,7 +605,10 @@ export class Villager extends Mover {
   private failedPicks = 0;
 
   /** How much of a kind these arms hold: a gnome brings home one find at a time — but drags a whole boar's meat in one go. */
-  haul(kind: LoadKind): number { return this.gnome ? (kind === 'food' && this.load?.food === 'meat' ? BOAR.meat : 1) : Math.round(HAUL.villager[kind] * p.haulMul); }
+  haul(kind: LoadKind): number {
+    const mul = this.moodNow?.haulMul ?? 1;
+    return Math.round(mul * (this.gnome ? (kind === 'food' && this.load?.food === 'meat' ? BOAR.meat : 1) : HAUL.villager[kind] * p.haulMul));
+  }
   /** the meat lying in the wild this gnome is on its way to (claimed in `VillageScene.meatClaims`, so two never chase one ham) */
   private fetching: Item | null = null;
   /** Arms and pouch together: what a granary trip hands in (see `VillageScene.deposit`), so a gnome sent back to work empties its pouch. */

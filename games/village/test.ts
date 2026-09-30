@@ -8,7 +8,7 @@ import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, Wrecker, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm } from './wildlife';
-import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, GNOME_PACK, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS, YARD, CALLINGS, TREE_RESERVE } from './config';
+import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, GNOME_PACK, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS, YARD, CALLINGS, TREE_RESERVE, MOODS, SERVE_RANGE } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
 const output = document.getElementById('test-results')!, summary = document.getElementById('test-summary')!;
@@ -1037,22 +1037,74 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(!!s.ogre, 'and the Ogre is untouched');
     p.peaceful = wasPeace;
 
-    // ---- inside the cottage, and the pot ---------------------------------------------------
+    // ---- inside the cottage, and the great pot in the square -------------------------------
     s = fresh(); const lodge = s.world.gnomeStart!;
     Object.assign(s.player, World.center(doorstep(lodge).tx, doorstep(lodge).ty));
     assert(s.doorAt() === lodge, 'a gnome cottage has a door you can push');
     s.interior.enter(lodge);
     assert(s.interior.active && s.interior.building === lodge, 'and you can walk inside');
+    s.interior.leave();
+    // the great pot: it takes what you throw into it, and nothing else
     for (const k of FOOD_KINDS) s.pantry[k] = 0;
-    s.pantry.mushroom = 2; s.pantry.burdock = 1;
-    lodge.warm = false; s.openCooking(lodge);
-    assert(/cold/i.test(s.cookProblem(RECIPES.stew) ?? ''), 'a cold hearth cooks nothing');
-    lodge.warm = true;
-    assert(s.cookProblem(RECIPES.stew) === null && s.cook(RECIPES.stew), 'a lit one does');
-    assert(s.pantry.stew === RECIPES.stew.makes && s.pantry.mushroom === 0 && s.pantry.burdock === 0, 'and the pot spends exactly what the recipe asks');
-    assert(/need/.test(s.cookProblem(RECIPES.stew) ?? ''), 'then says what is missing once the ingredients run out');
-    assert(/need/.test(s.cookProblem(RECIPES.roast) ?? ''), 'as it does for a dish never started');
+    const pot = s.world.cookpot!;
+    assert(!!pot && !pot.maxHp, 'a great pot stands in the square, and nothing can break it');
+    const potC = buildingCenter(pot);
+    assert(s.world.isBlocked(pot.tx, pot.ty) && !s.world.itemBlocked(potC.tx * TILE, potC.ty * TILE, 0),
+      'you cannot walk through it, but a throw can land in it');
+    const tossedIn = s.world.dropItem('food', 2, potC.tx * TILE, potC.ty * TILE, 'mushroom');
+    s.potAbsorb();
+    assert(!s.world.items.includes(tossedIn) && s.potStock(pot).mushroom === 2, `food that lands in the pot goes in it (${JSON.stringify(s.potStock(pot))})`);
+    const besidePot = s.world.dropItem('food', 2, (pot.tx - 4) * TILE, potC.ty * TILE, 'mushroom');
+    s.potAbsorb();
+    assert(s.world.items.includes(besidePot), 'and food that lands beside it does not');
+    s.world.removeItem(besidePot);
+    s.openCooking(pot);
+    assert(/burdock/.test(s.cookProblem(RECIPES.stew) ?? ''), `with only mushrooms in it the pot says what else it wants (${s.cookProblem(RECIPES.stew)})`);
+    const burdock = s.world.dropItem('food', 1, potC.tx * TILE, potC.ty * TILE, 'burdock'); s.potAbsorb();
+    assert(!s.world.items.includes(burdock) && s.cookProblem(RECIPES.stew) === null && s.cook(RECIPES.stew), 'throw the rest in and it cooks');
+    assert(s.potServings(pot).stew === RECIPES.stew.makes && !s.potStock(pot).mushroom && !s.potStock(pot).burdock,
+      'the servings stand in the pot and the ingredients are spent');
+    assert(s.pantry.stew === 0, 'nothing of it goes to the granary — it is ladled out, not stored');
+    assert(/needs/.test(s.cookProblem(RECIPES.roast) ?? ''), 'a dish never started says what it wants');
 
+    // ladling it out: every gnome round the pot gets a bowl, and the bowl takes them somewhere
+    for (const v of s.villagers()) if (v.gnome) Object.assign(v, { x: -900, y: -900 }); // the founders are stood well clear of the square
+    assert(/no grown gnome/.test(s.servingProblem() ?? ''), `with nobody at the pot there is nobody to serve (${s.servingProblem()})`);
+    const potSide = World.center(potC.tx, potC.ty + 3);
+    const diner = s.spawn(new Villager(potSide.x, potSide.y, lodge, 'farmer', 20, 'Diner', s.mods));
+    diner.gnome = true; diner.applyRole(s.mods); diner.hp = diner.maxHp; diner.update = () => {};
+    const farGnome = s.spawn(new Villager(potSide.x + (SERVE_RANGE + 6) * TILE, potSide.y, lodge, 'farmer', 20, 'Far', s.mods));
+    farGnome.gnome = true; farGnome.applyRole(s.mods); farGnome.update = () => {};
+    assert(s.gnomesAtPot().includes(diner) && !s.gnomesAtPot().includes(farGnome), `only the gnomes within ${SERVE_RANGE} tiles are at the pot`);
+    assert(s.servingProblem() === null, 'with a gnome at it and stew in it, the pot can be ladled out');
+    const hurt = diner.maxHp - 5; diner.hp = hurt;
+    const stewWas = s.potServings(pot).stew ?? 0;
+    assert(s.serveGnomes() === 1 && (s.potServings(pot).stew ?? 0) === stewWas - 1, 'one bowl, one gnome, one serving gone');
+    assert(diner.mood?.dish === 'stew' && diner.moodNow === MOODS.stew && diner.hp > hurt, 'the gnome takes the mood of what it ate, and the meal heals it');
+    assert(!farGnome.mood, 'and the one across the square gets nothing');
+    // what the stew does: it works faster, shines, and sees further
+    const plainWork = farGnome.workMul;
+    assert(diner.workMul > plainWork && Math.abs(diner.workMul / plainWork - MOODS.stew.workMul!) < 1e-9, `toadstool stew is worth ${MOODS.stew.workMul}x the work (${(diner.workMul / plainWork).toFixed(2)}x)`);
+    assert(!!diner.moodNow?.glow, 'and it glows');
+    // it wears off, and everything it wrote is put back
+    s.simTime += MOODS.stew.secs + 1;
+    diner.update = Villager.prototype.update; // the mood clock runs in update(), so let it tick
+    step(s, 0.2);
+    diner.update = () => {};
+    assert(!diner.mood && diner.moodNow === null && Math.abs(diner.workMul - plainWork) < 1e-9, 'when the bowl wears off the gnome is itself again');
+    // a stout gnome hauls farGnome more home, and a giddy one runs
+    s.serveOne(diner, 'cake');
+    assert(diner.haul('wood') === Math.round(MOODS.cake.haulMul! * 1) && diner.maxHp > farGnome.maxHp, `cake makes it stout: ${diner.haul('wood')} wood a trip and ${diner.maxHp} HP against ${farGnome.maxHp}`);
+    s.serveOne(diner, 'tart');
+    assert(diner.speed > farGnome.speed, `a tart sends it tearing about (${diner.speed.toFixed(0)} against ${farGnome.speed.toFixed(0)})`);
+    // and a roast makes it stand and fight instead of running home
+    s.serveOne(diner, 'roast');
+    assert(!!diner.moodNow?.bold, 'a roast emboldens it');
+    const bully = s.spawn(new Raider(diner.x + 3 * TILE, diner.y)); bully.update = () => {};
+    diner.update = Villager.prototype.update;
+    step(s, 1.5);
+    assert(diner.task !== 'fleeing' && !diner.hidden, `emboldened, it does not run from a raider (${diner.task})`);
+    bully.dead = true; diner.dead = true; farGnome.dead = true; s.removeDead();
     // a dish is worth far more to a growing child than the raw food it was made of
     const fedKid = s.spawn(new Villager(0, 0, lodge, 'kid', 1, 'Fed', s.mods)); fedKid.update = () => {};
     const rawKid = s.spawn(new Villager(0, 0, lodge, 'kid', 1, 'Raw', s.mods)); rawKid.update = () => {};
@@ -1060,11 +1112,12 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(fedKid.dietNow().work > rawKid.dietNow().work * 2, `a child raised on stew far outgrows one raised on raw (${fedKid.dietNow().work.toFixed(2)} vs ${rawKid.dietNow().work.toFixed(2)} work)`);
 
     // eating one: a meal now, and a while of being better at something
+    const stewLeft = s.potServings(pot).stew ?? 0;
     s.player.hp = 10; s.simTime = 100;
     assert(s.buffMul('work') === 1 && s.workHits(3) === 3, 'an unfed head works at the usual pace');
-    assert(s.eatDish('stew') && s.player.hp > 10, 'eating a dish heals');
+    assert(s.eatFromPot('stew') && s.player.hp > 10, 'a bowl out of the pot heals the head');
     assert(s.buffMul('work') > 1 && s.workHits(3) === 2, 'and a stew takes a swing off every tool');
-    assert(s.pantry.stew === RECIPES.stew.makes - 1, 'one serving is spent');
+    assert((s.potServings(pot).stew ?? 0) === stewLeft - 1, 'one serving is spent');
     s.simTime += RECIPES.stew.buffSecs + 1;
     assert(s.buffMul('work') === 1 && s.workHits(3) === 3, 'and it wears off');
     s.pantry.roast = 1; s.eatDish('roast');
@@ -1285,11 +1338,11 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     // honey is food, but nothing will ever sow or forage it
     assert(FOOD_KINDS.includes('honey') && !CROP_KINDS.includes('honey') && !Object.values(WILD_FOOD).includes('honey'), 'honey is food, but neither a crop nor a wild plant');
     for (const k of FOOD_KINDS) s.pantry[k] = 0;
-    s.pantry.honey = 2; s.pantry.wheat = 1;
-    const kitchen = s.world.place('gnomehouse', 135, 95); kitchen.warm = true;
-    s.openCooking(kitchen);
-    assert(s.cookProblem(RECIPES.cake) === null && s.cook(RECIPES.cake), 'and the pot bakes a honey cake from it');
-    assert(s.pantry.cake === RECIPES.cake.makes && s.pantry.honey === 0, 'spending the honey exactly');
+    const honeyPot = s.world.cookpot!;
+    Object.assign(s.potStock(honeyPot), { honey: 2, wheat: 1 });
+    s.openCooking(honeyPot);
+    assert(s.cookProblem(RECIPES.cake) === null && s.cook(RECIPES.cake), 'and the great pot bakes a honey cake from it');
+    assert(s.potServings(honeyPot).cake === RECIPES.cake.makes && !s.potStock(honeyPot).honey, 'spending the honey exactly');
     s.openCooking(null);
     p.hives = wasHives;
 

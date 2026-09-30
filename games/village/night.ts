@@ -121,6 +121,7 @@ export class Night {
       for (const a of s.agents as Mover[]) {
         if (a.dead || a.hidden) continue;
         if (a instanceof Player) light(a.x, a.y, 44, 0.95, sky.night * 0.12);
+        else if (a instanceof Villager && a.moodNow?.glow) light(a.x, a.y, 30, 0.9, sky.night * 0.22); // a gnome full of toadstool stew is a lantern
         else if (a instanceof Villager && a.role === 'soldier') light(a.x, a.y, 22, 0.8, sky.night * 0.18);
         else if (a instanceof Raider && a.boss) light(a.x, a.y, 18, 0.5, sky.night * 0.25);
       }

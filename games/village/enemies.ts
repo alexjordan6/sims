@@ -296,7 +296,7 @@ export class Ogre extends Raider {
     if (!this.aggroed) return this.lairCentre;
     let best: { x: number; y: number } | null = null, bd = Infinity;
     for (const b of s.world.buildings) {
-      if (b.kind === 'lair' || b.ruined) continue;
+      if (b.kind === 'lair' || b.ruined || !b.maxHp) continue; // the great pot is iron: nothing to knock down
       const f = BUILDINGS[b.kind], c = World.center(b.tx + f.w / 2, b.ty + f.h / 2), d = this.dist(c);
       if (d < bd) { bd = d; best = c; }
     }
