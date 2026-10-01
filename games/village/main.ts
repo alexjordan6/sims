@@ -561,9 +561,16 @@ export class VillageScene extends SimScene {
       const b = this.facedBuilding() ?? this.world.get(this.player.tile.tx, this.player.tile.ty)?.building ?? null;
       if (b) this.selectBuilding(b); else this.select(null);
     });
-    const closePanel = (): void => { if (this.cookingAt) this.openCooking(null); else if (this.pouchOf) this.openPouch(null); else if (this.armoryFor) this.openArmory(null); else this.togglePause(); };
+    const closePanel = (): void => {
+      if (this.ui?.bagShowing) this.ui.toggleBag(false);
+      else if (this.cookingAt) this.openCooking(null);
+      else if (this.pouchOf) this.openPouch(null);
+      else if (this.armoryFor) this.openArmory(null);
+      else this.togglePause();
+    };
     kb.on('keydown-E', closePanel);
     kb.on('keydown-ESC', closePanel);
+    kb.on('keydown-B', () => this.ui?.toggleBag());
     kb.on('keydown-V', () => this.openArmory(this.armoryFor ? null : this.player));
     kb.on('keydown-TAB', (e: KeyboardEvent) => { e.preventDefault?.(); this.player.cycleTool(e.shiftKey ? -1 : 1, this.locked); });
     kb.on('keydown-Q', () => this.player.cycleTool(1, this.locked));

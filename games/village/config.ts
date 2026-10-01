@@ -57,7 +57,7 @@ export const p = live(
     hungerMax: [D.hungerMax, 1, 30, 1, 'Food units the head\'s belly holds. It empties as the day passes; empty, you lose HP.'],
     hungerPerDay: [D.hungerPerDay, 0, 12, 0.5, 'Food units the head burns a day (a grown villager eats foodPerDay). 0 = the belly never empties.'],
     hungerMeal: [D.hungerMeal, 1, 10, 1, 'Food units one press of T eats. Meat and honey fill twice as much per unit, a cooked dish three or four times.'],
-    packSlots: [D.packSlots, 5, 36, 1, 'Player pack slots; applies at NEW VILLAGE.'],
+    packSlots: [D.packSlots, 4, 36, 1, 'Slots in your backpack (B). 16 is the four-by-four grid it is drawn as; other numbers still work, the grid just wraps. Applies at NEW VILLAGE.'],
     pickupRange: [D.pickupRange, 1, 8, 0.25, 'Loose-item pickup attraction radius, in tiles.'],
     pickupPull: [D.pickupPull, 10, 240, 5, 'Resting items move toward the player this many pixels per second.'],
     startWood: [D.startWood, 0, 200, 1, 'Wood in the woodyard at NEW VILLAGE.'],

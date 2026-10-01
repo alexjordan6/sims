@@ -92,7 +92,7 @@
   "collide": true,
   "gnomeStart": false,
   "peaceful": false,
-  "packSlots": 12,
+  "packSlots": 16,
   "pickupRange": 2.5,
   "pickupPull": 90,
   "skulks": 40,

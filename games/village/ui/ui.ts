@@ -70,6 +70,16 @@ export class UI {
 
   private top!: HTMLElement;
   private hotbar!: HTMLElement;
+  /** the backpack panel: hidden until the BAG on the belt (or B) opens it */
+  private bag!: HTMLElement;
+  private bagOpen = false;
+  /** Open or shut the backpack. Called by the BAG slot, by B, and by Esc through the scene. */
+  toggleBag(open = !this.bagOpen): void {
+    this.bagOpen = open;
+    this.bag.hidden = !open;
+    this.hotbar.querySelector('.bag')!.classList.toggle('on', open);
+  }
+  get bagShowing(): boolean { return this.bagOpen; }
   private feed!: HTMLElement;
   private toasts!: HTMLElement;
   private inspector!: HTMLElement;
@@ -145,16 +155,22 @@ export class UI {
         ${slot('gnomehouse', 'town', TOWN.wallWoodDoor, 'GNOME HOUSE', GNOME_TITLE, COST.gnomehouse)}
         ${slot('wand', 'dungeon', DUNGEON.wizard, 'WAND', 'Shaman wand: left click or drag a box to pick soldiers, right click to send them — open ground = go there and hold, a raider = attack it, a wall top = take that archer post. F = follow me (again to stop). With no one picked, orders go to everyone')}
         ${slot('basket', 'farm', FARM.crate, 'BASKET', 'F picks a kind of food; walk up to the granary to fill the basket with it, then throw it into a home yard. It flies where you point, bounces and rolls; children only eat what lies in the yard of the home they live in, and what they eat is who they become')}
+        <div class="slot bag" data-bag="1" title="Your backpack: what you are carrying, and what you are wearing. B opens it">${spr('farm', FARM.crate, 32)}<span class="lbl">BAG</span><span class="cost bagfull"></span></div>
       </div>
-      <div class="inventory-host panel"></div>
       <div class="hint"><kbd>click / C</kbd><span class="hint-text"></span></div>
     </div>`);
     this.hotbar.querySelectorAll<HTMLElement>('.slot').forEach((el) => el.addEventListener('click', () => s.setTool(el.dataset.tool as Tool)));
 
+    this.bag = h(`<div class="bagpanel panel" hidden>
+      <div class="ph"><h2>Backpack</h2><span class="cap">B or ESC to shut it</span><button class="btn small close">CLOSE</button></div>
+      <div class="inventory-host"></div>
+    </div>`);
+    this.hotbar.querySelector('.bag')!.addEventListener('click', () => this.toggleBag());
+    this.bag.querySelector('.close')!.addEventListener('click', () => this.toggleBag(false));
     this.feed = h('<div class="feed"></div>');
     this.toasts = h('<div class="toasts"></div>');
-    this.overlay.append(this.top, this.hotbar, this.feed, this.toasts);
-    this.inventory.mount(this.hotbar.querySelector('.inventory-host')!);
+    this.overlay.append(this.top, this.bag, this.hotbar, this.feed, this.toasts);
+    this.inventory.mount(this.bag.querySelector('.inventory-host')!);
     this.top.querySelector('.t-hunger')!.addEventListener('click', () => this.scene.eat());
     // the feed sits above the belt, whatever height the belt turns out to be (its hint line wraps)
     const belt = () => this.overlay.style.setProperty('--hotbar-h', this.hotbar.offsetHeight + 'px');
@@ -460,6 +476,11 @@ export class UI {
     if(this.scene.armoryFor)this.renderArmory();
     if (this.scene.pouchOf) this.renderPouch();
     if (this.scene.cookingAt) this.renderCooking();
+    // the BAG slot carries how full it is, so the bag can stay shut (outside the top bar's memo gate:
+    // what you are carrying changes far more often than the clock does)
+    const bagFull = this.hotbar.querySelector<HTMLElement>('.bagfull');
+    if (bagFull) { const pk = this.scene.player.pack, txt = `${pk.slots.length - pk.emptySlots}/${pk.slots.length}`; if (bagFull.textContent !== txt) bagFull.textContent = txt; }
+
   }
 
   private renderTop(): void {

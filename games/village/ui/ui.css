@@ -594,9 +594,20 @@ body.touch .wearers { flex-direction: row; flex-wrap: wrap; }
 /* what the head is carrying, under the wood / food count */
 .topbar .stat .val .hand { font-size: 9px; font-style: normal; color: var(--accent); margin-left: 4px; white-space: nowrap; }
 
-/* Desktop backpack. Touch keeps its existing belt and controls. */
+/* The backpack: one panel that sits on top of the belt, opened by the BAG slot or B. */
+.bagpanel { position:absolute; bottom:calc(var(--hotbar-h, 96px) + 10px); left:50%; transform:translateX(-50%);
+  pointer-events:auto; max-width:min(92vw, 420px); }
+.bagpanel[hidden] { display:none; }
+.bagpanel .ph { display:flex; align-items:center; gap:8px; padding:4px 8px 0; }
+.bagpanel .ph h2 { margin:0; font-size:13px; }
+.bagpanel .ph .cap { margin-left:auto; }
+.slot.bag { cursor:pointer; }
+.slot.bag.on { outline:2px solid var(--accent); outline-offset:-2px; }
+.slot.bag .bagfull { color:var(--accent); }
 .inventory-host { display:flex; flex-wrap:wrap; gap:8px 18px; padding:8px 10px; pointer-events:auto; user-select:none; }
-.pack-grid,.equipment-grid { display:flex; flex-wrap:wrap; gap:4px; }
+/* four across, four down: the backpack is a 4x4 grid, and the chest and pouch keep their own widths */
+.pack-grid { display:grid; grid-template-columns:repeat(4, 40px); gap:4px; }
+.equipment-grid { display:flex; flex-wrap:wrap; gap:4px; }
 .pack-cell { position:relative; width:40px; height:40px; padding:2px; border:1px solid #756544; border-radius:4px; background:#29261f; color:#baa984; cursor:grab; font:9px monospace; }
 .pack-cell:hover { border-color:#ffe066; background:#393329; }
 .pack-cell img { width:32px; height:32px; object-fit:contain; image-rendering:pixelated; pointer-events:none; }
