@@ -529,19 +529,23 @@ export class World {
       const t = this.get(tx, ty);
       return !!t && t.kind === 'grass' && !t.trail && !t.building && !t.defense;
     };
-    // out in the woods: more of whatever that ground would have grown anyway
+    // Out in the woods: more of whatever that ground would have grown anyway, and weighted hard toward
+    // what the pot actually wants. Hazel is the one wild plant no recipe calls for, so the extra growth
+    // is nearly all mushrooms, berries, garlic and burdock — what you forage should be worth cooking.
     for (let ty = 1; ty < this.rows - 1; ty++) for (let tx = 1; tx < this.cols - 1; tx++) {
       if (Math.abs(tx - hx) < 14 && Math.abs(ty - hy) < 10) continue; // the clearing is the village's
       if (!open(tx, ty)) continue;
       const near = this.treeNeighbours(tx, ty);
       const t = this.get(tx, ty)!;
-      if (near >= 3) { if (rng.chance(0.05 * extra)) this.set(tx, ty, 'mushroom').stage = 99; }
-      else if (near) { if (rng.chance(0.045 * extra)) this.set(tx, ty, rng.chance(0.6) ? 'bush' : 'hazel').stage = 99; }
-      else if (t.biome === 'meadow') { if (rng.chance(0.03 * extra)) this.set(tx, ty, 'garlic').stage = 99; }
-      else if (rng.chance(0.02 * extra)) this.set(tx, ty, 'burdock').stage = 99;
+      // mushroom and burdock are the scarce pair (deep shade and bare ground), and between them they
+      // are the whole stew, so they get the heaviest hand; meadow garlic is everywhere and needs none
+      if (near >= 3) { if (rng.chance(0.16 * extra)) this.set(tx, ty, 'mushroom').stage = 99; }
+      else if (near) { if (rng.chance(0.07 * extra)) this.set(tx, ty, rng.chance(0.88) ? 'bush' : 'hazel').stage = 99; }
+      else if (t.biome === 'meadow') { if (rng.chance(0.02 * extra)) this.set(tx, ty, 'garlic').stage = 99; }
+      else if (rng.chance(0.09 * extra)) this.set(tx, ty, 'burdock').stage = 99;
     }
-    // and a ring of it just beyond the clearing, within an early walk of the pot
-    for (let n = 0, tries = 0; n < Math.round(8 * p.wildDensity) && tries < 600; tries++) {
+    // and a ring of it just beyond the clearing, within an early walk of the pot — ingredients only
+    for (let n = 0, tries = 0; n < Math.round(14 * p.wildDensity) && tries < 900; tries++) {
       const a = rng.range(0, Math.PI * 2), r = rng.range(11, 20);
       const tx = Math.round(hx + Math.cos(a) * r), ty = Math.round(hy + Math.sin(a) * r * 0.8);
       if (!open(tx, ty)) continue;

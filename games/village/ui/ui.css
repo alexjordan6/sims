@@ -550,20 +550,26 @@ body.touch .ctrl-tab { font-size: 7px; }
 .pip.t1 { color: #c48a4c; border-color: #a56a36; } .pip.t2 { color: #b0b3b9; border-color: #8d8f95; } .pip.t3 { color: #f0f4f8; border-color: #c9d3de; }
 .armory-screen, .cooking-screen { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; background: #0008; z-index: 25; padding: 8px; }
 /* The great pot's card: it stands at the cauldron in the world, not over it. */
-.potcard { position: fixed; z-index: 40; width: 246px; padding: 5px 6px 6px; pointer-events: auto;
+.potcard { position: fixed; z-index: 40; width: 286px; padding: 5px 6px 6px; pointer-events: auto;
   font-size: 11px; box-shadow: 0 3px 0 #0007; }
 .potcard .pothead { display: flex; align-items: baseline; gap: 6px; }
 .potcard .pothead b { color: var(--accent); white-space: nowrap; }
 .potcard .pothead span { flex: 1; color: var(--ink-dim); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .potcard .pothead .close { margin-left: auto; padding: 0 5px; }
-.potchips { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; margin: 4px 0; }
-.potchip { display: flex; align-items: center; gap: 3px; padding: 2px 3px; border: 1px solid #756544;
+.potchips { display: flex; flex-direction: column; gap: 3px; margin: 4px 0; }
+.potchip { display: flex; align-items: center; gap: 4px; padding: 2px 3px; border: 1px solid #756544;
   border-radius: 3px; background: #29261f; color: var(--ink-dim); font: 9px monospace; text-align: left; cursor: not-allowed; }
-.potchip img { width: 16px; height: 16px; image-rendering: pixelated; }
-.potchip b { font-size: 9px; }
-.potchip span { margin-left: auto; white-space: nowrap; }
+.potchip > img { width: 18px; height: 18px; image-rendering: pixelated; flex-shrink: 0; }
+.potmain { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.potchip b { font-size: 10px; }
+/* two to a row: every recipe takes two things, so they sit side by side and the card stays short */
+.potneeds { display: grid; grid-template-columns: 1fr 1fr; gap: 1px 4px; font-size: 8px; }
+.potneeds .ing { display: inline-flex; align-items: center; gap: 2px; min-width: 0; }
+.potneeds .ing img { width: 11px; height: 11px; image-rendering: pixelated; flex-shrink: 0; }
+.potneeds .ing.short { opacity: .65; }
+.potneeds .ing.got i { font-weight: bold; }
 .potchip i { font-style: normal; }
-.potchip em { font-style: normal; color: var(--accent); }
+.potchip em { font-style: normal; color: var(--accent); margin-left: auto; }
 .potchip.can { cursor: pointer; border-color: var(--accent); background: #393329; }
 .potchip.can:hover { background: #4a4233; }
 .potcard .serve { width: 100%; }

@@ -1057,15 +1057,21 @@ export class UI {
       .map(([k, n]) => `<span style="color:${FOODS[k].colour}">${foodCount(Math.round(n * 10) / 10, k)}</span>`).join(' · ');
     const ready = DISHES.reduce((n, d) => n + Math.floor(made[d] ?? 0), 0);
     const why = s.servingProblem();
-    // one chip per dish: its name, what it still wants, and what it turns a gnome into
+    // one row per dish: the dish, what it turns a gnome into, and every ingredient named, pictured and
+    // counted — the recipe has to be readable off the card without hovering anything
     const chips = DISHES.map((d) => {
       const r = RECIPES[d], no = s.cookProblem(r), have = Math.floor(made[d] ?? 0), m = MOODS[d];
-      const needs = (Object.entries(r.needs) as [FoodKind, number][])
-        .map(([k, n]) => `<i style="color:${FOODS[k].colour}">${Math.floor(stock[k] ?? 0)}/${n}</i>`).join(' ');
+      const needs = (Object.entries(r.needs) as [FoodKind, number][]).map(([k, n]) => {
+        const got = Math.floor(stock[k] ?? 0);
+        return `<span class="ing ${got >= n ? 'got' : 'short'}" title="${esc(`${FOODS[k].name}: ${FOODS[k].blurb}`)}">`
+          + `${this.tilePortrait({ key: 'flora', frame: FLORA.pile[k][2] })}`
+          + `<i style="color:${FOODS[k].colour}">${got}/${n}</i> ${esc(FOODS[k].one)}</span>`;
+      }).join('');
       return `<button class="potchip ${no ? '' : 'can'}" data-cook="${d}" ${no ? 'disabled' : ''}
-        title="${esc(`${FOODS[d].name}: ${m.name} — a gnome given this ${m.blurb}, for ${m.secs}s`)}">
+        title="${esc(`${FOODS[d].name} — ${r.makes} servings. A gnome given one is ${m.name}: it ${m.blurb}, for ${m.secs}s`)}">
         ${this.tilePortrait({ key: 'flora', frame: FLORA.pile[d][2] })}
-        <b style="color:${m.colour}">${m.name}</b><span>${needs}</span>
+        <span class="potmain"><b style="color:${m.colour}">${esc(FOODS[d].name)}</b>
+          <span class="potneeds">${needs}</span></span>
         ${have ? `<em>×${have}</em>` : ''}</button>`;
     }).join('');
     const bowls = DISHES.filter((d) => (made[d] ?? 0) >= 1)
