@@ -6,7 +6,7 @@ import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type Tool } from '../agents';
 import { Boar } from '../wildlife';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
-import { OGRE, BOAR, HAUL, COST, ORDER, YARD, GNOME_PACK, p, TOWER, HEARTH_WOOD, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, TRAITS, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, SERVE_RANGE, MOODS, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, isDish, foodCount, hasInterior, type DishKind, CROP_KINDS, CALLINGS, DISMANTLE, DIET_CAP, DIET_STAT_NAME, type FoodKind, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS } from '../config';
+import { OGRE, BOAR, HAUL, TILE, COST, ORDER, YARD, GNOME_PACK, p, TOWER, HEARTH_WOOD, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, TRAITS, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, SERVE_RANGE, MOODS, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, isDish, foodCount, hasInterior, type DishKind, CROP_KINDS, CALLINGS, DISMANTLE, DIET_CAP, DIET_STAT_NAME, type FoodKind, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS } from '../config';
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
@@ -1042,41 +1042,42 @@ export class UI {
 
   private cookEl: HTMLElement | null = null;
   private lastCooking = '';
-  /** THE GREAT POT: what is in it, what it can be cooked into, and who gets a bowl. */
+  /**
+   * THE GREAT POT, as a card standing at the pot rather than a page over the world: it tracks the
+   * cauldron's own screen position every frame, so you can see what you are cooking over, and whoever
+   * is stood round it waiting for a bowl.
+   */
   renderCooking(): void {
     const s = this.scene, b = s.cookingAt;
     if (!b) { this.cookEl?.remove(); this.cookEl = null; this.lastCooking = ''; return; }
     const stock = s.potStock(b), made = s.potServings(b);
-    const rows = DISHES.map((d) => {
-      const r = RECIPES[d], why = s.cookProblem(r), have = Math.floor(made[d] ?? 0), food = FOODS[d];
-      const needs = (Object.entries(r.needs) as [FoodKind, number][]).map(([k, n]) => `<span style="color:${FOODS[k].colour}">${foodCount(n, k)}</span> <small>(${Math.floor(stock[k] ?? 0)} in)</small>`).join(' + ');
-      const eat = `+${r.heal} HP · +${Math.round(r.buffAdd * 100)}% ${DIET_STAT_NAME[food.stat]} for ${r.buffSecs}s`;
-      return `<div class="aslot">
-        <div class="aname">${this.tilePortrait({ key: 'flora', frame: FLORA.pile[d][2] })} ${food.name} <span class="tier">×${have}</span></div>
-        <div class="acur">${needs} <small>→ ${r.makes} servings</small></div>
-        <button class="btn small ${why ? '' : 'ok'} cook" data-cook="${d}" ${why ? 'disabled' : ''}>COOK · ${foodCount(r.makes, d)}</button>
-        <div class="d">${why ? `<em class="warn">${esc(why)}</em>` : `raised on it, a child gains up to +${Math.round(DIET_CAP[food.stat as keyof typeof DIET_CAP] * (food.power ?? 1) * p.dietMul * 100)}% ${DIET_STAT_NAME[food.stat]} for life`}</div>
-        <button class="btn small ${have < 1 ? '' : 'ok'} eat" data-eat="${d}" ${have < 1 ? 'disabled' : ''}>EAT ONE · ${eat}</button>
-        <div class="d"><b style="color:${MOODS[d].colour}">${MOODS[d].name}</b> — a gnome given this ${esc(MOODS[d].blurb)}, for ${MOODS[d].secs}s</div></div>`;
-    }).join('');
     const inPot = (Object.entries(stock) as [FoodKind, number][]).filter(([, n]) => n >= 0.05)
       .map(([k, n]) => `<span style="color:${FOODS[k].colour}">${foodCount(Math.round(n * 10) / 10, k)}</span>`).join(' · ');
     const ready = DISHES.reduce((n, d) => n + Math.floor(made[d] ?? 0), 0);
-    const on = s.buff && s.buffLeft() > 0 ? `<p class="sub small">Still warming you: <b>${FOODS[s.buff.dish].name}</b>, +${Math.round((s.buff.mul - 1) * 100)}% ${DIET_STAT_NAME[s.buff.stat]} for <span class="warmleft">${Math.ceil(s.buffLeft())}</span>s more.</p>` : '';
-    const key = `${b.tx},${b.ty}|${b.ruined}|${FOOD_KINDS.map((k) => Math.round((stock[k as FoodKind] ?? 0) * 10)).join(',')}|${DISHES.map((d) => Math.floor(made[d] ?? 0)).join(',')}|${s.servingProblem() ?? ''}|${s.buff && s.buffLeft() > 0 ? s.buff.dish : ''}`;
-    const html = `<div class="cooking panel">
-      <div class="ph"><h2>The Great Pot</h2><span class="cap">${inPot ? `holding ${inPot}` : 'empty'}</span><button class="btn small close">CLOSE</button></div>
-      <div class="aslots">${rows}</div>
-      ${on}
-      ${ready ? `<div class="raise"><div class="cap">LADLE IT OUT</div><button class="btn ${s.servingProblem() ? '' : 'ok'} serve" ${s.servingProblem() ? 'disabled' : ''}>DISH OUT TO THE GNOMES · ${ready} serving${ready === 1 ? '' : 's'}</button><div class="d">${esc(s.servingProblem() ?? `every grown gnome within ${SERVE_RANGE} tiles gets a bowl, and whatever it does to them`)}</div></div>` : ''}
-      <p class="sub small">Throw food in with the <b>BASKET</b> (or <b>G</b> to tip in a whole armful) and it goes in the pot rather than on the ground. What comes out is not for the granary — it is ladled straight out to the gnomes. <b>Every dish is a way of fighting</b>, never a bonus to their day's work: a fed gnome stops running from raiders altogether and meets them with whatever the bowl gave it.</p>
-    </div>`;
-    if (!this.cookEl) this.cookEl = h('<div class="screen cooking-screen"></div>');
-    if (!this.cookEl.isConnected) { this.screens.append(this.cookEl); this.lastCooking = ''; } // showScreen() empties #screens without asking
+    const why = s.servingProblem();
+    // one chip per dish: its name, what it still wants, and what it turns a gnome into
+    const chips = DISHES.map((d) => {
+      const r = RECIPES[d], no = s.cookProblem(r), have = Math.floor(made[d] ?? 0), m = MOODS[d];
+      const needs = (Object.entries(r.needs) as [FoodKind, number][])
+        .map(([k, n]) => `<i style="color:${FOODS[k].colour}">${Math.floor(stock[k] ?? 0)}/${n}</i>`).join(' ');
+      return `<button class="potchip ${no ? '' : 'can'}" data-cook="${d}" ${no ? 'disabled' : ''}
+        title="${esc(`${FOODS[d].name}: ${m.name} — a gnome given this ${m.blurb}, for ${m.secs}s`)}">
+        ${this.tilePortrait({ key: 'flora', frame: FLORA.pile[d][2] })}
+        <b style="color:${m.colour}">${m.name}</b><span>${needs}</span>
+        ${have ? `<em>×${have}</em>` : ''}</button>`;
+    }).join('');
+    const bowls = DISHES.filter((d) => (made[d] ?? 0) >= 1)
+      .map((d) => `<button class="btn small eat" data-eat="${d}" title="Eat one yourself: +${RECIPES[d].heal} HP and a while of ${DIET_STAT_NAME[FOODS[d].stat]}">${FOODS[d].name} ×${Math.floor(made[d] ?? 0)}</button>`).join('');
+    const key = `${b.tx},${b.ty}|${b.ruined}|${FOOD_KINDS.map((k) => Math.round((stock[k as FoodKind] ?? 0) * 10)).join(',')}|${DISHES.map((d) => Math.floor(made[d] ?? 0)).join(',')}|${why ?? ''}`;
+    const html = `<div class="pothead"><b>The Great Pot</b><span>${inPot || 'empty — throw food in'}</span><button class="btn small close">×</button></div>
+      <div class="potchips">${chips}</div>
+      ${ready ? `<button class="btn serve ${why ? '' : 'ok'}" ${why ? 'disabled' : ''}>DISH OUT · ${ready}</button>
+        <div class="potwhy">${esc(why ?? `a bowl each to every grown gnome within ${SERVE_RANGE} tiles`)}</div>` : ''}
+      ${bowls ? `<div class="potbowls"><span>yours:</span>${bowls}</div>` : ''}`;
+    if (!this.cookEl) this.cookEl = h('<div class="potcard panel"></div>');
+    if (!this.cookEl.isConnected) { this.overlay.append(this.cookEl); this.lastCooking = ''; }
     const el = this.cookEl;
-    // The panel is redrawn every frame. Replacing its DOM that often would swallow every click —
-    // a click needs the button it went down on to still be there when the mouse comes up — so the
-    // markup is rebuilt only when something in it actually changed, and the countdown is retexted.
+    // rebuilt only when something in it changed: replacing the DOM every frame would swallow every click
     if (key !== this.lastCooking) {
       this.lastCooking = key;
       el.innerHTML = html;
@@ -1085,10 +1086,27 @@ export class UI {
       el.querySelectorAll<HTMLElement>('[data-eat]').forEach((btn) => btn.addEventListener('click', () => { s.eatFromPot(btn.dataset.eat as DishKind); this.renderCooking(); }));
       el.querySelector('.serve')?.addEventListener('click', () => { s.serveGnomes(); this.renderCooking(); });
     }
-    const left = el.querySelector('.warmleft');
-    if (left) left.textContent = String(Math.ceil(s.buffLeft()));
+    this.placeAtWorld(el, (b.tx + BUILDINGS[b.kind].w / 2) * TILE, b.ty * TILE);
   }
 
+  /**
+   * Pin a card to a spot in the world: the camera moves, the card goes with it. Client pixels and
+   * `position: fixed`, so nothing depends on where the overlay happens to sit.
+   */
+  private placeAtWorld(el: HTMLElement, wx: number, wy: number): void {
+    const s = this.scene, cam = s.cameras.main;
+    const rect = s.game.canvas.getBoundingClientRect();
+    const x = rect.left + (wx - cam.worldView.x) * cam.zoom * rect.width / s.scale.width;
+    const y = rect.top + (wy - cam.worldView.y) * cam.zoom * rect.height / s.scale.height;
+    const w = el.offsetWidth || 240, h2 = el.offsetHeight || 120;
+    // kept on screen, and above the pot where it does not cover what it is about
+    const left = Math.max(8, Math.min(window.innerWidth - w - 8, x - w / 2));
+    // the top bar owns the first stretch of the screen; the card never climbs under it
+    const ceiling = (this.top.getBoundingClientRect().bottom || 8) + 6;
+    const top = Math.max(ceiling, Math.min(window.innerHeight - h2 - 8, y - h2 - 10));
+    el.style.left = `${Math.round(left)}px`;
+    el.style.top = `${Math.round(top)}px`;
+  }
   // ---- screens ---------------------------------------------------------------
 
   showScreen(kind: 'title' | 'pause' | 'over' | 'won' | null): void {
