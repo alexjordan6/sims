@@ -321,10 +321,10 @@ export class Renderer {
   }
 
   /**
-   * A few motes drift off every ripe wild plant some recipe calls for, so you can tell at a glance
-   * what is worth carrying to the pot. Hazel gets none: nothing is cooked with hazelnuts. Built the
-   * way syncGrass is — one sprite per visible tile, destroyed as it scrolls away — and deliberately
-   * faint, so the woods stay woods.
+   * Every ripe wild plant some recipe calls for wears a ring of sparks and a bobbing chevron, so what
+   * can be picked reads from across the clearing. Hazel gets none: nothing is cooked with hazelnuts.
+   * Built the way syncGrass is — one sprite per visible tile, destroyed as it scrolls away — and left
+   * untinted, so the markers hold up through the night wash.
    */
   private syncMotes(): void {
     const s = this.scene, w = s.world, view = s.cameras.main.worldView;
@@ -344,12 +344,13 @@ export class Renderer {
         m = s.add.image(tx * TILE, ty * TILE, 'flora', FLORA.motes[0]).setOrigin(0, 0);
         this.motes.set(id, m);
       }
-      // each tile drifts on its own phase (t.v), and the whole thing breathes rather than blinks
-      const phase = this.t * 1.6 + t.v * 0.7;
+      // each tile runs on its own phase (t.v) so a patch shimmers in turn rather than as one
+      const phase = this.t * 3.4 + t.v * 0.7;
       m.setFrame(FLORA.motes[Math.floor(phase) % 3]);
       m.setDepth(DEPTH.agents + ((ty + 1) * TILE) / 1000 + 0.0003)
-        .setAlpha(0.28 + 0.16 * Math.sin(phase))
-        .setTint(this.tint);
+        .setAlpha(0.78 + 0.22 * Math.sin(phase))
+        .setScale(1.15)
+        .setTint(0xffffff); // never dimmed by the night wash: what you can pick should read in the dark too
     }
     for (const [id, m] of this.motes) if (!seen.has(id)) { m.destroy(); this.motes.delete(id); }
   }

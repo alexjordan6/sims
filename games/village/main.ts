@@ -254,7 +254,7 @@ export class VillageScene extends SimScene {
     this.buff = null;
     this.mods = this.meta.mods();
     this.world = new World();
-    this.world.generate(this.rng, this.mods.fieldWide ? 5 : 3, p.gnomeStart ? 'gnome' : 'village');
+    this.world.generate(this.rng, this.mods.fieldWide ? 5 : 3, p.gnomeStart ? 'gnome' : 'village', this.seed);
     for (const k of FOOD_KINDS) this.pantry[k] = 0;
     this.food = this.mods.startFood;
     this.wood = this.mods.startWood;

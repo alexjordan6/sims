@@ -1,4 +1,4 @@
-import type { Rng } from '@shared/index';
+import { Rng } from '@shared/index';
 import { TILE, COLS, ROWS, BUILDING_HP, HEARTH_WOOD, ITEM, GNOME_HOME, YARD, p, CROP_KINDS, type DishKind, type FoodKind, type BuildingKind, type StartKind } from './config';
 export type { BuildingKind } from './config';
 import { tickItem, hop, type Item, type ItemKind } from './items';
@@ -513,7 +513,45 @@ export class World {
    * clearing instead, and the hidden one out in the woods is left ungenerated (there is nothing left
    * to discover). The supply buildings stand either way: hauling and storage work the same.
    */
-  generate(rng: Rng, fieldW = 3, start: StartKind = 'village'): void {
+  /**
+   * Extra wild food on top of what the seed already grew, and a handful within sight of the village so
+   * there is something to throw in the pot on day one. It draws from its own bag of numbers rather than
+   * the world's, so turning `wildDensity` up adds plants without moving a single tree, trail or lair —
+   * every seeded layout (and every check that leans on one) stays exactly where it was.
+   */
+  /** the seed this world was generated from, for features that need their own numbers (see scatterMoreWild) */
+  seed = 0;
+  private scatterMoreWild(hx: number, hy: number): void {
+    const extra = p.wildDensity - 1;
+    if (extra <= 0) return;
+    const rng = new Rng(this.seed ^ 0x5eed10);
+    const open = (tx: number, ty: number) => {
+      const t = this.get(tx, ty);
+      return !!t && t.kind === 'grass' && !t.trail && !t.building && !t.defense;
+    };
+    // out in the woods: more of whatever that ground would have grown anyway
+    for (let ty = 1; ty < this.rows - 1; ty++) for (let tx = 1; tx < this.cols - 1; tx++) {
+      if (Math.abs(tx - hx) < 14 && Math.abs(ty - hy) < 10) continue; // the clearing is the village's
+      if (!open(tx, ty)) continue;
+      const near = this.treeNeighbours(tx, ty);
+      const t = this.get(tx, ty)!;
+      if (near >= 3) { if (rng.chance(0.05 * extra)) this.set(tx, ty, 'mushroom').stage = 99; }
+      else if (near) { if (rng.chance(0.045 * extra)) this.set(tx, ty, rng.chance(0.6) ? 'bush' : 'hazel').stage = 99; }
+      else if (t.biome === 'meadow') { if (rng.chance(0.03 * extra)) this.set(tx, ty, 'garlic').stage = 99; }
+      else if (rng.chance(0.02 * extra)) this.set(tx, ty, 'burdock').stage = 99;
+    }
+    // and a ring of it just beyond the clearing, within an early walk of the pot
+    for (let n = 0, tries = 0; n < Math.round(8 * p.wildDensity) && tries < 600; tries++) {
+      const a = rng.range(0, Math.PI * 2), r = rng.range(11, 20);
+      const tx = Math.round(hx + Math.cos(a) * r), ty = Math.round(hy + Math.sin(a) * r * 0.8);
+      if (!open(tx, ty)) continue;
+      this.set(tx, ty, rng.chance(0.4) ? 'burdock' : rng.chance(0.5) ? 'garlic' : rng.chance(0.5) ? 'bush' : 'mushroom').stage = 99;
+      n++;
+    }
+  }
+
+  generate(rng: Rng, fieldW = 3, start: StartKind = 'village', seed = 0): void {
+    this.seed = seed;
     this.denseForests = rng.chance(0.65);
     // Broad overlapping forest regions leave meadows between them; some seeds have only open groves.
     const groves = Array.from({ length: this.denseForests ? 22 : 12 }, () => ({
@@ -619,6 +657,7 @@ export class World {
       if (byTrail && rng.chance(0.08)) this.set(tx, ty, 'burdock').stage = 99;
       else if (t.biome === 'meadow' && rng.chance(0.012)) this.set(tx, ty, 'garlic').stage = 99;
     }
+    this.scatterMoreWild(hx, hy);
     // Long grass over the whole wilderness (last, so older seeds keep their layouts): the village clearing, the
     // trails and the lair's patch stay short, with a few short tiles scattered for texture. It never grows back.
     const l = this.lair;

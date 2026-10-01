@@ -45,6 +45,14 @@ function births(s: VillageScene, rolls: number): number {
   for (let i = 0; i < rolls; i++) { s.simTime += p.birthEvery; s.tickBirths(); }
   return s.villagers().length - n;
 }
+/**
+ * Roll for a birth until one takes, up to `rolls` times, and report how many were born. birthChance is
+ * capped at 0.95 however high the slider goes, so a single roll is never a promise.
+ */
+function bornIn(s: VillageScene, rolls: number): number {
+  for (let i = 0; i < rolls; i++) { const n = births(s, 1); if (n) return n; }
+  return 0;
+}
 /** Like step(), but through the scene's own tick — for what the scene does per frame rather than what agents do. */
 function ticks(s: VillageScene, seconds: number) {
   for (let i = 0; i < Math.ceil(seconds * 60); i++) { s.grid.rebuild(s.agents); s.tick(1 / 60); }
@@ -482,7 +490,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     // a place is reserved at birth: an infant holds it while it grows
     const filledWas = CALLINGS.map((c) => s.callingFilled(c));
     cHome.nextBirth = 0; // the very first roll on a house only schedules the next one
-    assert(births(s, 1) === 1, 'a house with a free place bears a child');
+    assert(bornIn(s, 8) === 1, 'a house with a free place bears a child');
     const baby = s.infantsOf(cHome)[0];
     assert(!!baby.calling && s.callingFilled(baby.calling) === filledWas[CALLINGS.indexOf(baby.calling)] + 1,
       `a newborn takes its place from the cap while it is still an infant (${baby.calling})`);
@@ -494,7 +502,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(births(s, 30) === 0, 'and bears nobody');
     // building room makes children again
     p.soldierCap = 4;
-    assert(!s.birthProblem(cHome) && births(s, 1) === 1, 'room for a warrior and the house bears one');
+    assert(!s.birthProblem(cHome) && bornIn(s, 8) === 1, `room for a warrior and the house bears one (why ${s.birthProblem(cHome)} · soldier ${s.callingFilled('soldier')}/${s.callingCap('soldier')})`);
     assert(s.infantsOf(cHome).slice(-1)[0].calling === 'soldier', 'promised the only trade with a place');
     // a second barracks doubles the warrior places
     const capOne = s.callingCap('soldier');
@@ -517,7 +525,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     rMum.update = rDad.update = () => {}; rHome.residents = 2; rHome.nextBirth = 0; p.birthChance = 1;
     p.farmerCap = 5; p.woodcutterCap = 5; p.soldierCap = 10;
     const order: string[] = [];
-    for (let i = 0; i < 4; i++) { const before = s.villagers().length; births(s, 1); if (s.villagers().length > before) order.push(s.villagers()[s.villagers().length - 1].calling ?? '?'); }
+    for (let i = 0; i < 4; i++) if (bornIn(s, 8)) order.push(s.villagers()[s.villagers().length - 1].calling ?? '?');
     // the couple already hold 2 of the 5 farmer places, so farming is the fullest trade and waits its turn:
     // picking by free places alone would have promised all four to the barracks (10 open beats 5).
     assert(order.join(',') === 'woodcutter,soldier,soldier,woodcutter', `the emptiest trade by share of its cap goes first (${order.join(', ')})`);

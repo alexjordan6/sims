@@ -802,13 +802,18 @@ export function ensureFlora(scene: Phaser.Scene): void {
  * does not pulse as one. Nothing but a hint — the plant underneath is what you actually read.
  */
 function drawMotes(ctx: Ctx, ox: number, v: number): void {
-  const specks = [[4, 9], [8, 6], [11, 10], [6, 3], [10, 2]] as const;
-  for (let i = 0; i < specks.length; i++) {
-    const [x, y] = specks[i];
-    const lift = (i + v) % 3; // each frame has the same motes a little further up
-    px(ctx, ox + x, y - lift, lift === 0 ? '#fff4c4' : lift === 1 ? '#ffe89a' : '#ffd76a', 1, 1);
+  // a ring of sparks round the plant, each frame a little further round and up
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 + v * 0.26;
+    const x = 8 + Math.round(Math.cos(a) * 6), y = 9 + Math.round(Math.sin(a) * 4) - v;
+    px(ctx, ox + x, y, i % 2 ? '#fff4c4' : '#ffd76a', 2, 2);
+    px(ctx, ox + x, y, '#fffbe6', 1, 1);
   }
-  px(ctx, ox + 7, 12 - v, '#fffbe6', 1, 1);
+  // and a chevron over it, bobbing, so a ripe plant reads from across the clearing
+  const bob = v === 1 ? 0 : v === 0 ? 1 : 2;
+  for (let i = 0; i < 3; i++) px(ctx, ox + 5 + i, bob + i, '#fffbe6', 2, 1);
+  for (let i = 0; i < 3; i++) px(ctx, ox + 11 - i, bob + i, '#fffbe6', 2, 1);
+  for (let i = 0; i < 3; i++) { px(ctx, ox + 5 + i, bob + i - 1, '#f0c040', 2, 1); px(ctx, ox + 11 - i, bob + i - 1, '#f0c040', 2, 1); }
 }
 
 /** Long grass: a dense stand of blades over dark ground, each variant leaning and tufted differently. */

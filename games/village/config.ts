@@ -95,6 +95,7 @@ export const p = live(
     dietMul: [D.dietMul, 0, 3, 0.25, 'Scales every diet bonus (wheat +25% HP, carrots +15% speed, tomatoes +25% work, berries +25% damage at ×1).'],
     wildRegrowMul: [D.wildRegrowMul, 0.25, 4, 0.25, 'Scales how long picked bushes and mushrooms take to regrow (3 / 4 days at ×1).'],
     wildSprout: [D.wildSprout, 0, 0.1, 0.005, 'Daily chance each old-growth tree sprouts a berry bush or mushrooms on a grass tile beside it.'],
+    wildDensity: [D.wildDensity, 0.25, 6, 0.25, 'Scales how thickly wild food is scattered at worldgen — berries, mushrooms, hazel, garlic and burdock all together. Takes at NEW VILLAGE.'],
   }, 'lifecycle'),
   params({
     farmerCap: [D.farmerCap, 0, 40, 1, 'Farmers one granary can keep in work (a foraging gnome fills the same place). With no free place anywhere in the village, no child is born at all.'],

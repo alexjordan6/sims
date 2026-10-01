@@ -46,6 +46,7 @@
   "dietMul": 1,
   "wildRegrowMul": 1,
   "wildSprout": 0.01,
+  "wildDensity": 2,
   "farmerCap": 5,
   "woodcutterCap": 5,
   "soldierCap": 10,
