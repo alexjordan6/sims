@@ -139,7 +139,6 @@ export class UI {
     this.hotbar = h(`<div class="hotbar">
       <div class="slots panel">
         <span class="cap slots-cap">TOOLS <kbd>1-9</kbd></span>
-        ${slot('hands', 'farm', FARM.iconHand, 'HANDS', 'Harvest ripe crops; pick berries and mushrooms in the woods')}
         ${slot('hoe', 'town', TOWN.iconHoe, 'HOE', 'Till grass into soil; clears stumps; three hits on soil flatten it back to grass')}
         ${slot('seeds', 'farm', FARM.grassTuft, 'SEEDS', 'Sow the chosen crop on tilled soil (F cycles wheat / carrots / tomatoes), trees on grass. What a child eats decides the adult')}
         ${slot('axe', 'town', TOWN.iconAxe, 'AXE', 'Chop trees for wood (3 hits); clears stumps and saplings')}
@@ -150,7 +149,7 @@ export class UI {
         ${slot('bow', 'dungeon', DUNGEON.sword, 'BOW', 'Fire physical arrows. Shared ammunition is made at the barracks; a better bow is forged at its chest')}
         ${slot('wall', 'town', TOWN.wallStoneDoor, 'WALL', 'Build a connected stone perimeter. 4 wood per segment', 4)}
         ${slot('gate', 'town', TOWN.wallWoodDoor, 'GATE', 'Friendly villagers pass; X toggles opening to everyone', 12)}
-        ${slot('stairs', 'town', TOWN.iconHammer, 'STAIRS', 'Connect stairs to your walls. Use hands or X to climb and descend', 10)}
+        ${slot('stairs', 'town', TOWN.iconHammer, 'STAIRS', 'Connect stairs to your walls. Right click or X to climb and descend', 10)}
         ${slot('tavern', 'town', TOWN.wallWoodDoor, 'TAVERN', 'A cozy place to eat, rest and gather', COST.tavern)}
         ${slot('gnomehouse', 'town', TOWN.wallWoodDoor, 'GNOME HOUSE', GNOME_TITLE, COST.gnomehouse)}
         ${slot('wand', 'dungeon', DUNGEON.wizard, 'WAND', 'Shaman wand: left click or drag a box to pick soldiers, right click to send them — open ground = go there and hold, a raider = attack it, a wall top = take that archer post. F = follow me (again to stop). With no one picked, orders go to everyone')}
@@ -575,7 +574,10 @@ export class UI {
     const carry = s.carryHint();
     const raw = s.hint();
     const text = (carry && !raw.startsWith('E:') && !/full|first/.test(raw) ? carry : raw).replace(/^E: /, '');
-    if (hint.textContent !== text) hint.textContent = text;
+    // and what your hands would do there, since the right button is always available whatever you hold
+    const hands = s.handsHint();
+    const full = hands ? `${text} · right click: ${hands}` : text;
+    if (hint.textContent !== full) hint.textContent = full;
     // the touch action button shows the verb it would perform
     const verb = this.stage.querySelector('.act .verb');
     if (verb) {
@@ -634,7 +636,7 @@ export class UI {
       rows += `<b>Take down</b><span>${DISMANTLE.hits} hammer hits for half the wood back</span>`;
     } else if (t.kind === 'crop' || t.kind === 'tilled') {
       const fk = t.food ?? 'wheat', days = s.cropDaysOf(t), ripe = s.isRipe(t);
-      title = t.kind === 'crop' ? `${ripe ? 'Ripe' : 'Growing'} ${FOODS[fk].name.toLowerCase()}` : 'Tilled soil'; badge = t.kind === 'crop' ? (ripe ? 'harvest with hands' : `ripens in ${Math.max(0, days - t.stage)} day${days - t.stage === 1 ? '' : 's'}`) : t.food ? `farmers will sow ${FOODS[t.food].name.toLowerCase()}` : 'sow with seeds';
+      title = t.kind === 'crop' ? `${ripe ? 'Ripe' : 'Growing'} ${FOODS[fk].name.toLowerCase()}` : 'Tilled soil'; badge = t.kind === 'crop' ? (ripe ? 'right click to harvest' : `ripens in ${Math.max(0, days - t.stage)} day${days - t.stage === 1 ? '' : 's'}`) : t.food ? `farmers will sow ${FOODS[t.food].name.toLowerCase()}` : 'sow with seeds';
       if (t.kind === 'crop') rows += `<b>Growth</b><span>${Math.min(t.stage, days)} / ${days} days<div class="bar grow"><i style="width:${Math.round(100 * Math.min(1, t.stage / days))}%"></i></div></span><b>Yield</b><span>${s.cropYieldOf(fk)} ${FOODS[fk].one} · ${FOODS[fk].blurb}</span>`;
       else rows += `<b>Soil</b><span>${t.work ? `${t.work}/3 flattened` : 'ready for seed'}</span>`;
       extra = plan(t.food, 'REPLANT AS');
@@ -650,7 +652,7 @@ export class UI {
       }
     } else if (WILD_FOOD[t.kind]) {
       const fk = WILD_FOOD[t.kind]!, ripe = s.wildRipe(t), left = s.regrowDays(fk) - t.stage;
-      title = FOODS[fk].name; badge = ripe ? `${s.wildLeft(t)} left — pick with hands, or a gnome will` : `back in ${left} day${left === 1 ? '' : 's'}`;
+      title = FOODS[fk].name; badge = ripe ? `${s.wildLeft(t)} left — right click to pick, or a gnome will` : `back in ${left} day${left === 1 ? '' : 's'}`;
       rows += `<b>Yield</b><span>${FOODS[fk].yield} ${FOODS[fk].one} when regrown · ${FOODS[fk].blurb}</span><b>Regrows</b><span>every ${s.regrowDays(fk)} days${ripe ? '' : ` · ${t.stage} so far`}</span>`;
     } else {
       title = t.trail ? 'Trail' : t.tall ? 'Long grass' : 'Grass'; badge = t.biome === 'deepwood' ? 'deep woodland' : t.biome === 'woodland' ? 'woodland' : 'meadow';
@@ -1200,10 +1202,10 @@ export class UI {
         <section>
           <h3>THE GOAL</h3>
           <p><b>Wilderness:</b> the world is 240 × 160 tiles. Most seeds have dense forest regions; others are open meadow and scattered groves. Follow the woodland trails.</p>
-          <p><b>Fortify:</b> scroll the tool belt for WALL, GATE and STAIRS. Each takes one ground tile and wood for construction. Join walls into a perimeter and connect stairs. With hands equipped, use stairs to climb or descend. Walk along connected wall tops. Gates admit allies automatically; X opens them to enemies too. Hammer repairs damage. Brutes breach walls fast; Wreckers hammer them slowly — a closed perimeter is how your buildings stay standing.</p>
+          <p><b>Fortify:</b> scroll the tool belt for WALL, GATE and STAIRS. Each takes one ground tile and wood for construction. Join walls into a perimeter and connect stairs. Right click or X on stairs to climb or descend. Walk along connected wall tops. Gates admit allies automatically; X opens them to enemies too. Hammer repairs damage. Brutes breach walls fast; Wreckers hammer them slowly — a closed perimeter is how your buildings stay standing.</p>
           <p><b>Archers:</b> select a soldier, equip BOW, then SET WALL POST and click a battlement top connected to stairs. RETURN TO PATROL recalls them. Player bow is key 9. Everyone uses the shared quiver; craft 10 arrows for 2 wood at the barracks or its supply button. Arrows hit bodies and cover; wall archers shoot over ramparts.</p>
           <p><b>Towers:</b> every barracks shoots raiders inside its ring (shown while placing it or when it's selected) from its own chest of arrows — the bar over its roof is the stock. When it runs dry the bar flashes red and the tower falls silent: restock 10 arrows for 2 wood at the chest inside (which also holds the armor), or from the barracks card.</p>
-          <p><b>Come inside:</b> walk to a house, barracks or tavern door and use hands or X. WASD / joystick moves indoors; tapping the floor also walks there. Use nearby furnishings. The barracks rack makes quiver arrows and its chest restocks the tower and forges armor; tavern meals heal more with upgrades. Walk through the bottom doorway or choose EXIT. Raids continue outside.</p>
+          <p><b>Come inside:</b> walk up into a house, barracks or tavern door. WASD / joystick moves indoors; tapping the floor also walks there. Use nearby furnishings. The barracks rack makes quiver arrows and its chest restocks the tower and forges armor; tavern meals heal more with upgrades. Walk through the bottom doorway or choose EXIT. Raids continue outside.</p>
           <p>Survive <b>${p.bossDay} days</b>. Raiders first come on day ${p.firstRaidDay} and every ${p.raidEvery} days after, in big bands — and every wave brings more of them and new kinds. On day ${p.bossDay} the <b>Warlord</b> comes — beat him to win. If <b>you</b> die, the run ends (you keep the renown).</p>
           <h3>THE TRICK</h3>
           <p>You can't recruit anyone. <b>Every adult was a child you raised.</b> See RAISING CHILDREN below.</p>
@@ -1213,7 +1215,7 @@ export class UI {
         </section>
         <section>
           <h3>WHO'S WHO</h3>
-          ${who('dungeon', DUNGEON.hero, 'player', 'You', 'Equip a tool, then click: hoe tills, seeds plant, hands harvest, axe chops, sword fights, hammer upgrades.')}
+          ${who('dungeon', DUNGEON.hero, 'player', 'You', 'Equip a tool, then left click: hoe tills, seeds plant, axe chops, sword fights, hammer upgrades. Your hands need no tool — right click harvests, picks, climbs, works a gate and opens the pot.')}
           ${who('farm', FARM.farmerHat, 'farmer', 'Farmer', 'Plants and harvests the fields on their own.')}
           ${who('dungeon', DUNGEON.man, 'woodcutter', 'Woodcutter', 'Fells trees for wood — old growth first, thinning a grove from its edge so the core keeps spreading. Leaves the last ' + TREE_RESERVE + ' standing. Helps in the field when the woodyard is full.')}
           ${who('dungeon', DUNGEON.villager, 'kid', 'Child', 'Born into the house nursery; walks out into the yard and learns the trade the village had a place for, eating only what you toss in.')}

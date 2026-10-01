@@ -541,13 +541,13 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     s.player.tool = 'seeds'; s.player.cropKind = 'carrot'; s.world.set(122, 98, 'tilled'); s.hoverTile = { tx: 122, ty: 98 }; Object.assign(s.player, World.center(122, 99)); s.interact();
     const sown = s.world.get(122, 98)!;
     assert(sown.kind === 'crop' && sown.food === 'carrot' && s.cropDaysOf(sown) === s.cropDays + FOODS.carrot.days, 'seeds sow the chosen crop and it ripens on its own clock');
-    sown.stage = 99; s.player.tool = 'hands'; clearBulk(s); s.interact();
+    sown.stage = 99; clearBulk(s); assert(s.handsAt({ tx: 122, ty: 98 }), 'a ripe crop comes up under your hands, whatever you are holding');
     assert(held()?.food === 'carrot' && held()!.n === s.cropYieldOf('carrot') && s.world.get(122, 98)!.kind === 'tilled' && s.world.get(122, 98)!.food === 'carrot', 'harvesting by hand yields the crop and the soil remembers it');
     const sower = s.spawn(new Villager(World.center(122, 99).x, World.center(122, 99).y, s.world.houses[0], 'farmer', 20, 'Sower', s.mods));
     for (const q of s.world.find(t => t.kind === 'crop' || t.kind === 'tilled')) if (q.tx !== 122 || q.ty !== 98) s.world.set(q.tx, q.ty, 'grass');
     step(s, 6); assert(s.world.get(122, 98)!.kind === 'crop' && s.world.get(122, 98)!.food === 'carrot', `a farmer replants what the soil remembers (${s.world.get(122, 98)!.kind} ${s.world.get(122, 98)!.food})`);
     sower.dead = true; s.removeDead();
-    s.world.set(126, 98, 'bush').stage = 99; s.hoverTile = { tx: 126, ty: 98 }; Object.assign(s.player, World.center(126, 99)); clearBulk(s); s.interact();
+    s.world.set(126, 98, 'bush').stage = 99; Object.assign(s.player, World.center(126, 99)); clearBulk(s); s.handsAt({ tx: 126, ty: 98 });
     const bush = s.world.get(126, 98)!;
     assert(held()?.food === 'berry' && held()!.n === FOODS.berry.yield && bush.kind === 'bush' && bush.stage === 0 && !s.wildRipe(bush), 'a ripe bush is picked by hand and starts regrowing');
     const berries = held()!.n; s.interact(); assert(held()?.n === berries, 'a picked bush gives nothing');
@@ -591,7 +591,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(s.scrap === scrapWas && s.player.carriedOf('scrap') > 0 && !s.world.items.includes(loot!), 'scrap goes in the pack and must be deposited before forging');
     Object.assign(s.player, { x: dropped!.x, y: dropped!.y }); clearBulk(s); s.player.tool = 'sword'; s.tick(1 / 60);
     assert(held()?.kind === 'wood' && held()!.n === 9 && !s.world.items.includes(dropped!), 'an armful comes along with the sword out — whatever you are holding picks it up');
-    for (const tool of ['axe', 'hammer', 'basket', 'hands'] as const) {
+    for (const tool of ['axe', 'hammer', 'basket', 'sword'] as const) {
       clearBulk(s);
       const armful = s.world.dropItem('wood', 4, s.player.x, s.player.y);
       s.player.tool = tool; s.tick(1 / 60);
@@ -747,7 +747,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(carried, 'a gnome carries exactly one hazelnut at a time');
     assert(s.pantry.hazelnut === nutsWas + 1 && s.wildLeft(hazel) === FOODS.hazelnut.yield - 1 && hazel.stage >= 99, `the find reaches the granary and the plant keeps the rest (${s.wildLeft(hazel)} left)`);
     gma.update = () => {};
-    const rest = s.wildLeft(hazel); Object.assign(s.player, World.center(127, 100)); s.player.tool = 'hands'; s.player.facing = { x: 1, y: 0 }; clearBulk(s); s.interact(); const got = s.player.pack.bulk()[0] as { food?: string; n: number } | null;
+    const rest = s.wildLeft(hazel); Object.assign(s.player, World.center(127, 100)); s.player.facing = { x: 1, y: 0 }; clearBulk(s); s.handsAt({ tx: 128, ty: 100 }); const got = s.player.pack.bulk()[0] as { food?: string; n: number } | null;
     assert(got?.food === 'hazelnut' && got.n === rest && hazel.stage === 0 && hazel.left === undefined, `hands take everything left (${rest}) and the plant starts regrowing`);
     for (let d = 0; d < s.regrowDays('hazelnut'); d++) { s.day++; s.newDay(); }
     assert(s.wildLeft(hazel) === FOODS.hazelnut.yield, 'a bare plant regrows to its full yield');
@@ -896,7 +896,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       s.world.get(130, 100)!.tall = true; lb.rouse(s.player);
       assert(!lb.lurking && lb.provoked, 'a provoked boar cannot hide, grass or no grass');
       lb.calm(); delete (lb as unknown as { update?: unknown }).update; // back to the real update
-      Object.assign(s.player, World.center(126, 100)); s.player.tool = 'hands'; s.fx.length = 0;
+      Object.assign(s.player, World.center(126, 100)); s.fx.length = 0;
       step(s, 0.5);
       assert(lb.lurking && !lb.provoked, 'with nobody near it stays hidden and calm');
       Object.assign(s.player, { x: lb.x + 4, y: lb.y }); step(s, 0.2);
@@ -972,8 +972,8 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(!s.fog!.isExplored(den.tx, den.ty) && !s.villagers().some((v) => v.gnome), 'it lights no fog of its own, and its family is not out yet');
       // the craft is locked until they teach it
       assert(typeof s.toolLocked('gnomehouse') === 'string' && !s.gnomesFound, 'the GNOME HOUSE tool starts locked');
-      s.player.tool = 'hands'; s.setTool('gnomehouse');
-      assert(s.player.tool === 'hands', 'picking it up does nothing');
+      s.player.tool = 'sword'; s.setTool('gnomehouse');
+      assert(s.player.tool === 'sword', 'picking it up does nothing');
       s.player.tool = 'basket'; s.player.cycleTool(1, (t) => !!s.toolLocked(t));
       assert((s.player.tool as string) === 'wand', 'and cycling the belt skips over it');
       assert(s.buildProblem({ tx: 120, ty: 100 }, 'gnomehouse') === s.toolLocked('gnomehouse'), 'building one says why not');

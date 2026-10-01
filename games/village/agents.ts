@@ -528,6 +528,8 @@ export class Villager extends Mover {
       if (!this.workerSafety.update(dt, unsafe, unsafe) && !s.raidActive) this.unhide(s);
       return;
     }
+    // the pot before the job: a gnome with a bowl waiting for it goes and stands by the cauldron
+    if (this.wantsBowl(s) && !s.nearestRaider(this.x, this.y, WORKER_DANGER) && this.comeForBowl(dt, s)) return;
     switch (this.role) {
       case 'infant': return;
       case 'kid': this.kidUpdate(dt, s); break;
@@ -680,6 +682,28 @@ export class Villager extends Mover {
     this.companyWait = 0;
     this.delivering = !follow && !!this.pouch?.bulk().length; // released with a full pouch: the granary first
     this.task = follow ? 'following you' : 'off foraging';
+  }
+  /**
+   * Something is in the pot and this gnome has not had a bowl: it leaves off whatever it was doing and
+   * comes to the square to wait for one. A mood already on it means it has eaten; it goes back to work.
+   */
+  private wantsBowl(s: VillageScene): boolean {
+    return this.gnome && this.isAdult && !this.mood && !this.hidden && !this.carriedBy && s.potHasServings();
+  }
+  /** Walk to the pot and stand about it. True while that is what this gnome is doing. */
+  private comeForBowl(dt: number, s: VillageScene): boolean {
+    const pot = s.world.cookpot;
+    if (!pot) return false;
+    const door = doorstep(pot), at = World.center(door.tx, door.ty);
+    if (this.dist(at) > 2.2 * TILE) {
+      this.setGoal(s, door.tx, door.ty);
+      this.followPath(dt);
+      this.task = 'coming for a bowl';
+    } else {
+      this.clearGoal(); this.vx = this.vy = 0;
+      this.task = 'waiting on the pot';
+    }
+    return true;
   }
   /** Walk to the head and keep station: what a follower does when there is nothing worth picking nearby. */
   private walkToHead(dt: number, s: VillageScene, task: string): void {
@@ -1187,8 +1211,8 @@ export class Arrow extends Mover {
 // player
 
 /** What the player holds. The equipped tool decides what E does. */
-export type Tool = 'hands' | 'hoe' | 'seeds' | 'axe' | 'sword' | 'house' | 'barracks' | 'hammer' | 'bow' | 'tavern' | 'wall' | 'gate' | 'stairs' | 'basket' | 'gnomehouse' | 'wand';
-export const TOOLS: Tool[] = ['hands', 'hoe', 'seeds', 'axe', 'sword', 'house', 'barracks', 'hammer', 'bow', 'tavern', 'wall', 'gate', 'stairs', 'basket', 'gnomehouse', 'wand'];
+export type Tool = 'hoe' | 'seeds' | 'axe' | 'sword' | 'house' | 'barracks' | 'hammer' | 'bow' | 'tavern' | 'wall' | 'gate' | 'stairs' | 'basket' | 'gnomehouse' | 'wand';
+export const TOOLS: Tool[] = ['hoe', 'seeds', 'axe', 'sword', 'house', 'barracks', 'hammer', 'bow', 'tavern', 'wall', 'gate', 'stairs', 'basket', 'gnomehouse', 'wand'];
 
 /** A sword swing in progress: an arc in front of the player that connects during its active window. */
 /** A sword swing in progress: an arc in front of the player that connects during its active window. */
@@ -1223,7 +1247,7 @@ export class Player extends Mover {
   override canCarry(kind: BulkKind, food?: FoodKind): boolean { return this.roomFor(kind, food) > 0; }
   override get mass(): number { return MASS.player; }
   facing = { x: 0, y: 1 };
-  tool: Tool = 'hands';
+  tool: Tool = 'sword'; // the club you always have: there is no empty-handed tool, the right button is your hands
   /** which crop the seeds sow, and which food the basket takes */
   cropKind: FoodKind = 'wheat';
   basketKind: FoodKind = 'wheat';

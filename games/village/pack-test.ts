@@ -40,7 +40,7 @@ export function runPackChecks(s: VillageScene, assert: (ok:unknown,msg:string)=>
     assert(v.load?.n===6&&s.wood===s.woodCap,'villager partial deposit retains original armful');
     s.wood=0;s.deposit(v);assert(v.load===null&&s.wood===6,'villager remainder deposits normally');
     fresh();s.player.tool='axe';const axe=s.player.pack.findSlot(g=>g.kind==='tool'&&g.tool==='axe');s.player.pack.removeAt(axe);s.validateTool();
-    assert(String(s.player.tool)==='hands'&&!!s.toolLocked('axe')&&!s.toolLocked('seeds'),'missing implement falls back to hands; free modes remain free');
+    assert(String(s.player.tool)==='sword'&&!!s.toolLocked('axe')&&!s.toolLocked('seeds'),'missing implement falls back to the club you always have; free modes remain free');
     assert(s.recoverBasicKit()&&s.player.pack.hasTool('axe')&&s.player.pack.emptySlots===7,'recovery supplies only missing items');
     assert(s.recoverBasicKit()&&s.player.pack.emptySlots===7,'recovery does not duplicate kit');
     const empty=s.player.pack.slots.indexOf(null);s.swapEquipment(empty,'melee');

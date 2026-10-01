@@ -556,6 +556,7 @@ export class VillageScene extends SimScene {
     kb.on('keydown-C', () => this.interact());
     kb.on('keydown-X', () => {
       if (this.interior.active) { this.interior.act(); return; }
+      if (this.handsAt(this.target)) return;
       if (this.checkNearby()) return;
       if (this.hovered) { this.select(this.hovered); return; }
       const b = this.facedBuilding() ?? this.world.get(this.player.tile.tx, this.player.tile.ty)?.building ?? null;
@@ -609,7 +610,13 @@ export class VillageScene extends SimScene {
       if (this.posting) { const q = World.toTile(ptr.worldX, ptr.worldY + WALL_HEIGHT); this.assignPost(this.posting, q); return; }
       if (this.player.tool === 'wand' && this.screen === 'playing' && !this.interior.active) { this.wandDown(ptr, objs); return; }
       if (document.body.classList.contains('touch')) { this.pick(ptr, objs); return; }
-      if (ptr.rightButtonDown()) { this.pick(ptr, objs); return; }
+      // the right button is your hands: pick, harvest, climb, work a gate, open the pot — and when
+      // there is none of that under the cursor, look the thing over instead
+      if (ptr.rightButtonDown()) {
+        if (this.screen === 'playing' && this.handsAt(World.toTile(ptr.worldX, ptr.worldY))) return;
+        this.pick(ptr, objs);
+        return;
+      }
       if (this.screen !== 'playing') return;
       // left click: face the cursor and use the tool there
       const dx = ptr.worldX - this.player.x, dy = ptr.worldY - this.player.y;
@@ -729,7 +736,7 @@ export class VillageScene extends SimScene {
     if ((tool === 'sword' && this.player.weapons.melee < 0) || (tool === 'bow' && this.player.weapons.bow < 0)) return 'Equip a weapon first';
     return tool === 'gnomehouse' && !this.gnomesFound ? 'You have never seen how a toadstool cottage is built' : null;
   }
-  validateTool(): void { if (this.toolLocked(this.player.tool)) { this.player.tool = 'hands'; this.player.swing = null; } }
+  validateTool(): void { if (this.toolLocked(this.player.tool)) { this.player.tool = 'sword'; this.player.swing = null; } }
   equipped(slot: EquipmentSlot): Gear | null {
     const pl=this.player;
     if(slot==='melee'||slot==='bow') return pl.weapons[slot]<0?null:{kind:'weapon',slot,tier:pl.weapons[slot]};
@@ -1004,6 +1011,12 @@ export class VillageScene extends SimScene {
     this.fx.push({ kind: 'deposit', x: c.tx * TILE, y: (b.ty + BUILDINGS[b.kind].h) * TILE - 6, text: `+${foodCount(r.makes, r.dish)}`, colour: FOODS[r.dish].colour });
     this.event('food', `${FOODS[r.dish].name} in the pot — ${r.makes} servings, ready to ladle out.`, true);
     return true;
+  }
+  /** Is there a bowl standing in the pot for someone? */
+  potHasServings(b = this.world.cookpot): boolean {
+    if (!b || b.ruined) return false;
+    const made = this.potServings(b);
+    return DISHES.some((d) => (made[d] ?? 0) >= 1);
   }
   /** The grown gnomes standing near enough the pot to be handed a bowl. */
   gnomesAtPot(b = this.world.cookpot): Villager[] {
@@ -2729,8 +2742,7 @@ export class VillageScene extends SimScene {
     if (this.interior.active) { this.interior.act(); return; }
     const pl = this.player;
     if (pl.busy > 0) return;
-    if (pl.tool === 'hands' && this.checkNearby()) return;
-    if (pl.elevated && pl.tool !== 'bow' && pl.tool !== 'sword' && pl.tool !== 'hands') { this.event('info', 'Use the stairs to return to ground level first.'); return; }
+    if (pl.elevated && pl.tool !== 'bow' && pl.tool !== 'sword') { this.event('info', 'Use the stairs to return to ground level first.'); return; }
     const { tx, ty } = this.target;
     const t = this.world.get(tx, ty);
     if (pl.tool !== 'sword') this.workOn(tx, ty); // acting elsewhere abandons a half-done flatten / upgrade
@@ -2809,26 +2821,68 @@ export class VillageScene extends SimScene {
         } else if (t?.kind === 'sapling') this.world.set(tx, ty, 'grass'); // clear the stump
         this.fx.push({ kind: 'tool', tool: 'axe', tx, ty });
         return;
-      case 'hands':
-        if (t?.kind === 'cookpot') { this.openCooking(t.building ?? this.world.cookpot ?? null); return; }
-        if (t && this.isRipe(t)) {
-          const kind = t.food ?? 'wheat', why = this.loadProblem('food', kind, this.cropYieldOf(kind));
-          if (why) { this.event('food', why + '.'); return; }
-          this.world.set(tx, ty, 'tilled'); this.player.pickUp('food', this.cropYieldOf(kind), kind); this.fx.push({ kind: 'tool', tool: 'seed', tx, ty });
-        } else if (t && WILD_FOOD[t.kind]) {
-          // foraging: a ripe bush or patch gives its yield and starts regrowing
-          const kind = WILD_FOOD[t.kind]!;
-          if (!this.wildRipe(t)) { this.event('food', `Nothing to pick yet — ${FOODS[kind].name.toLowerCase()} in ${this.regrowDays(kind) - t.stage} day${this.regrowDays(kind) - t.stage === 1 ? '' : 's'}`); return; }
-          const why = this.loadProblem('food', kind);
-          if (why) { this.event('food', why + '.'); return; }
-          const got = this.pickWild(tx, ty, Math.min(this.wildLeft(t), pl.roomFor('food', kind)));
-          this.player.pickUp('food', got, kind); this.fx.push({ kind: 'tool', tool: 'seed', tx, ty });
-        }
-        return;
     }
   }
 
+  /**
+   * What your two hands do, on whatever you pointed at: open the great pot, take a ripe crop, pick a
+   * wild plant, climb a stair, work a gate. There is no HANDS tool any more — the right button does all
+   * of it whatever you are holding, and falls back to looking the thing over when there is nothing to do.
+   * Returns true when it did something.
+   */
+  handsAt(q: TilePos): boolean {
+    if (this.screen !== 'playing' || this.interior.active) return false;
+    const pl = this.player;
+    if (pl.busy > 0) return false;
+    // out of arm's reach it is not your hands' business
+    if (pl.dist(World.center(q.tx, q.ty)) > ITEM.reach + TILE) return false;
+    if (this.checkNearby(q)) return true; // stairs and gates first: they are what you are standing on
+    const t = this.world.get(q.tx, q.ty);
+    if (!t || pl.elevated) return false;
+    if (t.kind === 'cookpot') { this.openCooking(t.building ?? this.world.cookpot ?? null); return true; }
+    if (this.isRipe(t)) {
+      const kind = t.food ?? 'wheat', why = this.loadProblem('food', kind, this.cropYieldOf(kind));
+      if (why) { this.event('food', why + '.'); return true; }
+      this.world.set(q.tx, q.ty, 'tilled'); pl.pickUp('food', this.cropYieldOf(kind), kind);
+      this.fx.push({ kind: 'tool', tool: 'seed', tx: q.tx, ty: q.ty });
+      return true;
+    }
+    if (WILD_FOOD[t.kind]) {
+      // foraging: a ripe bush or patch gives its yield and starts regrowing
+      const kind = WILD_FOOD[t.kind]!;
+      if (!this.wildRipe(t)) { this.event('food', `Nothing to pick yet — ${FOODS[kind].name.toLowerCase()} in ${this.regrowDays(kind) - t.stage} day${this.regrowDays(kind) - t.stage === 1 ? '' : 's'}`); return true; }
+      const why = this.loadProblem('food', kind);
+      if (why) { this.event('food', why + '.'); return true; }
+      const got = this.pickWild(q.tx, q.ty, Math.min(this.wildLeft(t), pl.roomFor('food', kind)));
+      pl.pickUp('food', got, kind);
+      this.fx.push({ kind: 'tool', tool: 'seed', tx: q.tx, ty: q.ty });
+      return true;
+    }
+    return false;
+  }
+
   /** What the tool would do right now, as "E: verb" (or a reason it won't). */
+  /**
+   * What your hands would do on the pointed tile, for the hint line — the right button's half of it,
+   * shown next to whatever the held tool offers. Null when there is nothing there to handle.
+   */
+  handsHint(q: TilePos = this.target): string | null {
+    const pl = this.player, t = this.world.get(q.tx, q.ty);
+    if (!t) return null;
+    if (t.defense?.kind === 'stairs' || this.world.get(pl.tile.tx, pl.tile.ty)?.kind === 'stairs') return `${pl.elevated ? 'descend' : 'climb'} stairs`;
+    if (pl.elevated) return null;
+    if (t.defense?.kind === 'gate') return `${t.defense.open ? 'close' : 'open'} gate`;
+    if (t.kind === 'cookpot') return this.cookHint(t.building ?? this.world.cookpot!);
+    if (t.kind === 'crop') {
+      const fk = t.food ?? 'wheat', why = this.loadProblem('food', fk, this.cropYieldOf(fk));
+      return this.isRipe(t) ? (why ?? `harvest ${FOODS[fk].name.toLowerCase()} (${this.cropYieldOf(fk)})`) : `${FOODS[fk].name.toLowerCase()} growing (${t.stage}/${this.cropDaysOf(t)} days)`;
+    }
+    if (WILD_FOOD[t.kind]) {
+      const fk = WILD_FOOD[t.kind]!, why = this.loadProblem('food', fk);
+      return this.wildRipe(t) ? (why ?? `pick ${FOODS[fk].name.toLowerCase()} (${this.wildLeft(t)} · ${FOODS[fk].blurb})`) : `${FOODS[fk].name.toLowerCase()} picked — back in ${this.regrowDays(fk) - t.stage} day${this.regrowDays(fk) - t.stage === 1 ? '' : 's'}`;
+    }
+    return null;
+  }
   /** "carrying 8 wood — walk up to the woodyard to unload", shown while the head holds something. */
   carryHint(): string | null {
     return this.player.pack.bulk().length ? 'Pack supplies: food → granary · wood/scrap → woodyard · G throws largest stack' : null;
@@ -2909,18 +2963,6 @@ export class VillageScene extends SimScene {
         if (kind === 'tree') { const why = this.loadProblem('wood', undefined, p.playerTreeYield); return why ?? `E: clear ${this.isOldGrowth(t!) ? 'old growth' : 'young tree'}${this.world.hiveAt(tg.tx, tg.ty) ? ' — A HIVE HANGS HERE' : ''} (${t!.work}/3 · ${p.playerTreeYield} wood for you; a woodcutter gets ${this.treeYield(t!)}) · ${pl.carriedOf('wood')} wood in pack`; }
         if (kind === 'sapling') return t!.stage < 2 ? 'E: clear the stump' : 'E: cut down the sapling';
         return 'axe: face a tree';
-      case 'hands':
-        if (t?.kind === 'cookpot') return `E: ${this.cookHint(t.building ?? this.world.cookpot!)}`;
-        if (t?.defense?.kind === 'stairs' || this.world.get(pl.tile.tx, pl.tile.ty)?.kind === 'stairs') return `E: ${pl.elevated ? 'descend' : 'climb'} stairs`;
-        if (t?.defense?.kind === 'gate') return `E: ${t.defense.open ? 'close' : 'open'} gate`;
-        if (kind === 'crop') { const fk = t!.food ?? 'wheat', why = this.loadProblem('food', fk, this.cropYieldOf(fk)); return this.isRipe(t!) ? (why ?? `E: harvest ${FOODS[fk].name.toLowerCase()} (${this.cropYieldOf(fk)}) · ${pl.carriedOf('food',fk)} in pack`) : `${FOODS[fk].name.toLowerCase()} growing (${t!.stage}/${this.cropDaysOf(t!)} days)`; }
-        if (kind && WILD_FOOD[kind]) { const fk = WILD_FOOD[kind]!, why = this.loadProblem('food', fk); return this.wildRipe(t!) ? (why ?? `E: pick ${FOODS[fk].name.toLowerCase()} (${this.wildLeft(t!)} · ${FOODS[fk].blurb})`) : `${FOODS[fk].name.toLowerCase()} picked — back in ${this.regrowDays(fk) - t!.stage} day${this.regrowDays(fk) - t!.stage === 1 ? '' : 's'}`; }
-        if (kind === 'grass') return t!.tall ? `long grass — slows everyone to ${Math.round(p.grassSlow * 100)}% · ${need('sword')} to mow it` : `grass — ${need('hoe')} to till`;
-        if (kind === 'tilled') return `tilled — ${need('seeds')}`;
-        if (kind === 'tree') return `tree — ${need('axe')}`;
-        if (kind === 'sapling') return `sapling — a tree in ${this.saplingDays(tg.tx, tg.ty) - t!.stage} days`;
-        { const on = this.itemsBlurb(tg.tx, tg.ty); if (on) return `${on} on the ground — walk over it to pick it up`; }
-        return 'hands: harvest ripe crops, pick berries and mushrooms; walk over dropped things to pick them up';
     }
   }
 
