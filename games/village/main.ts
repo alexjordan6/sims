@@ -273,6 +273,8 @@ export class VillageScene extends SimScene {
     this.boss = null;
     this.ogre = this.world.lair ? this.spawn(new Ogre(this.world.lair)) : null;
     this.sounders = []; this.meatClaims.clear();
+    this.thicketRng = new Rng(this.seed ^ 0x7b1c0de);
+    this.thornT = 0; this.thornWarned = -Infinity;
     this.spawnSounders();
     this.spawnTrolls();
     this.spawnHives();
@@ -1012,6 +1014,51 @@ export class VillageScene extends SimScene {
     this.event('food', `${FOODS[r.dish].name} in the pot — ${r.makes} servings, ready to ladle out.`, true);
     return true;
   }
+  /** the thicket's own random stream (see reset) */
+  private thicketRng = new Rng(1);
+  /** seconds since the thorns last bit, and when the head was last told why it hurts */
+  private thornT = 0;
+  private thornWarned = -Infinity;
+  /**
+   * The thorns: anyone standing in thicket bleeds a little every quarter-second — you, villagers and raiders
+   * alike. Taken off `hp` directly (like hunger), so armor does not turn brambles and a shield does not
+   * block them. Villagers and raiders path round it when there is a way round (see THICKET_PATH_COST).
+   */
+  tickThorns(dt: number): void {
+    if (p.thicketDps <= 0 || !this.world.thicketCount) return;
+    this.thornT += dt;
+    if (this.thornT < 0.25) return;
+    const bite = p.thicketDps * this.thornT;
+    this.thornT = 0;
+    for (const a of this.agents) {
+      if (!(a instanceof Mover) || a.dead || a.hidden || a.elevated || a instanceof Arrow || a instanceof Bolt || a instanceof Swarm) continue;
+      if (a instanceof Villager && a.carriedBy) continue;
+      if (!this.world.thicketAt(a.x, a.y)) continue;
+      if (a instanceof Player && p.godMode) continue;
+      a.hp -= bite; a.hurtT = 0;
+      if (a.hp > 0) continue;
+      a.hp = 0; a.dead = true;
+      if (a instanceof Player) this.event('death', 'You bled out in the thicket.', true);
+      else if (a instanceof Villager) this.event('death', `${a.name} was caught in the thicket and bled out.`, true);
+    }
+    const pl = this.player;
+    if (!pl.dead && this.world.thicketAt(pl.x, pl.y) && this.simTime - this.thornWarned > 20) {
+      this.thornWarned = this.simTime;
+      this.event('info', 'Thorns! The thicket tears at you and drags at your feet — cut your way out with the axe or sword.', true);
+    }
+  }
+  /**
+   * Dawn: the thicket creeps. It spares the great pot's doorstep and every building's, so nothing is
+   * walled in overnight — everything else that is open ground, field or forage is fair game.
+   */
+  creepThicket(): void {
+    const doors = new Set(this.world.buildings.map((b) => { const d = doorstep(b); return d.ty * this.world.cols + d.tx; }));
+    const took = this.world.spreadThicket(this.thicketRng, p.thicketSpread, (tx, ty) => doors.has(ty * this.world.cols + tx));
+    if (!took.length) return;
+    // what the village actually lost is what makes the warning worth reading
+    const near = took.filter((q) => Math.hypot(q.tx - COLS / 2, q.ty - ROWS / 2) < 26).length;
+    if (near) this.event('info', `The thicket crept over ${near} tile${near === 1 ? '' : 's'} near the village in the night. Cut it back with the axe before it takes the fields.`, true);
+  }
   /** Is there a bowl standing in the pot for someone? */
   potHasServings(b = this.world.cookpot): boolean {
     if (!b || b.ruined) return false;
@@ -1302,6 +1349,7 @@ export class VillageScene extends SimScene {
         if (lying) html = `<div class="t">On the ground</div><div class="d">${lying} · walk over it to pick it up</div>`;
         else if (t.tall) html = `<div class="t">Long grass</div><div class="d">slows everyone to ${Math.round(p.grassSlow * 100)}% — raiders too · swing the sword to mow it</div>`;
         break;
+      case 'thicket': html = `<div class="t">Thicket</div><div class="d">thorns: ${p.thicketDps} HP a second and ${Math.round(p.thicketSlow * 100)}% pace to anyone in it — it creeps over fields and forage every night · the axe clears it in one blow, the sword in two</div>`; break;
       case 'tilled': html = `<div class="t">Tilled soil</div><div class="d">${t.food ? `farmers will replant ${FOODS[t.food].name.toLowerCase()}; seeds sow something else` : 'plant with seeds, or a farmer will'}</div>`; break;
       case 'bush': case 'mushroom': case 'hazel': case 'garlic': case 'burdock': { const fk = WILD_FOOD[t.kind]!; html = `<div class="t">${FOODS[fk].name}${this.wildRipe(t) ? '' : ' (picked)'}</div><div class="d">${this.wildRipe(t) ? `ripe · ${this.wildLeft(t)} left · pick by hand, or the gnomes will` : `regrows in ${this.regrowDays(fk) - t.stage} days`} · ${FOODS[fk].blurb}</div>`; break; }
       case 'tree': {
@@ -1345,6 +1393,7 @@ export class VillageScene extends SimScene {
     this.tickBirths();
     this.world.tickItems(dt);
     this.potAbsorb();
+    this.tickThorns(dt);
     this.validateTool();
     this.pickUpItems(dt);
     this.tidySelection();
@@ -1392,6 +1441,7 @@ export class VillageScene extends SimScene {
     else this.event('food', 'You slept badly on an empty belly.', true);
     // crops grow
     this.world.tiles.forEach((t, i) => { if (t.kind === 'crop') { t.stage++; this.world.dirty.add(i); } });
+    this.creepThicket();
     // stumps and saplings grow back; trees seed their neighbours
     const seeds: { tx: number; ty: number }[] = [];
     this.world.tiles.forEach((t, i) => {
@@ -2819,6 +2869,10 @@ export class VillageScene extends SimScene {
           if (++t.work >= this.workHits(3)) { this.knockDownHive(tx, ty, this.player); this.world.set(tx, ty, 'sapling'); this.player.pickUp('wood', p.playerTreeYield); }
           else this.world.dirty.add(ty * COLS + tx);
         } else if (t?.kind === 'sapling') this.world.set(tx, ty, 'grass'); // clear the stump
+        else if (t?.kind === 'thicket') {
+          // one blow clears a tile; the canes go in the pack as a little firewood
+          if (this.world.cutThicket(tx, ty, 1) && p.thicketWood > 0 && !this.loadProblem('wood', undefined, p.thicketWood)) this.player.pickUp('wood', p.thicketWood);
+        }
         this.fx.push({ kind: 'tool', tool: 'axe', tx, ty });
         return;
     }
@@ -2913,6 +2967,7 @@ export class VillageScene extends SimScene {
         if (game?.wild && !game.lurking) return game instanceof Boar
           ? `E: strike the ${game.name.toLowerCase()} — it and its sounder will charge you (${game.meat} meat)`
           : `E: attack the ${game.name.toLowerCase()} (${game instanceof Troll ? game.meat : 0} meat)`;
+        if (t?.kind === 'thicket' || this.world.thicketAt(pl.x, pl.y)) return 'E: hack at the thicket (two swings a tile — the axe clears it in one)';
         return t?.tall ? 'E: mow the long grass (a swing clears its arc)' : 'E: swing sword';
       }
       case 'wand': {
@@ -2962,6 +3017,7 @@ export class VillageScene extends SimScene {
       case 'axe':
         if (kind === 'tree') { const why = this.loadProblem('wood', undefined, p.playerTreeYield); return why ?? `E: clear ${this.isOldGrowth(t!) ? 'old growth' : 'young tree'}${this.world.hiveAt(tg.tx, tg.ty) ? ' — A HIVE HANGS HERE' : ''} (${t!.work}/3 · ${p.playerTreeYield} wood for you; a woodcutter gets ${this.treeYield(t!)}) · ${pl.carriedOf('wood')} wood in pack`; }
         if (kind === 'sapling') return t!.stage < 2 ? 'E: clear the stump' : 'E: cut down the sapling';
+        if (kind === 'thicket') return `E: hack out the thicket (one blow · ${p.thicketWood} wood)`;
         return 'axe: face a tree';
     }
   }

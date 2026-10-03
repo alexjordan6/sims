@@ -14,13 +14,14 @@ const scene = () => (window as unknown as { game: { scene: { scenes: VillageScen
 const output = document.getElementById('test-results')!, summary = document.getElementById('test-summary')!;
 const assert = (ok: unknown, message: string) => { if (!ok) throw new Error(message); output.textContent += `PASS ${message}\n`; };
 /** `wild` keeps the boars, `trolls` keeps the trolls, `hives` keeps the beehives — both wander into timed checks otherwise, and a troll fights back. */
-function fresh(wild = false, trolls = false, hives = false, skulks = false): VillageScene {
+function fresh(wild = false, trolls = false, hives = false, skulks = false, thickets = false): VillageScene {
   const s = scene(); s.reset(42); s.screen = 'playing'; s.paused = true; s.wood = 150; s.food = 150; s.fx.length = 0;
   s.world.mowAll(); // mown: the checks below time walks; the long grass checks raise it where they need it (mowAll keeps world.tallCount honest)
   if (!wild) { for (const a of s.agents) if (a instanceof Boar) a.dead = true; s.sounders = []; } // no stray sounder wanders into a check
   if (!trolls) for (const a of s.agents) if (a instanceof Troll) a.dead = true; // nor a troll, which would fight back
   if (!hives) s.world.hives.clear(); // nor a hive over a check that walks somebody past it
   if (!skulks) for (const a of s.agents) if (a instanceof Skulk) a.dead = true; // nor a skulk that crept out during an earlier check
+  if (!thickets) for (const q of s.world.find((t) => t.kind === 'thicket')) s.world.set(q.tx, q.ty, 'grass'); // nor thorns under a walk
   s.removeDead();
   (s as unknown as { ui: { showScreen(v: null): void } }).ui.showScreen(null);
   document.querySelector('.ctrl-panel')?.classList.remove('open');
@@ -1003,6 +1004,52 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
         && grown.filter((x) => x.role === 'soldier').length === p.startWarriors + v0.mods.startSoldiers,
         `a village opens ${p.startFarmers} farmer, ${p.startWoodcutters} woodcutter, ${p.startWarriors} warriors (${CALLINGS.map((c) => `${c} ${grown.filter((x) => x.role === c).length}`).join(', ')})`);
       assert(CALLINGS.every((c) => v0.callingFilled(c) <= v0.callingCap(c)), 'and none of them is over its cap');
+    }
+    // ---- thicket: thorns that slow, hurt and spread, and an axe to cut them back ------------
+    {
+      const w0 = fresh(false, false, false, false, true);
+      assert(w0.world.thicketCount > 0 && w0.world.thicketCount === [...w0.world.find((t) => t.kind === 'thicket')].length, `the wild grows thicket, and the census keeps up (${w0.world.thicketCount})`);
+      const hx = COLS / 2, hy = ROWS / 2;
+      assert(![...w0.world.find((t) => t.kind === 'thicket')].some((q) => Math.abs(q.tx - hx) < 14 && Math.abs(q.ty - hy) < 10), 'the village clearing starts clear of it');
+      assert([...w0.world.find((t) => t.kind === 'thicket')].some((q) => Math.hypot(q.tx - hx, q.ty - hy) < 32), 'but some of it is near enough to come creeping in');
+      s = fresh(); clearing(s); s.agents = [s.player];
+      s.world.set(126, 100, 'thicket');
+      assert(!s.world.isBlocked(126, 100) && s.world.slowAt(World.center(126, 100).x, World.center(126, 100).y) === p.thicketSlow, 'thicket can be walked into, but it drags');
+      // the thorns
+      const hpWas = s.player.hp; Object.assign(s.player, World.center(126, 100));
+      for (let i = 0; i < 60; i++) s.tickThorns(1 / 60);
+      assert(s.player.hp < hpWas && Math.abs((hpWas - s.player.hp) - p.thicketDps) < p.thicketDps * 0.3, `a second in it costs about ${p.thicketDps} HP (${(hpWas - s.player.hp).toFixed(1)})`);
+      Object.assign(s.player, World.center(124, 100)); s.player.hp = s.player.maxHp;
+      for (let i = 0; i < 60; i++) s.tickThorns(1 / 60);
+      assert(s.player.hp === s.player.maxHp, 'out of it, nothing');
+      // villagers go round it when there is a way round
+      for (let y = 98; y <= 102; y++) s.world.set(126, y, 'thicket'); // a detour of 6 beats one thorny step at 9
+      const round = s.world.bfs({ tx: 123, ty: 100 }, { tx: 129, ty: 100 });
+      assert(round.length > 0 && !round.some((q) => s.world.get(q.tx, q.ty)!.kind === 'thicket'), `a path goes round the thicket rather than through it (${round.length} steps)`);
+      for (let y = 90; y <= 110; y++) s.world.set(126, y, 'thicket');
+      const through = s.world.bfs({ tx: 123, ty: 100 }, { tx: 129, ty: 100 });
+      assert(through.length > 0 && through.some((q) => s.world.get(q.tx, q.ty)!.kind === 'thicket'), 'and through it only when there is no other way');
+      // the axe clears a tile in one blow and keeps the canes; the sword takes two swings
+      s.world.set(126, 100, 'thicket'); Object.assign(s.player, World.center(125, 100)); s.player.facing = { x: 1, y: 0 };
+      s.player.tool = 'axe'; s.hoverTile = { tx: 126, ty: 100 }; clearBulk(s);
+      const woodWas = s.player.carriedOf('wood'); s.interact();
+      assert(s.world.get(126, 100)!.kind === 'grass' && s.player.carriedOf('wood') === woodWas + p.thicketWood, `one axe blow clears it and leaves ${p.thicketWood} wood in the pack`);
+      s.world.set(127, 100, 'thicket');
+      assert(!s.world.cutThicket(127, 100, 2) && s.world.get(127, 100)!.kind === 'thicket', 'one sword swing only half-cuts a tile');
+      assert(s.world.cutThicket(127, 100, 2) && s.world.get(127, 100)!.kind === 'grass', 'the second clears it');
+      // it creeps: over grass, fields and forage, never over a doorstep, a tree or a building
+      for (const q of s.world.find((t) => t.kind === 'thicket')) s.world.set(q.tx, q.ty, 'grass');
+      s.world.set(130, 100, 'thicket');
+      s.world.set(131, 100, 'crop'); s.world.set(129, 100, 'bush'); s.world.set(130, 99, 'tree'); s.world.set(130, 101, 'grass');
+      const spareCrop = (tx: number, ty: number) => tx === 131 && ty === 100;
+      // one roll a tile a day, in one random direction: over a few dawns a lone tile takes a neighbour
+      let took = s.world.spreadThicket(new Rng(3), 1, spareCrop);
+      for (let i = 0; i < 8 && !took.length; i++) took = s.world.spreadThicket(new Rng(40 + i), 1, spareCrop);
+      assert(took.length === 1 && s.world.get(130, 99)!.kind === 'tree', `a day's creep takes one neighbour, and never a tree (${JSON.stringify(took)})`);
+      for (let i = 0; i < 30; i++) s.world.spreadThicket(new Rng(10 + i), 1, spareCrop);
+      assert(s.world.get(131, 100)!.kind === 'crop', 'a spared tile is never taken');
+      assert(s.world.get(129, 100)!.kind === 'thicket' || s.world.get(130, 101)!.kind === 'thicket', 'forage and open ground go under it');
+      for (const q of s.world.find((t) => t.kind === 'thicket')) s.world.set(q.tx, q.ty, 'grass');
     }
     // ---- the gnome start ------------------------------------------------------------------
     const wasGnome = p.gnomeStart, wasPeace = p.peaceful;

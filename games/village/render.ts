@@ -717,6 +717,7 @@ function tileFrames(t: Tile, cropDays: number, dayTime: number, oldDays: number,
     }
     case 'tilled': return { ground: F + FLORA.tilled, object: EMPTY };
     case 'crop': return { ground: F + FLORA.tilled, object: F + cropFrames(t)[cropPhase(t, cropDays, dayTime)] };
+    case 'thicket': return { ground: grass, object: F + FLORA.thicket[(t.v + t.work) % 3] }; // a hacked-at tile looks hacked at
     case 'bush': return { ground: grass, object: F + FLORA.bush[wildRipe ? 1 : 0] };
     case 'mushroom': return { ground: grass, object: F + FLORA.mushroom[wildRipe ? 1 : 0] };
     case 'hazel': return { ground: grass, object: F + FLORA.hazel[wildRipe ? 1 : 0] };

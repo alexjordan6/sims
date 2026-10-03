@@ -1469,6 +1469,7 @@ export class Player extends Mover {
         if (!spin && (cx * dx + cy * dy) / (d || 1) < SWING.halfAngleCos) continue;
       }
       if (s.world.cutGrass(tx, ty)) s.fx.push({ kind: 'cut', x: c.x, y: c.y });
+      else if (s.world.get(tx, ty)?.kind === 'thicket') { s.world.cutThicket(tx, ty, 2); s.fx.push({ kind: 'cut', x: c.x, y: c.y }); } // two swings to a tile
     }
   }
 

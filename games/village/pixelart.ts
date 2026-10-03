@@ -670,7 +670,9 @@ export const FLORA = {
   tallGrass: [73, 74, 75] as const,
   /** a beehive hanging in a canopy */
   hive: 97,
-  count: 98,
+  /** thicket: brambles over the whole tile, three variants */
+  thicket: [98, 99, 100] as const,
+  count: 101,
 } as const;
 
 /** Filled ellipse, pixel by pixel. */
@@ -794,6 +796,7 @@ export function ensureFlora(scene: Phaser.Scene): void {
   for (let i = 0; i < 3; i++) drawTallGrass(ctx, at(FLORA.tallGrass[i]), i);
   for (let i = 0; i < 3; i++) drawMotes(ctx, at(FLORA.motes[i]), i);
   drawScrap(ctx, at(FLORA.scrap));
+  for (let i = 0; i < 3; i++) drawThicket(ctx, at(FLORA.thicket[i]), i);
   tex.refresh();
   for (let i = 0; i < FLORA.count; i++) tex.add(i, 0, at(i), 0, 16, 16); // frames, so items and fx can draw one tile as an image
 }
@@ -814,6 +817,26 @@ function drawMotes(ctx: Ctx, ox: number, v: number): void {
   for (let i = 0; i < 3; i++) px(ctx, ox + 5 + i, bob + i, '#fffbe6', 2, 1);
   for (let i = 0; i < 3; i++) px(ctx, ox + 11 - i, bob + i, '#fffbe6', 2, 1);
   for (let i = 0; i < 3; i++) { px(ctx, ox + 5 + i, bob + i - 1, '#f0c040', 2, 1); px(ctx, ox + 11 - i, bob + i - 1, '#f0c040', 2, 1); }
+}
+
+/** Thicket: a knot of dark bramble canes over the whole tile, hooked with pale thorns and a few red hips. */
+function drawThicket(ctx: Ctx, ox: number, v: number): void {
+  px(ctx, ox, 1, '#24361c', 16, 15);
+  for (let i = 0; i < 7; i++) {
+    const x = (i * 5 + v * 3) % 15, y = 2 + ((i * 7 + v * 2) % 12);
+    blob(ctx, ox + x + 1, y, 3, 2.2, i % 2 ? '#2f4a22' : '#3b5a28');
+  }
+  // canes arching across, and thorns on them
+  for (let i = 0; i < 4; i++) {
+    const y0 = 3 + i * 3 + (v % 2);
+    for (let x = 0; x < 16; x++) {
+      const y = y0 + Math.round(Math.sin((x + i * 4 + v) * 0.6) * 1.5);
+      if (y < 1 || y > 15) continue;
+      px(ctx, ox + x, y, '#5a3a24', 1, 1);
+      if ((x + i + v) % 4 === 0) px(ctx, ox + x, y - 1, '#e8dcc0', 1, 1);
+    }
+  }
+  for (const [x, y] of [[3 + v, 5], [11 - v, 9], [7, 13 - v]] as const) px(ctx, ox + x, y, '#b8322a', 1, 1);
 }
 
 /** Long grass: a dense stand of blades over dark ground, each variant leaning and tufted differently. */

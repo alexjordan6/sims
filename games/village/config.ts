@@ -95,6 +95,11 @@ export const p = live(
     dietMul: [D.dietMul, 0, 3, 0.25, 'Scales every diet bonus (wheat +25% HP, carrots +15% speed, tomatoes +25% work, berries +25% damage at ×1).'],
     wildRegrowMul: [D.wildRegrowMul, 0.25, 4, 0.25, 'Scales how long picked bushes and mushrooms take to regrow (3 / 4 days at ×1).'],
     wildSprout: [D.wildSprout, 0, 0.1, 0.005, 'Daily chance each old-growth tree sprouts a berry bush or mushrooms on a grass tile beside it.'],
+    thicketSlow: [D.thicketSlow, 0.05, 1, 0.05, 'Speed multiplier for anyone forcing through thicket — you, villagers and raiders alike.'],
+    thicketDps: [D.thicketDps, 0, 20, 0.5, 'HP a second the thorns take from anyone standing in thicket. Villagers and raiders path round it when they can.'],
+    thicketSpread: [D.thicketSpread, 0, 0.5, 0.01, 'Daily chance each thicket tile creeps onto a neighbouring patch of grass, field or forage. Cut it back or it takes the village.'],
+    thicketPatches: [D.thicketPatches, 0, 60, 1, 'Thicket patches seeded at worldgen (a few of them close enough to reach the village). Takes at NEW VILLAGE.'],
+    thicketWood: [D.thicketWood, 0, 5, 1, 'Wood the axe gets for clearing one tile of thicket.'],
     wildDensity: [D.wildDensity, 0.25, 6, 0.25, 'Scales how thickly wild food is scattered at worldgen — berries, mushrooms, hazel, garlic and burdock all together. Takes at NEW VILLAGE.'],
   }, 'lifecycle'),
   params({

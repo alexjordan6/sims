@@ -7,7 +7,11 @@ import type { Gear } from './pack';
 export type DefenseKind = 'wall' | 'gate' | 'stairs';
 export interface Defense extends TilePos { kind: DefenseKind; hp: number; maxHp: number; open: boolean }
 /** 'bush', 'mushroom', 'hazel', 'garlic' and 'burdock' are wild food: they stay put, get picked (by hand, or unit by unit by gnomes) and regrow (see Tile.stage / Tile.left) */
-export type TileKind = 'grass' | 'tree' | 'sapling' | 'tilled' | 'crop' | 'bush' | 'mushroom' | 'hazel' | 'garlic' | 'burdock' | BuildingKind | DefenseKind;
+export type TileKind = 'grass' | 'tree' | 'sapling' | 'tilled' | 'crop' | 'bush' | 'mushroom' | 'hazel' | 'garlic' | 'burdock' | 'thicket' | BuildingKind | DefenseKind;
+/** Thicket: walkable, but it slows and tears at whoever is in it, and costs this many steps to path through (see bfs). */
+export const THICKET_PATH_COST = 9;
+/** What thicket creeps over: open ground, fields and forage. Never trees, buildings or defenses. */
+export const THICKET_PREY: ReadonlySet<TileKind> = new Set<TileKind>(['grass', 'tilled', 'crop', 'sapling', 'bush', 'mushroom', 'hazel', 'garlic', 'burdock']);
 
 /** Footprint per building kind; (tx, ty) is the top-left, the door sits on the bottom row at `door`. */
 export const BUILDINGS: Record<BuildingKind, { w: number; h: number; door: number; name: string }> = {
@@ -118,7 +122,7 @@ export interface Hive {
 }
 
 export const BLOCKING: Record<TileKind, boolean> = {
-  grass: false, tilled: false, crop: false, sapling: false, bush: false, mushroom: false, hazel: false, garlic: false, burdock: false, tree: true, house: true, barracks: true, granary: true, woodyard: true,
+  grass: false, tilled: false, crop: false, sapling: false, bush: false, mushroom: false, hazel: false, garlic: false, burdock: false, thicket: false, tree: true, house: true, barracks: true, granary: true, woodyard: true,
   tavern: true, lair: true, gnomehouse: true, cookpot: true, wall: true, gate: false, stairs: false,
 };
 
@@ -187,7 +191,9 @@ export class World {
     // paths only go stale when walkability changes: tilling, planting and harvesting don't re-path anyone
     // (fortifications always count: a closed gate blocks enemies even though the tile kind doesn't)
     const fort = (k: TileKind) => k === 'wall' || k === 'gate' || k === 'stairs';
-    if (BLOCKING[t.kind] !== BLOCKING[kind] || fort(t.kind) || fort(kind)) this.revision++;
+    if (BLOCKING[t.kind] !== BLOCKING[kind] || fort(t.kind) || fort(kind) || t.kind === 'thicket' || kind === 'thicket') this.revision++;
+    if (t.kind === 'thicket') this.thicketCount--;
+    if (kind === 'thicket') this.thicketCount++;
     t.kind = kind; t.stage = 0; t.work = 0; t.building = undefined; t.part = undefined; t.tall = undefined; t.v = (t.v + 31) % 97;
     if (!CROP_GROUND.has(kind)) t.food = undefined;
     this.dirty.add(i);
@@ -212,8 +218,28 @@ export class World {
     const t = this.get(Math.floor(x / TILE), Math.floor(y / TILE));
     return t?.kind === 'grass' && !!t.tall;
   }
-  /** Speed multiplier for a body at a pixel position: p.grassSlow in long grass, 1 anywhere else. */
-  slowAt(x: number, y: number): number { return this.tallAt(x, y) ? p.grassSlow : 1; }
+  /** Speed multiplier for a body at a pixel position: thicket drags hardest, long grass less, open ground not at all. */
+  slowAt(x: number, y: number): number {
+    const t = this.get(Math.floor(x / TILE), Math.floor(y / TILE));
+    if (t?.kind === 'thicket') return p.thicketSlow;
+    return t?.kind === 'grass' && t.tall ? p.grassSlow : 1;
+  }
+  /** Is the tile under a pixel position thicket? */
+  thicketAt(x: number, y: number): boolean { return this.get(Math.floor(x / TILE), Math.floor(y / TILE))?.kind === 'thicket'; }
+  /** thicket tiles on the map, kept in step by set() */
+  thicketCount = 0;
+  /**
+   * Cut at a tile of thicket. `hits` is how many blows clear it (the axe takes one, the sword two):
+   * the work is remembered on the tile, so a second swing finishes what the first began.
+   * Returns true when the tile is cleared to open ground.
+   */
+  cutThicket(tx: number, ty: number, hits: number): boolean {
+    const t = this.get(tx, ty);
+    if (!t || t.kind !== 'thicket') return false;
+    if (++t.work < hits) { this.dirty.add(ty * this.cols + tx); return false; }
+    this.set(tx, ty, 'grass');
+    return true;
+  }
   // ---- items on the ground ------------------------------------------------------------------
   /** Put an item in the world at a pixel position (resting, unless it is launched or hopped afterwards). */
   dropItem(kind: ItemKind, n: number, x: number, y: number, food?: FoodKind, rng?: Rng): Item {
@@ -490,7 +516,7 @@ export class World {
         if (!this.inBounds(nx, ny)) continue;
         const ni = cur + dirs[d];
         if (this.isBlocked(nx, ny, enemy, elevated)) continue;
-        const cost = costs[cur] + 1;
+        const cost = costs[cur] + (this.tiles[ni].kind === 'thicket' ? THICKET_PATH_COST : 1); // thorns: worth a long way round
         if (cost >= costs[ni]) continue;
         costs[ni] = cost;
         prev[ni] = cur;
@@ -674,5 +700,54 @@ export class World {
       if (rng.chance(0.06)) continue;
       t.tall = true; this.tallCount++; this.dirty.add(ty * this.cols + tx);
     }
+    this.growThickets(hx, hy);
+  }
+
+  /**
+   * Thicket patches in the wild, a few of them near enough the village to come creeping in. Out of their
+   * own bag of numbers, and last of all, so no older seeded layout moves.
+   */
+  private growThickets(hx: number, hy: number): void {
+    const rng = new Rng(this.seed ^ 0x7b1c4e7);
+    const patches = Math.round(p.thicketPatches);
+    for (let n = 0, tries = 0; n < patches && tries < patches * 40; tries++) {
+      // the first few close in (15-28 tiles out), the rest anywhere in the wild
+      const close = n < Math.ceil(patches / 4);
+      const a = rng.range(0, Math.PI * 2), r = close ? rng.range(15, 28) : rng.range(30, 90);
+      const cx = Math.round(hx + Math.cos(a) * r), cy = Math.round(hy + Math.sin(a) * r * 0.75);
+      if (!this.inBounds(cx, cy) || !THICKET_PREY.has(this.get(cx, cy)!.kind) || this.get(cx, cy)!.trail) continue;
+      if (Math.abs(cx - hx) < 14 && Math.abs(cy - hy) < 10) continue; // the village clearing starts clear
+      // a blob of 6-18 tiles grown out from the seed, never over a trail
+      const size = rng.int(6, 18), grown: TilePos[] = [{ tx: cx, ty: cy }];
+      this.set(cx, cy, 'thicket');
+      for (let k = 0; k < size * 6 && grown.length < size; k++) {
+        const from = grown[rng.int(0, grown.length - 1)];
+        const [dx, dy] = [[1, 0], [-1, 0], [0, 1], [0, -1]][rng.int(0, 3)];
+        const q = { tx: from.tx + dx, ty: from.ty + dy }, t = this.get(q.tx, q.ty);
+        if (!t || !THICKET_PREY.has(t.kind) || t.trail || t.building || t.defense) continue;
+        if (Math.abs(q.tx - hx) < 14 && Math.abs(q.ty - hy) < 10) continue; // the village clearing starts clear
+        this.set(q.tx, q.ty, 'thicket'); grown.push(q);
+      }
+      n++;
+    }
+  }
+  /**
+   * A day's creep: each thicket tile may take one neighbouring tile of grass, field or forage. Fields
+   * and forage it takes are lost to it, so the village has every reason to keep the axe busy.
+   * `rng` is the scene's own thicket stream, so the creep never shifts births, raids or anything else.
+   */
+  spreadThicket(rng: Rng, chance: number, spared: (tx: number, ty: number) => boolean): TilePos[] {
+    const took: TilePos[] = [];
+    if (chance <= 0 || !this.thicketCount) return took;
+    const from: TilePos[] = [];
+    for (let i = 0; i < this.tiles.length; i++) if (this.tiles[i].kind === 'thicket') from.push({ tx: i % this.cols, ty: (i / this.cols) | 0 });
+    for (const q of from) {
+      if (!rng.chance(chance)) continue;
+      const [dx, dy] = [[1, 0], [-1, 0], [0, 1], [0, -1]][rng.int(0, 3)];
+      const tx = q.tx + dx, ty = q.ty + dy, t = this.get(tx, ty);
+      if (!t || !THICKET_PREY.has(t.kind) || t.building || t.defense || spared(tx, ty)) continue;
+      this.set(tx, ty, 'thicket'); took.push({ tx, ty });
+    }
+    return took;
   }
 }
