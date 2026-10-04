@@ -741,10 +741,10 @@ export function lookFor(m: Mover): Look | null {
   const blade = m.weapons.melee < 0 ? 'none' : m.weapons.melee > 0 ? 'sword' : 'club';
   if (m instanceof Player) return { ...base, skin: 1, hair: 0, hairStyle: 0, body: 'adult', outfit: 'head', held: m.tool === 'sword' ? blade : m.tool === 'bow' && m.weapons.bow >= 0 ? 'bow' : m.tool === 'axe' ? 'axe' : m.tool === 'hoe' ? 'hoe' : m.tool === 'wand' ? 'wand' : 'none' };
   if (m instanceof Villager) {
-    if (m.gnome) return { ...base, body: m.isChild ? 'gnomekid' : 'gnome', outfit: 'gnome', held: m.isAdult ? 'club' : 'none' };
+    if (m.gnome) return { ...base, body: m.isChild ? 'gnomekid' : 'gnome', outfit: 'gnome', held: !m.isAdult ? 'none' : m.role === 'soldier' && m.weapon === 'pike' ? 'pike' : 'club' };
     if (m.role === 'kid' || m.role === 'infant') return { ...base, body: 'kid', outfit: 'kid', held: 'none' };
     if (m.elder) base.hair = 6; // grey
-    const held = m.role === 'farmer' ? 'hoe' : m.role === 'woodcutter' ? 'axe' : m.weapon === 'bow' ? 'bow' : blade;
+    const held = m.role === 'farmer' ? 'hoe' : m.role === 'woodcutter' ? 'axe' : m.weapon === 'bow' ? 'bow' : m.weapon === 'pike' ? 'pike' : blade;
     return { ...base, body: 'adult', outfit: m.role, held };
   }
   if (m instanceof Raider) {

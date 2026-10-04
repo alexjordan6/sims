@@ -267,7 +267,9 @@ export type Role = 'infant' | 'kid' | Calling;
 export type Order = { kind: 'hold'; tx: number; ty: number } | { kind: 'attack'; target: Mover } | { kind: 'follow' };
 
 export class Villager extends Mover {
-  weapon: 'sword' | 'bow' = 'sword';
+  weapon: 'sword' | 'bow' | 'pike' = 'sword';
+  /** a pike thrust in progress: the line it runs along, and how far through the windup it is */
+  private thrust: { t: number; ux: number; uy: number; dmg: number; struck: boolean } | null = null;
   post: TilePos | null = null;
   order: Order | null = null;
   private stairsGoal: TilePos | null = null;
@@ -984,12 +986,14 @@ export class Villager extends Mover {
         }
       }
       if (this.post) { this.setGoal(s, this.post.tx, this.post.ty); this.followPath(dt); this.task = 'holding wall post'; return; }
+      if (this.weapon === 'pike') { this.pikeTick(dt, s, dmg); return; }
       if (this.startAttack(s, this.target, Math.round(dmg), 13, 0.15, 0.45)) return;
       this.setGoal(s, this.target.tile.tx, this.target.tile.ty);
       this.followPath(dt);
       return;
     }
     this.target = null;
+    if (this.thrust && this.thrustTick(dt, s)) return;
     // out of combat they mend, whatever their orders: on patrol, escorting, holding ground or up on the wall.
     // (a cold barracks mends nobody, and the fighting branches above have already returned)
     const regen = s.world.barracks.some((b) => b.warm) ? s.mods.soldierRegen + (s.world.barracksLevel >= 3 ? 1 : 0) : 0;
@@ -1015,6 +1019,54 @@ export class Villager extends Mover {
       // a bigger garrison patrols a wider ring, so they aren't all shoulder to shoulder against the wall
       this.wanderNear(s, { tx: Math.round(post.tx), ty: Math.round(post.ty) }, 3 + Math.floor(s.fighters().length / 4));
     }
+  }
+
+  /**
+   * A pikeman fights at the end of its pike, not at the end of its arm. It keeps its quarry out at
+   * pike's length — stepping back from anything that gets inside the point, closing on anything beyond
+   * it — and thrusts along the line: every raider on that line is struck, however many, and anything
+   * charging onto the point takes far more of it. Friends are never in the way of a thrust, so a rank
+   * behind strikes straight past the rank in front.
+   */
+  private pikeTick(dt: number, s: VillageScene, dmg: number): void {
+    if (this.thrust) { this.thrustTick(dt, s); return; }
+    const foe = this.target!, d = this.dist(foe);
+    const ux = (foe.x - this.x) / (d || 1), uy = (foe.y - this.y) / (d || 1);
+    this.dir = ux < 0 ? -1 : 1;
+    if (d < p.pikeDeadZone + foe.radius) {
+      // inside the point: give ground until the pike can be brought to bear again
+      this.clearGoal();
+      const step = this.speed * dt, nx = this.x - ux * step, ny = this.y - uy * step, t = World.toTile(nx, ny);
+      if (!s.world.isBlocked(t.tx, t.ty, false, this.elevated)) { this.x = nx; this.y = ny; }
+      this.vx = -ux * this.speed; this.vy = -uy * this.speed;
+      this.task = 'giving ground';
+      return;
+    }
+    if (d <= p.pikeReach + foe.radius && this.attackCd <= 0 && s.world.lineClear(this, foe, this.elevated)) {
+      this.clearGoal(); this.vx = this.vy = 0;
+      this.thrust = { t: 0, ux, uy, dmg, struck: false };
+      s.fx.push({ kind: 'telegraph', who: this, ms: p.pikeWindup * 1000 });
+      this.task = 'levelling the pike';
+      return;
+    }
+    if (d <= p.pikeReach + foe.radius) { this.vx = this.vy = 0; this.clearGoal(); this.task = 'holding the point'; return; }
+    this.setGoal(s, foe.tile.tx, foe.tile.ty);
+    this.followPath(dt);
+    this.task = 'closing with the pike';
+  }
+  /** Advance a thrust: the windup, the strike down the line, the recovery. True while it holds the body. */
+  private thrustTick(dt: number, s: VillageScene): boolean {
+    const th = this.thrust;
+    if (!th) return false;
+    th.t += dt;
+    this.vx = this.vy = 0;
+    if (!th.struck && th.t >= p.pikeWindup) {
+      th.struck = true;
+      s.pikeStrike(this, th.ux, th.uy, th.dmg);
+    }
+    if (th.t >= p.pikeWindup + p.pikeRecover) { this.thrust = null; this.attackCd = 0.05; return false; }
+    this.task = th.struck ? 'recovering the pike' : 'levelling the pike';
+    return true;
   }
 
   // --- helpers --------------------------------------------------------------

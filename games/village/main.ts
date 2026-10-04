@@ -36,6 +36,8 @@ export type FxEvent =
   | { kind: 'upgrade'; building: Building }
   | { kind: 'hearts'; who: Mover }
   | { kind: 'melee'; who: Mover; x: number; y: number }
+  /** a pike thrust: the line it ran along, drawn as a streak */
+  | { kind: 'thrust'; x1: number; y1: number; x2: number; y2: number }
   | { kind: 'arrow'; who: Mover }
   /** a handful of food lobbed from the basket into a home's yard */
   | { kind: 'thud'; who: Mover }
@@ -299,7 +301,9 @@ export class VillageScene extends SimScene {
     // gnomes. Founders are spawned as written rather than drawn from the caps -- the caps gate births.
     for (let i = 0; i < p.startFarmers; i++) this.addVillager(home, 'farmer', grown);
     for (let i = 0; i < p.startWoodcutters; i++) this.addVillager(home, 'woodcutter', grown);
-    for (let i = 0; i < p.startWarriors; i++) this.addVillager(home, 'soldier', grown + 2);
+    // a gnome band marches with pikes: a hedge of points is what little people with 14 HP fight behind
+    if (p.gnomeStart) for (let i = 0; i < p.startPikemen; i++) this.addVillager(home, 'soldier', grown + 2).weapon = 'pike';
+    else for (let i = 0; i < p.startWarriors; i++) this.addVillager(home, 'soldier', grown + 2);
     if (!p.gnomeStart) {
       // the Legacy boons are skipped in a gnome start on purpose: addVillager makes anyone homed in a
       // cottage a gnome, so a boon's soldiers and second family would arrive under the wrong roof.
@@ -313,7 +317,7 @@ export class VillageScene extends SimScene {
     }
     const where = this.world.denseForests ? 'the deep woodland' : 'the open meadows';
     this.event('info', p.gnomeStart
-      ? `A gnome family keeps house in ${where}. Forage what grows wild, then throw it in the great pot in the square and cook it.`
+      ? `A gnome band keeps house in ${where}, ten of them under pikes. Set them where a raid will run onto their points, forage what grows wild, and cook it in the great pot in the square.`
       : `A new village in ${where}. Follow trails to explore. Build walls and stairs, then station archers.`);
   }
 
@@ -2490,9 +2494,36 @@ export class VillageScene extends SimScene {
     const hs = this.hearthBuildings();
     return { stocked: hs.filter((b) => b.firewood > 0).length, total: hs.length, nightly: hs.reduce((n, b) => n + hearthCost(b), 0) };
   }
-  equipSoldier(v: Villager, weapon: 'sword' | 'bow'): void {
+  equipSoldier(v: Villager, weapon: 'sword' | 'bow' | 'pike'): void {
     if (v.role !== 'soldier' || v.dead) return;
     v.weapon = weapon; v.attack = null; v.clearGoal();
+  }
+  /**
+   * A pike thrust lands: every raider along the line from the pikeman out to pike's length is struck.
+   * A target running onto the point takes up to (1 + pikeBrace) times the blow — the faster it was
+   * closing, the more — so a set pike is death to a charging Brute and only fair against a standing one.
+   * Returns how many it struck.
+   */
+  pikeStrike(who: Mover, ux: number, uy: number, dmg: number): number {
+    const reach = p.pikeReach;
+    let hits = 0;
+    for (const a of this.agents) {
+      if (!(a instanceof Raider) || a.dead || a.hidden || a.elevated !== who.elevated) continue;
+      const rx = a.x - who.x, ry = a.y - who.y;
+      const along = rx * ux + ry * uy, across = Math.abs(rx * uy - ry * ux);
+      if (along < p.pikeDeadZone * 0.5 || along > reach + a.radius || across > p.pikeWidth + a.radius) continue;
+      // how hard it was coming on: its speed toward the pikeman, as a share of a brisk charge
+      const closing = Math.max(0, -(a.vx * ux + a.vy * uy));
+      const brace = 1 + p.pikeBrace * Math.min(1, closing / 80);
+      const blow = Math.round(dmg * p.pikeDmgMul * brace);
+      a.hit(blow, true, who);
+      a.shove(ux, uy, brace > 1.5 ? 6 : 3);
+      this.fx.push({ kind: 'hit', attacker: who, target: a, dmg: blow, crit: brace > 1.5, killed: !!a.dead });
+      hits++;
+    }
+    this.fx.push({ kind: 'thrust', x1: who.x, y1: who.y - 4, x2: who.x + ux * reach, y2: who.y - 4 + uy * reach });
+    if (!hits) this.fx.push({ kind: 'miss', who });
+    return hits;
   }
   reachableStairs(m: Mover, post?: TilePos): TilePos | null {
     const candidates = [...this.world.defenses.values()].filter(d => d.kind === 'stairs').sort((a, b) => m.dist(World.center(a.tx, a.ty)) - m.dist(World.center(b.tx, b.ty)));

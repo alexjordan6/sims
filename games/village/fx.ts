@@ -261,6 +261,15 @@ export class Fx {
         break;
       case 'melee': this.swing(ev.who, ev, sprites, this.weaponFor(ev.who), ev.who instanceof Raider && ev.who.kind === 'brute' ? 240 : 150); this.sfx.swing(0); break;
       case 'arrow': this.sfx.swing(0); break;
+      case 'thrust': {
+        // the pike's line: a pale streak out to the point, gone in a blink
+        const g = this.scene.add.graphics().setDepth(DEPTH.swoosh);
+        g.lineStyle(2, 0xf2e6c8, 0.85); g.lineBetween(ev.x1, ev.y1, ev.x2, ev.y2);
+        g.fillStyle(0xffffff, 1); g.fillCircle(ev.x2, ev.y2, 1.5);
+        this.scene.tweens.add({ targets: g, alpha: 0, duration: 160, onComplete: () => g.destroy() });
+        this.sfx.swing(0);
+        break;
+      }
       case 'swing': {
         const c = COMBO[ev.stage] ?? COMBO[0];
         this.swing(ev.who, { x: ev.who.x + ev.dx * 20, y: ev.who.y + ev.dy * 20 }, sprites, 'sword', c.dur * 1000, ev.stage);

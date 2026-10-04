@@ -1005,6 +1005,47 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
         `a village opens ${p.startFarmers} farmer, ${p.startWoodcutters} woodcutter, ${p.startWarriors} warriors (${CALLINGS.map((c) => `${c} ${grown.filter((x) => x.role === c).length}`).join(', ')})`);
       assert(CALLINGS.every((c) => v0.callingFilled(c) <= v0.callingCap(c)), 'and none of them is over its cap');
     }
+    // ---- the pike: a thrust down a line, a dead zone, and a set point against a charge -------
+    {
+      s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, { x: -400, y: -400 });
+      const pk = s.spawn(new Villager(World.center(120, 100).x, World.center(120, 100).y, s.world.houses[0], 'soldier', 20, 'Pikey', s.mods));
+      pk.gnome = true; pk.weapon = 'pike'; pk.applyRole(s.mods); pk.hp = pk.maxHp; pk.order = null;
+      const dummy = (tx: number) => { const r = s.spawn(new Raider(World.center(tx, 100).x, World.center(tx, 100).y)); r.update = () => {}; r.hp = r.maxHp = 500; return r; };
+      // two raiders on one line, both inside pike's length: one thrust takes both
+      const nearR = dummy(121), farR = dummy(122);
+      const hits = s.pikeStrike(pk, 1, 0, 10);
+      assert(hits === 2 && nearR.hp < 500 && farR.hp < 500, `a thrust strikes every raider on its line (${hits} struck)`);
+      // beyond the point, nothing
+      const beyond = dummy(120 + Math.ceil((p.pikeReach + 20) / TILE)); const bWas = beyond.hp;
+      s.pikeStrike(pk, 1, 0, 10);
+      assert(beyond.hp === bWas, `a raider past ${p.pikeReach}px is out of the pike's reach`);
+      // and off the line, nothing
+      const off = s.spawn(new Raider(World.center(121, 100).x, World.center(121, 100).y + 24)); off.update = () => {}; off.hp = off.maxHp = 500;
+      s.pikeStrike(pk, 1, 0, 10);
+      assert(off.hp === 500, 'a raider beside the line is untouched');
+      for (const r of [nearR, farR, beyond, off]) r.dead = true; s.removeDead();
+      // the brace: something running onto the point takes far more than something standing on it
+      const stand = dummy(122); const sWas = stand.hp; s.pikeStrike(pk, 1, 0, 10); const standTook = sWas - stand.hp; stand.dead = true; s.removeDead();
+      const charge = dummy(122); charge.vx = -90; charge.vy = 0; const cWas = charge.hp; s.pikeStrike(pk, 1, 0, 10); const chargeTook = cWas - charge.hp; charge.dead = true; s.removeDead();
+      assert(chargeTook > standTook * 1.8, `a charge onto a set pike takes far more of it (${chargeTook} against ${standTook})`);
+      // friends never stand in the way: a gnome in front, a raider behind it, and the raider is struck
+      const front = s.spawn(new Villager(World.center(121, 100).x, World.center(121, 100).y, s.world.houses[0], 'soldier', 20, 'Front', s.mods)); front.update = () => {};
+      const past = dummy(122);
+      assert(s.pikeStrike(pk, 1, 0, 10) === 1 && past.hp < 500 && front.hp === front.maxHp, 'a thrust goes straight past a friend in the front rank');
+      past.dead = true; front.dead = true; s.removeDead();
+      // inside the point it gives ground rather than fight
+      const close = dummy(120); Object.assign(close, { x: pk.x + 3, y: pk.y });
+      const xWas = pk.x;
+      s.grid.rebuild(s.agents); pk.update(1 / 60, s); for (let i = 0; i < 4; i++) pk.update(1 / 60, s);
+      assert(pk.x < xWas && pk.task === 'giving ground', `a raider inside the point makes the pikeman give ground (${pk.task}, moved ${(xWas - pk.x).toFixed(1)}px)`);
+      close.dead = true; s.removeDead();
+      // at pike's length it levels the pike and thrusts on its own
+      const mark = dummy(122); Object.assign(pk, World.center(120, 100)); pk.attackCd = 0;
+      let thrust = false;
+      for (let i = 0; i < 90 && mark.hp === 500; i++) { s.grid.rebuild(s.agents); pk.update(1 / 60, s); if (pk.task === 'levelling the pike') thrust = true; }
+      assert(thrust && mark.hp < 500, `at pike's length it levels the pike and the thrust lands (${pk.task})`);
+      mark.dead = true; pk.dead = true; s.removeDead();
+    }
     // ---- thicket: thorns that slow, hurt and spread, and an axe to cut them back ------------
     {
       const w0 = fresh(false, false, false, false, true);
@@ -1061,14 +1102,15 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(!s.world.tiles.some((t) => t.kind === 'crop'), 'and no field is sown');
     const cot = s.world.gnomeStart!;
     assert(!!cot && !cot.wild && cot.kind === 'gnomehouse', 'a toadstool cottage stands in the clearing, already yours');
-    // the same opening roster as a village of people, in gnomes
+    // a forager and a woodcutter to keep it fed and warm, and a band of pikemen to keep it alive
     const band = s.villagers().filter((v) => v.gnome && v.isAdult);
     const roster = (vs: Villager[]) => CALLINGS.map((c) => `${c} ${vs.filter((v) => v.role === c).length}`).join(', ');
-    assert(band.length === p.startFarmers + p.startWoodcutters + p.startWarriors
+    assert(band.length === p.startFarmers + p.startWoodcutters + p.startPikemen
       && band.filter((v) => v.role === 'farmer').length === p.startFarmers
       && band.filter((v) => v.role === 'woodcutter').length === p.startWoodcutters
-      && band.filter((v) => v.role === 'soldier').length === p.startWarriors,
-      `with its founding band: ${p.startFarmers} forager, ${p.startWoodcutters} woodcutter, ${p.startWarriors} warriors (${roster(band)})`);
+      && band.filter((v) => v.role === 'soldier').length === p.startPikemen,
+      `with its founding band: ${p.startFarmers} forager, ${p.startWoodcutters} woodcutter, ${p.startPikemen} pikemen (${roster(band)})`);
+    assert(band.filter((v) => v.role === 'soldier').every((v) => v.weapon === 'pike'), 'every gnome warrior of the band carries a pike');
     assert(CALLINGS.every((c) => s.callingFilled(c) <= s.callingCap(c)), `and every one of them has a place (${CALLINGS.map((c) => `${s.callingFilled(c)}/${s.callingCap(c)}`).join(', ')})`);
     assert(s.gnomesFound && !s.toolLocked('gnomehouse'), 'and the craft already learned');
     const step0 = World.center(doorstep(cot).tx, doorstep(cot).ty);
