@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { TILE } from '../config';
+import { lambert } from './ps1';
 
 // Shared low-poly geometry and materials. Everything is flat-shaded and coloured per vertex or per
 // instance, so the whole world is a handful of materials. Pack models (glTF) replace these one kind
@@ -10,12 +11,12 @@ export const U = 1 / TILE;
 /** how tall a wall stands, in tiles */
 export const WALL_UNITS = 2.2;
 
-const flat = (colour = 0xffffff, extra: THREE.MeshLambertMaterialParameters = {}) => new THREE.MeshLambertMaterial({ color: colour, flatShading: true, ...extra });
+const flat = (colour = 0xffffff, extra: THREE.MeshLambertMaterialParameters = {}) => lambert({ color: colour, ...extra });
 
 /** the material every instanced prop shares: white, so the instance colour is the colour */
 export const PROP_MAT = flat(0xffffff);
 /** vertex-coloured, for the ground */
-export const GROUND_MAT = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
+export const GROUND_MAT = lambert({ vertexColors: true });
 
 const cache = new Map<number, THREE.MeshLambertMaterial>();
 /** a shared flat material of one colour */

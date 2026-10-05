@@ -45,6 +45,7 @@ export class Terrain {
       const g = new THREE.Group();
       const ground = new THREE.Mesh(new THREE.BufferGeometry(), GROUND_MAT);
       ground.userData.ground = true;
+      ground.receiveShadow = true;
       g.add(ground);
       this.group.add(g);
       this.grounds.push(ground);
@@ -199,6 +200,8 @@ export class Terrain {
       if (!im) {
         // a little headroom so a chunk that grows by a tree or two does not reallocate
         im = new THREE.InstancedMesh(GEO[shape], PROP_MAT, Math.ceil(items.length * 1.25) + 8);
+        im.castShadow = shape !== 'tuft' && shape !== 'berry';
+        im.receiveShadow = true;
         ch.props[shape] = im;
         ch.group.add(im);
       }

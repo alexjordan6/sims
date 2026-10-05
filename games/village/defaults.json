@@ -1,5 +1,8 @@
 {
   "cameraZoom": 2,
+  "ps1Height": 300,
+  "ps1Colours": 18,
+  "shadows": true,
   "dayLength": 120,
   "bossDay": 21,
   "raidEvery": 3,

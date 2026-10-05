@@ -7,6 +7,7 @@ import { BOAR, FOODS, ITEM, p } from '../config';
 import type { Item } from '../items';
 import type { VillageScene } from '../main';
 import { mat, U, WALL_UNITS } from './models';
+import { lambert } from './ps1';
 import { groundHeight } from './terrain';
 
 // Everyone who moves, and everything lying on the ground. Placeholder people are a few boxes —
@@ -18,7 +19,7 @@ const cone = new THREE.ConeGeometry(0.5, 1, 6);
 const ico = new THREE.IcosahedronGeometry(0.5, 0);
 
 function piece(colour: number, sx: number, sy: number, sz: number, x: number, y: number, z: number, g: THREE.BufferGeometry = box): THREE.Mesh {
-  const m = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ color: colour, flatShading: true }));
+  const m = new THREE.Mesh(g, lambert({ color: colour }));
   m.scale.set(sx, sy, sz); m.position.set(x, y + sy / 2, z);
   return m;
 }
@@ -179,7 +180,7 @@ export class Actors {
         const group = new THREE.Group();
         group.add(body);
         const mats: THREE.MeshLambertMaterial[] = [];
-        body.traverse((o) => { if (o instanceof THREE.Mesh) { o.userData.agent = m; mats.push(o.material as THREE.MeshLambertMaterial); } });
+        body.traverse((o) => { if (o instanceof THREE.Mesh) { o.userData.agent = m; o.castShadow = true; mats.push(o.material as THREE.MeshLambertMaterial); } });
         a = { group, body, mats, key, yaw: 0 };
         this.group.add(group); this.actors.set(m.id, a); pickDirty = true;
       }
@@ -285,7 +286,7 @@ function itemMesh(it: Item): THREE.Mesh {
   if (it.kind === 'scrap') return piece(0x7a7e84, 0.2, 0.08, 0.16, 0, 0, 0);
   if (it.kind === 'gear') return piece(0xb09040, 0.22, 0.12, 0.22, 0, 0, 0);
   const colour = it.food ? parseInt(FOODS[it.food].colour.slice(1), 16) : 0xa08060;
-  const m = new THREE.Mesh(ico, new THREE.MeshLambertMaterial({ color: colour, flatShading: true }));
+  const m = new THREE.Mesh(ico, lambert({ color: colour }));
   m.scale.setScalar(0.3);
   return m;
 }

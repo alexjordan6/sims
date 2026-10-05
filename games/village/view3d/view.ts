@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Raider, type Mover } from '../agents';
 import type { VillageScene, Ptr } from '../main';
-import { BUILDINGS, type Defense, type TilePos } from '../world';
+import { BUILDINGS, doorstep, type Defense, type TilePos } from '../world';
 import { TILE, p } from '../config';
 import { Terrain, groundHeight } from './terrain';
 import { Structures } from './structures';
@@ -9,6 +9,7 @@ import { Actors, standHeight } from './actors';
 import { Overlay } from './overlay';
 import { Fx3d } from './fx3d';
 import { skyAt } from './sky';
+import { Ps1Pass, updateFow } from './ps1';
 import { U, WALL_UNITS } from './models';
 
 // The 3D view of the village. Phaser still runs the sim loop, the keyboard and the debug sliders,
@@ -31,6 +32,11 @@ export class View {
   private hemi = new THREE.HemisphereLight(0x8090a0, 0x2a2018, 0.6);
   private sun = new THREE.DirectionalLight(0xffffff, 0.9);
   private torch = new THREE.PointLight(0xffa860, 0, 9, 1.4);
+  /** a few lamps lent to whichever hearths, pots and fires are nearest the camera */
+  private lamps: THREE.PointLight[] = [];
+  private ps1 = new Ps1Pass();
+  private fowRevision = -1;
+  private fowEnabled: boolean | null = null;
   private arrows: HTMLCanvasElement;
   private actx: CanvasRenderingContext2D;
   /** set on frames where tiles were repainted (the minimap redraws its terrain then) */
@@ -52,7 +58,9 @@ export class View {
   constructor(private scene: VillageScene) {
     const host = document.getElementById('game')!;
     this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setPixelRatio(1); // the frame is drawn small and blown up anyway (see Ps1Pass)
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.BasicShadowMap; // hard-edged, pixel shadows
     const canvas = this.renderer.domElement;
     canvas.className = 'view3d';
     host.prepend(canvas);
@@ -64,7 +72,12 @@ export class View {
 
     this.world.fog = new THREE.Fog(0x05060c, 10, 40);
     this.sun.position.set(-20, 30, 10);
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(1024, 1024);
+    const sc = this.sun.shadow.camera; sc.left = -24; sc.right = 24; sc.top = 24; sc.bottom = -24; sc.near = 1; sc.far = 90;
+    this.sun.shadow.bias = -0.002;
     this.world.add(this.hemi, this.sun, this.sun.target, this.torch);
+    for (let i = 0; i < 6; i++) { const l = new THREE.PointLight(0xff9a50, 0, 10, 1.3); this.lamps.push(l); this.world.add(l); }
     this.terrain = new Terrain(scene);
     this.structures = new Structures(scene);
     this.actors = new Actors(scene);
@@ -85,6 +98,7 @@ export class View {
     const host = document.getElementById('game')!;
     const w = Math.max(1, host.clientWidth), h = Math.max(1, host.clientHeight);
     this.renderer.setSize(w, h, false);
+    this.ps1.size(w, h, p.ps1Height);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.arrows.width = w; this.arrows.height = h;
@@ -266,10 +280,13 @@ export class View {
     const arc = sky.arc;
     this.sun.position.set(this.focus.x + Math.cos(arc) * 30, this.focus.y + Math.max(8, Math.sin(arc) * 40), this.focus.z - 12);
     this.sun.target.position.copy(this.focus);
+    this.sun.castShadow = p.shadows && sky.sunI > 0.3;
+    this.placeLamps(sky.night);
     if (pl) this.torch.position.set(pl.x * U, groundHeight(pl.x * U, pl.y * U) + standHeight(pl) + 1.4, pl.y * U);
     this.torch.intensity = (pl && !pl.hidden ? 3.2 : 0) * (0.35 + 0.65 * sky.night) * (0.93 + 0.07 * Math.sin(this.t * 13) * Math.sin(this.t * 7.3));
     // the world
     s.fog?.update(dt);
+    this.syncFow();
     this.tilesChanged = this.terrain.sync();
     this.structures.sync(sky.night, this.t);
     this.actors.sync(dt);
@@ -277,8 +294,47 @@ export class View {
     s.fx.length = 0;
     this.fx.update(dt);
     this.overlay.sync(dt);
-    if (!s.interior.active) this.renderer.render(this.world, this.camera);
+    if (!s.interior.active) {
+      const host = this.renderer.domElement;
+      this.ps1.size(host.width, host.height, p.ps1Height);
+      this.ps1.render(this.renderer, this.world, this.camera, dt, p.ps1Colours);
+    }
     this.drawRaidArrows();
+  }
+
+  /** The fog of war, uploaded for the shaders whenever the sight pass has run. */
+  private syncFow(): void {
+    const fog = this.scene.fog, on = !!fog && fog.enabled;
+    if (on === this.fowEnabled && (!on || fog!.revision === this.fowRevision)) return;
+    this.fowEnabled = on; this.fowRevision = fog?.revision ?? -1;
+    updateFow(on ? fog!.explored : null, on ? fog!.vis : null);
+  }
+
+  /**
+   * Lend the lamps to the lights nearest the camera: a warm house's door glows as night falls, the great pot
+   * smoulders always, and the lair's mouth breathes a dull red.
+   */
+  private placeLamps(night: number): void {
+    const s = this.scene, fx = this.focus.x, fz = this.focus.z;
+    const lights: { x: number; y: number; z: number; colour: number; power: number; d: number }[] = [];
+    for (const b of s.world.buildings) {
+      if (b.ruined) continue;
+      const f = BUILDINGS[b.kind];
+      let x: number, z: number, y = 1.1, colour = 0xff9a50, power = 0;
+      if (b.kind === 'cookpot') { x = b.tx + f.w / 2; z = b.ty + f.h / 2; y = 1.8; colour = 0xff7a30; power = 2.2 + 1.2 * night; }
+      else if (b.kind === 'lair') { const d = doorstep(b); x = d.tx + 0.5; z = d.ty; y = 0.8; colour = 0xff2a10; power = 1.6; }
+      else { if (!b.warm || night < 0.05) continue; const d = doorstep(b); x = d.tx + 0.5; z = d.ty + 0.2; power = 2.6 * night; }
+      const d = (x - fx) ** 2 + (z - fz) ** 2;
+      if (d > 32 * 32) continue;
+      lights.push({ x, y: groundHeight(x, z) + y, z, colour, power, d });
+    }
+    lights.sort((a, b) => a.d - b.d);
+    this.lamps.forEach((l, i) => {
+      const src = lights[i];
+      if (!src) { l.intensity = 0; return; }
+      l.position.set(src.x, src.y, src.z); l.color.setHex(src.colour);
+      l.intensity = src.power * (0.9 + 0.1 * Math.sin(this.t * 11 + i * 2.3));
+    });
   }
 
   /** During a raid, a red arrow on the screen's edge for every raider out of view (the boss's is big and gold). */

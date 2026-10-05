@@ -3,6 +3,7 @@ import { BUILDINGS, type Building, type BuildingKind, type Defense } from '../wo
 import type { VillageScene } from '../main';
 import { Mover } from '../agents';
 import { mat, WALL_UNITS, U } from './models';
+import { lambert } from './ps1';
 import { groundHeight } from './terrain';
 
 // Buildings and fortifications. Each is a small group of flat-shaded boxes and cones, rebuilt only
@@ -45,7 +46,7 @@ function makeBuilding(b: Building): Built {
   const g = new THREE.Group();
   const ruined = b.ruined;
   const wallC = ruined ? CHARRED : st.wall, roofC = ruined ? 0x1e1a18 : st.roof;
-  const windows = new THREE.MeshLambertMaterial({ color: 0x1a1410, emissive: 0x000000, flatShading: true });
+  const windows = lambert({ color: 0x1a1410, emissive: 0x000000 });
   const lvl = Math.min(3, b.level);
   const h = st.h + 0.3 * (lvl - 1);
   const cx = w / 2, cz = d / 2;
@@ -55,7 +56,7 @@ function makeBuilding(b: Building): Built {
       // the great pot: a squat black cauldron on stones, the stew a dull glow at its lip
       for (let k = 0; k < 6; k++) { const a = (k / 6) * Math.PI * 2; g.add(part(ico, 0x4a4844, 0.45, 0.3, 0.45, cx + Math.cos(a) * 1.1, 0, cz + Math.sin(a) * 1.1)); }
       g.add(part(cyl, wallC, 1.9, 0.95, 1.9, cx, 0.15, cz));
-      const stew = new THREE.Mesh(new THREE.CircleGeometry(0.85, 12).rotateX(-Math.PI / 2), new THREE.MeshLambertMaterial({ color: 0x5a3a1a, emissive: ruined ? 0x000000 : 0x6a2a08, flatShading: true }));
+      const stew = new THREE.Mesh(new THREE.CircleGeometry(0.85, 12).rotateX(-Math.PI / 2), lambert({ color: 0x5a3a1a, emissive: ruined ? 0x000000 : 0x6a2a08 }));
       stew.position.set(cx, 1.08, cz); g.add(stew);
       return { group: g, key: '', windows, light: stew };
     }
@@ -147,7 +148,7 @@ export class Structures {
       if (!e) {
         e = makeBuilding(b); e.key = key;
         e.group.position.set(b.tx, groundHeight(b.tx + BUILDINGS[b.kind].w / 2, b.ty + BUILDINGS[b.kind].h / 2), b.ty);
-        e.group.traverse((o) => { o.userData.building = b; });
+        e.group.traverse((o) => { o.userData.building = b; o.castShadow = true; o.receiveShadow = true; });
         this.group.add(e.group); this.built.set(b, e);
       }
       // the windows come on as night falls, in a warm house only; the pot's stew glows while it cooks
@@ -168,6 +169,7 @@ export class Structures {
       if (f && f.key !== key) { this.group.remove(f.group); f = undefined; pickDirty = true; }
       if (!f) {
         f = { group: makeDefense(d, open), key };
+        f.group.traverse((o) => { o.castShadow = true; o.receiveShadow = true; });
         f.group.position.set(d.tx, groundHeight(d.tx + 0.5, d.ty + 0.5), d.ty);
         this.group.add(f.group); this.forts.set(id, f); pickDirty = true;
       }
