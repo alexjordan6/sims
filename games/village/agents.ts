@@ -1326,6 +1326,8 @@ export class Player extends Mover {
   private sinceRoll = 99;
   /** set by the scene: W/A/S/D key objects */
   keys!: Record<'W' | 'A' | 'S' | 'D', { isDown: boolean }>;
+  /** the 3D camera's turn round the head (set by the view each frame); WASD and the stick walk relative to it */
+  camYaw = 0;
   /** virtual joystick axis (-1..1), set by the touch UI */
   touch = { x: 0, y: 0 };
 
@@ -1403,6 +1405,8 @@ export class Player extends Mover {
       const k = Math.min(1, len) / (len || 1);
       mx = this.touch.x * k; my = this.touch.y * k;
     }
+    // W is away from the camera, wherever it has swung round to
+    if (this.camYaw) { const c = Math.cos(this.camYaw), s = Math.sin(this.camYaw); [mx, my] = [mx * c + my * s, -mx * s + my * c]; }
     return { mx, my };
   }
 

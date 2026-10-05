@@ -10,10 +10,10 @@ import { OGRE, BOAR, HAUL, TILE, COST, ORDER, YARD, GNOME_PACK, p, TOWER, HEARTH
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
-import { skyAt } from '../night';
+import { skyAt } from '../view3d/sky';
 import { frameDataUrl, BUILDING_TEXTURE, FLORA } from '../pixelart';
 import { charImg, armorStats, weaponMul } from '../characters';
-import { lookFor, tileArt } from '../render';
+import { lookFor, tileArt } from '../look';
 import { BUILDINGS, MAX_LEVEL, hasHearth, hearthCost, WILD_FOOD, type BuildingKind, type TilePos } from '../world';
 import type { Item } from '../items';
 
@@ -508,7 +508,7 @@ export class UI {
     q('.sun').classList.toggle('moon', night);
     // the day chip takes on the sky's colour: peach at dawn, blue at night
     const sky = skyAt(s.dayTime);
-    this.top.style.setProperty('--sky', `rgba(${sky.r}, ${sky.g}, ${sky.b}, ${Math.min(0.85, sky.alpha * 1.3).toFixed(2)})`);
+    this.top.style.setProperty('--sky', `rgba(${(sky.sun >> 16) & 255}, ${(sky.sun >> 8) & 255}, ${sky.sun & 255}, ${(0.25 + 0.5 * sky.night).toFixed(2)})`);
     q('.day').textContent = p.peaceful ? `DAY ${s.day}` : `DAY ${s.day}/${p.bossDay}`;
     q('.hour').textContent = `${String(hour).padStart(2, '0')}:00`;
     const inHand = (kind: BulkKind) => s.player.carriedOf(kind) ? `<em class="hand">+${Number(s.player.carriedOf(kind).toFixed(1))} in pack</em>` : ''; 
@@ -1094,7 +1094,7 @@ export class UI {
       el.querySelectorAll<HTMLElement>('[data-eat]').forEach((btn) => btn.addEventListener('click', () => { s.eatFromPot(btn.dataset.eat as DishKind); this.renderCooking(); }));
       el.querySelector('.serve')?.addEventListener('click', () => { s.serveGnomes(); this.renderCooking(); });
     }
-    this.placeAtWorld(el, (b.tx + BUILDINGS[b.kind].w / 2) * TILE, b.ty * TILE);
+    this.placeAtWorld(el, (b.tx + BUILDINGS[b.kind].w / 2) * TILE, (b.ty + BUILDINGS[b.kind].h / 2) * TILE);
   }
 
   /**
@@ -1102,10 +1102,10 @@ export class UI {
    * `position: fixed`, so nothing depends on where the overlay happens to sit.
    */
   private placeAtWorld(el: HTMLElement, wx: number, wy: number): void {
-    const s = this.scene, cam = s.cameras.main;
-    const rect = s.game.canvas.getBoundingClientRect();
-    const x = rect.left + (wx - cam.worldView.x) * cam.zoom * rect.width / s.scale.width;
-    const y = rect.top + (wy - cam.worldView.y) * cam.zoom * rect.height / s.scale.height;
+    // through the 3D camera: the spot sits a little above the ground, at the pot's rim
+    const at = this.scene.view?.projectWorld(wx, wy, 1.6);
+    if (!at) return;
+    const { x, y } = at;
     const w = el.offsetWidth || 240, h2 = el.offsetHeight || 120;
     // kept on screen, and above the pot where it does not cover what it is about
     const left = Math.max(8, Math.min(window.innerWidth - w - 8, x - w / 2));

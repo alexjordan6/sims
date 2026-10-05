@@ -12,7 +12,9 @@ import { Boar, Swarm, type Sounder } from './wildlife';
 import { Fog } from './fog';
 import { p, TILE, COLS, ROWS, ZOOM, COST, BOAR, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, GNOME_BEDS, YARD, ORDER, LEVEL_PERKS, CALLING_NAME, CALLINGS, MOODS, SERVE_RANGE, TROLL, HIVE, ITEM, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, zeroFood, isDish, foodCount, hasInterior, type Recipe, type DishKind, DIET_STAT_NAME, type DietStat, type FoodKind, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
-import { Renderer, preloadArt } from './render';
+import { preloadArt } from './look';
+import { ensureFlora, ensureBuildingArt } from './pixelart';
+import { View } from './view3d/view';
 import { UI } from './ui/ui';
 import { weaponMul } from './characters';
 import { AdaptiveSpawner } from './adaptive-spawn';
@@ -59,6 +61,17 @@ export type FxEvent =
   | { kind: 'roll'; who: Mover; ux: number; uy: number; ms: number };
 
 export type Screen = 'title' | 'playing' | 'paused' | 'over' | 'won';
+
+/** A pointer on the 3D view: where on the ground it is (sim pixels), what it landed on, and the event. */
+export interface Ptr {
+  worldX: number; worldY: number;
+  /** the person or beast under it, if any */
+  agent: Mover | null;
+  /** the wall, gate or stairs under it, if any (posting orders land on wall tops) */
+  wallTile: TilePos | null;
+  event: MouseEvent;
+  rightButtonDown(): boolean;
+}
 
 export class VillageScene extends SimScene {
   readonly adaptive = new AdaptiveSpawner();
@@ -174,7 +187,7 @@ export class VillageScene extends SimScene {
 
   private nameIdx = 0;
   private hovered: Mover | null = null;
-  private view?: Renderer;
+  view?: View;
   private ui?: UI;
   private wasd!: Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>;
   /** camera follows the player when the world is bigger than the viewport (phones) */
@@ -611,25 +624,28 @@ export class VillageScene extends SimScene {
     kb.on('keydown-R', () => { if (this.screen === 'over' || this.screen === 'won') this.startGame(); });
     this.hud.setVisible(false);
 
-    this.view = new Renderer(this);
-    this.fog = new Fog(this, 45);
+    ensureFlora(this); ensureBuildingArt(this); // the DOM UI's icons are still drawn from these
+    this.fog = new Fog(this);
+    this.view = new View(this);
     this.chartHome();
     this.view.rebuild();
     this.ui = new UI(this);
     this.ui.mount();
 
-    // hover / click on the map
-    this.input.on('pointermove', (ptr: Phaser.Input.Pointer) => this.onPointerMove(ptr));
-    this.input.mouse?.disableContextMenu();
-    this.input.on('pointerdown', (ptr: Phaser.Input.Pointer, objs: Phaser.GameObjects.GameObject[]) => {
-      if (this.posting) { const q = World.toTile(ptr.worldX, ptr.worldY + WALL_HEIGHT); this.assignPost(this.posting, q); return; }
-      if (this.player.tool === 'wand' && this.screen === 'playing' && !this.interior.active) { this.wandDown(ptr, objs); return; }
-      if (document.body.classList.contains('touch')) { this.pick(ptr, objs); return; }
+    this.scale.on('resize', () => this.fitCamera());
+    this.setupTail();
+  }
+
+  /** A press on the map (the 3D view hands it over with what lies under it). */
+  onPointerDown(ptr: Ptr): void {
+      if (this.posting) { const q = ptr.wallTile ?? World.toTile(ptr.worldX, ptr.worldY); this.assignPost(this.posting, q); return; }
+      if (this.player.tool === 'wand' && this.screen === 'playing' && !this.interior.active) { this.wandDown(ptr); return; }
+      if (document.body.classList.contains('touch')) { this.pick(ptr); return; }
       // the right button is your hands: pick, harvest, climb, work a gate, open the pot — and when
       // there is none of that under the cursor, look the thing over instead
       if (ptr.rightButtonDown()) {
         if (this.screen === 'playing' && this.handsAt(World.toTile(ptr.worldX, ptr.worldY))) return;
-        this.pick(ptr, objs);
+        this.pick(ptr);
         return;
       }
       if (this.screen !== 'playing') return;
@@ -638,15 +654,13 @@ export class VillageScene extends SimScene {
       if (Math.hypot(dx, dy) > 4) this.player.facing = Math.abs(dx) >= Math.abs(dy) ? { x: Math.sign(dx), y: 0 } : { x: 0, y: Math.sign(dy) };
       if (dx) this.player.dir = dx < 0 ? -1 : 1;
       this.interact();
-    });
-    this.input.on('pointerup', (ptr: Phaser.Input.Pointer) => this.wandUp(ptr));
-    this.input.on('wheel', (_p: unknown, _o: unknown, _dx: number, dy: number) => this.player.cycleTool(dy > 0 ? 1 : -1, this.locked));
-    this.input.on('gameout', () => { this.hovered = null; this.hoverTile = null; this.hoverPoint = null; this.ui?.tooltip(null); });
+  }
+  /** The pointer left the map. */
+  onPointerOut(): void { this.hovered = null; this.hoverTile = null; this.hoverPoint = null; this.ui?.tooltip(null); }
 
-    this.scale.on('resize', () => this.fitCamera());
+  private setupTail(): void {
     // Phaser only watches the window; the stage can change on its own (drawer, orientation, layout)
     new ResizeObserver(() => this.scale.refresh()).observe(this.game.canvas.parentElement!);
-    this.fitCamera();
     this.goTitle();
   }
 
@@ -655,52 +669,16 @@ export class VillageScene extends SimScene {
     super.reset(newSeed);
     this.view?.rebuild();
     this.ui?.clear();
-    if (this.following) this.cameras.main.centerOn(this.player.x, this.player.y);
+    this.view?.snapCamera();
     if (this.screen !== 'title') { this.screen = 'playing'; this.paused = false; this.ui?.showScreen(null); }
   }
 
-  /** Follow-camera zoom levels the player can cycle through on small screens. */
-  static readonly ZOOMS = [1, 1.5, 2, 3, 4, 6, 8] as const;
-  /** index into ZOOMS; null = automatic */
-  zoomChoice: number | null = null;
-  /** the zoom the camera should rest at; fx bumps zoom in briefly and always return here */
-  baseZoom = 2;
-  private cameraZoomSetting = p.cameraZoom;
 
-  /**
-   * The world is bigger than any normal screen, so the camera follows the player: 2x on
-   * desktop, 1.5x on phones, multiplied by p.cameraZoom (default 2 for a closer view).
-   * Z / the ZOOM button cycle ZOOMS. Only a huge display shows the whole map at once.
-   */
-  fitCamera(): void {
-    const cam = this.cameras.main;
-    cam.zoomEffect.reset(); // a zoom bump in flight would otherwise snap back to the old zoom
-    const vw = this.scale.width, vh = this.scale.height;
-    const fit = Math.min(vw / this.W, vh / this.H);
-    if (fit >= 2 * p.cameraZoom && this.zoomChoice === null) {
-      this.following = false;
-      cam.removeBounds();
-      this.baseZoom = Math.min(4, Math.floor(fit * 2) / 2);
-      cam.setZoom(this.baseZoom);
-      cam.centerOn(this.W / 2, this.H / 2);
-      return;
-    }
-    const auto = (Math.min(vw, vh) < 500 ? 1.5 : 2) * p.cameraZoom;
-    const zoom = this.zoomChoice === null ? auto : VillageScene.ZOOMS[this.zoomChoice];
-    this.following = true;
-    this.baseZoom = zoom;
-    cam.setZoom(zoom);
-    cam.setBounds(0, 0, this.W, this.H, true);
-    if (this.player) cam.centerOn(this.player.x, this.player.y);
-  }
+  /** The 3D view follows the head and sizes itself; this is kept for the resize hook (Phaser's own camera draws nothing). */
+  fitCamera(): void {}
 
-  /** Cycle zoom presets (Z, or the touch zoom button). */
-  cycleZoom(): void {
-    const zooms: readonly number[] = VillageScene.ZOOMS;
-    const next = zooms.findIndex((zoom) => zoom > this.baseZoom);
-    this.zoomChoice = next < 0 ? 0 : next;
-    this.fitCamera();
-  }
+  /** Step the camera's distance out (Z, or the touch zoom button); it wraps back in. */
+  cycleZoom(): void { this.view?.cycleZoom(); }
 
   // ---- screens / flow -------------------------------------------------------
 
@@ -822,9 +800,9 @@ export class VillageScene extends SimScene {
     if (this.selectedTile && this.world.get(this.selectedTile.tx, this.selectedTile.ty)?.building) { this.selectedBuilding = this.world.get(this.selectedTile.tx, this.selectedTile.ty)!.building!; this.selectedTile = null; }
   }
   /** Pick whatever is under the pointer: a person, else a thing on the ground, else a building, else the tile itself. */
-  pick(ptr: { worldX: number; worldY: number }, objs: Phaser.GameObjects.GameObject[] = []): void {
+  pick(ptr: { worldX: number; worldY: number; agent?: Mover | null }): void {
     if (this.checkNearby(World.toTile(ptr.worldX, ptr.worldY))) return;
-    const m = (objs[0]?.getData('agent') as Mover) ?? null;
+    const m = ptr.agent ?? null;
     if (m) { this.select(m); return; }
     const near = this.world.itemsNear(ptr.worldX, ptr.worldY, 8).sort((a, b) => (a.x - ptr.worldX) ** 2 + (a.y - ptr.worldY) ** 2 - ((b.x - ptr.worldX) ** 2 + (b.y - ptr.worldY) ** 2))[0]
       ?? this.world.items.find((it) => !it.rest && Math.hypot(it.x - ptr.worldX, it.y - it.z - ptr.worldY) <= 8);
@@ -1336,11 +1314,11 @@ export class VillageScene extends SimScene {
   /** Refresh from screen coordinates so a stationary mouse still aims correctly as the camera follows. */
   private bowAim(): { x: number; y: number } | null {
     if (!this.hoverPoint || document.body.classList.contains('touch')) return null;
-    const ptr = this.input.activePointer;
-    return this.cameras.main.getWorldPoint(ptr.x, ptr.y);
+    return this.view?.aimPoint() ?? null;
   }
 
-  private onPointerMove(ptr: Phaser.Input.Pointer): void {
+  onPointerMove(ptr: Ptr): void {
+    this.hovered = ptr.agent;
     if (this.drag) { this.drag.x1 = ptr.worldX; this.drag.y1 = ptr.worldY; }
     this.hoverTile = document.body.classList.contains('touch') ? null : { tx: Math.floor(ptr.worldX / TILE), ty: Math.floor(ptr.worldY / TILE) };
     this.hoverPoint = this.hoverTile ? { x: ptr.worldX, y: ptr.worldY } : null;
@@ -2627,14 +2605,14 @@ export class VillageScene extends SimScene {
   /** Back to patrol: no order, no post. */
   release(): void { for (const v of this.recipients()) this.giveOrder(v, null); }
   /** The wand's pointer: left picks (a click or a marquee), right orders; touch does both with one finger. */
-  private wandDown(ptr: Phaser.Input.Pointer, objs: Phaser.GameObjects.GameObject[]): void {
-    const m = (objs[0]?.getData('agent') as Mover | undefined) ?? null;
+  private wandDown(ptr: Ptr): void {
+    const m = ptr.agent;
     const touch = document.body.classList.contains('touch');
     if (ptr.rightButtonDown() || (touch && !(m instanceof Villager && this.commandable(m)))) { this.wandOrder(ptr, m); return; }
     if (m instanceof Villager && this.commandable(m)) { this.selectSquad([m], (ptr.event as MouseEvent).shiftKey || touch); return; }
     this.drag = { x0: ptr.worldX, y0: ptr.worldY, x1: ptr.worldX, y1: ptr.worldY };
   }
-  private wandUp(ptr: Phaser.Input.Pointer): void {
+  wandUp(ptr: Ptr): void {
     const d = this.drag;
     if (!d) return;
     this.drag = null;
@@ -2643,9 +2621,9 @@ export class VillageScene extends SimScene {
     else if (!add) this.clearSquad();
   }
   /** What the right button means: a raider = attack, a wall top = post, anywhere else = hold there. */
-  private wandOrder(ptr: { worldX: number; worldY: number }, m: Mover | null): void {
+  private wandOrder(ptr: Ptr, m: Mover | null): void {
     if (m instanceof Raider && !m.dead) { this.orderAttack(m); return; }
-    const top = World.toTile(ptr.worldX, ptr.worldY + WALL_HEIGHT);
+    const top = ptr.wallTile ?? World.toTile(ptr.worldX, ptr.worldY);
     if (this.world.get(top.tx, top.ty)?.defense?.kind === 'wall') { this.orderPost(top); return; }
     const q = World.toTile(ptr.worldX, ptr.worldY);
     const spot = !this.world.isBlocked(q.tx, q.ty) ? q : this.world.nearest(ptr.worldX, ptr.worldY, (_t, tx, ty) => !this.world.isBlocked(tx, ty));
@@ -3066,17 +3044,7 @@ export class VillageScene extends SimScene {
   // ---- rendering ------------------------------------------------------------
 
   draw(): void {
-    if (this.cameraZoomSetting !== p.cameraZoom) {
-      this.cameraZoomSetting = p.cameraZoom;
-      this.zoomChoice = null;
-      this.fitCamera();
-    }
     const dt = this.game.loop.delta / 1000;
-    if (this.following) {
-      const cam = this.cameras.main;
-      const k = Math.min(1, dt * 8);
-      cam.centerOn(cam.midPoint.x + (this.player.x - cam.midPoint.x) * k, cam.midPoint.y + (this.player.y - (this.player.elevated ? WALL_HEIGHT : 0) - cam.midPoint.y) * k);
-    }
     if (this.player.tool === 'bow') {
       const aim = this.bowAim();
       if (aim) {

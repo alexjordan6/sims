@@ -81,10 +81,16 @@ export class Minimap {
       c.fillRect(Math.floor(a.x / TILE) - (size >> 1), Math.floor(a.y / TILE) - (size >> 1), size, size);
     }
     // the camera window
-    const v = s.cameras.main.worldView;
-    c.strokeStyle = 'rgba(255,255,255,0.7)';
-    c.lineWidth = 1;
-    c.strokeRect(v.x / TILE + 0.5, v.y / TILE + 0.5, v.width / TILE - 1, v.height / TILE - 1);
+    // the camera window: what the 3D view sees of the ground, a trapezoid that turns with the camera
+    const foot = s.view?.groundFootprint();
+    if (foot) {
+      c.strokeStyle = 'rgba(255,255,255,0.7)';
+      c.lineWidth = 1;
+      c.beginPath();
+      foot.forEach((q, i) => (i ? c.lineTo(q.x, q.z) : c.moveTo(q.x, q.z)));
+      c.closePath();
+      c.stroke();
+    }
   }
 
   private paintTerrain(): void {

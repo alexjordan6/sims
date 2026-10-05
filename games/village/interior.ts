@@ -2,7 +2,7 @@ import type { VillageScene } from './main';
 import { BUILDINGS, World, doorstep, hearthCost, type Building } from './world';
 import { p, hasInterior, type InteriorKind } from './config';
 import { ensureCharacter, frameSize } from './characters';
-import { lookFor } from './render';
+import { lookFor } from './look';
 import type { Mover } from './agents';
 
 type Furnishing = { x: number; y: number; w: number; h: number; kind: 'bed' | 'table' | 'hearth' | 'rack' | 'bar' | 'shelf' | 'chest' | 'crib'; label: string };

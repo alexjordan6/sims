@@ -981,7 +981,6 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       // walking in: the glade, then the cottage itself
       const door = doorstep(den);
       Object.assign(s.player, World.center(door.tx, door.ty));
-      s.cameras.main.centerOn(s.player.x, s.player.y); s.cameras.main.preRender(); // worldView only refreshes on render, and the test never renders
       s.fog!.update(1); s.tick(1 / 60);
       assert(s.gnomesFound && !den.wild, 'walking into sight of the cottage finds the gnomes');
       const pair = s.villagers().filter((v) => v.gnome);
