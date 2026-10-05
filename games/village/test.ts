@@ -1053,6 +1053,18 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       const hx = COLS / 2, hy = ROWS / 2;
       assert(![...w0.world.find((t) => t.kind === 'thicket')].some((q) => Math.abs(q.tx - hx) < 14 && Math.abs(q.ty - hy) < 10), 'the village clearing starts clear of it');
       assert([...w0.world.find((t) => t.kind === 'thicket')].some((q) => Math.hypot(q.tx - hx, q.ty - hy) < 32), 'but some of it is near enough to come creeping in');
+      // the thorn ring: walk out from the square in any direction and you meet thorns or a trail lane
+      const open: number[] = [];
+      for (let k = 0; k < 72; k++) {
+        const a = (k / 72) * Math.PI * 2;
+        let met = false;
+        for (let r = 12; r <= 30 && !met; r += 0.5) {
+          const t = w0.world.get(Math.round(hx + Math.cos(a) * r), Math.round(hy + Math.sin(a) * r * 0.75));
+          if (t && (t.kind === 'thicket' || t.trail)) met = true;
+        }
+        if (!met) open.push(k * 5);
+      }
+      assert(open.length === 0, `a ring of thorns hems the village in all the way round (open at ${open.join(', ')} degrees)`);
       s = fresh(); clearing(s); s.agents = [s.player];
       s.world.set(126, 100, 'thicket');
       assert(!s.world.isBlocked(126, 100) && s.world.slowAt(World.center(126, 100).x, World.center(126, 100).y) === p.thicketSlow, 'thicket can be walked into, but it drags');

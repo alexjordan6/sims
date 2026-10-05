@@ -49,6 +49,20 @@ export class Fog {
     this.layer.fill(1);
   }
 
+  /**
+   * Mark an oval of ground round (cx, cy) as already explored: dimmed, not lit. The village knows its own
+   * surroundings — the thorn ring that hems it in is in plain sight from the first morning.
+   */
+  chart(cx: number, cy: number, rx: number, ry: number): void {
+    if (!this.enabled) return;
+    for (let ty = Math.max(0, Math.floor(cy - ry)); ty <= Math.min(ROWS - 1, Math.ceil(cy + ry)); ty++)
+      for (let tx = Math.max(0, Math.floor(cx - rx)); tx <= Math.min(COLS - 1, Math.ceil(cx + rx)); tx++) {
+        if (Math.hypot((tx - cx) / rx, (ty - cy) / ry) > 1) continue;
+        const i = ty * COLS + tx;
+        if (!this.explored[i]) { this.explored[i] = 1; this.seen++; }
+      }
+    this.t = 99; this.lastScroll = { x: -1e9, y: -1e9 }; // repaint on the next update
+  }
   /** How well the tile at world (x, y) is seen right now, 0..1. Everything is seen with fog off. */
   visibleAt(x: number, y: number): number {
     const tx = Math.floor(x / TILE), ty = Math.floor(y / TILE);

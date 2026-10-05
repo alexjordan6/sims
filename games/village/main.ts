@@ -284,6 +284,7 @@ export class VillageScene extends SimScene {
     this.gnomesFound = p.gnomeStart; // you already keep a toadstool cottage: the craft needs no finding
     this.gnomesFollow = true; // every run starts with them at your heels (reset() does not re-run the field initialiser)
     this.fog?.reset();
+    this.chartHome();
     this.result = null;
     this.nameIdx = this.rng.int(0, NAMES.length - 1);
 
@@ -319,8 +320,15 @@ export class VillageScene extends SimScene {
     this.event('info', p.gnomeStart
       ? `A gnome band keeps house in ${where}, ten of them under pikes. Set them where a raid will run onto their points, forage what grows wild, and cook it in the great pot in the square.`
       : `A new village in ${where}. Follow trails to explore. Build walls and stairs, then station archers.`);
+    if (p.thicketRing > 0 && this.world.thicketCount) this.event('info', 'A ring of thorns hems the village in. The trails run through it for now, but it creeps closer every night. Cut it back with the axe, or it will close the trails and take the fields.', true);
   }
 
+  /** The ground out to the thorn ring starts charted, so you can see what hems you in. */
+  private chartHome(): void {
+    if (!this.fog || p.thicketRing <= 0) return;
+    const r = 16 + p.thicketRing + 6;
+    this.fog.chart(COLS / 2, ROWS / 2, r, r * 0.75);
+  }
   /** Settle a boar family at (tx, ty): `n` boars on the free tiles around it. */
   foundSounder(tx: number, ty: number, n: number, young = false): Sounder {
     const sd: Sounder = { id: this.sounders.length + 1, home: { tx, ty }, members: [] };
@@ -605,6 +613,7 @@ export class VillageScene extends SimScene {
 
     this.view = new Renderer(this);
     this.fog = new Fog(this, 45);
+    this.chartHome();
     this.view.rebuild();
     this.ui = new UI(this);
     this.ui.mount();
@@ -1060,8 +1069,9 @@ export class VillageScene extends SimScene {
     const took = this.world.spreadThicket(this.thicketRng, p.thicketSpread, (tx, ty) => doors.has(ty * this.world.cols + tx));
     if (!took.length) return;
     // what the village actually lost is what makes the warning worth reading
-    const near = took.filter((q) => Math.hypot(q.tx - COLS / 2, q.ty - ROWS / 2) < 26).length;
-    if (near) this.event('info', `The thicket crept over ${near} tile${near === 1 ? '' : 's'} near the village in the night. Cut it back with the axe before it takes the fields.`, true);
+    // the ring itself creeps every night; only what it takes inside it (or in a lane) is news
+    const near = took.filter((q) => Math.abs(q.tx - COLS / 2) < 18 && Math.abs(q.ty - ROWS / 2) < 13 || this.world.get(q.tx, q.ty)?.trail).length;
+    if (near) this.event('info', `The thorn ring crept ${near} tile${near === 1 ? '' : 's'} closer in the night. Cut it back with the axe before it takes the fields and closes the trails.`, true);
   }
   /** Is there a bowl standing in the pot for someone? */
   potHasServings(b = this.world.cookpot): boolean {

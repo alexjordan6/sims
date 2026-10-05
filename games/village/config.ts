@@ -98,6 +98,7 @@ export const p = live(
     thicketSlow: [D.thicketSlow, 0.05, 1, 0.05, 'Speed multiplier for anyone forcing through thicket — you, villagers and raiders alike.'],
     thicketDps: [D.thicketDps, 0, 20, 0.5, 'HP a second the thorns take from anyone standing in thicket. Villagers and raiders path round it when they can.'],
     thicketSpread: [D.thicketSpread, 0, 0.5, 0.01, 'Daily chance each thicket tile creeps onto a neighbouring patch of grass, field or forage. Cut it back or it takes the village.'],
+    thicketRing: [D.thicketRing, 0, 12, 1, 'Tiles thick the thorn ring round the village grows at worldgen (0 for none). The trails run through it in open lanes. Takes at NEW VILLAGE.'],
     thicketPatches: [D.thicketPatches, 0, 60, 1, 'Thicket patches seeded at worldgen (a few of them close enough to reach the village). Takes at NEW VILLAGE.'],
     thicketWood: [D.thicketWood, 0, 5, 1, 'Wood the axe gets for clearing one tile of thicket.'],
     wildDensity: [D.wildDensity, 0.25, 6, 0.25, 'Scales how thickly wild food is scattered at worldgen — berries, mushrooms, hazel, garlic and burdock all together. Takes at NEW VILLAGE.'],

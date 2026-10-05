@@ -708,6 +708,7 @@ export class World {
    * own bag of numbers, and last of all, so no older seeded layout moves.
    */
   private growThickets(hx: number, hy: number): void {
+    this.growThornRing(hx, hy);
     const rng = new Rng(this.seed ^ 0x7b1c4e7);
     const patches = Math.round(p.thicketPatches);
     for (let n = 0, tries = 0; n < patches && tries < patches * 40; tries++) {
@@ -729,6 +730,38 @@ export class World {
         this.set(q.tx, q.ty, 'thicket'); grown.push(q);
       }
       n++;
+    }
+  }
+  /**
+   * The thorn ring: a ragged band of thicket all the way round the village, just beyond the clearing. The
+   * trails run through it in open lanes (until it creeps over them), and everything else — the woods, the
+   * forage, the wild — lies on the far side. Cutting out through it is the village's first labour, and
+   * keeping it back is a labour for every day after. Its own bag of numbers, so nothing else moves.
+   */
+  private growThornRing(hx: number, hy: number): void {
+    const band = Math.round(p.thicketRing);
+    if (band <= 0) return;
+    const rng = new Rng(this.seed ^ 0x7b1c41e);
+    // a lumpy edge: a few slow waves round the circle, so the ring bulges in and thins out
+    const ph = [rng.range(0, 7), rng.range(0, 7), rng.range(0, 7), rng.range(0, 7)];
+    const inner = (a: number) => 16 + 1.6 * Math.sin(3 * a + ph[0]) + 1.1 * Math.sin(5 * a + ph[1]);
+    const thick = (a: number) => band + 1.5 * Math.sin(2 * a + ph[2]) + 1.2 * Math.sin(7 * a + ph[3]);
+    const l = this.lair, den = this.buildings.find((b) => b.kind === 'gnomehouse');
+    const R = 16 + 2.7 + band + 2.7 + 1;
+    for (let ty = Math.floor(hy - R); ty <= hy + R; ty++) for (let tx = Math.floor(hx - R); tx <= hx + R; tx++) {
+      const t = this.get(tx, ty);
+      // grass and the old wood go under it; forage is left standing in pockets, a prize for cutting in to
+      if (!t || !(t.kind === 'grass' || t.kind === 'tree') || t.trail || t.building || t.defense) continue;
+      if (Math.abs(tx - hx) < 14 && Math.abs(ty - hy) < 10) continue; // the village clearing starts clear
+      if (l && tx >= l.tx - 3 && tx <= l.tx + 6 && ty >= l.ty - 3 && ty <= l.ty + 6) continue;
+      if (den && Math.abs(tx - den.tx) < 6 && Math.abs(ty - den.ty) < 6) continue;
+      const dx = tx - hx, dy = (ty - hy) / 0.75, e = Math.hypot(dx, dy), a = Math.atan2(dy, dx);
+      const r0 = inner(a), r1 = r0 + thick(a);
+      if (e < r0 || e > r1) continue;
+      const rim = r1 - e; // the inner edge is a hedge; the outer edge frays into the wood
+      if (rim < 1 && !rng.chance(0.55)) continue;
+      if (t.kind === 'tree' && rng.chance(0.12)) continue; // it chokes the old wood here, but a few trunks stand through it
+      this.set(tx, ty, 'thicket');
     }
   }
   /**
