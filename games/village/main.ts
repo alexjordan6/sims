@@ -164,7 +164,7 @@ export class VillageScene extends SimScene {
   raidActive = false;
   screen: Screen = 'title';
   selected: Mover | null = null;
-  /** a building picked with X / right-click / tap */
+  /** a building picked with X or a click */
   selectedBuilding: Building | null = null;
   /** the inspector can also show a tile (crop, tree, wall…) or a thing lying on the ground */
   selectedTile: TilePos | null = null;
@@ -200,7 +200,7 @@ export class VillageScene extends SimScene {
   private ui?: UI;
   /** WASD no longer steers (right-click does): the player reads keys that are never down */
   private wasd = { W: { isDown: false }, A: { isDown: false }, S: { isDown: false }, D: { isDown: false } };
-  /** camera follows the player when the world is bigger than the viewport (phones) */
+  /** (the 2D camera follow; the 3D view does its own following) */
   following = false;
 
   // the kernel sizes its grid from W/H; in resize mode the viewport varies, the world does not
@@ -551,7 +551,6 @@ export class VillageScene extends SimScene {
     const kb = this.input.keyboard!;
     const clearMovementInput = (): void => {
       kb.resetKeys();
-      if (this.player) this.player.touch = { x: 0, y: 0 };
     };
     const clearMovementWhenHidden = (): void => { if (document.hidden) clearMovementInput(); };
     window.addEventListener('blur', clearMovementInput);
@@ -649,7 +648,6 @@ export class VillageScene extends SimScene {
   onPointerDown(ptr: Ptr): void {
       if (this.posting) { const q = ptr.wallTile ?? World.toTile(ptr.worldX, ptr.worldY); this.assignPost(this.posting, q); return; }
       if (this.player.tool === 'wand' && this.screen === 'playing' && !this.interior.active) { this.wandDown(ptr); return; }
-      if (document.body.classList.contains('touch')) { this.pick(ptr); return; }
       // the right button is the command: walk, hunt, or go and use whatever is there
       if (ptr.rightButtonDown()) { this.rightCommand(ptr); return; }
       if (this.screen !== 'playing') return;
@@ -880,7 +878,7 @@ export class VillageScene extends SimScene {
   /** The 3D view follows the head and sizes itself; this is kept for the resize hook (Phaser's own camera draws nothing). */
   fitCamera(): void {}
 
-  /** Step the camera's distance out (Z, or the touch zoom button); it wraps back in. */
+  /** Step the camera's distance out (Z); it wraps back in. */
   cycleZoom(): void { this.view?.cycleZoom(); }
 
   // ---- screens / flow -------------------------------------------------------
@@ -1509,7 +1507,7 @@ export class VillageScene extends SimScene {
     this.hovered = m;
   }
 
-  /** tile under the mouse (null on touch / when the pointer left the canvas); drives cursor placement */
+  /** tile under the mouse (null when the pointer left the canvas); drives cursor placement */
   hoverTile: TilePos | null = null;
   /** the exact point under the mouse, for throws and bow aiming */
   hoverPoint: { x: number; y: number } | null = null;
@@ -1517,14 +1515,14 @@ export class VillageScene extends SimScene {
   /** Refresh from screen coordinates so a stationary mouse still aims correctly as the camera follows. */
   private bowAim(): { x: number; y: number } | null {
     if (this.forcedAim) return this.forcedAim;
-    if (!this.hoverPoint || document.body.classList.contains('touch')) return null;
+    if (!this.hoverPoint) return null;
     return this.view?.aimPoint() ?? null;
   }
 
   onPointerMove(ptr: Ptr): void {
     this.hovered = ptr.agent;
     if (this.drag) { this.drag.x1 = ptr.worldX; this.drag.y1 = ptr.worldY; }
-    this.hoverTile = document.body.classList.contains('touch') ? null : { tx: Math.floor(ptr.worldX / TILE), ty: Math.floor(ptr.worldY / TILE) };
+    this.hoverTile = { tx: Math.floor(ptr.worldX / TILE), ty: Math.floor(ptr.worldY / TILE) };
     this.hoverPoint = this.hoverTile ? { x: ptr.worldX, y: ptr.worldY } : null;
     if (!this.ui || (this.screen !== 'playing' && this.screen !== 'paused')) { this.ui?.tooltip(null); return; }
     const ev = ptr.event as MouseEvent;
@@ -1888,7 +1886,7 @@ export class VillageScene extends SimScene {
     const c = buildingCenter(g);
     this.fx.push({ kind: 'deposit', x: c.tx * TILE, y: (g.ty + BUILDINGS[g.kind].h) * TILE - 6, text: `-${take} ${FOODS[kind].one}`, colour: FOODS[kind].colour });
   }
-  /** Where a throw is aimed: the mouse, or a few tiles ahead on touch / keyboard. */
+  /** Where a throw is aimed: the mouse, or a few tiles ahead when it is off the map. */
   get tossAim(): { x: number; y: number } {
     const pl = this.player;
     return this.hoverPoint ?? { x: pl.x + pl.facing.x * p.tossRange * TILE / 2, y: pl.y + pl.facing.y * p.tossRange * TILE / 2 };
@@ -2810,12 +2808,11 @@ export class VillageScene extends SimScene {
   }
   /** Back to patrol: no order, no post. */
   release(): void { for (const v of this.recipients()) this.giveOrder(v, null); }
-  /** The wand's pointer: left picks (a click or a marquee), right orders; touch does both with one finger. */
+  /** The wand's pointer: left picks (a click or a marquee), right orders. */
   private wandDown(ptr: Ptr): void {
     const m = ptr.agent;
-    const touch = document.body.classList.contains('touch');
-    if (ptr.rightButtonDown() || (touch && !(m instanceof Villager && this.commandable(m)))) { this.wandOrder(ptr, m); return; }
-    if (m instanceof Villager && this.commandable(m)) { this.selectSquad([m], (ptr.event as MouseEvent).shiftKey || touch); return; }
+    if (ptr.rightButtonDown()) { this.wandOrder(ptr, m); return; }
+    if (m instanceof Villager && this.commandable(m)) { this.selectSquad([m], (ptr.event as MouseEvent).shiftKey); return; }
     this.drag = { x0: ptr.worldX, y0: ptr.worldY, x1: ptr.worldX, y1: ptr.worldY };
   }
   wandUp(ptr: Ptr): void {
@@ -2864,7 +2861,7 @@ export class VillageScene extends SimScene {
     if (why) { this.event('build', why + '.'); return; }
     if (this.world.placeDefense(kind, q.tx, q.ty)) { this.wood -= cost; this.fx.push({ kind: 'tool', tool: 'hammer', ...q }); }
   }
-  /** Context action: use a nearby doorway, stairs, or gate. Both mouse and touch use this path. */
+  /** Context action: use a nearby doorway, stairs, or gate. */
   checkNearby(point?: TilePos): boolean {
     if (this.screen !== 'playing') return false;
     if (this.interior.active) { this.interior.act(); return true; }
@@ -3269,9 +3266,7 @@ export class VillageScene extends SimScene {
   }
 }
 
-// Decide the touch layout before Phaser measures its parent (the side panel becomes a drawer).
 const query = new URLSearchParams(location.search);
-if (matchMedia('(pointer: coarse)').matches || query.has('touch')) document.body.classList.add('touch');
 
 // Dev starts, so a link is enough: ?start=gnome and ?peaceful set the debug sliders before the first setup().
 if (query.get('start') === 'gnome') p.gnomeStart = true;

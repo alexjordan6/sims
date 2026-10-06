@@ -95,9 +95,6 @@ export class UI {
   private rosterT = 0;
   private topT = 0;
   private feedSeen = 0;
-  /** coarse pointer (phone/tablet) or ?touch=1 for testing */
-  readonly touch = document.body.classList.contains('touch');
-  private lastSelected: Mover | null = null;
   private lastBuilding: import('../world').Building | null = null;
   /** the building whose DEMOLISH button has been pressed once (the second press does it) */
   private confirmDemolish: import('../world').Building | null = null;
@@ -181,7 +178,7 @@ export class UI {
     this.roster = h(`<div class="roster panel"><div class="ph">${spr('dungeon', DUNGEON.villager, 24)}<h2>Villagers</h2><span class="cap">pick one to inspect</span></div><div class="legend-row">
       <span class="rl farmer">${spr('farm', FARM.farmerHat, 16)} farmer</span><span class="rl woodcutter">${spr('dungeon', DUNGEON.man, 16)} cutter</span><span class="rl kid">${spr('dungeon', DUNGEON.villager, 16)} child</span><span class="rl soldier">${spr('dungeon', DUNGEON.knight, 16)} soldier</span>
     </div><div class="list"></div></div>`);
-    // --- minimap: top of the side panel (the drawer on phones) so it never covers the world
+    // --- minimap: top of the side panel so it never covers the world
     this.minimap = new Minimap(s, 2);
     const box = h('<div class="minimap-panel panel"><span class="cap">MAP</span><span class="cap explored" style="float:right"></span></div>');
     box.append(this.minimap.el);
@@ -202,7 +199,6 @@ export class UI {
     this.tooltipEl = h('<div class="tooltip" hidden></div>');
     this.overlay.append(this.tooltipEl);
 
-    if (this.touch) this.mountTouch();
     this.mountControls();
 
     // debug sliders hidden until backtick
@@ -222,44 +218,31 @@ export class UI {
    * Open by default for new players; remembers the last state.
    */
   private mountControls(): void {
-    const rows: [string, string][] = this.touch
-      ? [
-          ['MOVE stick', 'walk'],
-          ['ROLL', 'dodge roll — through bodies, not walls'],
-          ['TOSS', 'throw the largest supply stack'],
-          ['USE', 'use the tool you hold (the button says what)'],
-          ['TOOL', 'next tool — or tap a slot'],
-          ['tap a villager', 'inspect them'],
-          ['FOLK', 'villagers list'],
-          ['ZOOM', 'camera 1× / 1.5× / 2× / 3×'],
-          ['PAUSE', 'menu'],
-          ['HELP', 'how to play'],
-        ]
-      : [
-          ['right click', 'walk there · attack an enemy · use a plant, crop, pot, gate or door'],
-          ['Q W E R', 'strike · shoot · roll · rally — toward the cursor'],
-          ['G', 'throw the largest supply stack'],
-          ['T', 'eat a meal — your pack first, then the granary'],
-          ['click · C', 'walk over and use the held tool there (with a weapon: look things over)'],
-          ['X', 'check a villager'],
-          ['1 – 9', 'pick a tool'],
-          ['Tab', 'next tool'],
-          ['screen edge · ← → ↑ ↓ · middle-drag', 'pan the camera'],
-          ['Space · Y', 'camera back to you · lock it on you'],
-          ['wheel · Z', 'camera distance'],
-          ['H', 'call the gnomes to your heels / send them foraging'],
-          ['Esc', 'menu'],
-          ['- · =', 'game speed'],
-          ['K', 'this panel'],
-          ['M', 'sound on / off'],
-          ['?', 'how to play'],
-        ];
+    const rows: [string, string][] = [
+      ['right click', 'walk there · attack an enemy · use a plant, crop, pot, gate or door'],
+      ['Q W E R', 'strike · shoot · roll · rally — toward the cursor'],
+      ['G', 'throw the largest supply stack'],
+      ['T', 'eat a meal — your pack first, then the granary'],
+      ['click · C', 'walk over and use the held tool there (with a weapon: look things over)'],
+      ['X', 'check a villager'],
+      ['1 – 9', 'pick a tool'],
+      ['Tab', 'next tool'],
+      ['screen edge · ← → ↑ ↓ · middle-drag', 'pan the camera'],
+      ['Space · Y', 'camera back to you · lock it on you'],
+      ['wheel · Z', 'camera distance'],
+      ['H', 'call the gnomes to your heels / send them foraging'],
+      ['Esc', 'menu'],
+      ['- · =', 'game speed'],
+      ['K', 'this panel'],
+      ['M', 'sound on / off'],
+      ['?', 'how to play'],
+    ];
     const panel = h(`<div class="ctrl-panel">
       <button class="ctrl-tab" title="Controls (K)">${spr('town', TOWN.iconKey, 16)} CONTROLS <span class="arrow">▴</span></button>
       <div class="ctrl-card panel">
         <div class="ph">${spr('town', TOWN.iconKey, 24)}<h2>Controls</h2><button class="btn small ctrl-close">×</button></div>
         <div class="ctrl-rows">${rows.map(([k, d]) => `<kbd>${esc(k)}</kbd><span>${esc(d)}</span>`).join('')}</div>
-        ${this.touch ? '' : '<div class="ctrl-foot">Hold a tool, face something, click. The bar above the belt tells you what will happen.</div>'}
+        <div class="ctrl-foot">Right-click to walk, fight and use things; Q W E R for abilities. The bar above the belt says what a click will do.</div>
         <div class="ctrl-foot"><button class="btn small mute">SOUND</button></div>
       </div>
     </div>`);
@@ -283,170 +266,8 @@ export class UI {
       if (e.key === 'k' || e.key === 'K') set(!open); // H is the gnome whistle (main.ts), and one key does one thing
       if (e.key === '?') this.showHelp(); // the row below has always advertised it
     });
-    (this.touch ? document.getElementById('game')! : this.overlay).append(panel);
+    this.overlay.append(panel);
     set(open);
-  }
-
-  // ---- touch controls ----------------------------------------------------------
-
-  private mountTouch(): void {
-    const s = this.scene;
-    document.body.classList.add('touch');
-    this.blockBrowserZoom();
-
-    // the side panel becomes a bottom drawer with tabs
-    const tabs = h(`<div class="tabs"><button class="btn small on" data-tab="inspector">INSPECT</button><button class="btn small" data-tab="roster">VILLAGERS</button><button class="btn small close-drawer">CLOSE</button></div>`);
-    this.side.prepend(tabs);
-    tabs.querySelectorAll<HTMLElement>('[data-tab]').forEach((b) => b.addEventListener('click', () => this.showTab(b.dataset.tab as 'inspector' | 'roster')));
-    tabs.querySelector('.close-drawer')!.addEventListener('click', () => this.side.classList.remove('open'));
-    this.showTab('inspector');
-
-    // joystick + buttons
-    const ctl = h(`<div class="mobile">
-      <div class="stick"><div class="knob"></div><span class="mlbl">MOVE</span></div>
-      <div class="mid">
-        <button class="mbtn small zoombtn">⌕<span class="mlbl">ZOOM</span></button>
-        <button class="mbtn small helpbtn">?<span class="mlbl">HELP</span></button>
-        <button class="mbtn small armorybtn">⛨<span class="mlbl">ARMOR</span></button>
-      </div>
-      <div class="cluster">
-        <button class="mbtn small drawerbtn">${spr('dungeon', DUNGEON.villager, 24)}<span class="mlbl">FOLK</span></button>
-        <button class="mbtn small pausebtn">II<span class="mlbl">PAUSE</span></button>
-        <button class="mbtn small buildbtn">${spr('town', TOWN.iconHammer, 24)}<span class="mlbl">TOOL</span></button>
-        <button class="mbtn small rollbtn">↻<span class="mlbl">ROLL</span></button>
-        <button class="mbtn small tossbtn">✵<span class="mlbl">TOSS</span></button>
-        <button class="mbtn act"><span class="verb">USE</span></button>
-      </div>
-    </div>`);
-    // The world gets its own uncovered area: top bar above it, a control deck below it.
-    const deck = h('<div class="deck"></div>');
-    this.stage.prepend(this.top);
-    deck.append(this.feed, this.hotbar, ctl);
-    this.stage.append(deck);
-    // the world area just shrank; make sure Phaser sees the final size
-    setTimeout(() => s.scale.refresh(), 60);
-    window.addEventListener('orientationchange', () => setTimeout(() => s.scale.refresh(), 300));
-    const press = (sel: string, fn: () => void) => {
-      ctl.querySelector<HTMLElement>(sel)!.addEventListener('pointerdown', (e) => { e.preventDefault(); fn(); });
-    };
-    press('.act', () => s.interact());
-    press('.rollbtn', () => s.dodge());
-    press('.tossbtn', () => s.tossLoad());
-    press('.buildbtn', () => s.player.cycleTool());
-    press('.pausebtn', () => s.togglePause());
-    press('.drawerbtn', () => { this.showTab('roster'); this.side.classList.toggle('open'); });
-    press('.zoombtn', () => s.cycleZoom());
-    press('.helpbtn', () => this.showHelp());
-    press('.armorybtn', () => s.openArmory(s.armoryFor ? null : s.player));
-
-    const stick = ctl.querySelector<HTMLElement>('.stick')!;
-    const knob = ctl.querySelector<HTMLElement>('.knob')!;
-    const R = 40, dead = 0.18;
-    let active: number | null = null;
-    const set = (dx: number, dy: number) => {
-      const d = Math.hypot(dx, dy);
-      const k = d > R ? R / d : 1;
-      dx *= k; dy *= k;
-      knob.style.transform = `translate(${dx}px, ${dy}px)`;
-      const ax = dx / R, ay = dy / R;
-      s.player.touch = Math.hypot(ax, ay) < dead ? { x: 0, y: 0 } : { x: ax, y: ay };
-    };
-    const fromEvent = (e: PointerEvent) => {
-      const r = stick.getBoundingClientRect();
-      set(e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2));
-    };
-    stick.addEventListener('pointerdown', (e) => { active = e.pointerId; stick.setPointerCapture(e.pointerId); fromEvent(e); e.preventDefault(); });
-    stick.addEventListener('pointermove', (e) => { if (e.pointerId === active) fromEvent(e); });
-    const release = (e: PointerEvent) => { if (e.pointerId !== active) return; active = null; set(0, 0); };
-    stick.addEventListener('pointerup', release);
-    stick.addEventListener('pointercancel', release);
-    stick.addEventListener('lostpointercapture', release);
-    window.addEventListener('blur', () => {
-      active = null;
-      set(0, 0);
-    });
-  }
-
-  /**
-   * Phones ignore `user-scalable=no` (Safari especially), and `touch-action` alone doesn't cover
-   * every element: a stray pinch that starts over a bit of UI can still trigger the browser's own
-   * page zoom, which pans the fixed-layout controls off screen. Block what we can — but never
-   * block a *shrinking* pinch, so a stuck player can always pinch back out themselves — and if the
-   * page still ends up zoomed, try to force it back to 1x in place (no reload, run kept), falling
-   * back to a banner (positioned to the visible slice of the page, wherever that's panned to) and
-   * finally a reload only if nothing else worked.
-   */
-  private blockBrowserZoom(): void {
-    const stop = (e: Event) => e.preventDefault();
-    // Safari pinch
-    document.addEventListener('gesturestart', stop, { passive: false });
-    document.addEventListener('gesturechange', stop, { passive: false });
-    // other browsers: multi-finger pinch reported via touchmove. Block it from growing (zooming
-    // in) but always let it shrink (zooming back out) — that's the one native gesture a stuck
-    // player can fall back on, so it must never be the thing we're blocking.
-    let pinchStart = 0;
-    const pinchDist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-    document.addEventListener('touchstart', (e) => { if (e.touches.length === 2) pinchStart = pinchDist(e.touches); }, { passive: true });
-    document.addEventListener('touchmove', (e) => {
-      if (e.touches.length < 2) return;
-      if (pinchDist(e.touches) > pinchStart + 4) e.preventDefault();
-    }, { passive: false });
-    // double-tap zoom: eat the second tap of a quick double tap outside form fields
-    let lastTap = 0;
-    document.addEventListener('touchend', (e) => {
-      const now = Date.now();
-      if (now - lastTap < 300 && !(e.target as HTMLElement).closest('input')) e.preventDefault();
-      lastTap = now;
-    }, { passive: false });
-
-    const vv = window.visualViewport;
-    if (!vv) return;
-
-    // re-applying the viewport meta tag forces most mobile browsers to drop a manual pinch-zoom,
-    // without a reload — this is the trick, there's no direct API for it
-    const meta = document.querySelector('meta[name="viewport"]');
-    const metaContent = meta?.getAttribute('content') ?? '';
-    const forceReset = (): void => {
-      if (!meta) return;
-      meta.setAttribute('content', 'width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no');
-      meta.remove();
-      document.head.appendChild(meta);
-      requestAnimationFrame(() => meta.setAttribute('content', metaContent));
-    };
-
-    let banner: HTMLElement | null = null;
-    let attempted = false;
-    const positionBanner = (): void => {
-      // pin it to the visible slice of the page — while zoomed, that may not be the layout
-      // viewport's top edge, which is where a plain `position: fixed; top: 0` would sit
-      if (banner) { banner.style.left = `${vv.offsetLeft}px`; banner.style.top = `${vv.offsetTop}px`; banner.style.width = `${vv.width}px`; }
-    };
-    const check = (): void => {
-      const zoomed = vv.scale > 1.08;
-      if (!zoomed) {
-        attempted = false;
-        if (banner) { banner.remove(); banner = null; }
-        return;
-      }
-      if (!attempted) { attempted = true; forceReset(); setTimeout(check, 260); return; }
-      if (!banner) {
-        banner = h(`<div class="zoomed-banner"><span>The page got zoomed in.</span><button class="btn ok">RESET VIEW</button></div>`);
-        banner.querySelector('button')!.addEventListener('click', () => {
-          forceReset();
-          setTimeout(() => { if ((vv.scale ?? 1) > 1.08) location.reload(); }, 260);
-        });
-        document.body.append(banner);
-      }
-      positionBanner();
-    };
-    vv.addEventListener('resize', check);
-    vv.addEventListener('scroll', positionBanner);
-    check();
-  }
-
-  private showTab(tab: 'inspector' | 'roster'): void {
-    this.side.dataset.tab = tab;
-    this.side.querySelectorAll<HTMLElement>('[data-tab]').forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
   }
 
   // ---- per-frame -------------------------------------------------------------
@@ -458,13 +279,9 @@ export class UI {
     const label = followers ? `SEND FORAGING (${followers})` : 'CALL GNOMES';
     if (call.textContent !== label) call.textContent = label;
     this.stage.classList.toggle('raid', s.raidActive);
-    if (s.selectedBuilding !== this.lastBuilding) { this.lastBuilding = s.selectedBuilding; this.confirmDemolish = null; this.renderInspector(true); if (this.touch && s.selectedBuilding) { this.showTab('inspector'); this.side.classList.add('open'); } }
-    if (this.touch && s.selected !== this.lastSelected) {
-      this.lastSelected = s.selected;
-      if (s.selected) { this.showTab('inspector'); this.side.classList.add('open'); }
-    }
+    if (s.selectedBuilding !== this.lastBuilding) { this.lastBuilding = s.selectedBuilding; this.confirmDemolish = null; this.renderInspector(true); }
     const pickKey = s.selectedItem ? `item${s.selectedItem.id}` : s.selectedTile ? `tile${s.selectedTile.tx},${s.selectedTile.ty}` : '';
-    if (pickKey !== this.lastPick) { this.lastPick = pickKey; this.renderInspector(true); if (this.touch && pickKey) { this.showTab('inspector'); this.side.classList.add('open'); } }
+    if (pickKey !== this.lastPick) { this.lastPick = pickKey; this.renderInspector(true); }
     this.topT += dt; this.rosterT += dt;
     this.minimap.render(dt, s.tilesChanged);
     if (this.topT > 0.1) {
@@ -595,20 +412,6 @@ export class UI {
     const hands = s.handsHint();
     const full = hands ? `${text} · right click: ${hands}` : text;
     if (hint.textContent !== full) hint.textContent = full;
-    // the touch action button shows the verb it would perform
-    const verb = this.stage.querySelector('.act .verb');
-    if (verb) {
-      const v = this.verbFor(s.hint());
-      if (verb.textContent !== v) verb.textContent = v;
-      verb.parentElement!.classList.toggle('idle', v === '…');
-    }
-  }
-
-  /** "E: harvest" → "HARVEST"; things E can't do right now → "…" */
-  private verbFor(hint: string): string {
-    if (!hint.startsWith('E:')) return '…';
-    const w = hint.slice(2).trim().split(/[ !(]/)[0].toUpperCase();
-    return { TILL: 'TILL', PLANT: 'PLANT', HARVEST: 'HARVEST', CHOP: 'CHOP', ATTACK: 'FIGHT', SWING: 'SWING', BUILD: 'BUILD', UPGRADE: 'UPGRADE', CLEAR: 'CLEAR', DIG: 'DIG', FLATTEN: 'FLATTEN', CUT: 'CUT' }[w] ?? 'USE';
   }
 
   private lastPick = '';
@@ -735,7 +538,7 @@ export class UI {
       if (b.kind === 'barracks') {
         const why = s.restockProblem(b);
         html += `<p>The tower shoots raiders inside the ring while the chest has arrows.</p><button class="btn small ${why ? '' : 'ok'} restock" ${why ? 'disabled' : ''} title="${why ? esc(why) : ''}">RESTOCK ${TOWER.restockArrows} ARROWS · ${TOWER.restockWood} WOOD</button>${why ? `<span class="d"> ${esc(why)}</span>` : ''}`;
-        html += `<p>Equip soldiers with bows in their cards. SET WALL POST, then tap a connected battlement. Stairs are required.</p><button class="btn small craft-arrows">FLETCH 10 ARROWS · 2 WOOD</button> <button class="btn small ok open-armory" title="The chest inside: armor and tower arrows">ARMOR CHEST</button><p class="d">Forges leather now, iron at Lv2, steel at Lv3. Scrap iron drops where a raider falls — walk over it.</p>`;
+        html += `<p>Equip soldiers with bows in their cards. SET WALL POST, then click a connected battlement. Stairs are required.</p><button class="btn small craft-arrows">FLETCH 10 ARROWS · 2 WOOD</button> <button class="btn small ok open-armory" title="The chest inside: armor and tower arrows">ARMOR CHEST</button><p class="d">Forges leather now, iron at Lv2, steel at Lv3. Scrap iron drops where a raider falls — walk over it.</p>`;
       }
       if (b.kind === 'house' || b.kind === 'barracks' || b.kind === 'tavern' || b.kind === 'gnomehouse') {
         const why = s.demolishProblem(b), refund = s.demolishRefund(b), arming = this.confirmDemolish === b;
@@ -760,7 +563,7 @@ export class UI {
       return;
     }
     if (!m || m.dead) {
-      const html = `${head}<p class="empty">Click or tap anything: a villager, a building, a crop, a tree, a wall, or something lying on the ground.<br>Children are the point: feed them well in the yard, keep them safe, and <b>encourage</b> them — how they're raised is who they become.</p>`;
+      const html = `${head}<p class="empty">Click anything: a villager, a building, a crop, a tree, a wall, or something lying on the ground.<br>Children are the point: feed them well in the yard, keep them safe, and <b>encourage</b> them — how they're raised is who they become.</p>`;
       if (force || this.lastInspector !== html) { this.inspector.innerHTML = html; this.lastInspector = html; }
       return;
     }
@@ -1230,7 +1033,7 @@ export class UI {
           <p><b>Fortify:</b> scroll the tool belt for WALL, GATE and STAIRS. Each takes one ground tile and wood for construction. Join walls into a perimeter and connect stairs. Right click or X on stairs to climb or descend. Walk along connected wall tops. Gates admit allies automatically; X opens them to enemies too. Hammer repairs damage. Brutes breach walls fast; Wreckers hammer them slowly — a closed perimeter is how your buildings stay standing.</p>
           <p><b>Archers:</b> select a soldier, equip BOW, then SET WALL POST and click a battlement top connected to stairs. RETURN TO PATROL recalls them. Player bow is key 9. Everyone uses the shared quiver; craft 10 arrows for 2 wood at the barracks or its supply button. Arrows hit bodies and cover; wall archers shoot over ramparts.</p>
           <p><b>Towers:</b> every barracks shoots raiders inside its ring (shown while placing it or when it's selected) from its own chest of arrows — the bar over its roof is the stock. When it runs dry the bar flashes red and the tower falls silent: restock 10 arrows for 2 wood at the chest inside (which also holds the armor), or from the barracks card.</p>
-          <p><b>Come inside:</b> walk up into a house, barracks or tavern door. WASD / joystick moves indoors; tapping the floor also walks there. Use nearby furnishings. The barracks rack makes quiver arrows and its chest restocks the tower and forges armor; tavern meals heal more with upgrades. Walk through the bottom doorway or choose EXIT. Raids continue outside.</p>
+          <p><b>Come inside:</b> walk up into a house, barracks or tavern door. Right-click the floor to walk; click a bed, the hearth or a rack to go and use it. The barracks rack makes quiver arrows and its chest restocks the tower and forges armor; tavern meals heal more with upgrades. Walk through the bottom doorway or choose EXIT. Raids continue outside.</p>
           <p>Survive <b>${p.bossDay} days</b>. Raiders first come on day ${p.firstRaidDay} and every ${p.raidEvery} days after, in big bands — and every wave brings more of them and new kinds. On day ${p.bossDay} the <b>Warlord</b> comes — beat him to win. If <b>you</b> die, the run ends (you keep the renown).</p>
           <h3>THE TRICK</h3>
           <p>You can't recruit anyone. <b>Every adult was a child you raised.</b> See RAISING CHILDREN below.</p>
@@ -1274,7 +1077,7 @@ export class UI {
           <p><b>Every child can starve.</b> Nobody young eats from the granary. Infants are nursed: they eat only when a fed grown-up lives at home, so an empty larder or an empty house starves the nursery. Children eat only what lies within ${YARD} tiles of the home they live in. ${p.kidStarveDays} hungry days are fatal.</p>
           <p><b>Feeding the yard.</b> Children eat nothing from the granary — only what you throw down for them. Take the <b>BASKET</b>, walk up to the granary to fill it (${STACK.food} food), point anywhere within ${p.tossRange} tiles and throw: ${p.tossSize} food flies there, bounces off walls and trees, rolls and stops wherever it stops. Children eat only what lies <b>within ${YARD} tiles of the home they live in</b> (${p.kidFood} a day each) — a throw that rolls short is wasted until you walk over it, and what lies in a yard is the children's: you will not pick it up by walking past, and no foraging gnome will take it. A child that misses a day stops training; after ${p.kidStarveDays} hungry days they starve. The basket's hint tells you how many children a yard holds and how much food is lying in it.</p>
           <p><b>Care.</b> Each dawn a child earns care for the day before: fed · <b>well fed</b> (ate from the yard that day) · both parents alive · another child at home · a Lv2+ house · your <b>encouragement</b>. Running from raiders, going hungry or losing a parent costs care. It averages into <b>stars</b> (★ to ★★★★★) that are fixed at coming of age and last for life: each star is +6% HP and work speed; five stars make a <b>gifted</b> adult with a trait (Hardy, Quick, Brave, Green Thumb, Tireless); a neglected child grows up frail.</p>
-          <p><b>Encourage.</b> Walk up to a child and press X (or tap them, or the button on their card): a moment together, once a day, worth a care point and a day of apprenticeship. During a raid it also sends them inside.</p>
+          <p><b>Encourage.</b> Walk up to a child and press X (or click them, or the button on their card): a moment together, once a day, worth a care point and a day of apprenticeship. During a raid it also sends them inside.</p>
           <p><b>Children go to bed at dusk</b> and sleep indoors until dawn, and they <b>run for the nearest door</b> when raiders are near. Snatchers take children caught in the open.</p>
           <p><b>Renown</b> comes from children raised: 20 each, plus 8 per star.</p>
           <h3>WEAPONS</h3>
@@ -1296,7 +1099,7 @@ export class UI {
         <section>
           <h3>CONTROLS</h3>
           <div class="controls">
-            <kbd>right click</kbd><span>the command. On open ground: walk there (the way round walls and thorns is found for you). On an enemy: chase it and attack with the sword or bow in hand. On a ripe crop or plant, the great pot, a gate or stairs: walk up and use it with your hands. On a door: go in. (Joystick on phone.)</span>
+            <kbd>right click</kbd><span>the command. On open ground: walk there (the way round walls and thorns is found for you). On an enemy: chase it and attack with the sword or bow in hand. On a ripe crop or plant, the great pot, a gate or stairs: walk up and use it with your hands. On a door: go in.</span>
             <kbd>Q</kbd><span>strike: the sword toward the cursor; press again inside the swing to combo</span>
             <kbd>W</kbd><span>shoot: a bow shot at the cursor (needs a bow and arrows)</span>
             <kbd>E</kbd><span>roll: a committed tumble toward the cursor. It goes clean through bodies but not through walls, and you cannot steer or swing until it lands. A raider's blow checks its reach at the moment it strikes, so rolling out of a wind-up beats it.</span>

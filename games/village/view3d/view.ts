@@ -278,11 +278,11 @@ export class View {
     // pan: arrow keys, or the mouse pushed against an edge of the view
     let px = (k.has('ArrowRight') ? 1 : 0) - (k.has('ArrowLeft') ? 1 : 0), pz = (k.has('ArrowDown') ? 1 : 0) - (k.has('ArrowUp') ? 1 : 0);
     const r = this.renderer.domElement.getBoundingClientRect(), m = this.mouse;
-    if (m && !document.body.classList.contains('touch') && s.screen === 'playing') {
+    if (m && s.screen === 'playing') {
       if (m.x < r.left + EDGE) px = -1; else if (m.x > r.right - EDGE) px = 1;
       if (m.y < r.top + EDGE) pz = -1; else if (m.y > r.bottom - EDGE) pz = 1;
     }
-    const following = this.locked || k.has(' ') || document.body.classList.contains('touch') || s.screen !== 'playing';
+    const following = this.locked || k.has(' ') || s.screen !== 'playing';
     if (pl && following) {
       const want = new THREE.Vector3(pl.x * U, groundHeight(pl.x * U, pl.y * U) + standHeight(pl) + 0.8, pl.y * U);
       this.pan.copy(want);

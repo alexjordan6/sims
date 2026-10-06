@@ -101,7 +101,7 @@ export class PackUI {
     this.render();
   }
   private down(e: PointerEvent, host: HTMLElement): void {
-    if (e.pointerType === 'touch' || e.button !== 0 || this.s.screen !== 'playing') return;
+    if (e.button !== 0 || this.s.screen !== 'playing') return;
     const el = (e.target as Element).closest<HTMLElement>('.pack-cell'); if (!el) return;
     e.preventDefault(); e.stopPropagation();
     const source = this.source(el), item = this.item(source, host); if (!item) return;

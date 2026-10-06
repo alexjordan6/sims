@@ -84,10 +84,10 @@ export class Interior {
     if (!this.building) return;
     const b = this.building; this.building = null;
     const d = doorstep(b), p = this.s.player;
-    if (p) { Object.assign(p, World.center(d.tx, d.ty)); p.hidden = false; p.vx = p.vy = 0; p.touch.x = p.touch.y = 0; p.clearGoal(); }
+    if (p) { Object.assign(p, World.center(d.tx, d.ty)); p.hidden = false; p.vx = p.vy = 0; p.clearGoal(); }
     this.destination = null;
   }
-  /** A tap on the room's floor at room pixels (x, y): walk there, or act when it is the head itself (or the right button). */
+  /** A click on the room's floor at room pixels (x, y): walk there, or act when it is the head itself (or the right button). */
   tap(x: number, y: number, right: boolean): void {
     if (Math.hypot(x - this.x, y - this.y) < 20) { this.act(); return; }
     // tapping a piece of furniture (or the door) walks up to it and uses it on arrival, MOBA style
@@ -107,8 +107,8 @@ export class Interior {
   update(dt: number): void {
     this.time += dt;
     const p = this.s.player, k = p.keys;
-    let dx = Number(k.D.isDown) - Number(k.A.isDown) + p.touch.x;
-    let dy = Number(k.S.isDown) - Number(k.W.isDown) + p.touch.y;
+    let dx = Number(k.D.isDown) - Number(k.A.isDown);
+    let dy = Number(k.S.isDown) - Number(k.W.isDown);
     if (dx || dy) this.destination = null;
     else if (this.destination) {
       dx = this.destination.x - this.x; dy = this.destination.y - this.y;

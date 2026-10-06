@@ -1338,8 +1338,6 @@ export class Player extends Mover {
   camYaw = 0;
   /** the way the head's standing order walks it this tick, a unit vector (MOBA right-click), or null */
   steer: { x: number; y: number } | null = null;
-  /** virtual joystick axis (-1..1), set by the touch UI */
-  touch = { x: 0, y: 0 };
 
   constructor(x: number, y: number) {
     super(x, y);
@@ -1410,11 +1408,6 @@ export class Player extends Mover {
     let mx = (this.keys.D.isDown ? 1 : 0) - (this.keys.A.isDown ? 1 : 0);
     let my = (this.keys.S.isDown ? 1 : 0) - (this.keys.W.isDown ? 1 : 0);
     if (mx && my) { mx *= Math.SQRT1_2; my *= Math.SQRT1_2; }
-    if (!mx && !my && (this.touch.x || this.touch.y)) {
-      const len = Math.hypot(this.touch.x, this.touch.y);
-      const k = Math.min(1, len) / (len || 1);
-      mx = this.touch.x * k; my = this.touch.y * k;
-    }
     // W is away from the camera, wherever it has swung round to
     if (this.camYaw) { const c = Math.cos(this.camYaw), s = Math.sin(this.camYaw); [mx, my] = [mx * c + my * s, -mx * s + my * c]; }
     // no keys, no stick: the standing order walks (VillageScene.driveCommand sets it in world space)

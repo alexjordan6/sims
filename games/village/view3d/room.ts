@@ -179,7 +179,7 @@ export class Room3d {
     // the head turns to walk, and bobs
     const pg = this.people.get(s.player);
     if (pg) {
-      const k = s.player.keys, mx = Number(k.D.isDown) - Number(k.A.isDown) + s.player.touch.x, my = Number(k.S.isDown) - Number(k.W.isDown) + s.player.touch.y;
+      const k = s.player.keys, mx = Number(k.D.isDown) - Number(k.A.isDown), my = Number(k.S.isDown) - Number(k.W.isDown);
       if (mx || my) pg.rotation.y = Math.atan2(mx, my);
       pg.position.y = it.moving ? Math.abs(Math.sin(it.time * 12)) * 0.06 : 0;
     }
