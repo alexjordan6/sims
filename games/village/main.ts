@@ -1774,6 +1774,7 @@ export class VillageScene extends SimScene {
 
   tick(dt: number): void {
     if (this.screen !== 'playing') return;
+    this.world.beginTick();
 
     this.dayTime += dt / p.dayLength;
     if (this.dayTime >= 1) {
@@ -2177,8 +2178,12 @@ export class VillageScene extends SimScene {
     }
     this.bodies.rebuild(solid);
     for (const a of solid) {
-      this.bodies.forEachInRadius(a.x, a.y, a.space + 16, (b, d2) => {
-        if (b === a || b.id < a.id || b.elevated !== a.elevated) return; // each pair once
+      const as = a.space;
+      this.bodies.forEachInRadius(a.x, a.y, as * 2 + 0.5, (b, d2) => {
+        // each pair once, from the bigger body's side (its search reaches every body that can touch it)
+        if (b === a || b.elevated !== a.elevated) return;
+        const bs = b.space;
+        if (bs > as || (bs === as && b.id < a.id)) return;
         const minD = a.space + b.space;
         if (d2 >= minD * minD) return;
         let d = Math.sqrt(d2), ux: number, uy: number;
@@ -2368,7 +2373,28 @@ export class VillageScene extends SimScene {
   }
 
   /** What a soldier should go for: a snatcher carrying a child first (seen from further away), then real threats, rats last. Calm wild animals are nobody's business. */
+  /** this tick's answers to identical target searches (a band at the head's heels asks the same question a thousand times) */
+  private targetMemo = new Map<string, Raider | null>();
+  /** the grid rebuild the memo belongs to: every frame rebuilds the grid (the game loop and the test steppers alike) */
+  private memoGrid = -1;
+  private gridStamp = 0;
+  private memoFresh(): void {
+    if (!(this.grid as unknown as { _stamped?: boolean })._stamped) {
+      const g = this.grid as unknown as { rebuild(i: Iterable<unknown>): void; _stamped?: boolean }, orig = g.rebuild.bind(g);
+      g.rebuild = (items) => { this.gridStamp++; orig(items); };
+      g._stamped = true;
+    }
+    if (this.memoGrid !== this.gridStamp) { this.memoGrid = this.gridStamp; this.targetMemo.clear(); }
+  }
   bestTarget(x: number, y: number, r: number): Raider | null {
+    this.memoFresh();
+    const key = `b${Math.round(x)},${Math.round(y)},${r}`;
+    if (this.targetMemo.has(key)) { const m = this.targetMemo.get(key)!; if (!m || !m.dead) return m; }
+    const found = this.bestTargetUncached(x, y, r);
+    this.targetMemo.set(key, found);
+    return found;
+  }
+  private bestTargetUncached(x: number, y: number, r: number): Raider | null {
     let best: Raider | null = null, bs = Infinity;
     this.grid.forEachInRadius(x, y, r * 2.5, (o, d2) => {
       if (o instanceof Raider && !o.dead && o.carrying && d2 < bs) { bs = d2; best = o; }
@@ -2384,6 +2410,14 @@ export class VillageScene extends SimScene {
 
   /** Enemies currently targeting the player; following soldiers defend against these only. */
   attackingPlayer(x: number, y: number, r: number): Raider | null {
+    this.memoFresh();
+    const key = `a${Math.round(x)},${Math.round(y)},${r}`;
+    if (this.targetMemo.has(key)) { const m = this.targetMemo.get(key)!; if (!m || !m.dead) return m; }
+    const found = this.attackingPlayerUncached(x, y, r);
+    this.targetMemo.set(key, found);
+    return found;
+  }
+  private attackingPlayerUncached(x: number, y: number, r: number): Raider | null {
     let best: Raider | null = null, bestDistance = r * r;
     this.grid.forEachInRadius(x, y, r, (o, d2) => {
       if (o instanceof Raider && o.isTargeting(this.player) && d2 < bestDistance) {

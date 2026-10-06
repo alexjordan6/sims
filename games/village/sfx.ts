@@ -154,9 +154,17 @@ export class Sfx {
   /** Old wood shifting somewhere near: a low, slow creak. */
   creak(): void { this.tone('triangle', 150, 104, 0.55, 0.05); this.tone('sawtooth', 152, 100, 0.5, 0.02, 0.05); }
 
+  /** voices started in the current 50 ms window: a thousand-body melee must not start a thousand oscillators */
+  private voiceWin = 0; private voices = 0;
+  private voiceOk(): boolean {
+    const now = performance.now();
+    if (now - this.voiceWin > 50) { this.voiceWin = now; this.voices = 0; }
+    return ++this.voices <= 14;
+  }
+
   /** A short tone: frequency glides from f0 to f1 over `dur` seconds. */
   private tone(type: OscillatorType, f0: number, f1: number, dur: number, vol = 0.3, delay = 0): void {
-    const c = this.ctx; if (!c || !this.master || this.muted) return;
+    const c = this.ctx; if (!c || !this.master || this.muted || !this.voiceOk()) return;
     const t = c.currentTime + delay;
     const o = c.createOscillator(); const g = c.createGain();
     o.type = type;
@@ -170,7 +178,7 @@ export class Sfx {
 
   /** Filtered noise burst, for whooshes and thuds. */
   private noise(dur: number, f0: number, f1: number, vol = 0.25, q = 1, delay = 0): void {
-    const c = this.ctx; if (!c || !this.master || !this.noiseBuf || this.muted) return;
+    const c = this.ctx; if (!c || !this.master || !this.noiseBuf || this.muted || !this.voiceOk()) return;
     const t = c.currentTime + delay;
     const src = c.createBufferSource(); src.buffer = this.noiseBuf;
     const f = c.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = q;

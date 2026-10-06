@@ -567,3 +567,4 @@ body::after {
 .potcard .potact { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
 .potcard .potrow > img { width: 28px !important; height: 28px !important; }
 .potcard .potneeds .ing img { width: 16px !important; height: 16px !important; }
+.roster .grp-more { font-size: 11px; color: var(--ink-dim); padding: 2px 6px 6px; }

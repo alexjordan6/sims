@@ -1737,6 +1737,29 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       for (const g of [...fed, left]) g.dead = true; s.removeDead();
     }
 
+    // ---- paths at scale: a crowd shares one distance field; everything else draws from a per-tick budget ----
+    {
+      s = fresh(); clearing(s);
+      const w = s.world, goal = { tx: 130, ty: 100 };
+      w.beginTick(2);
+      const many = [118, 119, 120, 121, 122].map((x) => w.route({ tx: x, ty: 96 }, goal));
+      assert(many.every((p) => p !== null && p.length > 0) && w.pathBudget === 0, `five walkers to one goal: two A* searches, then the rest walk a shared field (budget left ${w.pathBudget})`);
+      assert(w.route({ tx: 118, ty: 104 }, { tx: 125, ty: 92 }) === null, 'a lone walker over the budget is told to ask again next tick');
+      w.beginTick();
+      assert((w.route({ tx: 118, ty: 104 }, { tx: 125, ty: 92 }) ?? []).length > 0, 'and gets its path once the budget refills');
+    }
+
+    // ---- fog at scale: a block of soldiers lights its ground through a dozen merged discs, never less than before ----
+    {
+      s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(120, 100));
+      for (let i = 0; i < 100; i++) { const g = s.spawn(new Villager(World.center(110 + (i % 10), 104 + Math.floor(i / 10)).x, World.center(110 + (i % 10), 104 + Math.floor(i / 10)).y, s.world.houses[0], 'soldier', 20, `F${i}`, s.mods)); g.gnome = true; g.applyRole(s.mods); }
+      const f = s.fog as unknown as { sources(): { tx: number; ty: number; r: number }[]; bucketed(): { tx: number; ty: number; r: number }[] };
+      const lit = (srcs: { tx: number; ty: number; r: number }[]) => { const set = new Set<number>(); for (const q of srcs) for (let y = Math.floor(q.ty - q.r); y <= q.ty + q.r; y++) for (let x = Math.floor(q.tx - q.r); x <= q.tx + q.r; x++) if (Math.hypot(x + 0.5 - q.tx, y + 0.5 - q.ty) < q.r) set.add(y * 1000 + x); return set; };
+      const raw = f.sources(), merged = f.bucketed(), a = lit(raw), b = lit(merged);
+      assert(merged.length < raw.length / 3 && [...a].every((k) => b.has(k)), `100 soldiers light their ground through ${merged.length} discs instead of ${raw.length}, and nothing they saw goes dark`);
+      for (const ag of s.agents) if (ag !== s.player) (ag as Villager).dead = true; s.removeDead();
+    }
+
     // ---- the crowd: gnomes and rank-and-file raiders are drawn as instanced flipbook bodies ----------
     {
       s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(120, 100));

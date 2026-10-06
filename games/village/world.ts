@@ -465,6 +465,76 @@ export class World {
    */
   private lastFlood: { revision: number; enemy: boolean; elevated: boolean; reached: Int32Array } | null = null;
 
+  /** A* searches route() may still run this tick (see beginTick); a request past it is refused and retried next tick. */
+  pathBudget = 12;
+  /** how often each goal was asked for this tick, and the distance fields built for popular goals */
+  private demand = new Map<string, number>();
+  private fields = new Map<string, { revision: number; dist: Float32Array; x0: number; y0: number; w: number; h: number }>();
+  /** A new tick: the path budget refills and demand starts again. */
+  beginTick(budget = 12): void { this.pathBudget = budget; this.budgetAt = performance.now(); this.demand.clear(); if (this.fields.size > 24) this.fields.clear(); }
+  /** when the budget was last refilled: a caller that never runs the scene's tick (a test stepping agents) still gets one a frame */
+  private budgetAt = 0;
+  /**
+   * A path for a walker, with a crowd in mind. When three or more walkers want the same goal this tick (a
+   * regiment, a thousand gnomes at the head's heels), one distance field is built outward from the goal and
+   * every one of them just walks downhill on it. Anything else is an A* search drawn from the tick's budget;
+   * null means the budget is spent, so ask again next tick. Same result shape as bfs().
+   */
+  route(from: TilePos, to: TilePos, enemy = false, elevated = false): TilePos[] | null {
+    if (!this.inBounds(from.tx, from.ty) || !this.inBounds(to.tx, to.ty)) return [];
+    const key = `${to.tx},${to.ty},${enemy ? 1 : 0}${elevated ? 1 : 0}`;
+    const asked = (this.demand.get(key) ?? 0) + 1;
+    this.demand.set(key, asked);
+    let f = this.fields.get(key);
+    if (f && f.revision !== this.revision) { this.fields.delete(key); f = undefined; }
+    if (!f && asked >= 3) { f = this.buildField(to, enemy, elevated); this.fields.set(key, f); }
+    if (f) { const p = this.descend(f, from, to); if (p) return p; }
+    if (this.pathBudget <= 0 && performance.now() - this.budgetAt > 20) this.beginTick();
+    if (this.pathBudget <= 0) return null;
+    this.pathBudget--;
+    return this.bfs(from, to, enemy, elevated);
+  }
+  /** Distance (in steps, thorns costing extra) from every tile within 40 of `to` back to it. */
+  private buildField(to: TilePos, enemy: boolean, elevated: boolean): { revision: number; dist: Float32Array; x0: number; y0: number; w: number; h: number } {
+    const R = 40, x0 = Math.max(0, to.tx - R), y0 = Math.max(0, to.ty - R), x1 = Math.min(this.cols - 1, to.tx + R), y1 = Math.min(this.rows - 1, to.ty + R);
+    const w = x1 - x0 + 1, h = y1 - y0 + 1, dist = new Float32Array(w * h).fill(Infinity);
+    const heap: number[] = [], hd: number[] = [];
+    const push = (i: number, d: number) => { heap.push(i); hd.push(d); let k = heap.length - 1; while (k > 0) { const pp = (k - 1) >> 1; if (hd[pp] <= hd[k]) break; [heap[pp], heap[k]] = [heap[k], heap[pp]]; [hd[pp], hd[k]] = [hd[k], hd[pp]]; k = pp; } };
+    const pop = () => { const i = heap[0], d = hd[0], li = heap.pop()!, ld = hd.pop()!; if (heap.length) { heap[0] = li; hd[0] = ld; let k = 0; for (;;) { const a = 2 * k + 1, b = a + 1; let m = k; if (a < heap.length && hd[a] < hd[m]) m = a; if (b < heap.length && hd[b] < hd[m]) m = b; if (m === k) break; [heap[m], heap[k]] = [heap[k], heap[m]]; [hd[m], hd[k]] = [hd[k], hd[m]]; k = m; } } return [i, d] as const; };
+    const seed = (tx: number, ty: number) => { const i = (ty - y0) * w + (tx - x0); dist[i] = 0; push(i, 0); };
+    // a blocked goal (a building, a tree) is reached from beside it, as bfs does
+    if (this.isBlocked(to.tx, to.ty, enemy, elevated)) { for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const tx = to.tx + dx, ty = to.ty + dy; if (tx >= x0 && tx <= x1 && ty >= y0 && ty <= y1 && !this.isBlocked(tx, ty, enemy, elevated)) seed(tx, ty); } }
+    else seed(to.tx, to.ty);
+    while (heap.length) {
+      const [i, d] = pop();
+      if (d > dist[i]) continue;
+      const cx = (i % w) + x0, cy = ((i / w) | 0) + y0;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = cx + dx, ny = cy + dy;
+        if (nx < x0 || nx > x1 || ny < y0 || ny > y1 || this.isBlocked(nx, ny, enemy, elevated)) continue;
+        const ni = (ny - y0) * w + (nx - x0), nd = d + (this.tiles[ny * this.cols + nx].kind === 'thicket' ? THICKET_PATH_COST : 1);
+        if (nd < dist[ni]) { dist[ni] = nd; push(ni, nd); }
+      }
+    }
+    return { revision: this.revision, dist, x0, y0, w, h };
+  }
+  /** Walk downhill on a field from `from` toward its goal: up to 24 steps, or null when `from` is off the field or cut off. */
+  private descend(f: { dist: Float32Array; x0: number; y0: number; w: number; h: number }, from: TilePos, to: TilePos): TilePos[] | null {
+    const at = (tx: number, ty: number) => tx < f.x0 || ty < f.y0 || tx >= f.x0 + f.w || ty >= f.y0 + f.h ? Infinity : f.dist[(ty - f.y0) * f.w + (tx - f.x0)];
+    if (from.tx === to.tx && from.ty === to.ty) return [];
+    let cx = from.tx, cy = from.ty, d = at(cx, cy);
+    // standing on a blocked tile (a doorway, a wall top) the walker's own tile has no distance: start from its best neighbour
+    if (!isFinite(d)) { let best = Infinity; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) best = Math.min(best, at(cx + dx, cy + dy)); if (!isFinite(best)) return null; d = best + 1; }
+    const path: TilePos[] = [];
+    for (let k = 0; k < 24 && d > 0; k++) {
+      let bx = cx, by = cy, bd = d;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nd = at(cx + dx, cy + dy); if (nd < bd) { bd = nd; bx = cx + dx; by = cy + dy; } }
+      if (bx === cx && by === cy) break;
+      cx = bx; cy = by; d = bd; path.push({ tx: cx, ty: cy });
+    }
+    return path;
+  }
+
   bfs(from: TilePos, to: TilePos, enemy = false, elevated = false): TilePos[] {
     if (!this.inBounds(from.tx, from.ty) || !this.inBounds(to.tx, to.ty)) return [];
     const n = this.cols * this.rows;

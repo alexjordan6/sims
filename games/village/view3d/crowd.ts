@@ -4,6 +4,7 @@ import { Mover, Villager, Raider } from '../agents';
 import { lookFor } from '../look';
 import type { VillageScene } from '../main';
 import { MODELS, bake } from './assets';
+import { FOE_MODEL } from './registry';
 import { heldMesh, piece, modelFor, scaleOf, standHeight, PERSON, type Kick } from './actors';
 import { lambert } from './ps1';
 import { U } from './models';
@@ -101,8 +102,26 @@ export class Crowd {
    * Draw everyone the crowd handles this frame. Returns nothing; `drawn` lists who it took, so the
    * actor path leaves them alone. Bodies that died since last frame lie fallen and sink away.
    */
+  /** looks still to bake ahead of need, one a frame, so no fight stalls on a first sight of something */
+  private warmList: [string, string, boolean][] | null = null;
+  private warmRev = -1;
+  private warm(): void {
+    if (this.warmRev !== MODELS.revision) {
+      this.warmRev = MODELS.revision;
+      const list: [string, string, boolean][] = [];
+      for (const k of GNOME_LOOKS) for (const held of ['pike', 'club', 'none']) list.push([k, held, true]);
+      for (const f of Object.values(FOE_MODEL)) for (const held of ['sword', 'axe', 'none']) list.push([f!.key, held, false]);
+      this.warmList = list.filter(([k, h, hat]) => !this.looks.has(`${k}|${h}|${hat}`));
+    }
+    const next = this.warmList?.find(([k]) => MODELS.characters.has(k));
+    if (!next) return;
+    this.warmList = this.warmList!.filter((x) => x !== next);
+    this.look(next[0], next[1], next[2]);
+  }
+
   sync(dt: number): void {
     this.t += dt;
+    this.warm();
     const s = this.scene, fog = s.fog;
     const was = new Set(this.drawn);
     this.drawn.clear();

@@ -80,7 +80,7 @@ export class Fog {
     this.t = 0;
     for (const i of this.lit) this.vis[i] = 0;
     this.lit = [];
-    for (const src of this.sources()) {
+    for (const src of this.bucketed()) {
       const R = src.r + 1;
       const x0 = Math.max(0, Math.floor(src.tx - R)), x1 = Math.min(COLS - 1, Math.ceil(src.tx + R));
       const y0 = Math.max(0, Math.floor(src.ty - R)), y1 = Math.min(ROWS - 1, Math.ceil(src.ty + R));
@@ -98,6 +98,25 @@ export class Fog {
     this.revision++;
   }
 
+  /**
+   * The sources, merged 4x4 tiles at a time: one disc per bucket, centred on its members and grown by the
+   * farthest one's offset, so it covers what each of them saw (a little more at the edge, never less).
+   */
+  private bucketed(): { tx: number; ty: number; r: number }[] {
+    const all = this.sources();
+    if (all.length < 40) return all;
+    const buckets = new Map<number, { tx: number; ty: number; r: number }[]>();
+    for (const s of all) { const k = Math.floor(s.ty / 4) * 1000 + Math.floor(s.tx / 4); let b = buckets.get(k); if (!b) buckets.set(k, (b = [])); b.push(s); }
+    const out: { tx: number; ty: number; r: number }[] = [];
+    for (const b of buckets.values()) {
+      if (b.length === 1) { out.push(b[0]); continue; }
+      const cx = b.reduce((n, s) => n + s.tx, 0) / b.length, cy = b.reduce((n, s) => n + s.ty, 0) / b.length;
+      let r = 0;
+      for (const s of b) r = Math.max(r, s.r + Math.hypot(s.tx - cx, s.ty - cy));
+      out.push({ tx: cx, ty: cy, r });
+    }
+    return out;
+  }
   /** Everyone and everything that can see, in tile space. */
   private sources(): { tx: number; ty: number; r: number }[] {
     const s = this.scene;

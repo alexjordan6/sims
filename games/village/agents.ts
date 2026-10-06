@@ -91,9 +91,11 @@ export abstract class Mover implements Agent {
   /** Re-path only when the goal tile changes (or `force`). */
   setGoal(s: VillageScene, tx: number, ty: number, force = false): void {
     if (!force && this.pathRevision === s.world.revision && this.goal && this.goal.tx === tx && this.goal.ty === ty) return;
+    const path = s.world.route(this.tile, { tx, ty }, this.hostile, this.elevated);
+    if (path === null) { this.goal = null; return; } // over the tick's path budget: keep walking, ask again next tick
     this.goal = { tx, ty };
     this.pathRevision = s.world.revision;
-    this.path = s.world.bfs(this.tile, this.goal, this.hostile, this.elevated);
+    this.path = path;
   }
 
   clearGoal(): void {

@@ -653,7 +653,8 @@ export class UI {
     for (const [label, cls, list] of groups) {
       if (!list.length) continue;
       html += `<div class="grp ${cls}">${label} <b>${list.length}</b>${cls === 'kid' ? '<span class="grp-note">trade · care stars</span>' : ''}</div>`;
-      for (const v of list) {
+      // a big village lists the first forty of each group, and says how many more there are
+      for (const v of list.slice(0, 40)) {
         const c = CHAR[v.role];
         let bar = '';
         if (v.role === 'kid') {
@@ -667,14 +668,16 @@ export class UI {
         const lk = lookFor(v);
         html += `<div class="row ${s.selected === v ? 'sel' : ''}" data-id="${v.id}">${lk ? `<img class="art row-portrait" src="${charImg(lk)}" alt="">` : spr(c.key, c.frame, 24)}<span class="n">${esc(v.name)}</span><span class="a">${v.age.toFixed(1)}d${v.elder ? ' · old' : ''}</span>${bar}</div>`;
       }
+      if (list.length > 40) html += `<div class="grp-more">… and ${list.length - 40} more</div>`;
     }
     if (!vs.length) html = '<p class="empty">Nobody lives here yet.</p>';
     // health changes every tick in a fight: patch the bars in place rather than rebuilding the list
     const structure = html.replace(/width:[\d.]+%/g, 'width:%').replace(/ low"/g, '"');
     const list = this.roster.querySelector('.list')!;
     if (structure !== this.lastRoster) { list.innerHTML = html; this.lastRoster = structure; return; }
+    const byId = new Map(vs.map((v) => [String(v.id), v]));
     for (const row of list.querySelectorAll<HTMLElement>('.row[data-id]')) {
-      const v = vs.find((x) => String(x.id) === row.dataset.id);
+      const v = byId.get(row.dataset.id!);
       const bar = row.querySelector<HTMLElement>('.bar.hp');
       if (!v || !bar) continue;
       const pct = Math.max(0, v.hp / v.maxHp * 100);

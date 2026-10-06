@@ -86,6 +86,7 @@ export class Fx3d {
 
   /** A word that floats up from p and fades. */
   word(text: string, p: THREE.Vector3, colour: string, size = 14, ttl = 0.9): void {
+    if (this.words.length >= 40) return; // a great melee would bury the screen in numbers: past forty, let them go
     const el = document.createElement('div');
     el.className = 'fx-word'; el.textContent = text; el.style.color = colour; el.style.fontSize = `${size}px`;
     this.layer.append(el);
