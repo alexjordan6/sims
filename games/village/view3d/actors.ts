@@ -7,7 +7,10 @@ import { BOAR, FOODS, ITEM, p } from '../config';
 import type { Item } from '../items';
 import type { VillageScene } from '../main';
 import { mat, U, WALL_UNITS } from './models';
-import { lambert } from './ps1';
+import { lambert, psxify } from './ps1';
+import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import { MODELS } from './assets';
+import { FOLK, HEAD, FOE_MODEL } from './registry';
 import { groundHeight } from './terrain';
 
 // Everyone who moves, and everything lying on the ground. Placeholder people are a few boxes —
@@ -65,13 +68,73 @@ interface Actor {
   carry?: THREE.Mesh;
   /** death animation clock, once the agent is gone */
   dying?: number;
+  /** a pack character's animation, when it has one */
+  anim?: Anim;
+}
+
+interface Anim { mixer: THREE.AnimationMixer; actions: Map<string, THREE.AnimationAction>; current: string }
+
+/** how tall a grown person stands, in units */
+const PERSON = 1.25;
+
+/** The pack character that plays this mover, if there is one (rats, boars, bolts, arrows and swarms keep code bodies). */
+function modelFor(m: Mover): { key: string; tint?: number } | null {
+  if (m instanceof Player) return { key: HEAD };
+  if (m instanceof Villager) return { key: FOLK[m.id % FOLK.length] };
+  if (m instanceof Raider && !(m instanceof Boar) && m.kind !== 'rat' && m.kind !== 'boar') return FOE_MODEL[m.boss ? 'warlord' : m.kind] ?? null;
+  return null;
+}
+
+/** Build a pack character for a mover: its own copy of the rig and materials, a mixer, its held tool in the right hand. */
+function makeCharacter(m: Mover, md: { key: string; tint?: number }): { body: THREE.Group; anim: Anim } | null {
+  const ch = MODELS.characters.get(md.key);
+  if (!ch) return null;
+  const body = new THREE.Group();
+  const rig = SkeletonUtils.clone(ch.scene);
+  const k = PERSON / ch.height;
+  rig.scale.setScalar(k);
+  rig.traverse((o) => {
+    if (!(o instanceof THREE.Mesh)) return;
+    const mt = (o.material as THREE.MeshLambertMaterial).clone(); // every actor flashes on its own
+    if (md.tint !== undefined) mt.color.multiply(new THREE.Color(md.tint));
+    if (m instanceof Villager && m.elder) mt.color.multiplyScalar(0.85);
+    psxify(mt); // a clone keeps the shader hook but not its defines
+    o.material = mt;
+  });
+  body.add(rig);
+  const hand = rig.getObjectByName('arm-right'), head = rig.getObjectByName('head');
+  const look = lookFor(m), held = look ? heldMesh(look.held) : null;
+  if (held && hand) { held.scale.setScalar(1 / k); held.position.set(-0.05 / k, -0.32 / k, 0.06 / k); held.rotation.x = Math.PI / 2; hand.add(held); }
+  else if (held) { held.position.set(0.3, 0.42, 0.12); held.rotation.x = 0.5; body.add(held); }
+  if (m instanceof Villager && m.gnome && head) { const hat = piece(0xa02a22, 0.34 / k, 0.55 / k, 0.34 / k, 0, 0.2 / k, 0, cone); head.add(hat); } // the red hat
+  if (m instanceof Player && head) head.add(piece(0xc8a040, 0.34 / k, 0.06 / k, 0.32 / k, 0, 0.24 / k, 0)); // the head's circlet
+  const mixer = new THREE.AnimationMixer(rig);
+  const actions = new Map<string, THREE.AnimationAction>();
+  for (const clip of ch.clips) actions.set(clip.name, mixer.clipAction(clip));
+  for (const one of ['die', 'attack-melee-right', 'interact-right', 'pick-up']) { const a = actions.get(one); if (a) { a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; } }
+  const idle = actions.get('idle'); idle?.play();
+  mixer.update(Math.random() * 2); // not everyone breathes in step
+  return { body, anim: { mixer, actions, current: 'idle' } };
+}
+
+/** Cross-fade an actor to an animation (one-shots restart). */
+function play(an: Anim, name: string, fade = 0.15): void {
+  const next = an.actions.get(name);
+  if (!next) return;
+  if (an.current === name && next.loop !== THREE.LoopOnce) return;
+  const prev = an.actions.get(an.current);
+  next.reset().setEffectiveWeight(1).play();
+  if (prev && prev !== next) prev.crossFadeTo(next, fade, false);
+  an.current = name;
 }
 
 /** Build the placeholder for one mover. Front faces +z. */
-export function makeActor(m: Mover): { body: THREE.Group; key: string } {
+export function makeActor(m: Mover): { body: THREE.Group; key: string; anim?: Anim } {
+  const key = actorKey(m);
+  const md = modelFor(m), built = md ? makeCharacter(m, md) : null;
+  if (built) return { body: built.body, key, anim: built.anim };
   const body = new THREE.Group();
   const look = lookFor(m);
-  const key = actorKey(m);
   if (m instanceof Arrow) { body.add(piece(0x8a6a3a, 0.04, 0.04, 0.6, 0, 0, 0), piece(0xd0d0d0, 0.06, 0.06, 0.1, 0, -0.01, 0.3, cone)); return { body, key }; }
   if (m instanceof Bolt) { const b = piece(0xb46bff, 0.35, 0.35, 0.35, 0, 0.4, 0, ico); (b.material as THREE.MeshLambertMaterial).emissive.setHex(0x7a2ad0); body.add(b); return { body, key }; }
   if (m instanceof Swarm) { for (let k = 0; k < 9; k++) body.add(piece(0x1a1408, 0.06, 0.06, 0.06, (Math.random() - 0.5) * 0.6, 0.4 + Math.random() * 0.5, (Math.random() - 0.5) * 0.6)); return { body, key }; }
@@ -108,8 +171,8 @@ export function makeActor(m: Mover): { body: THREE.Group; key: string } {
 }
 
 function actorKey(m: Mover): string {
-  const look = lookFor(m);
-  return `${m.constructor.name}|${look?.held ?? ''}|${look?.body ?? ''}|${m instanceof Villager ? m.role + m.gnome + m.elder : ''}|${m instanceof Raider ? m.kind + m.boss : ''}`;
+  const look = lookFor(m), md = modelFor(m);
+  return `${md && MODELS.characters.has(md.key) ? md.key : 'box'}|${m.constructor.name}|${look?.held ?? ''}|${look?.body ?? ''}|${m instanceof Villager ? m.role + m.gnome + m.elder : ''}|${m instanceof Raider ? m.kind + m.boss : ''}`;
 }
 
 function scaleOf(m: Mover): number {
@@ -128,7 +191,7 @@ export function standHeight(m: Mover): number {
 }
 
 /** the hit-flash and squash an fx can lay on an actor for a moment */
-export interface Kick { flash: number; flashColour: number; squash: number; recoilX: number; recoilZ: number; spin: number }
+export interface Kick { flash: number; flashColour: number; squash: number; recoilX: number; recoilZ: number; spin: number; /** seconds of a strike animation to play */ attack: number }
 
 export class Actors {
   readonly group = new THREE.Group();
@@ -153,7 +216,7 @@ export class Actors {
 
   kick(id: number): Kick {
     let k = this.kicks.get(id);
-    if (!k) this.kicks.set(id, (k = { flash: 0, flashColour: 0xffffff, squash: 0, recoilX: 0, recoilZ: 0, spin: 0 }));
+    if (!k) this.kicks.set(id, (k = { flash: 0, flashColour: 0xffffff, squash: 0, recoilX: 0, recoilZ: 0, spin: 0, attack: 0 }));
     return k;
   }
 
@@ -176,18 +239,24 @@ export class Actors {
       const key = actorKey(m);
       if (a && a.key !== key) { this.group.remove(a.group); a = undefined; pickDirty = true; }
       if (!a) {
-        const { body } = makeActor(m);
+        const { body, anim } = makeActor(m);
         const group = new THREE.Group();
         group.add(body);
         const mats: THREE.MeshLambertMaterial[] = [];
         body.traverse((o) => { if (o instanceof THREE.Mesh) { o.userData.agent = m; o.castShadow = true; mats.push(o.material as THREE.MeshLambertMaterial); } });
-        a = { group, body, mats, key, yaw: 0 };
+        a = { group, body, mats, key, yaw: 0, anim };
         this.group.add(group); this.actors.set(m.id, a); pickDirty = true;
       }
       const x = m.x * U, z = m.y * U;
       const moving = Math.abs(m.vx) + Math.abs(m.vy) > 1;
       const k = this.kicks.get(m.id);
-      const bob = moving && !(m instanceof Arrow) && !(m instanceof Bolt) ? Math.abs(Math.sin(this.t * 12 + m.id)) * 0.06 : 0;
+      const bob = !a.anim && moving && !(m instanceof Arrow) && !(m instanceof Bolt) ? Math.abs(Math.sin(this.t * 12 + m.id)) * 0.06 : 0;
+      if (a.anim) {
+        const sp = Math.hypot(m.vx, m.vy);
+        if (k && k.attack > 0) { if (a.anim.current !== 'attack-melee-right') play(a.anim, 'attack-melee-right', 0.05); }
+        else play(a.anim, sp > 70 ? 'sprint' : moving ? 'walk' : 'idle');
+        a.anim.mixer.update(dt * (moving ? Math.max(0.6, Math.min(1.6, sp / 45)) : 1));
+      }
       a.group.position.set(x + (k?.recoilX ?? 0), groundHeight(x, z) + standHeight(m) + bob, z + (k?.recoilZ ?? 0));
       // facing: arrows along their flight, the head along its aim or facing, everyone else the way they walk
       let fx = 0, fz = 0;
@@ -226,8 +295,9 @@ export class Actors {
     // the dead tip over, sink and are gone
     this.dying = this.dying.filter((a) => {
       a.dying! += dt;
-      const f = Math.min(1, a.dying! / 0.6);
-      a.body.rotation.x = -f * Math.PI / 2;
+      const f = Math.min(1, a.dying! / (a.anim ? 1.2 : 0.6));
+      if (a.anim) { if (a.anim.current !== 'die') play(a.anim, 'die', 0.05); a.anim.mixer.update(dt); }
+      else a.body.rotation.x = -f * Math.PI / 2;
       a.group.position.y -= dt * 0.25 * f;
       for (const mt of a.mats) { mt.transparent = true; mt.opacity = 1 - f; }
       if (f >= 1) { this.group.remove(a.group); return false; }
@@ -235,7 +305,7 @@ export class Actors {
     });
     // kicks fade
     for (const k of this.kicks.values()) {
-      k.flash = Math.max(0, k.flash - dt);
+      k.flash = Math.max(0, k.flash - dt); k.attack = Math.max(0, k.attack - dt);
       k.squash *= Math.max(0, 1 - dt * 10); k.recoilX *= Math.max(0, 1 - dt * 10); k.recoilZ *= Math.max(0, 1 - dt * 10); k.spin *= Math.max(0, 1 - dt * 8);
     }
     if (pickDirty) { this.pickable.length = 0; for (const a of this.actors.values()) this.pickable.push(a.body); }

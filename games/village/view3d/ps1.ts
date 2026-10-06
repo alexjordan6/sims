@@ -3,7 +3,7 @@ import { COLS, ROWS } from '../config';
 
 // The pixel-horror look, PS1 style:
 //  - vertices snap to a coarse screen grid, so edges crawl and wobble as the camera moves
-//  - textures map without perspective correction (affine), and sample without smoothing
+//  - textures sample without smoothing, every texel a hard square
 //  - the frame is drawn small and blown up with hard pixels, then dithered down to a short palette,
 //    darkened at the corners and given a little grain
 // Plus the fog of war, which lives in the same material patch: every lit surface is multiplied by how
@@ -18,10 +18,7 @@ THREE.ShaderChunk.project_vertex += `
   { vec4 psx = gl_Position; psx.xyz /= psx.w; psx.xy = floor(psx.xy * ${GRID} + 0.5) / ${GRID}; psx.xyz *= psx.w; gl_Position = psx; }
 #endif
 `;
-// affine texture mapping: the uv varyings skip perspective correction
-for (const k of ['uv_pars_vertex', 'uv_pars_fragment'] as const) {
-  THREE.ShaderChunk[k] = THREE.ShaderChunk[k].replace(/varying vec2 (v\w*Uv);/g, 'noperspective varying vec2 $1;');
-}
+// (no affine texture warp: WebGL2's shading language has no noperspective qualifier; textures sample hard instead)
 
 // ---- the fog of war, as a texture every material reads ---------------------------------------------
 

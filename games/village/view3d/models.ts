@@ -13,8 +13,8 @@ export const WALL_UNITS = 2.2;
 
 const flat = (colour = 0xffffff, extra: THREE.MeshLambertMaterialParameters = {}) => lambert({ color: colour, ...extra });
 
-/** the material every instanced prop shares: white, so the instance colour is the colour */
-export const PROP_MAT = flat(0xffffff);
+/** the material every instanced prop shares: vertex colours (a model's own, or white on a placeholder) times the instance colour */
+export const PROP_MAT = flat(0xffffff, { vertexColors: true });
 /** vertex-coloured, for the ground */
 export const GROUND_MAT = lambert({ vertexColors: true });
 
@@ -70,6 +70,8 @@ export const GEO = {
   ring: new THREE.RingGeometry(0.42, 0.5, 20).rotateX(-Math.PI / 2),
   disc: new THREE.CircleGeometry(0.5, 20).rotateX(-Math.PI / 2),
 } as const;
+// placeholders are white per vertex, so the instance colour alone paints them under PROP_MAT
+for (const g of Object.values(GEO)) if (!g.getAttribute('color')) g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(g.getAttribute('position').count * 3).fill(1), 3));
 
 /** colours the placeholder world is painted in: dark, damp, desaturated */
 export const COL = {

@@ -3,6 +3,8 @@ import { COLS, ROWS, FOODS, POT_INGREDIENTS } from '../config';
 import { WILD_FOOD, type Tile, type TileKind } from '../world';
 import type { VillageScene } from '../main';
 import { GEO, COL, GROUND_MAT, PROP_MAT } from './models';
+import { MODELS } from './assets';
+import { FLORA_MODEL, pickModel, cropModel } from './registry';
 
 // The ground and everything rooted in it, cut into chunks of CH x CH tiles. A chunk is rebuilt only
 // when one of its tiles changes (world.dirty) or is first explored, so a still world costs nothing.
@@ -12,8 +14,13 @@ import { GEO, COL, GROUND_MAT, PROP_MAT } from './models';
 export const CH = 32;
 const CX = Math.ceil(COLS / CH), CY = Math.ceil(ROWS / CH);
 
-type Shape = 'trunk' | 'crown' | 'oldCrown' | 'stump' | 'sapling' | 'blob' | 'berry' | 'cap' | 'crop' | 'thicket' | 'tuft';
-const SHAPES: Shape[] = ['trunk', 'crown', 'oldCrown', 'stump', 'sapling', 'blob', 'berry', 'cap', 'crop', 'thicket', 'tuft'];
+/** a code-built shape (see GEO), or 'm:pack/name' for a loaded model */
+type Shape = string;
+/** what a shape draws with: the model if it has landed, else the placeholder */
+function geometryOf(shape: Shape): THREE.BufferGeometry | undefined {
+  return shape.startsWith('m:') ? MODELS.props.get(shape.slice(2)) : GEO[shape as keyof typeof GEO];
+}
+const NO_SHADOW = new Set<Shape>(['tuft', 'berry', 'm:nature/grass_large']);
 
 /** a little rise and fall in the ground, the same at every shared corner, so the low-poly facets read */
 export function groundHeight(x: number, z: number): number {
@@ -31,7 +38,7 @@ function hash(tx: number, ty: number, k = 0): number {
 const c3 = new THREE.Color();
 function hexColour(s: string): number { return parseInt(s.slice(1), 16); }
 
-interface Chunk { ground: THREE.Mesh; props: Partial<Record<Shape, THREE.InstancedMesh>>; group: THREE.Group }
+interface Chunk { ground: THREE.Mesh; props: Map<Shape, THREE.InstancedMesh>; group: THREE.Group }
 
 export class Terrain {
   readonly group = new THREE.Group();
@@ -49,7 +56,7 @@ export class Terrain {
       g.add(ground);
       this.group.add(g);
       this.grounds.push(ground);
-      this.chunks.push({ ground, props: {}, group: g });
+      this.chunks.push({ ground, props: new Map(), group: g });
     }
   }
 
@@ -58,7 +65,7 @@ export class Terrain {
     const cx = Math.floor(x / CH), cz = Math.floor(z / CH), out: THREE.Object3D[] = [];
     for (let j = cz - 1; j <= cz + 1; j++) for (let i = cx - 1; i <= cx + 1; i++) {
       if (i < 0 || j < 0 || i >= CX || j >= CY) continue;
-      for (const im of Object.values(this.chunks[j * CX + i].props)) if (im && im.count) out.push(im);
+      for (const im of this.chunks[j * CX + i].props.values()) if (im.count) out.push(im);
     }
     return out;
   }
@@ -137,12 +144,13 @@ export class Terrain {
     ch.ground.geometry.dispose();
     ch.ground.geometry = geo;
     // ---- flora: count, then fill one instanced mesh per shape ----
-    const list: Record<Shape, { m: THREE.Matrix4; c: number }[]> = Object.fromEntries(SHAPES.map((k) => [k, []])) as never;
+    const list = new Map<Shape, { m: THREE.Matrix4; c: number }[]>();
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), v = new THREE.Vector3(), sc = new THREE.Vector3();
     const add = (shape: Shape, x: number, z: number, scale: number, colour: number, turn = 0, lift = 0, tilt = 0) => {
       e.set(tilt, turn, 0); q.setFromEuler(e);
       v.set(x, groundHeight(x, z) + lift, z); sc.set(scale, scale, scale);
-      list[shape].push({ m: m4.clone().compose(v, q, sc), c: colour });
+      let l = list.get(shape); if (!l) list.set(shape, (l = []));
+      l.push({ m: m4.clone().compose(v, q, sc), c: colour });
     };
     for (let ty = y0; ty < y1; ty++) for (let tx = x0; tx < x1; tx++) {
       const i = ty * COLS + tx;
@@ -150,22 +158,30 @@ export class Terrain {
       const t = w.tiles[i], cx2 = tx + 0.5, cz = ty + 0.5;
       const r = hash(tx, ty, 1), turn = hash(tx, ty, 2) * Math.PI * 2;
       const jx = cx2 + (hash(tx, ty, 3) - 0.5) * 0.3, jz = cz + (hash(tx, ty, 4) - 0.5) * 0.3;
+      // a model if it has landed (white: its own colours), else the placeholder in its flat colour
+      const prop = (kind: keyof typeof FLORA_MODEL, x: number, z: number, size: number, fallback: Shape, colour: number, tint = 0xffffff, tilt = 0, variant = r) => {
+        const m = pickModel(kind, variant);
+        if (m && MODELS.props.has(m.key)) add('m:' + m.key, x, z, size * m.scale, tint, turn, 0, tilt);
+        else add(fallback, x, z, size, colour, turn, 0, tilt);
+        return !!(m && MODELS.props.has(m.key));
+      };
       switch (t.kind) {
         case 'tree': {
           const old = s.isOldGrowth(t), size = (old ? 1.15 : 0.8 + Math.min(1, t.stage / Math.max(1, s.oldGrowthDays)) * 0.25) * (0.9 + r * 0.2);
           const chopped = t.work > 0 ? 0.12 * t.work : 0; // a tree being felled leans
-          add('trunk', jx, jz, size, COL.trunk, turn, 0, chopped);
-          add(old ? 'oldCrown' : 'crown', jx, jz, size, old ? COL.crownOld : COL.crown, turn, 0, chopped);
+          if (!prop(old ? 'oldTree' : 'tree', jx, jz, size, 'trunk', COL.trunk, 0xffffff, chopped)) add(old ? 'oldCrown' : 'crown', jx, jz, size, old ? COL.crownOld : COL.crown, turn, 0, chopped);
           break;
         }
         case 'sapling':
-          if (t.stage < 2) add('stump', cx2, cz, 1, COL.stump, turn);
-          else add('sapling', jx, jz, 0.7 + r * 0.4, COL.sapling, turn);
+          if (t.stage < 2) prop('stump', cx2, cz, 1, 'stump', COL.stump);
+          else prop('sapling', jx, jz, 0.7 + r * 0.4, 'sapling', COL.sapling);
           break;
         case 'thicket': add('thicket', jx, jz, 0.95 + r * 0.25, COL.thicket, turn); break;
         case 'crop': {
           const fk = t.food ?? 'wheat', days = s.cropDaysOf(t), grown = Math.min(1, t.stage / days);
           const ripe = t.stage >= days;
+          const m = cropModel(fk, grown, ripe);
+          if (m && MODELS.props.has(m.key)) { add('m:' + m.key, cx2, cz, m.scale * (0.55 + 0.45 * grown), m.tint, turn); break; }
           const colour = ripe ? hexColour(FOODS[fk].colour) : 0x4a6a30;
           for (let k = 0; k < 4; k++) add('crop', tx + 0.25 + (k & 1) * 0.5, ty + 0.25 + (k >> 1) * 0.5, 0.35 + grown * 0.75, colour, turn + k);
           break;
@@ -174,35 +190,40 @@ export class Terrain {
           const ripe = s.wildRipe(t);
           const wild = WILD_FOOD[t.kind], ingredient = !!wild && POT_INGREDIENTS.has(wild);
           if (t.kind === 'mushroom') {
-            for (let k = 0; k < 3; k++) add('cap', jx + (hash(tx, ty, 5 + k) - 0.5) * 0.5, jz + (hash(tx, ty, 8 + k) - 0.5) * 0.5, (ripe ? 1 : 0.6) * (0.8 + hash(tx, ty, 11 + k) * 0.5), ripe ? COL.cap : COL.mushroom, turn);
+            if (prop(ripe ? 'mushroomRipe' : 'mushroom', jx, jz, 1, 'cap', ripe ? COL.cap : COL.mushroom)) break;
+            for (let k = 0; k < 2; k++) add('cap', jx + (hash(tx, ty, 5 + k) - 0.5) * 0.5, jz + (hash(tx, ty, 8 + k) - 0.5) * 0.5, (ripe ? 1 : 0.6) * (0.8 + hash(tx, ty, 11 + k) * 0.5), ripe ? COL.cap : COL.mushroom, turn);
             break;
           }
           const body = t.kind === 'garlic' ? COL.garlic : t.kind === 'burdock' ? COL.burdock : t.kind === 'hazel' ? COL.hazel : COL.bush;
-          add('blob', jx, jz, t.kind === 'garlic' ? 0.55 : 0.9 + r * 0.25, body, turn);
+          // picked bare, a plant is a shade duller
+          prop(t.kind as 'bush' | 'hazel' | 'garlic' | 'burdock', jx, jz, t.kind === 'garlic' ? 0.8 : 0.9 + r * 0.25, 'blob', body, ripe ? 0xffffff : 0x9a9a8a);
           if (ripe) {
             const fruit = t.kind === 'bush' ? COL.berry : t.kind === 'hazel' ? COL.nut : t.kind === 'burdock' ? 0xa05a8a : 0xe8e0c8;
             for (let k = 0; k < (ingredient ? 6 : 4); k++) {
               const a = (k / 6) * Math.PI * 2 + turn;
-              add('berry', jx + Math.cos(a) * 0.24, jz + Math.sin(a) * 0.24, 1, fruit, 0, 0.3 + hash(tx, ty, 20 + k) * 0.2);
+              add('berry', jx + Math.cos(a) * 0.26, jz + Math.sin(a) * 0.26, 1, fruit, 0, 0.3 + hash(tx, ty, 20 + k) * 0.25);
             }
           }
           break;
         }
         default:
-          if (t.tall && !t.building && !t.defense) add('tuft', jx, jz, 0.9 + r * 0.4, COL.tuft, turn);
+          if (t.tall && !t.building && !t.defense) prop('tuft', jx, jz, 0.9 + r * 0.4, 'tuft', COL.tuft, 0xc8d0b0);
       }
     }
-    for (const shape of SHAPES) {
-      const items = list[shape];
-      let im = ch.props[shape];
-      if (im && im.count < items.length) { ch.group.remove(im); im.dispose(); im = undefined; delete ch.props[shape]; }
-      if (!items.length) { if (im) im.count = 0; continue; }
+    // shapes this chunk no longer has are emptied
+    for (const [shape, im] of ch.props) if (!list.has(shape)) im.count = 0;
+    for (const [shape, items] of list) {
+      const geo = geometryOf(shape);
+      if (!geo) continue;
+      let im = ch.props.get(shape);
+      // a mesh too small for the chunk, or still drawing a placeholder its model has since replaced, is remade
+      if (im && (im.instanceMatrix.count < items.length || im.geometry !== geo)) { ch.group.remove(im); im.dispose(); im = undefined; ch.props.delete(shape); }
       if (!im) {
         // a little headroom so a chunk that grows by a tree or two does not reallocate
-        im = new THREE.InstancedMesh(GEO[shape], PROP_MAT, Math.ceil(items.length * 1.25) + 8);
-        im.castShadow = shape !== 'tuft' && shape !== 'berry';
+        im = new THREE.InstancedMesh(geo, PROP_MAT, Math.ceil(items.length * 1.25) + 8);
+        im.castShadow = !NO_SHADOW.has(shape);
         im.receiveShadow = true;
-        ch.props[shape] = im;
+        ch.props.set(shape, im);
         ch.group.add(im);
       }
       im.count = items.length;

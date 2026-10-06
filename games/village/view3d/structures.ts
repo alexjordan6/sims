@@ -5,6 +5,8 @@ import { Mover } from '../agents';
 import { mat, WALL_UNITS, U } from './models';
 import { lambert } from './ps1';
 import { groundHeight } from './terrain';
+import { kitBuilding, kitDefense } from './kit';
+import { MODELS } from './assets';
 
 // Buildings and fortifications. Each is a small group of flat-shaded boxes and cones, rebuilt only
 // when what it looks like changes (level, ruin, gate open/shut). Pack models replace these later
@@ -142,11 +144,13 @@ export class Structures {
     const live = new Set<Building>();
     for (const b of w.buildings) {
       live.add(b);
-      const key = `${b.kind}|${Math.min(3, b.level)}|${!!b.ruined}`;
+      // (the model count is in the key so a building is rebuilt from kit pieces once they land)
+      const key = `${b.kind}|${Math.min(3, b.level)}|${!!b.ruined}|${MODELS.props.size}`;
       let e = this.built.get(b);
       if (e && e.key !== key) { this.group.remove(e.group); e = undefined; }
       if (!e) {
-        e = makeBuilding(b); e.key = key;
+        const kit = kitBuilding(b);
+        e = kit ? { group: kit.group, key, windows: kit.windows } : makeBuilding(b); e.key = key;
         e.group.position.set(b.tx, groundHeight(b.tx + BUILDINGS[b.kind].w / 2, b.ty + BUILDINGS[b.kind].h / 2), b.ty);
         e.group.traverse((o) => { o.userData.building = b; o.castShadow = true; o.receiveShadow = true; });
         this.group.add(e.group); this.built.set(b, e);
@@ -164,11 +168,13 @@ export class Structures {
       seen.add(id);
       const friendly = d.kind === 'gate' && s.agents.some((a) => a instanceof Mover && !a.hostile && !a.elevated && !a.hidden && Math.hypot(a.x * U - (d.tx + 0.5), a.y * U - (d.ty + 0.5)) < 1.2);
       const open = d.kind === 'gate' && (d.open || friendly);
-      const key = defenseKey(d, open);
+      const key = defenseKey(d, open) + '|' + MODELS.props.size;
       let f = this.forts.get(id);
       if (f && f.key !== key) { this.group.remove(f.group); f = undefined; pickDirty = true; }
       if (!f) {
-        f = { group: makeDefense(d, open), key };
+        const kitted = kitDefense(d, open);
+        if (kitted) kitted.traverse((o) => { o.userData.defense = d; });
+        f = { group: kitted ?? makeDefense(d, open), key };
         f.group.traverse((o) => { o.castShadow = true; o.receiveShadow = true; });
         f.group.position.set(d.tx, groundHeight(d.tx + 0.5, d.ty + 0.5), d.ty);
         this.group.add(f.group); this.forts.set(id, f); pickDirty = true;

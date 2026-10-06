@@ -139,6 +139,7 @@ export class Fx3d {
       case 'melee': {
         const dx = ev.x - ev.who.x, dy = ev.y - ev.who.y, d = Math.hypot(dx, dy) || 1;
         this.arc(ev.who, dx / d, dy / d, ev.who instanceof Raider && ev.who.kind === 'brute' ? 0.24 : 0.15, false, 0xd8b0a0);
+        this.actors.kick(ev.who.id).attack = 0.45;
         sfx.swing(0); break;
       }
       case 'arrow': sfx.swing(0); break;
@@ -150,6 +151,7 @@ export class Fx3d {
       }
       case 'swing':
         this.arc(ev.who, ev.dx, ev.dy, ev.stage === 2 ? 0.3 : 0.18, ev.stage === 2);
+        this.actors.kick(ev.who.id).attack = 0.4;
         sfx.swing(ev.stage); break;
       case 'telegraph': {
         const k = this.actors.kick(ev.who.id); k.flash = Math.max(k.flash, ev.ms / 1000); k.flashColour = 0xffc040;
@@ -165,6 +167,7 @@ export class Fx3d {
         if (ev.tool === 'seed') { this.burst(p, 7, [0xd8c070, 0x8a6a3a], 1, 1.2); this.actors.kick(who.id).squash = 0.12; sfx.dig(); break; }
         const dx = p.x - who.x * U, dz = p.z - who.y * U, d = Math.hypot(dx, dz) || 1;
         this.arc(who, dx / d, dz / d, 0.16, false, 0xc8c0a8);
+        this.actors.kick(who.id).attack = 0.4;
         window.setTimeout(() => { this.burst(p, ev.tool === 'axe' ? 5 : 8, ev.tool === 'axe' ? [0x8a6a3a, 0xc8a070] : [0x6a5440, 0x4a3a2a], 1.5, 1.5); if (ev.tool === 'axe' || ev.tool === 'hammer') sfx.chop(); else sfx.dig(); }, 90);
         break;
       }

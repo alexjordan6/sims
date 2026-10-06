@@ -11,6 +11,9 @@ import { Fx3d } from './fx3d';
 import { skyAt } from './sky';
 import { Ps1Pass, updateFow, setFowOn } from './ps1';
 import { Room3d } from './room';
+import { MODELS, loadModels } from './assets';
+import { propKeys, characterKeys } from './registry';
+import { KIT_PIECES, KIT_PROPS } from './kit';
 import { U, WALL_UNITS } from './models';
 
 // The 3D view of the village. Phaser still runs the sim loop, the keyboard and the debug sliders,
@@ -39,6 +42,8 @@ export class View {
   private room: Room3d;
   private fowRevision = -1;
   private fowEnabled: boolean | null = null;
+  /** the model revision the world was last built with, and when it last changed (rebuilds wait for a quiet moment) */
+  private modelsBuilt = 0; private modelsSeen = 0; private modelsQuiet = 0;
   private arrows: HTMLCanvasElement;
   private actx: CanvasRenderingContext2D;
   /** set on frames where tiles were repainted (the minimap redraws its terrain then) */
@@ -95,6 +100,8 @@ export class View {
     new ResizeObserver(() => this.resize()).observe(host);
     this.resize();
     this.bindInput(canvas);
+    // the packs load in the background; the placeholders stand in until they land
+    void loadModels([...propKeys(), ...KIT_PROPS].map((key) => ({ key, centre: true })).concat(KIT_PIECES.map((key) => ({ key, centre: false }))), characterKeys());
   }
 
   private resize(): void {
@@ -289,6 +296,9 @@ export class View {
     this.placeLamps(sky.night);
     if (pl) this.torch.position.set(pl.x * U, groundHeight(pl.x * U, pl.y * U) + standHeight(pl) + 1.4, pl.y * U);
     this.torch.intensity = (pl && !pl.hidden ? 3.2 : 0) * (0.35 + 0.65 * sky.night) * (0.93 + 0.07 * Math.sin(this.t * 13) * Math.sin(this.t * 7.3));
+    // models landing: once they stop arriving for a moment, the ground and its flora are rebuilt with them
+    if (MODELS.revision !== this.modelsSeen) { this.modelsSeen = MODELS.revision; this.modelsQuiet = 0; }
+    else if (this.modelsBuilt !== this.modelsSeen && (this.modelsQuiet += dt) > 0.3) { this.modelsBuilt = this.modelsSeen; this.terrain.rebuildAll(); }
     // the world
     s.fog?.update(dt);
     this.syncFow();
