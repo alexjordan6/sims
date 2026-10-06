@@ -162,17 +162,39 @@ export class Overlay {
         const d = s.drag, x0 = Math.min(d.x0, d.x1) * U, z0 = Math.min(d.y0, d.y1) * U, w = Math.abs(d.x1 - d.x0) * U, h = Math.abs(d.y1 - d.y0) * U;
         this.fill(x0, z0, w, h, CYAN, 0.12); this.rect(x0, z0, w, h, CYAN, 0.9);
       }
-      for (const v of s.squad) if (!v.dead && !v.hidden) this.moverRing(v, CYAN, pulse);
+      // the picked: a ring under each loose fighter, an outline round each picked block
+      for (const v of s.squad) if (!v.regiment && !v.dead && !v.hidden) this.moverRing(v, CYAN, pulse);
+      for (const r of s.pickedRegiments()) this.outline(r.slots, r.fx, r.fy, CYAN, 0.6 + 0.3 * pulse);
+      // a placement being dragged: where every body will stand, and which way the blocks will face
+      if (s.placing) {
+        let budget = 400;
+        for (const g of s.placementPlan(s.placing)) {
+          const colour = parseInt(g.reg.colour.slice(1), 16);
+          this.outline(g.slots, g.fx, g.fy, colour, 0.95);
+          for (const q of g.slots) { if (budget-- <= 0) break; this.ring(q.x * U, q.y * U, 0.2, colour, 0.7, 0.25); }
+          const cx = g.x * U, cz = g.y * U, y = groundHeight(cx, cz) + 0.08, len = 1.6;
+          const hx = cx + g.fx * len, hz = cz + g.fy * len;
+          this.seg(cx, y, cz, hx, y, hz, colour, 1);
+          this.seg(hx, y, hz, hx - (g.fx * 0.7 - g.fy * 0.45), y, hz - (g.fy * 0.7 + g.fx * 0.45), colour, 1);
+          this.seg(hx, y, hz, hx - (g.fx * 0.7 + g.fy * 0.45), y, hz - (g.fy * 0.7 - g.fx * 0.45), colour, 1);
+        }
+      }
       const hunted = new Set<Mover>();
       for (const v of s.fighters()) {
         const o = v.order;
         if (!o) continue;
         if (o.kind === 'hold') {
           this.rect(o.tx + 0.2, o.ty + 0.2, 0.6, 0.6, CYAN, 0.35);
-          const pg = this.poles.take(); pg.position.set(o.tx + 0.5, groundHeight(o.tx + 0.5, o.ty + 0.5), o.ty + 0.5);
+          this.flag(o.tx + 0.5, o.ty + 0.5, CYAN, 1);
         } else if (o.kind === 'attack' && !o.target.dead && !o.target.hidden) hunted.add(o.target);
       }
       for (const m of hunted) this.moverRing(m, 0xff4040, pulse);
+    }
+    // every regiment's banner: a pole in its colour at the block's centre, its strength above
+    for (const r of s.regiments) {
+      const x = r.x * U, z = r.y * U, colour = parseInt(r.colour.slice(1), 16);
+      this.flag(x, z, colour, 2.4);
+      this.bar(x, groundHeight(x, z) + 2.25, z, 1.1, r.members.length / Math.max(1, r.peak), colour, 0x000000, 0.1);
     }
     // the target tile; in build mode the footprint
     const f = s.target;
@@ -213,6 +235,23 @@ export class Overlay {
       this.marker(sb.tx + bf.w / 2, groundHeight(sb.tx + bf.w / 2, sb.ty + bf.h / 2) + 3.6, sb.ty + bf.h / 2);
       if (sb.kind === 'barracks') { const c = s.towerCenter(sb); this.ring(c.x * U, c.y * U, s.towerRange(sb) / TILE, 0xffe066, 0.3, 0.03); }
     }
+  }
+  /** A pole with a pennant at (x, z) on the ground, in `colour`, `size` times the marker's height. */
+  private flag(x: number, z: number, colour: number, size: number): void {
+    const pg = this.poles.take();
+    pg.position.set(x, groundHeight(x, z), z); pg.scale.setScalar(size);
+    ((pg.children[1] as THREE.Mesh).material as THREE.MeshBasicMaterial).color.setHex(colour);
+  }
+  /** The rotated box round a block's slots: four ground lines along and across its facing. */
+  private outline(slots: { x: number; y: number }[], fx: number, fy: number, colour: number, alpha: number): void {
+    if (!slots.length) return;
+    const rx = -fy, ry = fx, pad = 5;
+    let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+    for (const q of slots) { const a = q.x * rx + q.y * ry, b = q.x * fx + q.y * fy; a0 = Math.min(a0, a); a1 = Math.max(a1, a); b0 = Math.min(b0, b); b1 = Math.max(b1, b); }
+    a0 -= pad; a1 += pad; b0 -= pad; b1 += pad;
+    const at = (a: number, b: number): [number, number, number] => { const x = (rx * a + fx * b) * U, z = (ry * a + fy * b) * U; return [x, groundHeight(x, z) + 0.06, z]; };
+    const c = [at(a0, b0), at(a1, b0), at(a1, b1), at(a0, b1)];
+    for (let i = 0; i < 4; i++) { const p0 = c[i], p1 = c[(i + 1) % 4]; this.seg(p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], colour, i === 2 ? alpha : alpha * 0.6); }
   }
   /** a flat bar floating at (x, y, z), filled to frac */
   private bar(x: number, y: number, z: number, w: number, frac: number, colour: number, back = 0x000000, h = 0.12): void {

@@ -18,6 +18,7 @@ import { View } from './view3d/view';
 import { UI } from './ui/ui';
 import { weaponMul } from './characters';
 import { AdaptiveSpawner } from './adaptive-spawn';
+import { Regiment, REGIMENT_SIZE, BANNER_COLOURS, SHAPES, SLOT_GAP, layout, type Shape, type Stance } from './regiment';
 
 const NAMES = ['Ada', 'Bram', 'Cass', 'Dov', 'Eli', 'Fen', 'Gil', 'Hana', 'Ivo', 'Juno', 'Kai', 'Lior', 'Mara', 'Nils', 'Orla', 'Pim', 'Quin', 'Rue', 'Sol', 'Tova', 'Uli', 'Vera', 'Wren', 'Xan', 'Yael', 'Zed'];
 
@@ -271,6 +272,7 @@ export class VillageScene extends SimScene {
     this.interior.leave();
     this.posting = null;
     this.squad = []; this.drag = null;
+    this.regiments = []; this.regimentSeq = 0; this.placing = null; this.enlistT = 0;
     this.arrows = 30; this.feverWas = null;
     this.scrap = 0;
     this.armoryFor = null;
@@ -462,7 +464,7 @@ export class VillageScene extends SimScene {
     for (let r = 1; spots.length < gnomes && r < 60; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
       if (Math.max(Math.abs(dx), Math.abs(dy)) !== r || spots.length >= gnomes) continue;
       const tx = here.tx + dx, ty = here.ty + dy;
-      if (!this.world.inBounds(tx, ty) || this.world.isBlocked(tx, ty)) continue;
+      if (!this.world.inBounds(tx, ty) || this.world.isBlocked(tx, ty) || this.world.get(tx, ty)?.kind === 'thicket') continue;
       const c = World.center(tx, ty);
       for (const [ox, oy] of [[-4, -4], [4, -4], [-4, 4], [4, 4]]) if (spots.length < gnomes) spots.push({ x: c.x + ox, y: c.y + oy });
     }
@@ -711,14 +713,14 @@ export class VillageScene extends SimScene {
     kb.on('keydown-F', () => this.cycleVariant());
     kb.on('keydown-M', () => this.toggleMute());
     kb.on('keydown-Z', () => this.cycleZoom());
-    kb.on('keydown-H', (e: KeyboardEvent) => { if (!e.repeat) this.summonGnomes(); });
+    kb.on('keydown-H', (e: KeyboardEvent) => { if (!e.repeat && !this.regimentKey('H')) this.summonGnomes(); });
 
     super.create(); // creates gfx + hud, then calls reset() -> setup()
     kb.removeAllListeners('keydown-SPACE'); // Esc handles pause; Space brings the camera back to the head
     kb.on('keydown-SPACE', () => this.view?.recentre());
     kb.on('keydown-Y', () => this.view?.toggleLock());
-    kb.on('keydown-G', () => this.tossLoad());
-    kb.on('keydown-T', () => { if (this.screen === 'playing' && !this.paused) this.eat(); });
+    kb.on('keydown-G', () => { if (!this.regimentKey('G')) this.tossLoad(); });
+    kb.on('keydown-T', () => { if (this.regimentKey('T')) return; if (this.screen === 'playing' && !this.paused) this.eat(); });
     // number keys pick tools; game speed moves to - / =
     kb.removeAllListeners('keydown-ONE'); kb.removeAllListeners('keydown-TWO'); kb.removeAllListeners('keydown-THREE');
     kb.on('keydown-MINUS', () => (this.speed = this.speed > 4 ? 4 : 1));
@@ -1213,7 +1215,7 @@ export class VillageScene extends SimScene {
     const pl = this.player;
     if (pl.tool === 'seeds') pl.cycleCrop();
     else if (pl.tool === 'basket') pl.cycleBasket(this.pantry);
-    else if (pl.tool === 'wand') this.orderFollow();
+    else if (pl.tool === 'wand') { if (!this.regimentKey('F')) this.orderFollow(); }
   }
   /** Age in days a child comes of age: the nursery, then the years in the yard (Quick to Grow shortens it). */
   get adultAge(): number { return Math.max(p.infantDays + 0.1, p.infantDays + p.childDays + this.mods.adultAgeDelta); }
@@ -1725,6 +1727,7 @@ export class VillageScene extends SimScene {
   onPointerMove(ptr: Ptr): void {
     this.hovered = ptr.agent;
     if (this.drag) { this.drag.x1 = ptr.worldX; this.drag.y1 = ptr.worldY; }
+    if (this.placing) { this.placing.x1 = ptr.worldX; this.placing.y1 = ptr.worldY; }
     this.hoverTile = { tx: Math.floor(ptr.worldX / TILE), ty: Math.floor(ptr.worldY / TILE) };
     this.hoverPoint = this.hoverTile ? { x: ptr.worldX, y: ptr.worldY } : null;
     if (!this.ui || (this.screen !== 'playing' && this.screen !== 'paused')) { this.ui?.tooltip(null); return; }
@@ -1787,6 +1790,7 @@ export class VillageScene extends SimScene {
     this.mealCd = Math.max(0, this.mealCd - dt);
     this.tickLobs(dt);
     this.driveCommand(dt);
+    this.tickRegiments(dt);
     for (const a of this.agents) a.update(dt, this);
     this.separate();
     this.tickAges(dt);
@@ -2182,6 +2186,8 @@ export class VillageScene extends SimScene {
       this.bodies.forEachInRadius(a.x, a.y, as * 2 + 0.5, (b, d2) => {
         // each pair once, from the bigger body's side (its search reaches every body that can touch it)
         if (b === a || b.elevated !== a.elevated) return;
+        // two of one block: their slots keep them apart; one walking to its place slips between its mates instead of shouldering them out of theirs
+        if (a instanceof Villager && b instanceof Villager && a.regiment && a.regiment === b.regiment && a.slot && b.slot && (a.vx || a.vy || b.vx || b.vy)) return;
         const bs = b.space;
         if (bs > as || (bs === as && b.id < a.id)) return;
         const minD = a.space + b.space;
@@ -2681,16 +2687,20 @@ export class VillageScene extends SimScene {
     const adults = this.villagers().filter(v => v.gnome && v.isAdult && !v.dead);
     const workers = adults.filter(v => v.role !== 'soldier');
     // only warriors whose orders are ours to move: a wand hold or attack, and a wall post, are not
-    const warriors = adults.filter(v => v.role === 'soldier' && !v.post && (!v.order || v.order.kind === 'follow'));
-    const following = workers.filter(v => v.followingPlayer).length + warriors.filter(v => v.order?.kind === 'follow').length;
+    const warriors = adults.filter(v => v.role === 'soldier' && !v.post && !v.regiment && (!v.order || v.order.kind === 'follow'));
+    const following = workers.filter(v => v.followingPlayer).length + warriors.filter(v => v.order?.kind === 'follow').length + this.regiments.filter((r) => r.stance === 'follow').length;
     if (following) {
       this.gnomesFollow = false;
       for (const v of workers) v.followPlayer(this, false);
+      for (const r of this.regiments) if (r.stance === 'follow') r.place(r.x, r.y, r.fx, r.fy, r.cols); // the banners plant where they stand
       for (const v of warriors) { v.order = null; v.clearGoal(); } // back to patrolling the barracks
       this.event('info', 'The gnomes go back to work. H or CALL GNOMES brings them to your heels.', true);
       return;
     }
     const nearby = [...workers, ...warriors].filter(v => !v.hidden && !v.carriedBy && v.dist(this.player) <= 20 * TILE);
+    const banners = this.regiments.filter((r) => Math.hypot(r.x - this.player.x, r.y - this.player.y) <= 20 * TILE);
+    for (const r of banners) r.stance = 'follow';
+    if (banners.length) this.gnomesFollow = true;
     if (nearby.length) this.gnomesFollow = true; // a call nobody heard changes no standing order
     for (const v of nearby) {
       if (v.role === 'soldier') { v.order = { kind: 'follow' }; v.clearGoal(); }
@@ -2997,7 +3007,7 @@ export class VillageScene extends SimScene {
   }
   /** Send the squad to a spot: one free tile each, the spot first, then the ring around it. */
   orderHold(tx: number, ty: number): Villager[] {
-    const who = this.recipients();
+    const who = this.loose();
     if (!who.length) return who;
     const w = this.world, free = (q: TilePos) => w.inBounds(q.tx, q.ty) && !w.isBlocked(q.tx, q.ty);
     const spots: TilePos[] = [];
@@ -3015,14 +3025,19 @@ export class VillageScene extends SimScene {
     return sorted;
   }
   orderAttack(m: Raider): Villager[] {
-    const who = this.recipients();
+    const regs = this.orderedRegiments();
+    for (const r of regs) { r.stance = 'advance'; r.quarry = m; }
+    const who = this.loose();
     for (const v of who) this.giveOrder(v, { kind: 'attack', target: m });
+    if (regs.length && !who.length) this.wandFx(m.x, m.y - 12, 'ADVANCE');
     if (who.length) this.wandFx(m.x, m.y - 12, 'ATTACK');
     return who;
   }
   /** F with the wand: the squad shadows the head; pressed again, they hold where they stand. */
   orderFollow(): Villager[] {
-    const who = this.recipients();
+    const regs = this.orderedRegiments();
+    if (regs.length) { const all = regs.every((r) => r.stance === 'follow'); for (const r of regs) { if (all) r.place(r.x, r.y, r.fx, r.fy, r.cols); else r.stance = 'follow'; } }
+    const who = this.loose();
     const following = who.length > 0 && who.every((v) => v.order?.kind === 'follow');
     for (const v of who) this.giveOrder(v, following ? { kind: 'hold', ...v.tile } : { kind: 'follow' });
     if (who.length) this.wandFx(this.player.x, this.player.y - 14, following ? 'HOLD' : 'FOLLOW');
@@ -3050,11 +3065,31 @@ export class VillageScene extends SimScene {
   /** The wand's pointer: left picks (a click or a marquee), right orders. */
   private wandDown(ptr: Ptr): void {
     const m = ptr.agent;
-    if (ptr.rightButtonDown()) { this.wandOrder(ptr, m); return; }
-    if (m instanceof Villager && this.commandable(m)) { this.selectSquad([m], (ptr.event as MouseEvent).shiftKey); return; }
+    if (ptr.rightButtonDown()) {
+      const top = ptr.wallTile ?? World.toTile(ptr.worldX, ptr.worldY);
+      if (!(m instanceof Raider && !m.dead) && this.world.get(top.tx, top.ty)?.defense?.kind !== 'wall' && this.orderedRegiments().length) {
+        this.placing = { x0: ptr.worldX, y0: ptr.worldY, x1: ptr.worldX, y1: ptr.worldY };
+        return;
+      }
+      this.wandOrder(ptr, m); return;
+    }
+    const shift = (ptr.event as MouseEvent).shiftKey;
+    if (m instanceof Villager && this.commandable(m)) { this.selectSquad(m.regiment ? m.regiment.members : [m], shift); return; }
+    const flag = this.bannerAt(ptr.worldX, ptr.worldY);
+    if (flag) { this.selectRegiment(flag, shift); return; }
     this.drag = { x0: ptr.worldX, y0: ptr.worldY, x1: ptr.worldX, y1: ptr.worldY };
   }
   wandUp(ptr: Ptr): void {
+    const pl = this.placing;
+    if (pl) {
+      this.placing = null;
+      pl.x1 = ptr.worldX; pl.y1 = ptr.worldY;
+      for (const g of this.placementPlan(pl)) g.reg.place(g.x, g.y, g.fx, g.fy, g.cols);
+      const q = World.toTile(pl.x0, pl.y0);
+      if (this.loose().length && !this.world.isBlocked(q.tx, q.ty)) this.orderHold(q.tx, q.ty);
+      else this.wandFx(pl.x0, pl.y0 - 8, 'FORM UP');
+      return;
+    }
     const d = this.drag;
     if (!d) return;
     this.drag = null;
@@ -3070,6 +3105,121 @@ export class VillageScene extends SimScene {
     const q = World.toTile(ptr.worldX, ptr.worldY);
     const spot = !this.world.isBlocked(q.tx, q.ty) ? q : this.world.nearest(ptr.worldX, ptr.worldY, (_t, tx, ty) => !this.world.isBlocked(tx, ty));
     if (spot) this.orderHold(spot.tx, spot.ty);
+  }
+
+  // ---- regiments: the gnome army in blocks under banners ---------------------------------------
+
+  regiments: Regiment[] = [];
+  private regimentSeq = 0;
+  private enlistT = 0;
+  /** the wand's right button held on open ground: press = the centre, drag = the facing (and a line's width) */
+  placing: { x0: number; y0: number; x1: number; y1: number } | null = null;
+  /** Who stands under a banner: grown gnome soldiers. */
+  rankable(v: Villager): boolean { return v.gnome && this.commandable(v); }
+  /** Orders to loose fighters: the picked ones (or everyone) not under a banner. */
+  loose(): Villager[] { return this.recipients().filter((v) => !v.regiment); }
+  /** The regiments an order goes to: those of the picked fighters (or every one when nobody is picked). */
+  orderedRegiments(): Regiment[] { return this.squad.length ? this.regimentsOf(this.squad) : [...this.regiments]; }
+  regimentsOf(list: Villager[]): Regiment[] { const out = new Set<Regiment>(); for (const v of list) if (v.regiment && !v.dead) out.add(v.regiment); return [...out]; }
+  /** The regiments picked with the wand (none when nobody is picked). */
+  pickedRegiments(): Regiment[] { return this.regimentsOf(this.squad); }
+  selectRegiment(r: Regiment, add = false): void { this.selectSquad(r.members, add); }
+  /** A banner within a tile of (x, y). */
+  bannerAt(x: number, y: number): Regiment | null {
+    let best: Regiment | null = null, bd = TILE;
+    for (const r of this.regiments) { const d = Math.hypot(r.x - x, r.y - y); if (d < bd) { bd = d; best = r; } }
+    return best;
+  }
+  /** A gnome soldier falls in under the newest banner with room, or a new banner is raised for it. */
+  enlist(v: Villager): Regiment {
+    let r = this.regiments[this.regiments.length - 1];
+    if (!r || r.members.length >= REGIMENT_SIZE) {
+      this.regimentSeq++;
+      r = new Regiment(this.regimentSeq, BANNER_COLOURS[(this.regimentSeq - 1) % BANNER_COLOURS.length], v.x, v.y);
+      this.regiments.push(r);
+    }
+    r.add(v);
+    return r;
+  }
+  /** Each tick: the fallen leave their banners, new warriors fall in, every block thinks and lays out its slots. */
+  tickRegiments(dt: number): void {
+    for (const r of this.regiments) r.prune((v) => this.rankable(v) && v.regiment === r);
+    this.regiments = this.regiments.filter((r) => r.members.length > 0);
+    this.enlistT -= dt;
+    if (this.enlistT <= 0) {
+      this.enlistT = 0.5;
+      for (const a of this.agents) if (a instanceof Villager && !a.regiment && this.rankable(a) && (!a.order || a.order.kind === 'follow') && !a.post && !a.hidden) this.enlist(a);
+    }
+    // a soldier's default order, following the head, is the banner's job once it stands under one
+    for (const r of this.regiments) for (const v of r.members) if (v.order?.kind === 'follow') { v.order = null; v.clearGoal(); }
+    // the blocks following the head march in ranks of three behind it, each keeping its own station
+    const followers = this.regiments.filter((r) => r.stance === 'follow');
+    for (let row = 0, back = 2 * TILE; row * 3 < followers.length; row++) {
+      const rank = followers.slice(row * 3, row * 3 + 3), widths = rank.map((r) => r.width()), depth = Math.max(...rank.map((r) => r.depth()));
+      let at = -(widths.reduce((a, w) => a + w, 0) + TILE * (rank.length - 1)) / 2;
+      rank.forEach((r, i) => { r.trail = { side: at + widths[i] / 2, back: back + depth / 2 }; at += widths[i] + TILE; });
+      back += depth + TILE;
+    }
+    const pick = (x: number, y: number, r: number): Mover | null => this.bestTarget(x, y, r);
+    for (const r of this.regiments) {
+      r.tick(dt, this.world, this.player, pick);
+      let i = 0;
+      for (const v of r.members) v.slot = !v.order && !v.post && !v.hidden && !v.carriedBy ? r.slots[i++] ?? null : null;
+    }
+  }
+  /**
+   * Where a wand placement puts each ordered regiment: side by side across the drag's facing, centred on
+   * the press. A click (no drag) faces the blocks the way they would walk; a line is two deep, and a longer drag stretches it wider.
+   */
+  placementPlan(pl: { x0: number; y0: number; x1: number; y1: number }): { reg: Regiment; x: number; y: number; fx: number; fy: number; cols: number; slots: { x: number; y: number }[] }[] {
+    const regs = this.orderedRegiments();
+    if (!regs.length) return [];
+    const dx = pl.x1 - pl.x0, dy = pl.y1 - pl.y0, len = Math.hypot(dx, dy);
+    let fx: number, fy: number;
+    if (len > TILE / 2) { fx = dx / len; fy = dy / len; }
+    else {
+      const cx = regs.reduce((a, r) => a + r.x, 0) / regs.length, cy = regs.reduce((a, r) => a + r.y, 0) / regs.length, d = Math.hypot(pl.x0 - cx, pl.y0 - cy);
+      if (d > TILE) { fx = (pl.x0 - cx) / d; fy = (pl.y0 - cy) / d; } else { fx = regs[0].fx; fy = regs[0].fy; }
+    }
+    const sized = regs.map((reg) => {
+      const n = Math.max(1, reg.active().length);
+      const cols = reg.shape === 'line' && len > TILE / 2 ? Math.max(Math.ceil(n / 2), Math.min(n, Math.round(len / regs.length / SLOT_GAP))) : reg.shape === 'line' ? reg.cols : 0;
+      let lo = Infinity, hi = -Infinity;
+      for (const o of layout(reg.shape, n, cols)) { lo = Math.min(lo, o.ox); hi = Math.max(hi, o.ox); }
+      return { reg, cols, n, width: (hi - lo + 1) * SLOT_GAP };
+    });
+    const gap = TILE, total = sized.reduce((a, z) => a + z.width, 0) + gap * (sized.length - 1);
+    const rx = -fy, ry = fx;
+    let at = -total / 2;
+    return sized.map(({ reg, cols, n, width }) => {
+      const off = at + width / 2; at += width + gap;
+      const x = pl.x0 + rx * off, y = pl.y0 + ry * off;
+      return { reg, x, y, fx, fy, cols, slots: reg.slotsAt(x, y, fx, fy, n, reg.shape, cols) };
+    });
+  }
+  /** Set regiments' stance (a hold is where they stand). */
+  setStance(regs: Regiment[], stance: Stance): void {
+    for (const r of regs) {
+      if (stance === 'hold') r.place(r.x, r.y, r.fx, r.fy, r.cols);
+      else { r.stance = stance; if (stance === 'advance') r.quarry = null; }
+    }
+    if (regs.length) this.wandFx(regs[0].x, regs[0].y - 12, stance === 'hold' ? 'HOLD' : stance === 'advance' ? 'ADVANCE' : 'FOLLOW');
+  }
+  /** The next shape for these regiments: square, line, wedge. */
+  cycleShape(regs: Regiment[]): void {
+    if (!regs.length) return;
+    const next: Shape = SHAPES[(SHAPES.indexOf(regs[0].shape) + 1) % SHAPES.length];
+    for (const r of regs) { r.shape = next; r.cols = 0; r.dirty = true; }
+    this.wandFx(regs[0].x, regs[0].y - 12, next.toUpperCase());
+  }
+  /** F, G, T and H while the wand is out and a regiment is picked: shape, hold, advance, follow. True when taken. */
+  regimentKey(k: 'F' | 'G' | 'T' | 'H'): boolean {
+    if (this.player.tool !== 'wand' || this.screen !== 'playing') return false;
+    const regs = this.pickedRegiments();
+    if (!regs.length) return false;
+    if (k === 'F') this.cycleShape(regs);
+    else this.setStance(regs, k === 'G' ? 'hold' : k === 'T' ? 'advance' : 'follow');
+    return true;
   }
 
   rescueFallenGuards(): void {
@@ -3435,6 +3585,8 @@ export class VillageScene extends SimScene {
       case 'wand': {
         const n = this.squad.length, all = this.fighters().length;
         if (!all) return 'wand: nobody to command — grown soldiers answer it';
+        const regs = this.pickedRegiments();
+        if (regs.length) return `${regs.length === 1 ? `banner ${regs[0].id} picked (${regs[0].members.length}, ${regs[0].shape}, ${regs[0].stance})` : `${regs.length} banners picked`} · right-drag on the ground: place it — the drag is the facing, and a line's width · right click a raider: advance on it · F shape · G hold · T advance · H follow`;
         return `${n ? `${n} picked` : `no one picked — orders go to all ${all}`} · left click / drag: pick soldiers · right click: ground = hold there, raider = attack, wall top = archer post · F: follow me`;
       }
       case 'basket': {

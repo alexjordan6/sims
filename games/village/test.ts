@@ -8,6 +8,7 @@ import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, Wrecker, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm } from './wildlife';
+import { SLOT_GAP } from './regiment';
 import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, GNOME_PACK, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS, YARD, CALLINGS, TREE_RESERVE, MOODS, SERVE_RANGE, POT_INGREDIENTS, BODY } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
@@ -897,7 +898,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       const held = bg.load as { food?: string; n: number } | null;
       assert(held?.food === 'meat' && held.n === BOAR.meat && !s.world.items.includes(meat!), `a gnome fetches the whole piece (${bg.task})`);
       step(s, 40);
-      assert(s.pantry.meat === BOAR.meat && !bg.load, `and carries it to the granary (${s.pantry.meat} meat stored · ${bg.task})`);
+      assert(s.pantry.meat === BOAR.meat && (bg.load as { food?: string } | null)?.food !== 'meat', `and carries it to the granary (${s.pantry.meat} meat stored · ${bg.task})`);
       const eater = s.spawn(new Villager(...Object.values(World.center(120, 100)) as [number, number], s.world.houses[0], 'kid', 1, 'Meat eater', s.mods));
       eater.diet.meat = p.dietFull;
       assert(Math.abs(eater.dietNow().dmg - DIET_CAP.dmg * 2 * p.dietMul) < 1e-9 && eater.dietNow().hp === 0, 'children raised on meat get twice the damage bonus berries give, and nothing else');
@@ -1774,6 +1775,71 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(v.pickAt(at.x, at.y).agent === g, 'pointing at a crowd body picks that gnome');
       g.dead = true; s.removeDead(); s.draw();
       assert(!v.crowd.drawn.has(g.id), 'a dead one leaves the crowd (it lies down and sinks)');
+    }
+
+    // ---- regiments: gnome soldiers fall in under banners and fight as blocks -----------------------
+    {
+      const run = (secs: number) => { for (let i = 0; i < Math.ceil(secs * 60); i++) { s.grid.rebuild(s.agents); s.tick(1 / 60); } };
+      s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(104, 100)); s.world.items.length = 0;
+      const army: Villager[] = [];
+      for (let i = 0; i < 50; i++) {
+        const at = World.center(122 + (i % 8), 96 + Math.floor(i / 8));
+        const g = s.spawn(new Villager(at.x, at.y, s.world.houses[0], 'soldier', 20, `Rank${i}`, s.mods));
+        g.gnome = true; g.applyRole(s.mods); g.weapon = 'pike'; army.push(g);
+      }
+      run(0.1);
+      const reg = s.regiments[0];
+      assert(s.regiments.length === 1 && reg.members.length === 50 && army.every((g) => g.regiment === reg) && reg.stance === 'follow', `fifty gnome soldiers fall in under one banner, following the head (${s.regiments.length} banners, ${reg?.members.length} under the first)`);
+      const extra = s.spawn(new Villager(army[0].x, army[0].y, s.world.houses[0], 'soldier', 20, 'Recruit', s.mods)); extra.gnome = true; extra.applyRole(s.mods);
+      run(0.6);
+      assert(s.regiments.length === 2 && extra.regiment === s.regiments[1], `the fifty-first raises a second banner (${s.regiments.length})`);
+      extra.dead = true; s.removeDead(); run(0.1);
+      assert(s.regiments.length === 1, 'and a banner with nobody under it is struck');
+      const off = () => Math.max(...reg.active().map((g) => Math.hypot(g.x - g.slot!.x, g.y - g.slot!.y)));
+      // placed with the wand: the block marches to the spot and takes its shape
+      const spot = World.center(130, 100);
+      s.player.tool = 'wand'; s.selectRegiment(reg);
+      for (const g of s.placementPlan({ x0: spot.x, y0: spot.y, x1: spot.x + 40, y1: spot.y })) g.reg.place(g.x, g.y, g.fx, g.fy, g.cols);
+      run(14);
+      assert(reg.stance === 'hold' && Math.hypot(reg.x - spot.x, reg.y - spot.y) < 1 && off() < TILE / 2, `a placed square marches there and every gnome stands within half a tile of its slot (worst ${off().toFixed(1)} px)`);
+      const front = reg.slots.slice(0, Math.ceil(Math.sqrt(50)));
+      assert(front.every((q) => q.x > reg.x + 2 * SLOT_GAP), 'facing east: the front rank is the eastmost');
+      // turned a quarter: the slots turn with it
+      reg.place(reg.x, reg.y, 0, 1);
+      run(10);
+      assert(reg.slots.slice(0, 8).every((q) => q.y > reg.y + 2 * SLOT_GAP) && off() < TILE / 2, `turned to face south, the front rank is the southmost and the block re-forms (worst ${off().toFixed(1)} px)`);
+      // losing ten from the front: the ranks close up, each body about one place, and the front rank stays full
+      for (const g of reg.members.slice(0, 10)) g.dead = true;
+      s.removeDead(); run(1 / 60);
+      const front7 = reg.slots.slice(0, 7);
+      assert(reg.members.length === 40 && reg.slots.length === 40 && off() < 2.5 * SLOT_GAP && front7.every((q) => reg.active().some((g) => g.slot === q)),
+        `ten fall from the front: the ranks close, the front rank full again and nobody more than a couple of places from its new slot (${reg.members.length} left, worst ${off().toFixed(1)} px)`);
+      run(8);
+      assert(off() < TILE / 2, `and the ranks close (worst ${off().toFixed(1)} px)`);
+      // a charge onto a holding pike block breaks on its front
+      reg.place(reg.x, reg.y, 1, 0); run(6);
+      const back = reg.x - 2 * TILE;
+      const charge: Raider[] = [];
+      for (let i = 0; i < 6; i++) {
+        const r = s.spawn(new Raider(reg.x + 9 * TILE, reg.y + (i - 2.5) * 10));
+        r.update = (dt: number) => { r.vx = -r.speed; r.x -= r.speed * dt; };
+        charge.push(r);
+      }
+      run(8);
+      assert(charge.every((r) => r.dead || r.x > back), `six raiders charging a holding pike square never get through it (${charge.filter((r) => r.dead).length} dead, furthest at ${Math.min(...charge.map((r) => r.x - reg.x)).toFixed(0)} px from the banner)`);
+      for (const r of charge) r.dead = true; s.removeDead();
+      // advance: the block marches on the nearest raider and fights it
+      const prey = s.spawn(new Raider(reg.x + 14 * TILE, reg.y)); prey.update = () => {}; prey.hp = prey.maxHp = 400;
+      s.setStance([reg], 'advance');
+      run(10);
+      assert((reg.quarry === prey || prey.dead) && prey.hp < 400, `advancing, the block finds the nearest raider and its pikes strike it (${prey.hp.toFixed(0)} hp left, banner ${Math.round(Math.hypot(reg.x - prey.x, reg.y - prey.y))} px off)`);
+      prey.dead = true; s.removeDead();
+      // the wand keys: F changes the shape, G holds, H follows
+      s.selectRegiment(reg);
+      assert(s.regimentKey('F') && reg.shape === 'line', 'with a regiment picked, F turns the square into a line');
+      assert(s.regimentKey('H') && (reg.stance as string) === 'follow' && s.regimentKey('G') && (reg.stance as string) === 'hold', 'H sets it following, G holding');
+      s.clearSquad(); s.player.tool = 'sword';
+      assert(!s.regimentKey('F'), 'with nothing picked (or the wand away) the keys keep their old jobs');
     }
 
     // ---- MOBA commands: the head walks where it is sent, hunts what it is told to, uses what it is pointed at ----

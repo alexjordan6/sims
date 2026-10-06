@@ -192,6 +192,18 @@ export class UI {
     supply.querySelector('.leave-room')!.addEventListener('click', () => s.interior.leave());
     this.side.prepend(supply);
     this.roster.addEventListener('click', (e) => {
+      // a regiment's row: its buttons set the stance or the shape; anywhere else on it picks the block for the wand
+      const reg = (e.target as HTMLElement).closest<HTMLElement>('.reg-row');
+      if (reg) {
+        const r = s.regiments.find((x) => x.id === Number(reg.dataset.reg));
+        if (!r) return;
+        const act = (e.target as HTMLElement).closest<HTMLElement>('[data-act]')?.dataset.act;
+        if (act === 'shape') s.cycleShape([r]);
+        else if (act === 'hold' || act === 'advance' || act === 'follow') s.setStance([r], act);
+        else { s.player.tool = 'wand'; s.selectRegiment(r, (e as MouseEvent).shiftKey); }
+        this.lastRoster = ''; this.renderRoster();
+        return;
+      }
       const row = (e.target as HTMLElement).closest<HTMLElement>('.row');
       if (!row) return;
       const v = s.villagers().find((x) => x.id === Number(row.dataset.id));
@@ -646,10 +658,22 @@ export class UI {
       ['Infants', 'kid', vs.filter((v) => v.role === 'infant').sort((a, b) => b.age - a.age)],
       ['Children', 'kid', vs.filter((v) => v.role === 'kid').sort((a, b) => b.age - a.age)],
       ['Soldiers', 'soldier', vs.filter((v) => v.role === 'soldier' && !v.gnome)],
-      ['Gnomes', 'gnome', vs.filter((v) => v.gnome && v.isAdult)], // listed by blood, once: their calling shows on the row
+      ['Gnomes', 'gnome', vs.filter((v) => v.gnome && v.isAdult && !v.regiment)], // listed by blood, once: their calling shows on the row (the army is listed by banner)
       ['Workers', 'farmer', vs.filter((v) => (v.role === 'farmer' || v.role === 'woodcutter') && !v.gnome)],
     ];
     let html = '';
+    // the army: one row a banner — strength, shape, stance — rather than a row a gnome
+    if (s.regiments.length) {
+      const picked = new Set(s.pickedRegiments()), n = s.regiments.reduce((a, r) => a + r.members.length, 0);
+      html += `<div class="grp soldier">Regiments <b>${n}</b><span class="grp-note">click: pick · F shape · G hold · T advance · H follow</span></div>`;
+      for (const r of s.regiments) {
+        const pct = Math.round(r.members.length / Math.max(1, r.peak) * 100);
+        const st = (k: string, label: string) => `<button class="btn tiny${r.stance === k ? ' on' : ''}" data-act="${k}">${label}</button>`;
+        html += `<div class="reg-row${picked.has(r) ? ' sel' : ''}" data-reg="${r.id}"><i class="swatch" style="background:${r.colour}"></i><span class="n">Banner ${r.id}</span><span class="a">${r.members.length}/${r.peak}</span>`
+          + `<button class="btn tiny" data-act="shape" title="cycle the formation">${r.shape}</button>${st('follow', 'FOLLOW')}${st('hold', 'HOLD')}${st('advance', 'ADVANCE')}`
+          + `<div class="bar hp ${pct < 40 ? 'low' : ''}"><i style="width:${pct}%"></i></div></div>`;
+      }
+    }
     for (const [label, cls, list] of groups) {
       if (!list.length) continue;
       html += `<div class="grp ${cls}">${label} <b>${list.length}</b>${cls === 'kid' ? '<span class="grp-note">trade · care stars</span>' : ''}</div>`;
