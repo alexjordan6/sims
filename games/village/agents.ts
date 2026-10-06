@@ -1178,6 +1178,47 @@ export class Raider extends Mover {
   isTargeting(who: Mover): boolean { return this.target === who && !this.dead; }
   /** Adaptive encounters pursue the head rather than villagers. */
   huntPlayer = false;
+  /**
+   * A camp in the wild this raider guards (VillageScene.spawnCamps), in sim pixels. It fights only what comes
+   * within `aggro` of it while that stays within `leash` of home, walks back when its quarry gets away, and
+   * heals on getting home — it never goes looking for the village.
+   */
+  camp: { x: number; y: number; aggro: number; leash: number } | null = null;
+  /** A camp raider's quarry: the nearest person within aggro of it and within the leash of home, or null. */
+  protected campPick(s: VillageScene): Mover | null {
+    const c = this.camp!;
+    let best: Mover | null = null, bd = c.aggro * c.aggro;
+    const consider = (m: Mover) => {
+      if (m.dead || m.hidden || (m instanceof Villager && m.carriedBy)) return;
+      if ((m.x - c.x) ** 2 + (m.y - c.y) ** 2 > c.leash * c.leash) return;
+      const d = (m.x - this.x) ** 2 + (m.y - this.y) ** 2;
+      if (d < bd) { bd = d; best = m; }
+    };
+    consider(s.player);
+    for (const v of s.villagers()) consider(v);
+    return best;
+  }
+  /** A quarry that has run past the leash is let go. */
+  protected campLeash(): void {
+    const c = this.camp, t = this.target;
+    if (c && t && (t.x - c.x) ** 2 + (t.y - c.y) ** 2 > c.leash * c.leash) this.target = null;
+  }
+  /** Nothing to fight: walk home, heal on arrival, keep watch. */
+  protected campIdle(dt: number, s: VillageScene): void {
+    const c = this.camp!, d = Math.hypot(this.x - c.x, this.y - c.y);
+    this.bored = 0;
+    if (d > TILE * 1.5) {
+      const home = World.toTile(c.x, c.y);
+      this.setGoal(s, home.tx, home.ty);
+      this.followPath(dt);
+      this.task = 'going back to its camp';
+      return;
+    }
+    // home with nobody to fight: the camp resets, and its raiders are whole again
+    this.hp = this.maxHp;
+    this.clearGoal(); this.vx = this.vy = 0;
+    this.task = 'keeping watch over its camp';
+  }
   protected retarget = 0;
   protected bored = 0;
   readonly boss: boolean;
@@ -1224,8 +1265,10 @@ export class Raider extends Mover {
     this.retarget -= dt;
     if (this.retarget <= 0 || !this.target || this.target.dead || this.target.hidden) {
       this.retarget = 0.5;
-      this.target = this.huntPlayer ? (s.player.dead || s.player.hidden ? null : s.player) : s.nearestVictim(this.x, this.y);
+      this.target = this.camp ? this.campPick(s) : this.huntPlayer ? (s.player.dead || s.player.hidden ? null : s.player) : s.nearestVictim(this.x, this.y);
     }
+    this.campLeash();
+    if (!this.target && this.camp) { this.campIdle(dt, s); return; }
     if (!this.target) {
       this.bored += dt;
       if (this.bored > 20) this.dead = true; // nothing to loot, leave

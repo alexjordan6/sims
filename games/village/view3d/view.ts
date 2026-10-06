@@ -371,6 +371,12 @@ export class View {
       if (d > 32 * 32) continue;
       lights.push({ x, y: groundHeight(x, z) + y, z, colour, power, d });
     }
+    // a raider camp's fire, where anyone holds it
+    for (const camp of s.camps) {
+      if (!camp.members.some((m) => !m.dead)) continue;
+      const x = camp.x * U, z = camp.y * U, d = (x - fx) ** 2 + (z - fz) ** 2;
+      if (d <= 32 * 32) lights.push({ x, y: groundHeight(x, z) + 0.8, z, colour: 0xff7a30, power: 1.6 + 1.6 * night, d });
+    }
     lights.sort((a, b) => a.d - b.d);
     this.lamps.forEach((l, i) => {
       const src = lights[i];

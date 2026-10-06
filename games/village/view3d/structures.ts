@@ -126,6 +126,8 @@ export class Structures {
   readonly group = new THREE.Group();
   private built = new Map<Building, Built>();
   private forts = new Map<number, { group: THREE.Group; key: string }>();
+  /** a fire at each raider camp in the wild */
+  private campfires = new Map<object, THREE.Object3D>();
   /** the meshes a pointer can land on: wall tops, gates, stairs */
   readonly pickable: THREE.Object3D[] = [];
   /** every building's group, for the pointer */
@@ -134,6 +136,8 @@ export class Structures {
   constructor(private scene: VillageScene) {}
 
   clear(): void {
+    for (const f of this.campfires.values()) this.group.remove(f);
+    this.campfires.clear();
     for (const b of this.built.values()) this.group.remove(b.group);
     for (const f of this.forts.values()) this.group.remove(f.group);
     this.built.clear(); this.forts.clear(); this.pickable.length = 0;
@@ -185,6 +189,24 @@ export class Structures {
       f.group.traverse((o) => { if (o instanceof THREE.Mesh) o.material = tint === null ? (o as THREE.Mesh & { _base: THREE.Material })._base : mat(tint); });
     }
     for (const [id, f] of this.forts) if (!seen.has(id)) { this.group.remove(f.group); this.forts.delete(id); pickDirty = true; }
+    // the camps' fires: a ring of logs and a flame that dances; a cleared camp's fire is cold
+    for (const camp of s.camps) {
+      let fire = this.campfires.get(camp);
+      const model = MODELS.props.get('nature/campfire_logs');
+      if (fire && fire.userData.model !== !!model) { this.group.remove(fire); fire = undefined; }
+      if (!fire) {
+        fire = new THREE.Group(); fire.userData.model = !!model;
+        if (model) { const m = new THREE.Mesh(model, lambert({ vertexColors: true })); m.scale.setScalar(1.6); fire.add(m); }
+        else fire.add(part(cyl, 0x4a3426, 0.9, 0.15, 0.9, 0, 0, 0));
+        const flame = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.6, 5), lambert({ color: 0xff8a30, emissive: 0xff6a10 }));
+        flame.position.y = 0.3; flame.userData.flame = true; fire.add(flame);
+        fire.position.set(camp.x * U, groundHeight(camp.x * U, camp.y * U), camp.y * U);
+        this.group.add(fire); this.campfires.set(camp, fire);
+      }
+      const lit = camp.members.some((m) => !m.dead);
+      fire.children.forEach((o) => { if (o.userData.flame) { o.visible = lit; o.scale.y = 0.8 + 0.3 * Math.abs(Math.sin(t * 9 + camp.x)); } });
+    }
+    for (const [camp, fire] of this.campfires) if (!s.camps.includes(camp as never)) { this.group.remove(fire); this.campfires.delete(camp); }
     if (pickDirty) {
       this.pickable.length = 0;
       for (const f of this.forts.values()) this.pickable.push(f.group);

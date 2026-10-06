@@ -514,8 +514,10 @@ export class Brute extends Raider {
     this.retarget -= dt;
     if (this.retarget <= 0 || !this.target || this.target.dead || this.target.hidden) {
       this.retarget = 0.6;
-      this.target = s.nearestSoldier(this.x, this.y, 200) ?? s.nearestVictim(this.x, this.y);
+      this.target = this.camp ? this.campPick(s) : s.nearestSoldier(this.x, this.y, 200) ?? s.nearestVictim(this.x, this.y);
     }
+    this.campLeash();
+    if (!this.target && this.camp) { this.campIdle(dt, s); return; }
     if (!this.target) {
       this.bored += dt;
       if (this.bored > 20) this.dead = true;
@@ -555,8 +557,10 @@ export class Shaman extends Raider {
     this.retarget -= dt;
     if (this.retarget <= 0 || !this.target || this.target.dead || this.target.hidden) {
       this.retarget = 0.5;
-      this.target = s.nearestVictim(this.x, this.y);
+      this.target = this.camp ? this.campPick(s) : s.nearestVictim(this.x, this.y);
     }
+    this.campLeash();
+    if (!this.target && this.camp) { this.campIdle(dt, s); return; }
     if (!this.target) {
       this.bored += dt;
       if (this.bored > 20) this.dead = true;

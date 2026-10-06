@@ -302,6 +302,7 @@ export class VillageScene extends SimScene {
     this.thornT = 0; this.thornWarned = -Infinity;
     this.spawnSounders();
     this.spawnTrolls();
+    this.spawnCamps();
     this.spawnHives();
     this.lairFound = false;
     this.gnomesFound = p.gnomeStart; // you already keep a toadstool cottage: the craft needs no finding
@@ -383,6 +384,72 @@ export class VillageScene extends SimScene {
    * Scatter p.trolls of them over the wilderness. Solitary: no families, no homes, no registry — each is
    * simply an agent standing where it was put, and from there it prowls wherever it likes.
    */
+  /** the raider camps out in the wild, and the day each was last cleared (null while anyone holds it) */
+  camps: { x: number; y: number; members: Raider[]; cleared: number | null; born: number }[] = [];
+  private campRng = new Rng(1);
+  /**
+   * Camps: raiders who live out in the wild and guard their ground (Raider.camp). They are where the fighting
+   * is between raids — you go to them, they do not come to you. Out of their own stream off the seed.
+   */
+  private spawnCamps(): void {
+    this.camps = [];
+    this.campRng = new Rng(this.seed ^ 0xca3b5);
+    for (let k = 0; k < p.campCount; k++) this.foundCamp();
+  }
+  /** Pick open, reachable ground in the wild for a new camp — outside the thorn ring, off the trails, clear of the lair, the gnome glade and other camps, and out of everyone's sight. */
+  private campSpot(): TilePos | null {
+    const rng = this.campRng, hx = COLS / 2, hy = ROWS / 2, den = this.world.wildGnomeHouse;
+    for (let tries = 0; tries < 80; tries++) {
+      const a = rng.range(0, Math.PI * 2), r = rng.range(32, 80);
+      const tx = Math.round(hx + Math.cos(a) * r), ty = Math.round(hy + Math.sin(a) * r * 0.7);
+      const t = this.world.get(tx, ty);
+      if (!t || t.trail || t.building || t.kind === 'thicket' || this.world.isBlocked(tx, ty, true)) continue;
+      if (this.world.lair && Math.hypot(this.world.lair.tx - tx, this.world.lair.ty - ty) < 12) continue;
+      if (den && Math.hypot(den.tx - tx, den.ty - ty) < 12) continue;
+      if (this.camps.some((c) => Math.hypot(c.x / TILE - tx, c.y / TILE - ty) < 14)) continue;
+      if (this.fog && this.fog.enabled && this.fog.visibleAt(tx * TILE, ty * TILE) > 0) continue; // a camp grows where nobody is looking
+      if (!this.world.bfs({ tx, ty }, { tx: hx, ty: hy }, true).length) continue; // somewhere you can walk to
+      return { tx, ty };
+    }
+    return null;
+  }
+  /** Raise a camp somewhere in the wild and man it. */
+  private foundCamp(): void {
+    const q = this.campSpot();
+    if (!q) return;
+    const c = World.center(q.tx, q.ty);
+    const camp = { x: c.x, y: c.y, members: [] as Raider[], cleared: null as number | null, born: this.day };
+    this.camps.push(camp);
+    this.manCamp(camp);
+  }
+  /** Fill a camp: two to four raiders (more as the days go on), some of them butchers or bone shamans. */
+  private manCamp(camp: { x: number; y: number; members: Raider[]; cleared: number | null }): void {
+    const rng = this.campRng, n = Math.min(5, 2 + rng.int(0, 2) + Math.floor(this.day / 7));
+    camp.members = [];
+    for (let i = 0; i < n; i++) {
+      const roll = rng.next(), opts = { hpMul: this.mods.raiderHpMul, speedMul: this.mods.raiderSpeedMul };
+      const a = rng.range(0, Math.PI * 2), d = rng.range(4, 20);
+      let x = camp.x + Math.cos(a) * d, y = camp.y + Math.sin(a) * d;
+      const t = World.toTile(x, y);
+      if (this.world.isBlocked(t.tx, t.ty, true)) { x = camp.x; y = camp.y; }
+      const r = roll < 0.2 ? new Brute(x, y, opts) : roll < 0.38 ? new Shaman(x, y, opts) : new Raider(x, y, opts);
+      r.camp = { x: camp.x, y: camp.y, aggro: p.campAggro * TILE, leash: p.campLeash * TILE };
+      r.lairBound = true; // camps never start, hold open or count toward a raid
+      r.task = 'keeping watch over its camp';
+      camp.members.push(this.spawn(r));
+    }
+    camp.cleared = null;
+  }
+  /** Dawn: cleared camps are re-manned after a while, and now and then a new one grows out of sight. */
+  private tendCamps(): void {
+    for (const camp of this.camps) {
+      if (camp.members.some((m) => !m.dead)) continue;
+      if (camp.cleared === null) { camp.cleared = this.day; continue; }
+      if (this.day - camp.cleared >= p.campRespawnDays && !(this.fog && this.fog.visibleAt(camp.x, camp.y) > 0)) this.manCamp(camp);
+    }
+    if (p.campCount > 0 && this.day % 3 === 0 && this.camps.length < p.campCount * 2) this.foundCamp();
+  }
+
   private spawnTrolls(): void {
     const hx = COLS / 2, hy = ROWS / 2;
     const rng = new Rng(this.seed ^ 0x7201);
@@ -1639,6 +1706,7 @@ export class VillageScene extends SimScene {
     // crops grow
     this.world.tiles.forEach((t, i) => { if (t.kind === 'crop') { t.stage++; this.world.dirty.add(i); } });
     this.creepThicket();
+    this.tendCamps();
     // stumps and saplings grow back; trees seed their neighbours
     const seeds: { tx: number; ty: number }[] = [];
     this.world.tiles.forEach((t, i) => {

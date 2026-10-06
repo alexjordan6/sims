@@ -36,6 +36,10 @@ export const p = live(
     waveHpGrowth: [D.waveHpGrowth, 0, 0.3, 0.01, 'Raider HP multiplier grows this much per wave (0.08 = +8% each raid).'],
   }, 'pacing'),
   params({
+    campCount: [D.campCount, 0, 30, 1, 'Raider camps out in the wild at the start of a run (outside the thorn ring). Camps guard their ground and never come for the village.'],
+    campAggro: [D.campAggro, 2, 16, 1, 'Tiles from a camp raider at which it notices you (or a villager) and attacks.'],
+    campLeash: [D.campLeash, 4, 30, 1, 'Tiles from its camp a raider will chase before it gives up, walks home and heals.'],
+    campRespawnDays: [D.campRespawnDays, 1, 10, 1, 'Days a cleared camp stays empty before raiders move back in. Every few days a new camp also grows out of sight.'],
     adaptiveSpawns: [D.adaptiveSpawns, 'Health-driven spawning. Off resets the ramp; existing enemies remain. Independent of raids and peaceful mode.'],
     adaptiveHp: [D.adaptiveHp, 0, 200, 1, 'Spawn only while raw HP is strictly above this value, not a percentage.'],
     adaptiveEvery: [D.adaptiveEvery, 0.5, 60, 0.5, 'Simulation seconds between batches. Low HP and shelter restart the countdown.'],

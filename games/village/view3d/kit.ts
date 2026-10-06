@@ -23,7 +23,7 @@ export const KIT_PIECES = [
   'town/roof', 'town/roof-gable', 'town/roof-flat', 'town/chimney', 'town/banner-red', 'town/wall-block', 'town/wall-arch', 'town/stairs-stone',
 ];
 /** whole models stood on the ground and centred */
-export const KIT_PROPS = ['grave/crypt-large', 'nature/log_stackLarge', 'grave/fire-basket', 'grave/lantern-candle', 'grave/gravestone-round', 'grave/gravestone-cross', 'grave/gravestone-broken'];
+export const KIT_PROPS = ['nature/campfire_logs', 'grave/crypt-large', 'nature/log_stackLarge', 'grave/fire-basket', 'grave/lantern-candle', 'grave/gravestone-round', 'grave/gravestone-cross', 'grave/gravestone-broken'];
 
 const mats = new Map<number, THREE.MeshLambertMaterial>();
 /** vertex colours times a tint: white for as-is, dark for a ruin */

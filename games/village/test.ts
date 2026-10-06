@@ -22,6 +22,8 @@ function fresh(wild = false, trolls = false, hives = false, skulks = false, thic
   if (!hives) s.world.hives.clear(); // nor a hive over a check that walks somebody past it
   if (!skulks) for (const a of s.agents) if (a instanceof Skulk) a.dead = true; // nor a skulk that crept out during an earlier check
   if (!thickets) for (const q of s.world.find((t) => t.kind === 'thicket')) s.world.set(q.tx, q.ty, 'grass'); // nor thorns under a walk
+  for (const c of s.camps) for (const m of c.members) m.dead = true; // nor a raider camp out in the wild
+  s.camps = [];
   s.removeDead();
   (s as unknown as { ui: { showScreen(v: null): void } }).ui.showScreen(null);
   document.querySelector('.ctrl-panel')?.classList.remove('open');
@@ -1663,6 +1665,31 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       const spare = s.player.pack.put({ ...club });
       assert(!s.storeGear(spare, barracks) && s.player.pack.at(spare)?.kind === 'weapon', 'a full chest keeps the club in your pack');
       s.stashOf(barracks).length = 0;
+    }
+
+    // ---- camps: between raids the enemies live out in the wild, guard their ground, and leave the village be ----
+    {
+      const run = (secs: number) => { for (let i = 0; i < Math.ceil(secs * 60); i++) { s.grid.rebuild(s.agents); s.tick(1 / 60); } };
+      s = fresh(); clearing(s); s.agents = [s.player]; s.world.items.length = 0;
+      const home = World.center(120, 100), at = World.center(150, 100);
+      Object.assign(s.player, home);
+      const camp = { x: at.x, y: at.y, members: [] as Raider[], cleared: null as number | null, born: 0 };
+      s.camps.push(camp); (s as unknown as { manCamp(c: typeof camp): void }).manCamp(camp);
+      assert(camp.members.length >= 2 && camp.members.every((m) => m.camp && m.lairBound), `a camp is manned by ${camp.members.length} raiders who belong to it`);
+      run(60);
+      const far = Math.max(...camp.members.map((m) => Math.hypot(m.x - at.x, m.y - at.y)));
+      const nearest = Math.min(...camp.members.map((m) => s.player.dist(m)));
+      assert(camp.members.every((m) => !m.dead) && far <= (p.campLeash + 1) * TILE && nearest > 20 * TILE, `left alone for a minute they keep to their camp and never come for the village (${(far / TILE).toFixed(1)} tiles from camp, ${(nearest / TILE).toFixed(0)} from the head)`);
+      // walk into their ground and they come for you
+      Object.assign(s.player, World.center(146, 100)); s.fog?.update(1);
+      const hpWas = s.player.hp; run(1.5); // (long enough to be hit, short of a death that would end the run)
+      assert(s.player.hp < hpWas, `walking into their ground, the head is set upon (${hpWas} -> ${s.player.hp} hp)`);
+      // run past the leash and they let you go, walk home, and are whole again
+      Object.assign(s.player, home); s.player.hp = s.player.maxHp; s.player.dead = false; s.screen = 'playing';
+      for (const m of camp.members) m.hp = Math.max(1, m.maxHp - 5);
+      run(20);
+      assert(camp.members.every((m) => m.hp === m.maxHp && Math.hypot(m.x - at.x, m.y - at.y) <= 2 * TILE), `outrun past the leash, they go home and heal (${camp.members.map((m) => `${m.hp}/${m.maxHp}`).join(", ")})`);
+      for (const m of camp.members) m.dead = true; s.removeDead(); s.camps = [];
     }
 
     // ---- MOBA commands: the head walks where it is sent, hunts what it is told to, uses what it is pointed at ----
