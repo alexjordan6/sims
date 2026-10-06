@@ -15,7 +15,7 @@ export class Rat extends Raider {
   constructor(x: number, y: number, opts: RaiderOpts = {}) {
     super(x, y, opts);
     this.kind = 'rat';
-    this.name = 'Rat';
+    this.name = 'Plague rat';
     this.harmless = true;
     this.pushScale = 1.8; // rats fly
     this.hp = this.maxHp = Math.round(8 * (opts.hpMul ?? 1));
@@ -470,7 +470,7 @@ export class Ogre extends Raider {
     const t = s.world.get(tx, ty);
     if (!t) return;
     if (t.defense && t.defense.hp > 0) {
-      if (s.world.damageDefense(t.defense, defenseDmg)) { s.event('raid', 'The defenses have been breached!', true); s.rescueFallenGuards(); }
+      if (s.world.damageDefense(t.defense, defenseDmg)) { s.event('raid', 'The wall is breached — they are inside!', true); s.rescueFallenGuards(); }
     } else if (t.building && !seen.has(t.building)) {
       seen.add(t.building);
       s.damageBuilding(t.building, buildingDmg, this);
@@ -496,7 +496,7 @@ export class Brute extends Raider {
   constructor(x: number, y: number, opts: RaiderOpts = {}) {
     super(x, y, opts);
     this.kind = 'brute';
-    this.name = 'Brute';
+    this.name = 'Butcher';
     this.heavy = true;
     this.pushScale = 0.15;
     this.hp = this.maxHp = Math.round(180 * (opts.hpMul ?? 1));
@@ -541,7 +541,7 @@ export class Shaman extends Raider {
   constructor(x: number, y: number, opts: RaiderOpts = {}) {
     super(x, y, opts);
     this.kind = 'shaman';
-    this.name = 'Shaman';
+    this.name = 'Bone shaman';
     this.hp = this.maxHp = Math.round(22 * (opts.hpMul ?? 1));
     this.dmg = 6;
     this.speed = 34 * (opts.speedMul ?? 1);
@@ -756,7 +756,7 @@ export class Troll extends Raider {
   constructor(x: number, y: number) {
     super(x, y);
     this.kind = 'troll';
-    this.name = 'Troll';
+    this.name = 'Bog troll';
     this.wild = true;      // no raid brought it here
     this.lairBound = true; // ...so it neither starts a raid nor holds one open
     this.harmless = false; // but it is nobody's friend

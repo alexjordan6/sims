@@ -1,10 +1,15 @@
-// Tiny WebAudio synth: no assets, just oscillators and filtered noise. Cartoon-flavoured.
+// Tiny WebAudio synth: no assets, just oscillators and filtered noise. Everything struck goes through a
+// muffling low-pass and a long, cold reverb; under it all a drone that thickens as night comes on.
 
 type Ctx = AudioContext;
 
 export class Sfx {
   private ctx: Ctx | null = null;
   private master: GainNode | null = null;
+  /** where struck sounds go: muffled, and sent into the reverb */
+  private bus: GainNode | null = null;
+  private droneGain: GainNode | null = null;
+  private droneLevel = 0;
   private noiseBuf: AudioBuffer | null = null;
   /** the looping wind around the lair: a low moaning noise whose level follows how close you are */
   private windGain: GainNode | null = null;
@@ -26,6 +31,7 @@ export class Sfx {
     this.muted = !this.muted;
     try { localStorage.setItem('village.muted', this.muted ? '1' : '0'); } catch { /* ignore */ }
     if (this.master) this.master.gain.value = this.muted ? 0 : 0.5;
+    this.droneLevel = -1; // re-set on the next drone() call
     return this.muted;
   }
 
@@ -41,6 +47,16 @@ export class Sfx {
     this.noiseBuf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
     const d = this.noiseBuf.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    // the bus: a low-pass (nothing rings bright here) and a long reverb of decaying noise
+    const c = this.ctx;
+    this.bus = c.createGain();
+    const muffle = c.createBiquadFilter(); muffle.type = 'lowpass'; muffle.frequency.value = 2600;
+    const verb = c.createConvolver();
+    const ir = c.createBuffer(2, Math.floor(c.sampleRate * 2.4), c.sampleRate);
+    for (let ch = 0; ch < 2; ch++) { const x = ir.getChannelData(ch); for (let i = 0; i < x.length; i++) x[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / x.length, 3.2); }
+    verb.buffer = ir;
+    const wet = c.createGain(); wet.gain.value = 0.32;
+    this.bus.connect(muffle); muffle.connect(this.master); muffle.connect(verb); verb.connect(wet).connect(this.master);
     return this.ctx;
   }
 
@@ -96,6 +112,48 @@ export class Sfx {
     this.gladeGain.gain.setTargetAtTime(level * 0.05, c.currentTime, 0.8);
   }
 
+  /**
+   * The drone under everything (0 = silent, 1 = deepest night): two detuned saws and a sub-bass through a
+   * low-pass that slowly breathes. Built on first use, like wind().
+   */
+  drone(level: number): void {
+    level = Math.max(0, Math.min(1, level));
+    const c = this.ensure(); if (!c || !this.master) return;
+    if (!this.droneGain) {
+      const g = c.createGain(); g.gain.value = 0;
+      const f = c.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 150; f.Q.value = 4;
+      const lfo = c.createOscillator(); lfo.frequency.value = 0.06;
+      const depth = c.createGain(); depth.gain.value = 70;
+      lfo.connect(depth).connect(f.frequency);
+      for (const [type, hz, vol] of [['sawtooth', 41.2, 0.5], ['sawtooth', 41.9, 0.5], ['sine', 55, 0.8], ['triangle', 58.3, 0.25]] as const) {
+        const o = c.createOscillator(); o.type = type; o.frequency.value = hz;
+        const og = c.createGain(); og.gain.value = vol;
+        o.connect(og).connect(f); o.start();
+      }
+      f.connect(g).connect(this.master);
+      lfo.start();
+      this.droneGain = g;
+    }
+    if (Math.abs(level - this.droneLevel) < 0.01) return;
+    this.droneLevel = level;
+    this.droneGain.gain.setTargetAtTime(this.muted ? 0 : level * 0.09, c.currentTime, 1.5);
+  }
+  /** A raid is coming: a slow, sour swell — a tritone that rises out of nothing and dies in the reverb. */
+  stinger(): void {
+    const c = this.ctx; if (!c || !this.bus || this.muted) return;
+    const t = c.currentTime;
+    for (const [hz, vol] of [[98, 0.16], [138.6, 0.12], [196.5, 0.06]] as const) {
+      const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.setValueAtTime(hz, t); o.frequency.linearRampToValueAtTime(hz * 0.97, t + 2.2);
+      const g = c.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.9); g.gain.exponentialRampToValueAtTime(0.001, t + 2.4);
+      o.connect(g).connect(this.bus); o.start(t); o.stop(t + 2.5);
+    }
+    this.noise(2.0, 180, 60, 0.12, 0.6, 0.3);
+  }
+  /** Something breathing in the thorns: a narrow band of noise that swells and falls. */
+  whisper(): void { this.noise(1.1, 2300, 1500, 0.05, 7); this.noise(0.9, 1700, 2100, 0.035, 9, 0.35); }
+  /** Old wood shifting somewhere near: a low, slow creak. */
+  creak(): void { this.tone('triangle', 150, 104, 0.55, 0.05); this.tone('sawtooth', 152, 100, 0.5, 0.02, 0.05); }
+
   /** A short tone: frequency glides from f0 to f1 over `dur` seconds. */
   private tone(type: OscillatorType, f0: number, f1: number, dur: number, vol = 0.3, delay = 0): void {
     const c = this.ctx; if (!c || !this.master || this.muted) return;
@@ -106,7 +164,7 @@ export class Sfx {
     o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t + dur);
     g.gain.setValueAtTime(vol, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-    o.connect(g).connect(this.master);
+    o.connect(g).connect(this.bus ?? this.master);
     o.start(t); o.stop(t + dur + 0.02);
   }
 
@@ -121,7 +179,7 @@ export class Sfx {
     const g = c.createGain();
     g.gain.setValueAtTime(vol, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
-    src.connect(f).connect(g).connect(this.master);
+    src.connect(f).connect(g).connect(this.bus ?? this.master);
     src.start(t); src.stop(t + dur + 0.02);
   }
 
@@ -134,7 +192,7 @@ export class Sfx {
   hurt(): void { this.tone('sawtooth', 180, 70, 0.16, 0.25); this.noise(0.1, 200, 60, 0.2); }
   kill(): void { this.tone('square', 700, 90, 0.22, 0.25); this.noise(0.18, 900, 150, 0.25, 0.5, 0.04); }
   poof(): void { this.noise(0.25, 700, 120, 0.25, 0.4); }
-  streak(n: number): void { for (let i = 0; i < Math.min(n, 4); i++) this.tone('triangle', 520 + i * 160, 700 + i * 160, 0.1, 0.18, i * 0.06); }
+  streak(n: number): void { const minor = [330, 392, 440, 523]; for (let i = 0; i < Math.min(n, 4); i++) this.tone('triangle', minor[i], minor[i] * 0.98, 0.16, 0.16, i * 0.07); }
   bolt(): void { this.tone('sawtooth', 1200, 300, 0.18, 0.15); }
   grunt(): void { this.tone('sawtooth', 120, 90, 0.12, 0.12); }
   whiff(): void { this.noise(0.1, 800, 300, 0.1, 0.8); }

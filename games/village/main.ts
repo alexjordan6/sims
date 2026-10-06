@@ -331,9 +331,9 @@ export class VillageScene extends SimScene {
     }
     const where = this.world.denseForests ? 'the deep woodland' : 'the open meadows';
     this.event('info', p.gnomeStart
-      ? `A gnome band keeps house in ${where}, ten of them under pikes. Set them where a raid will run onto their points, forage what grows wild, and cook it in the great pot in the square.`
-      : `A new village in ${where}. Follow trails to explore. Build walls and stairs, then station archers.`);
-    if (p.thicketRing > 0 && this.world.thicketCount) this.event('info', 'A ring of thorns hems the village in. The trails run through it for now, but it creeps closer every night. Cut it back with the axe, or it will close the trails and take the fields.', true);
+      ? `A gnome band keeps house in ${where}, ten of them under pikes. Nobody comes this far out without a reason. Set the pikes where a raid will run onto them, forage what grows wild, and cook it in the great pot in the square.`
+      : `A new village in ${where}. The last one here is gone, and nobody says how. Follow the trails to explore. Build walls and stairs, then station archers.`);
+    if (p.thicketRing > 0 && this.world.thicketCount) this.event('info', 'A ring of thorns hems the village in. It was not here last spring. The trails still run through it, but it creeps closer every night — cut it back with the axe, or it will close the trails and take the fields.', true);
   }
 
   /** The ground out to the thorn ring starts charted, so you can see what hems you in. */
@@ -1029,13 +1029,13 @@ export class VillageScene extends SimScene {
       a.hp -= bite; a.hurtT = 0;
       if (a.hp > 0) continue;
       a.hp = 0; a.dead = true;
-      if (a instanceof Player) this.event('death', 'You bled out in the thicket.', true);
-      else if (a instanceof Villager) this.event('death', `${a.name} was caught in the thicket and bled out.`, true);
+      if (a instanceof Player) this.event('death', 'The thorns drank you dry.', true);
+      else if (a instanceof Villager) this.event('death', `${a.name} was caught in the thicket and bled out. The thorns are a little thicker there now.`, true);
     }
     const pl = this.player;
     if (!pl.dead && this.world.thicketAt(pl.x, pl.y) && this.simTime - this.thornWarned > 20) {
       this.thornWarned = this.simTime;
-      this.event('info', 'Thorns! The thicket tears at you and drags at your feet — cut your way out with the axe or sword.', true);
+      this.event('info', 'Thorns! Hooks in the skin, roots round the ankles — the thicket drags at you. Cut your way out with the axe or sword.', true);
     }
   }
   /**
@@ -1049,7 +1049,7 @@ export class VillageScene extends SimScene {
     // what the village actually lost is what makes the warning worth reading
     // the ring itself creeps every night; only what it takes inside it (or in a lane) is news
     const near = took.filter((q) => Math.abs(q.tx - COLS / 2) < 18 && Math.abs(q.ty - ROWS / 2) < 13 || this.world.get(q.tx, q.ty)?.trail).length;
-    if (near) this.event('info', `The thorn ring crept ${near} tile${near === 1 ? '' : 's'} closer in the night. Cut it back with the axe before it takes the fields and closes the trails.`, true);
+    if (near) this.event('info', `In the night the thorns crept ${near} tile${near === 1 ? '' : 's'} closer. Something feeds them. Cut them back with the axe before they take the fields and close the trails.`, true);
   }
   /** Is there a bowl standing in the pot for someone? */
   potHasServings(b = this.world.cookpot): boolean {
@@ -1399,7 +1399,7 @@ export class VillageScene extends SimScene {
     // finding the lair: the first time it comes into sight
     if (!this.lairFound && this.world.lair && this.fog) {
       const c = buildingCenter(this.world.lair);
-      if (this.fog.visibleAt(c.tx * TILE, c.ty * TILE) > 0.5) { this.lairFound = true; this.event('raid', "You found the Ogre's lair. He sleeps by day."); }
+      if (this.fog.visibleAt(c.tx * TILE, c.ty * TILE) > 0.5) { this.lairFound = true; this.event('raid', "You found the Ogre's lair. It reeks of old meat. He sleeps by day."); }
     }
     // finding the gnomes: walk into their glade until the cottage itself comes into sight
     const den = this.world.wildGnomeHouse;
@@ -1412,7 +1412,7 @@ export class VillageScene extends SimScene {
       this.stats.raidsRepelled++;
       this.slowMo();
       if (this.boss?.dead) { this.endRun(true); return; }
-      this.event('raid', 'Raid repelled!', true);
+      this.event('raid', 'The raid is broken. Count the living.', true);
     }
     // the head unloads by walking up to the woodyard / granary — or, with the basket out, fills it there
     if (!this.player.hidden) {
@@ -1430,7 +1430,7 @@ export class VillageScene extends SimScene {
   newDay(): void {
     // a night's rest — but not on an empty belly
     if (!p.hunger || this.player.hunger > 0) this.player.hp = Math.min(this.player.maxHp, this.player.hp + 30);
-    else this.event('food', 'You slept badly on an empty belly.', true);
+    else this.event('food', 'You slept badly on an empty belly, and dreamt of teeth.', true);
     // crops grow
     this.world.tiles.forEach((t, i) => { if (t.kind === 'crop') { t.stage++; this.world.dirty.add(i); } });
     this.creepThicket();
@@ -1471,10 +1471,10 @@ export class VillageScene extends SimScene {
     if (this.day === 2 && this.world.lair && !this.lairFound) {
       const l = this.world.lair, dx = l.tx + 2 - COLS / 2, dy = l.ty + 2 - ROWS / 2;
       const ns = Math.abs(dy) > Math.abs(dx) * 0.4 ? (dy < 0 ? 'north' : 'south') : '', ew = Math.abs(dx) > Math.abs(dy) * 0.4 ? (dx < 0 ? 'west' : 'east') : '';
-      this.event('info', `The woodcutters whisper of a giant in the forest to the ${ns}${ns && ew ? '-' : ''}${ew}. He only walks at night.`);
+      this.event('info', `The woodcutters won't go ${ns}${ns && ew ? '-' : ''}${ew} any more. Something walks the forest there, taller than the trees. Only at night.`);
     }
     // the gnomes: that they exist, never where. Their glade is the clue — walk into it.
-    if (this.day === 3 && this.world.wildGnomeHouse) this.event('info', 'The children swear they saw a little red cap watching from the ferns.');
+    if (this.day === 3 && this.world.wildGnomeHouse) this.event('info', 'The children swear a little red cap watches them from the ferns. They say it smiles.');
 
     this.burnHearths();
     // Baby Fever is judged on the larder as the day breaks, before anyone eats
@@ -1528,14 +1528,14 @@ export class VillageScene extends SimScene {
 
     if (p.peaceful) {
       // nobody marches. The run still has a length: outlast the day the Warlord would have come.
-      if (this.day >= p.bossDay) { this.event('raid', 'The Warlord never came. The village endures.', true); this.endRun(true); }
+      if (this.day >= p.bossDay) { this.event('raid', 'The Warlord never came. The village endures — for now.', true); this.endRun(true); }
       return;
     }
     const warn = 1 + this.mods.warnDaysDelta;
     if (this.day === p.bossDay) this.spawnRaid(true);
     else if (this.isRaidDay(this.day)) this.spawnRaid();
-    else if (this.day === p.bossDay - RUN.warnDays) this.event('raid', `The Warlord marches — he arrives in ${RUN.warnDays} days`, true);
-    else if (this.isRaidDay(this.day + warn) || this.day + warn === p.bossDay) this.event('raid', warn > 1 ? `Scouts report raiders — they arrive in ${warn} days` : 'Raiders sighted — they arrive tomorrow', true);
+    else if (this.day === p.bossDay - RUN.warnDays) this.event('raid', `The Warlord marches. The birds have gone quiet — he arrives in ${RUN.warnDays} days`, true);
+    else if (this.isRaidDay(this.day + warn) || this.day + warn === p.bossDay) this.event('raid', warn > 1 ? `Scouts report torchlight in the trees — raiders arrive in ${warn} days` : 'Raiders sighted at the treeline — they arrive tomorrow. Bar the doors.', true);
   }
 
   // ---- the breeding program: nurseries, ages, pens ------------------------------------
@@ -1647,7 +1647,7 @@ export class VillageScene extends SimScene {
       if (v.role === 'infant') { if (v.age >= p.infantDays) this.leaveNursery(v); }
       else if (v.role === 'kid') { if (v.age >= this.adultAge) { v.comeOfAge(this); this.rehouse(v); } }
       else if (!v.elder) { if (v.age >= this.elderAge) { v.elder = true; v.applyRole(this.mods); this.event('info', `${v.name} has grown old`); } }
-      else if (v.age >= v.deathAt(this)) { v.dead = true; v.hp = 0; this.event('death', `${v.name} passed away at ${Math.floor(v.age)}`); }
+      else if (v.age >= v.deathAt(this)) { v.dead = true; v.hp = 0; this.event('death', `${v.name} died in their sleep at ${Math.floor(v.age)}. The house is quieter.`); }
     }
   }
   /** An infant walks out of the house into the yard, to be fed and to learn the trade they were promised. */
@@ -1857,7 +1857,7 @@ export class VillageScene extends SimScene {
     this.cropsEatenThisRaid = false;
     const from = ['west', 'east', 'north', 'south'][side];
     if (boss) this.event('raid', `THE WARLORD ATTACKS from the ${from} with ${parts.join(', ')}!`, true);
-    else this.event('raid', `RAID! ${parts.join(', ')} from the ${from}`, true);
+    else this.event('raid', `They come out of the dark from the ${from} — ${parts.join(', ')}!`, true);
   }
 
   // ---- hooks called by enemies ----------------------------------------------
@@ -1866,17 +1866,17 @@ export class VillageScene extends SimScene {
   cropEaten(): void {
     if (this.cropsEatenThisRaid) return;
     this.cropsEatenThisRaid = true;
-    this.event('food', 'Rats are gnawing the crops!', true);
+    this.event('food', 'Rats in the crops — hundreds of them, gnawing!', true);
   }
   childGrabbed(kid: Villager, by: Raider): void {
-    this.event('raid', `A ${by.name.toLowerCase()} grabbed ${kid.name}!`, true);
+    this.event('raid', `A ${by.name.toLowerCase()} has taken ${kid.name}! Get them back before the trees do!`, true);
   }
   childCarriedOff(kid: Villager, _by: Raider): void {
     kid.carriedBy = null;
     kid.dead = true;
     kid.hp = 0;
     kid.hungerDays = 99; // keeps onDeath from logging "was killed"
-    this.event('death', `${kid.name} was carried off`, true);
+    this.event('death', `${kid.name} was carried off into the woods. Nobody heard them scream.`, true);
   }
 
 
@@ -1898,7 +1898,7 @@ export class VillageScene extends SimScene {
     if (a instanceof Villager) {
       a.home.residents--;
       for (const k of this.villagers()) if (k.isChild && k.parents.includes(a)) k.care -= 1; // losing a parent
-      if (a.hp <= 0 && !a.starved && a.age < a.deathAt(this)) this.event('death', `${a.name} the ${a.role} was killed`, true);
+      if (a.hp <= 0 && !a.starved && a.age < a.deathAt(this)) this.event('death', `${a.name} the ${a.role} is dead.`, true);
     } else if (a instanceof Boar) {
       // game, not an enemy: the meat lies where it fell for the head's hands or a gnome
       a.sounder.members = a.sounder.members.filter((b) => b !== a);
@@ -1937,7 +1937,7 @@ export class VillageScene extends SimScene {
           this.stats.bossesSlain++;
           a.lair.level = 3; this.world.refresh(a.lair); // the fire goes out
           this.slowMo();
-          this.event('raid', 'The Ogre is slain! His lair falls silent.', true);
+          this.event('raid', 'The Ogre is slain! His lair falls silent — for the first time in living memory.', true);
         } else this.event('raid', a.boss ? 'The Warlord has fallen!' : `${a.name} slain`, a.boss);
       }
     }

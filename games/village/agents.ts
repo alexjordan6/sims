@@ -1158,7 +1158,7 @@ export class Raider extends Mover {
       a.struck = true;
       s.fx.push({ kind: 'melee', who: this, x: c.x, y: c.y });
       if (a.defense.hp > 0 && s.world.damageDefense(a.defense, this.dmg * (this.kind === 'brute' ? p.bruteWallMul : 1))) {
-        s.event('raid', 'The defenses have been breached!', true); s.rescueFallenGuards();
+        s.event('raid', 'The wall is breached — they are inside!', true); s.rescueFallenGuards();
       }
     }
     if (a.t >= (this.kind === 'brute' ? 0.6 : 1.1)) { this.siege = null; this.clearGoal(); }
@@ -1202,7 +1202,7 @@ export class Raider extends Mover {
     this.speed = (this.boss ? 44 : 38) * (opts.speedMul ?? 1);
     this.radius = this.boss ? 5 : 3;
     this.color = 0xd94a4a;
-    this.name = this.boss ? 'The Warlord' : 'Raider';
+    this.name = this.boss ? 'The Warlord' : 'Hollow raider';
     this.task = this.boss ? 'leading the raid' : 'raiding';
   }
 

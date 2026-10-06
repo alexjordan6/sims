@@ -660,3 +660,15 @@ body.touch .inventory-host { display:none; }
 .room-label { position: absolute; left: 50%; top: 128px; transform: translateX(-50%); z-index: 2; pointer-events: none; color: #f0d4a2; font-size: 12px; text-shadow: 1px 1px 0 #000; letter-spacing: 1px; }
 .room-label.raid { color: #ff7860; }
 body.touch .room-label { top: 8px; }
+
+/* ---- dread: the UI goes the way of the world — drained, darker, with grain over everything ---- */
+:root { --accent: #d8c48a; --danger: #c8443a; --ok: #8fb07a; --ink: #f0e6d0; --ink-dim: #cbbd9f; }
+.panel, .btn, .inlay, .slot { filter: brightness(0.74) saturate(0.5) contrast(1.08) sepia(0.12); }
+.panel .panel, .panel .btn, .panel .inlay, .panel .slot, .btn .slot { filter: none; } /* a frame inside a frame is not dimmed twice */
+body::after {
+  content: ''; position: fixed; inset: -20px; pointer-events: none; z-index: 9998; opacity: 0.07; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  animation: grain 0.6s steps(3) infinite;
+}
+@keyframes grain { 0% { transform: translate(0, 0); } 33% { transform: translate(-12px, 7px); } 66% { transform: translate(9px, -10px); } }
+@media (prefers-reduced-motion: reduce) { body::after { animation: none; } }

@@ -39,7 +39,7 @@ const ROLE_LABEL: Record<string, string> = { infant: 'Infant', kid: 'Child', far
 /** the GNOME HOUSE slot's tooltip once the craft is learned (locked, it says how to learn it) */
 const GNOME_TITLE = 'A toadstool cottage: a gnome couple moves in and raises a family like any house. Their grown ones take a calling like anyone else — the wild instead of the fields, the axe, or the club — and H calls the whole train to your heels';
 
-const ENEMY_LABEL: Record<string, string> = { raider: 'Raider', warlord: 'Warlord', rat: 'Rat — eats crops', snatcher: 'Snatcher — steals children', brute: 'Brute — heavy', shaman: 'Shaman — ranged', wrecker: 'Wrecker — tears down buildings', boar: 'Boar — wild game, fights back', troll: 'Troll — prowls the wild', skulk: 'Skulk — creeps from long grass, hunts gnomes' };
+const ENEMY_LABEL: Record<string, string> = { raider: 'Hollow raider', warlord: 'The Warlord', rat: 'Plague rat — eats crops', snatcher: 'Snatcher — steals children', brute: 'Butcher — heavy', shaman: 'Bone shaman — ranged', wrecker: 'Wrecker — tears down buildings', boar: 'Boar — wild game, fights back', troll: 'Bog troll — prowls the wild', skulk: 'Skulk — creeps from long grass, hunts gnomes' };
 
 const EVENT_ICON: Record<EventKind, { key: string; frame: number }> = {
   birth: { key: 'dungeon', frame: DUNGEON.villager },
@@ -242,8 +242,9 @@ export class UI {
           ['click · C', 'use the held tool, toward the cursor'],
           ['right click · X', 'check a villager'],
           ['1 – 9', 'pick a tool'],
-          ['Tab · wheel', 'next / previous tool'],
-          ['Z', 'camera zoom'],
+          ['Tab', 'next tool'],
+          ['← → ↑ ↓ · middle-drag', 'turn the camera'],
+          ['wheel · Z', 'camera distance'],
           ['H', 'call the gnomes to your heels / send them foraging'],
           ['E · Esc', 'menu'],
           ['- · =', 'game speed'],
@@ -1129,14 +1130,15 @@ export class UI {
         <div class="card panel">
           <h1>VILLAGE</h1>
           ${cast}
-          <p class="sub">Farm. Raise a family. Plan their upbringing. Train the next generation to defend your town.<br>
+          <p class="sub">The last village here is gone. Farm the dark soil, raise a family behind thin walls, and teach the children to hold a blade, because something walks out of the trees every few nights.<br>
           Survive ${p.bossDay} days of raids and <b>beat the Warlord</b>.</p>
           <div class="controls">
             <kbd>WASD</kbd><span>move</span><kbd>Space</kbd><span>dodge roll</span>
             <kbd>G</kbd><span>throw the largest supply stack</span>
             <kbd>T</kbd><span>eat one meal. Your pack is eaten before the granary, and raw food before cooked so a dish's warmth is never spent on a routine meal. Meat and honey fill twice as much per unit, a cooked dish three or four times.</span>
             <kbd>click / C</kbd><span>use the tool you hold, toward the cursor</span>
-            <kbd>right click / X</kbd><span>check a villager</span><kbd>1-9 · Tab · wheel</kbd><span>pick a tool</span>
+            <kbd>right click / X</kbd><span>check a villager</span><kbd>1-9 · Tab</kbd><span>pick a tool</span>
+            <kbd>arrows · middle-drag</kbd><span>turn the camera</span><kbd>wheel · Z</kbd><span>camera distance</span>
             <kbd>E / Esc</kbd><span>menu</span><kbd>- / =</kbd><span>game speed</span>
           </div>
           <div class="row"><label class="sub">seed <input class="seed" value="${s.seed}"></label></div>
@@ -1227,12 +1229,12 @@ export class UI {
           ${who('dungeon', DUNGEON.villager, 'kid', 'Child', 'Born into the house nursery; walks out into the yard and learns the trade the village had a place for, eating only what you toss in.')}
           ${who('dungeon', DUNGEON.knight, 'soldier', 'Soldier', 'Guards the barracks and fights raiders.')}
           <p><b>The shaman wand.</b> Pick it from the belt and the fighters answer like an army: <b>left click</b> a soldier (shift adds), or <b>drag a box</b> over several; then <b>right click</b> open ground to send them there — they <b>hold</b> that spot, fighting whatever comes within ${ORDER.leash} tiles and drifting back after — a <b>raider</b> to hunt it down (they hold where it fell), or a <b>wall top</b> to man the battlements (it hands them a bow). <b>F</b> makes the squad follow you; F again and they hold where they stand. With nobody picked, an order goes to every soldier. RETURN TO PATROL on a fighter's card cancels their order.</p>
-          ${who('dungeon', DUNGEON.orc, 'raider', 'Raider', 'Walks at the nearest person and hits them. Tramples crops.')}
+          ${who('dungeon', DUNGEON.orc, 'raider', 'Hollow raider', 'Hooded, red-eyed, never speaks. Walks at the nearest person and hits them. Tramples crops.')}
           ${who('dungeon', 123, 'raider', 'Rat swarm', 'At least 10 arrive together and spread across the field. Foragers doubles their eating time, but crops are never immune. Scare them with equipped weapons or stop them with gates.')}
           ${who('dungeon', DUNGEON.imp, 'raider', 'Snatcher', 'Grabs a child and runs for the map edge. Kill it to free them; kids indoors are safe.')}
-          ${who('dungeon', DUNGEON.orc, 'raider', 'Brute', '180 base HP, 24 damage, twice the speed, reach and attack rate, half the knockback. The axe winds up and swings even when you dodge. Devastates fortifications.')}
+          ${who('dungeon', DUNGEON.orc, 'raider', 'Butcher', '180 base HP, 24 damage, twice the speed, reach and attack rate, half the knockback. The axe winds up and swings even when you dodge. Devastates fortifications.')}
           ${who('dungeon', DUNGEON.orc, 'raider', 'Wrecker', 'Ignores people and goes for the nearest house it can reach, then any other building. A Lv1 house falls in about 16 seconds. Walled off, it batters the wall — slowly. A ruin keeps its footprint but does nothing until the hammer rebuilds it.')}
-          ${who('dungeon', DUNGEON.wizard, 'raider', 'Shaman', 'Keeps its distance and casts bolts. Close in on it.')}
+          ${who('dungeon', DUNGEON.wizard, 'raider', 'Bone shaman', 'Keeps its distance and casts bolts. Close in on it.')}
           ${who('farm', FARM.cow, 'woodcutter', 'Boar', `Not a raider: grazes in sounders out in the woods. Leave it be and it leaves you be; strike one and the whole sounder charges whoever did it (${p.boarDmg} a blow) until it calms. Soldiers and towers ignore calm boars but fight provoked ones, and the wand can send soldiers hunting. A sounder of two or more breeds. Drops ${BOAR.meat} meat where it falls — gnomes carry it to the granary, or pick it up by hand. In long grass it is <b>hidden</b>: you'll see the grass stir as it moves, or tread on it and find out. Mow the grass along your lanes.`)}
           <h3>HEARTHS</h3>
           <p>Houses, the barracks and the tavern each keep a <b>woodpile</b> that burns one night's wood at dawn (a house ${HEARTH_WOOD.house[1]}, the barracks ${HEARTH_WOOD.barracks[1]}; more at higher levels). <b>Woodcutters</b> fill the piles before they haul to the woodyard, so every armful spent on warmth is one the woodyard doesn't get — and the card can stock a night from the village pile in a pinch. A building with an empty pile spends the day <b>cold</b>: no births, no drill, no soldier regen, no meals, and its children lose care. Your own axe only clears ground (${p.playerTreeYield} wood a tree); the real wood comes in on woodcutters' backs.</p>
@@ -1282,8 +1284,9 @@ export class UI {
             <kbd>G</kbd><span>throw the largest wood, food or scrap stack toward the cursor. Drag any pack item onto the world to drop it. Walk away from your dropped items before returning to pick them up.</span>
             <kbd>click / C</kbd><span>use the tool you hold. A click also turns you toward the cursor. The bottom bar says what the tool will do. The sword swings an arc; it only hits what it reaches.</span>
             <kbd>right click / X</kbd><span>check a villager (opens the inspector)</span>
-            <kbd>1-9 · Tab · wheel</kbd><span>pick a tool — hands, hoe, seeds, axe, sword, house, barracks, hammer</span>
-            <kbd>Z</kbd><span>camera zoom 1× / 1.5× / 2× / 3× — 1× shows most of the map</span>
+            <kbd>1-9 · Tab</kbd><span>pick a tool — hoe, seeds, axe, sword, house, barracks, hammer</span>
+            <kbd>arrows · middle-drag</kbd><span>turn the camera round you; WASD walks the way the camera faces</span>
+            <kbd>wheel · Z</kbd><span>camera distance — the wheel eases in and out, Z steps through presets</span>
             <kbd>E / Esc</kbd><span>menu (pause, restart, how to play)</span>
             <kbd>- / =</kbd><span>game speed 1x / 4x / 16x</span>
             <kbd>\`</kbd><span>tuning sliders (debug)</span>

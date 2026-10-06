@@ -8,6 +8,7 @@ import type { VillageScene, FxEvent } from '../main';
 import { U } from './models';
 import { groundHeight } from './terrain';
 import type { Actors } from './actors';
+import { skyAt } from './sky';
 
 // What the sim's fx queue looks like in 3D: bursts of low-poly specks, swings and thrusts drawn as
 // fading arcs and streaks, words floating up from where they happened, and every sound the 2D game
@@ -43,6 +44,9 @@ export class Fx3d {
   private wasPaused = false;
   private windLevel = 0; private windWarned = false; private windAcc = 0;
   private gladeLevel = 0; private gladeWarned = false; private gladeAcc = 0; private gladeHome: Building | null = null;
+  private wasRaid = false;
+  /** seconds until the dark next makes a sound of its own */
+  private eerieT = 8;
 
   constructor(private scene: VillageScene, private actors: Actors, private host: FxHost) {
     this.mesh = new THREE.InstancedMesh(speck, new THREE.MeshBasicMaterial({ color: 0xffffff }), MAX);
@@ -303,13 +307,34 @@ export class Fx3d {
     if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
   }
 
+  /**
+   * The dark makes its own sounds: the drone thickens toward midnight, a sour swell when a raid comes on,
+   * and now and then, at night, something breathes in the thorns near you, or old wood creaks by the lair.
+   */
+  private dread(dt: number): void {
+    const s = this.scene, night = skyAt(s.dayTime).night;
+    this.sfx.drone(s.screen === 'playing' ? 0.3 + 0.7 * night : 0);
+    if (s.raidActive && !this.wasRaid) this.sfx.stinger();
+    this.wasRaid = s.raidActive;
+    this.eerieT -= dt;
+    if (this.eerieT > 0 || night < 0.5 || s.interior.active) return;
+    this.eerieT = 7 + Math.random() * 12;
+    const pl = s.player, t = pl.tile;
+    let thorns = false;
+    for (let dy = -3; dy <= 3 && !thorns; dy++) for (let dx = -3; dx <= 3; dx++) if (s.world.get(t.tx + dx, t.ty + dy)?.kind === 'thicket') { thorns = true; break; }
+    if (thorns) { this.sfx.whisper(); return; }
+    const lair = s.world.lair;
+    if (lair) { const c = buildingCenter(lair); if (Math.hypot(c.tx - t.tx, c.ty - t.ty) < OGRE.windRadius * 0.7) { this.sfx.creak(); return; } }
+    if (Math.random() < 0.35) this.sfx.creak();
+  }
+
   // ---- per frame -----------------------------------------------------------------------
 
   update(dt: number): void {
     const s = this.scene;
     if (s.paused !== this.wasPaused) this.wasPaused = s.paused;
-    if (this.wasPaused) { this.sfx.wind(0); this.sfx.glade(0); }
-    else { this.wind(dt); this.glade(dt); }
+    if (this.wasPaused) { this.sfx.wind(0); this.sfx.glade(0); this.sfx.drone(0); }
+    else { this.wind(dt); this.glade(dt); this.dread(dt); }
     const step = this.wasPaused ? 0 : dt;
     // specks: integrate, drop the spent ones (keeping colours in step with their slots)
     let w = 0;
