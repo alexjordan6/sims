@@ -102,7 +102,7 @@ export function kitBuilding(b: Building): KitBuilt | null {
   if (ruined) return { group: g, windows, top };
   if (stone) {
     // the barracks: a flat roof behind a crenellated parapet
-    for (let i = 0; i < w; i++) for (let j = 0; j < d; j++) piece(g, 'town/roof-flat', 0xb0b0b0, i + 0.5, top, j + 0.5);
+    for (let i = 0; i < w; i++) for (let j = 0; j < d; j++) piece(g, 'town/roof-flat', ROOF, i + 0.5, top, j + 0.5);
     const parapet = lambert({ color: 0x5e5e62 });
     for (let i = 0; i < w; i++) for (const z of [0.1, d - 0.1]) if (i % 2 === 0) { const c = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.35, 0.2), parapet); c.position.set(i + 0.5, top + 0.3, z); g.add(c); }
     for (let j = 0; j < d; j++) for (const x of [0.1, w - 0.1]) if (j % 2 === 0) { const c = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.35, 0.5), parapet); c.position.set(x, top + 0.3, j + 0.5); g.add(c); }
