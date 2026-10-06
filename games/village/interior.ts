@@ -1,14 +1,11 @@
 import type { VillageScene } from './main';
 import { BUILDINGS, World, doorstep, hearthCost, type Building } from './world';
 import { p, hasInterior, type InteriorKind } from './config';
-import { ensureCharacter, frameSize } from './characters';
-import { lookFor } from './look';
-import type { Mover } from './agents';
 
-type Furnishing = { x: number; y: number; w: number; h: number; kind: 'bed' | 'table' | 'hearth' | 'rack' | 'bar' | 'shelf' | 'chest' | 'crib'; label: string };
+export type Furnishing = { x: number; y: number; w: number; h: number; kind: 'bed' | 'table' | 'hearth' | 'rack' | 'bar' | 'shelf' | 'chest' | 'crib'; label: string };
 
 /** The colours one kind of room is built from; draw() reads nothing else, so a new interior is a new row here. */
-interface Room {
+export interface Room {
   bg: string; frame: string; base: string;
   plankA: string; plankB: string; plankLine: string;
   upper: string; upperLine: string; post: string; sill: string;
@@ -24,7 +21,7 @@ const COTTAGE: Room = {
   banner: '#934646', bannerTrim: '#d4a568', bannerStud: '#e3b577',
   blanket: '#a75556', mat: '#16121a', matTrim: '#e7b970', glow: '#ffc36a24',
 };
-const ROOM: Record<InteriorKind, Room> = {
+export const ROOM: Record<InteriorKind, Room> = {
   house: COTTAGE,
   tavern: COTTAGE,
   barracks: { ...COTTAGE, banner: '#375575', blanket: '#456989' },
@@ -43,14 +40,13 @@ export class Interior {
   building: Building | null = null;
   x = 160;
   y = 193;
-  private canvas?: HTMLCanvasElement;
-  private ctx?: CanvasRenderingContext2D;
-  private furniture: Furnishing[] = [];
+  /** what stands in the room, in room pixels (the 3D view builds it from this: see view3d/room.ts) */
+  furniture: Furnishing[] = [];
   private destination: { x: number; y: number } | null = null;
-  private time = 0;
+  time = 0;
   private mealAt = -99;
   /** walking this frame (for the gait) */
-  private moving = false;
+  moving = false;
   constructor(private s: VillageScene) {}
   get active(): boolean { return !!this.building; }
 
@@ -82,32 +78,19 @@ export class Interior {
       this.furniture.push({ x: 212, y: 52, w: 67, h: 24, kind: 'bar', label: 'Hot stew · 2 food' });
       for (const [x, y] of [[42, 92], [216, 105], [55, 146], [208, 153]]) this.furniture.push({ x, y, w: 43, h: 22, kind: 'table', label: 'Gather around the table' });
     }
-    if (!this.canvas) {
-      this.canvas = document.createElement('canvas'); this.canvas.width = 320; this.canvas.height = 224;
-      this.canvas.className = 'interior-view'; this.canvas.setAttribute('aria-label', 'Walkable building interior. WASD or joystick to move; tap a destination; use C or the action button.');
-      this.ctx = this.canvas.getContext('2d')!;
-      document.getElementById('game')!.append(this.canvas);
-      this.canvas.addEventListener('pointerdown', e => {
-        e.stopPropagation(); e.preventDefault();
-        const r = this.canvas!.getBoundingClientRect(), scale = Math.min(r.width / 320, r.height / 224);
-        const x = (e.clientX - r.left - (r.width - 320 * scale) / 2) / scale;
-        const y = (e.clientY - r.top - (r.height - 224 * scale) / 2) / scale;
-        if (x > 270 && y < 25) { this.leave(); return; }
-        if (Math.hypot(x - this.x, y - this.y) < 20 || e.button === 2) { this.act(); return; }
-        this.destination = { x, y };
-      });
-      this.canvas.addEventListener('contextmenu', e => e.preventDefault());
-    }
-    this.canvas.hidden = false;
     this.s.event('info', `Inside ${BUILDINGS[b.kind].name}. Move with WASD, the joystick, or tap the floor.`, true);
   }
   leave(): void {
     if (!this.building) return;
     const b = this.building; this.building = null;
-    if (this.canvas) this.canvas.hidden = true;
     const d = doorstep(b), p = this.s.player;
     if (p) { Object.assign(p, World.center(d.tx, d.ty)); p.hidden = false; p.vx = p.vy = 0; p.touch.x = p.touch.y = 0; p.clearGoal(); }
     this.destination = null;
+  }
+  /** A tap on the room's floor at room pixels (x, y): walk there, or act when it is the head itself (or the right button). */
+  tap(x: number, y: number, right: boolean): void {
+    if (Math.hypot(x - this.x, y - this.y) < 20 || right) { this.act(); return; }
+    this.destination = { x, y };
   }
   private free(x: number, y: number): boolean {
     if (x < 23 || x > 297 || y < 58 || y > 205) return false;
@@ -169,88 +152,4 @@ export class Interior {
     this.s.event('info', f.label);
   }
 
-  draw(): void {
-    if (!this.building || !this.ctx) return;
-    const c = this.ctx, b = this.building, r = ROOM[b.kind as InteriorKind];
-    c.imageSmoothingEnabled = false;
-    const rect = (x: number, y: number, w: number, h: number, color: string) => { c.fillStyle = color; c.fillRect(Math.round(x), Math.round(y), w, h); };
-    rect(0, 0, 320, 224, r.bg);
-    rect(15, 26, 290, 188, r.frame); rect(20, 30, 280, 178, r.base);
-    for (let y = 57; y < 208; y += 8) for (let x = 21; x < 299; x += 28) {
-      rect(x, y, 27, 7, ((x + y) % 3) ? r.plankA : r.plankB); rect(x + 4, y + 5, 10, 1, r.plankLine);
-    }
-    rect(20, 30, 280, 28, r.upper);
-    for (let y = 31; y < 55; y += 6) rect(21, y, 278, 1, r.upperLine);
-    for (const x of [21, 124, 195, 294]) rect(x, 30, 4, 29, r.post);
-    for (const x of [88, 199]) { rect(x, 34, 18, 17, r.sill); rect(x + 2, 36, 14, 13, this.s.dayTime > 0.75 || this.s.dayTime < 0.25 ? '#263654' : '#83aeb1'); rect(x + 8, 35, 2, 15, '#51372d'); rect(x + 2, 42, 14, 2, '#51372d'); }
-    rect(132, 92, 58, 82, r.banner);
-    c.strokeStyle = r.bannerTrim; c.strokeRect(135.5, 95.5, 51, 75);
-    for (let y = 100; y < 170; y += 9) { rect(132, y, 3, 3, r.bannerStud); rect(187, y, 3, 3, r.bannerStud); }
-    // a toadstool cap rather than a hanging: pale spots over the red
-    if (r.spots) for (const [sx, sy, sw] of [[141, 101, 9], [163, 112, 11], [145, 130, 7], [168, 142, 9], [150, 156, 10]] as const) { rect(sx, sy, sw, sw - 3, r.bannerTrim); rect(sx + 1, sy + 1, sw - 2, sw - 5, '#ffffff'); }
-    rect(146, 202, 28, 12, r.mat); rect(146, 201, 28, 2, r.matTrim);
-    for (const f of this.furniture) {
-      const { x, y, w, h, kind } = f;
-      rect(x + 2, y + h - 3, w + 2, 6, '#433026');
-      if (kind === 'bed') {
-        rect(x, y, w, h, '#402a22'); rect(x + 2, y + 2, w - 4, h - 5, '#b98152');
-        rect(x + 3, y + 4, w - 6, 7, '#eee0bd'); rect(x + 2, y + 12, w - 4, h - 16, r.blanket);
-        rect(x + 4, y + 14, 2, h - 19, '#d2a16e');
-      } else if (kind === 'hearth') {
-        rect(x, y, w, h, '#969083'); rect(x + 4, y + 4, w - 8, h - 4, '#211a1c');
-        if (b.warm) for (let i = 0; i < 5; i++) { const flame = 5 + Math.sin(this.time * 8 + i * 2) * 3; rect(x + 7 + i * 6, y + h - flame, 5, flame, i % 2 ? '#ffc85f' : '#e8803b'); }
-        else for (let i = 0; i < 3; i++) rect(x + 9 + i * 9, y + h - 3, 4, 2, i % 2 ? '#4a2a22' : '#6b3a2a'); // cold: a few dead embers
-        // the woodpile beside it shows how many nights are left
-        for (let i = 0; i < b.firewood; i++) { rect(x + w + 4, y + h - 4 - i * 4, 9, 3, '#8f5c34'); rect(x + w + 4, y + h - 4 - i * 4, 2, 3, '#d3ab6d'); }
-        rect(x - 3, y, w + 6, 3, '#b2a38d');
-      } else if (kind === 'rack') {
-        rect(x, y, w, h, '#3e2c23'); rect(x + 2, y + 3, w - 4, 3, '#b17c49');
-        for (let i = 0; i < 6; i++) { rect(x + 6 + i * 8, y + 7, 2, 20, '#d3ab6d'); rect(x + 5 + i * 8, y + 7, 4, 3, '#d2d8d8'); }
-      } else if (kind === 'chest') {
-        // an iron-banded chest; arrow fletchings stick out of the lid while the tower has any
-        rect(x, y + 6, w, h - 6, '#3e2c23'); rect(x + 2, y + 8, w - 4, h - 10, '#7a5236');
-        rect(x, y + 2, w, 6, '#4b3328'); rect(x + 1, y + 3, w - 2, 3, '#8a5d3d');
-        for (const u of [4, w - 8]) { rect(x + u, y + 2, 4, h - 2, '#6d7378'); rect(x + u + 1, y + 2, 2, h - 2, '#9aa1a6'); }
-        rect(x + w / 2 - 3, y + 6, 6, 6, '#d9b25a'); rect(x + w / 2 - 1, y + 8, 2, 3, '#3e2c23');
-        const stock = Math.min(4, Math.ceil((b.ammo ?? 0) / (this.s.towerCap(b) / 4)));
-        for (let i = 0; i < stock; i++) { rect(x + 8 + i * 5, y - 6, 1, 9, '#d3ab6d'); rect(x + 7 + i * 5, y - 7, 3, 3, i % 2 ? '#d2d8d8' : '#c9564a'); }
-      } else if (kind === 'crib') {
-        rect(x, y + 4, w, h - 4, '#5a3a28'); rect(x + 2, y + 6, w - 4, h - 8, '#c9a26b'); rect(x + 2, y + 6, w - 4, 4, '#eee0bd');
-        for (let i = 0; i < w; i += 3) rect(x + i, y, 1, h, '#8a5c34');
-        rect(x, y, w, 1, '#a87848'); rect(x, y + h - 1, w, 1, '#3e2c23');
-      } else if (kind === 'shelf') {
-        rect(x, y, w, h, '#b78453');
-        for (let i = 0; i < 7; i++) rect(x + 3 + i * 4, y + 3, 3, 11, ['#818f69', '#b45f53', '#e0b57a'][i % 3]);
-      } else {
-        rect(x, y, w, h, '#422c21'); rect(x + 2, y + 2, w - 4, h - 4, '#b0824c'); rect(x + 2, y + 3, w - 4, 2, '#d4a569');
-        for (const u of [8, w - 11]) { rect(x + u, y + 7, 6, 5, '#e9d8b0'); rect(x + u + 1, y + 8, 4, 2, '#9c5834'); }
-        rect(x + w / 2, y + 6, 3, 7, '#f6d992'); rect(x + w / 2 + 1, y + 3, 1, 3, '#ffbd53');
-      }
-    }
-    // people are drawn with their real looks (outfit, armor, dye), the same textures the world uses
-    const person = (x: number, y: number, m: Mover, walk = false, scale = 1) => {
-      const look = lookFor(m); if (!look) return;
-      const key = ensureCharacter(this.s, look), { w, h } = frameSize(look.body);
-      const tex = this.s.textures.getFrame(key, walk ? 1 : 0); if (!tex) return;
-      c.drawImage(tex.source.image as CanvasImageSource, tex.cutX, tex.cutY, tex.width, tex.height, Math.round(x - w * scale / 2), Math.round(y - h * scale * 0.75), w * scale, h * scale);
-    };
-    const residents = this.s.villagers().filter(v => v.hidden && v.indoors === b && v.role !== 'infant');
-    const small = b.kind === 'gnomehouse' ? 0.8 : 1;
-    residents.forEach((v, i) => person(46 + i % 3 * 28, 86 + Math.floor(i / 3) * 46, v, false, small));
-    // infants in their cribs (a crowded nursery shows the overflow as a count)
-    const cribs = this.furniture.filter(f => f.kind === 'crib'), infants = this.s.infantsOf(b);
-    infants.slice(0, cribs.length).forEach((v, i) => { const f = cribs[i]; person(f.x + f.w / 2, f.y + f.h - 3 + Math.sin(this.time * 2 + i) * 0.5, v, false, 0.7); });
-    if (infants.length > cribs.length) { c.font = '8px monospace'; c.fillStyle = '#f0d4a2'; c.fillText(`+${infants.length - cribs.length}`, 282, 200); }
-    const keeper = this.s.villagers().find(v => v.role !== 'kid');
-    if (b.kind === 'tavern' && keeper) person(247, 47, keeper);
-    const p = this.s.player;
-    person(this.x, this.y, p, this.moving && Math.floor(this.time / 0.18) % 2 === 1);
-
-    // Warm radial firelight, contained inside the room; the outside night keeps advancing.
-    if (b.warm) { const glow = c.createRadialGradient(160, 60, 5, 160, 90, 145); glow.addColorStop(0, r.glow); glow.addColorStop(1, '#00000000'); c.fillStyle = glow; c.fillRect(20, 30, 280, 177); }
-    else { c.fillStyle = '#1a2a4018'; c.fillRect(20, 30, 280, 177); }
-    c.font = '10px monospace'; c.fillStyle = '#f0d4a2'; c.fillText(`${BUILDINGS[b.kind].name} · Lv${b.level}`, 19, 17);
-    c.fillStyle = '#cba984'; c.fillText('EXIT ×', 270, 17);
-    if (this.s.raidActive) { c.fillStyle = '#ff7860'; c.fillText('RAID OUTSIDE', 119, 220); }
-  }
 }

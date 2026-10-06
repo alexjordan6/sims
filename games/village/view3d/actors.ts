@@ -68,7 +68,7 @@ interface Actor {
 }
 
 /** Build the placeholder for one mover. Front faces +z. */
-function makeActor(m: Mover): { body: THREE.Group; key: string } {
+export function makeActor(m: Mover): { body: THREE.Group; key: string } {
   const body = new THREE.Group();
   const look = lookFor(m);
   const key = actorKey(m);

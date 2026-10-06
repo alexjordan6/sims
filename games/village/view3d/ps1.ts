@@ -29,7 +29,9 @@ const fowData = new Uint8Array(COLS * ROWS);
 export const FOW = new THREE.DataTexture(fowData, COLS, ROWS, THREE.RedFormat, THREE.UnsignedByteType);
 FOW.magFilter = THREE.LinearFilter; FOW.minFilter = THREE.LinearFilter;
 FOW.needsUpdate = true;
-const fowUniforms = { fowTex: { value: FOW }, fowSize: { value: new THREE.Vector2(COLS, ROWS) } };
+const fowUniforms = { fowTex: { value: FOW }, fowSize: { value: new THREE.Vector2(COLS, ROWS) }, fowOn: { value: 1 } };
+/** Switch the fog of war off for a frame (a room indoors has no fog; its floor is not the map). */
+export function setFowOn(on: boolean): void { fowUniforms.fowOn.value = on ? 1 : 0; }
 
 /** Refresh the fog texture: black where never seen, dim where remembered, full light where seen now. */
 export function updateFow(explored: Uint8Array | null, vis: Float32Array | null): void {
@@ -44,8 +46,8 @@ function psxCompile(sh: THREE.WebGLProgramParametersWithUniforms): void {
     .replace('#include <common>', '#include <common>\nvarying vec2 vFowXZ;')
     .replace('#include <project_vertex>', '#include <project_vertex>\n{ vec4 fw = vec4(transformed, 1.0);\n#ifdef USE_INSTANCING\n fw = instanceMatrix * fw;\n#endif\n fw = modelMatrix * fw; vFowXZ = fw.xz; }');
   sh.fragmentShader = sh.fragmentShader
-    .replace('#include <common>', '#include <common>\nuniform sampler2D fowTex; uniform vec2 fowSize; varying vec2 vFowXZ;')
-    .replace('#include <fog_fragment>', 'gl_FragColor.rgb *= texture2D(fowTex, vFowXZ / fowSize).r;\n#include <fog_fragment>');
+    .replace('#include <common>', '#include <common>\nuniform sampler2D fowTex; uniform vec2 fowSize; uniform float fowOn; varying vec2 vFowXZ;')
+    .replace('#include <fog_fragment>', 'gl_FragColor.rgb *= mix(1.0, texture2D(fowTex, vFowXZ / fowSize).r, fowOn);\n#include <fog_fragment>');
 }
 
 /** A flat-shaded, wobbling, fog-of-war-aware lit material: what every solid thing in the world is made of. */

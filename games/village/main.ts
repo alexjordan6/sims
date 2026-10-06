@@ -3058,7 +3058,7 @@ export class VillageScene extends SimScene {
     }
     this.view?.sync(dt);
     this.ui?.render(dt);
-    this.interior.draw();
+
   }
 }
 

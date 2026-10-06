@@ -9,7 +9,8 @@ import { Actors, standHeight } from './actors';
 import { Overlay } from './overlay';
 import { Fx3d } from './fx3d';
 import { skyAt } from './sky';
-import { Ps1Pass, updateFow } from './ps1';
+import { Ps1Pass, updateFow, setFowOn } from './ps1';
+import { Room3d } from './room';
 import { U, WALL_UNITS } from './models';
 
 // The 3D view of the village. Phaser still runs the sim loop, the keyboard and the debug sliders,
@@ -35,6 +36,7 @@ export class View {
   /** a few lamps lent to whichever hearths, pots and fires are nearest the camera */
   private lamps: THREE.PointLight[] = [];
   private ps1 = new Ps1Pass();
+  private room: Room3d;
   private fowRevision = -1;
   private fowEnabled: boolean | null = null;
   private arrows: HTMLCanvasElement;
@@ -79,6 +81,7 @@ export class View {
     this.world.add(this.hemi, this.sun, this.sun.target, this.torch);
     for (let i = 0; i < 6; i++) { const l = new THREE.PointLight(0xff9a50, 0, 10, 1.3); this.lamps.push(l); this.world.add(l); }
     this.terrain = new Terrain(scene);
+    this.room = new Room3d(scene);
     this.structures = new Structures(scene);
     this.actors = new Actors(scene);
     this.overlay = new Overlay(scene);
@@ -99,6 +102,7 @@ export class View {
     const w = Math.max(1, host.clientWidth), h = Math.max(1, host.clientHeight);
     this.renderer.setSize(w, h, false);
     this.ps1.size(w, h, p.ps1Height);
+    this.room?.resize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
     this.arrows.width = w; this.arrows.height = h;
@@ -142,6 +146,7 @@ export class View {
     canvas.addEventListener('pointerdown', (e) => {
       try { canvas.setPointerCapture(e.pointerId); } catch { /* a synthetic or already-gone pointer */ }
       if (e.button === 1) { e.preventDefault(); this.dragging = { x: e.clientX, y: e.clientY }; return; }
+      if (s.interior.active) { const q = this.room.floorAt(e.clientX, e.clientY, canvas); if (q) s.interior.tap(q.x, q.y, e.button === 2); return; }
       s.onPointerDown(this.ptrAt(e));
     });
     canvas.addEventListener('pointerup', (e) => {
@@ -294,11 +299,15 @@ export class View {
     s.fx.length = 0;
     this.fx.update(dt);
     this.overlay.sync(dt);
-    if (!s.interior.active) {
-      const host = this.renderer.domElement;
-      this.ps1.size(host.width, host.height, p.ps1Height);
-      this.ps1.render(this.renderer, this.world, this.camera, dt, p.ps1Colours);
-    }
+    const host = this.renderer.domElement;
+    this.ps1.size(host.width, host.height, p.ps1Height);
+    this.room.sync(dt);
+    if (s.interior.active) {
+      // indoors: the room's diorama, with no fog of war (its floor is not the map)
+      setFowOn(false);
+      this.ps1.render(this.renderer, this.room.scene, this.room.camera, dt, p.ps1Colours);
+      setFowOn(true);
+    } else this.ps1.render(this.renderer, this.world, this.camera, dt, p.ps1Colours);
     this.drawRaidArrows();
   }
 
