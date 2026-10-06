@@ -417,6 +417,12 @@ export function hasInterior(k: BuildingKind): k is InteriorKind { return (INTERI
 
 // ---- bodies ---------------------------------------------------------------------------------
 /** How hard a body is to push aside when two overlap: the lighter one gives way (see VillageScene.separate). */
+/**
+ * Personal space, px: how close two bodies may stand before they push apart (VillageScene.separate). Sized to
+ * the 3D figures, whose heads alone are wider than the old sprites' hit circles. Only crowding uses it:
+ * reach, hits and pathing keep `radius`.
+ */
+export const BODY = { adult: 6, kid: 4.5, gnome: 4, gnomeKid: 3, player: 6, humanoidMul: 1.7, beastMul: 1.2 } as const;
 export const MASS = { kid: 0.5, villager: 1, player: 2, raider: 1, brute: 2, ogre: 10, warlord: 3, rat: 0.3, snatcher: 0.8, boar: 1.5, troll: 1.2, skulk: 0.7 } as const;
 
 // ---- items on the ground --------------------------------------------------------------------

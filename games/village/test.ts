@@ -8,7 +8,7 @@ import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, Wrecker, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm } from './wildlife';
-import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, GNOME_PACK, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS, YARD, CALLINGS, TREE_RESERVE, MOODS, SERVE_RANGE, POT_INGREDIENTS } from './config';
+import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, GNOME_PACK, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS, YARD, CALLINGS, TREE_RESERVE, MOODS, SERVE_RANGE, POT_INGREDIENTS, BODY } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
 const output = document.getElementById('test-results')!, summary = document.getElementById('test-summary')!;
@@ -630,14 +630,29 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       `equals share the push, equally and opposite (${offA.x.toFixed(2)},${offA.y.toFixed(2)} vs ${offB.x.toFixed(2)},${offB.y.toFixed(2)})`);
     const giant = s.ogre!; s.agents.push(giant); giant.hidden = false; giant.state = 'hunting'; giant.update = () => {}; Object.assign(giant, World.center(132, 100));
     const tot = s.spawn(new Villager(giant.x + 2, giant.y, home3, 'kid', 1, 'Tot', s.mods)); tot.update = () => {};
-    const ogreWas = giant.x; s.tick(1 / 60); s.tick(1 / 60); s.tick(1 / 60);
-    assert(tot.dist(giant) >= tot.radius + giant.radius - 0.01 && Math.abs(giant.x - ogreWas) < 0.5, `the Ogre pushes a child aside and barely moves (giant moved ${Math.abs(giant.x - ogreWas).toFixed(2)} px)`);
+    const ogreWas = giant.x, totWas = tot.x; s.tick(1 / 60); s.tick(1 / 60); s.tick(1 / 60);
+    const giantMoved = Math.abs(giant.x - ogreWas), totMoved = Math.abs(tot.x - totWas);
+    assert(tot.dist(giant) >= tot.space + giant.space - 0.01 && giantMoved < totMoved / 10, `the Ogre pushes a child aside and barely moves (giant moved ${giantMoved.toFixed(2)} px, the child ${totMoved.toFixed(1)})`);
     tot.dead = true; s.removeDead(); giant.hidden = true; s.agents = s.agents.filter((a) => a !== giant);
     for (let y = 98; y <= 102; y++) s.world.placeDefense('wall', 135, y);
     const pinned = s.spawn(new Villager(135 * 16 - 3, World.center(135, 100).y, home3, 'farmer', 20, 'Pinned', s.mods)); pinned.update = () => {};
     const pusher = s.spawn(new Villager(135 * 16 - 4, World.center(135, 100).y, home3, 'farmer', 20, 'Pusher', s.mods)); pusher.update = () => {};
     for (let i = 0; i < 5; i++) s.tick(1 / 60);
     assert(pinned.x < 135 * 16 && pusher.x < pinned.x && pinned.dist(pusher) >= 5.9, `a body against a wall is not pushed into it; the other gives way (${pinned.x.toFixed(1)} / ${pusher.x.toFixed(1)})`);
+    // a crowd keeps the room its figures take up, not just their hit circles: ten gnomes dropped on one spot
+    // spread until no two of them overlap
+    {
+      const band: Villager[] = [];
+      for (let i = 0; i < 10; i++) {
+        const g = s.spawn(new Villager(World.center(128, 104).x, World.center(128, 104).y, home3, 'soldier', 20, `Pike${i}`, s.mods));
+        g.gnome = true; g.applyRole(s.mods); g.update = () => {}; band.push(g);
+      }
+      for (let i = 0; i < 60; i++) s.tick(1 / 60);
+      let closest = Infinity;
+      for (const a of band) for (const b of band) if (a !== b) closest = Math.min(closest, a.dist(b));
+      assert(closest >= 2 * BODY.gnome - 0.3 && band[0].space > band[0].radius, `a band of gnomes stands shoulder to shoulder, not inside each other (closest pair ${closest.toFixed(1)} px, room ${2 * BODY.gnome})`);
+      for (const g of band) g.dead = true; s.removeDead();
+    }
     // a crowd at one pile all get to eat
     s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(124, 104)); s.world.items.length = 0;
     const crowd: Villager[] = [];

@@ -1,6 +1,6 @@
 import type { Agent } from '@shared/index';
 import { World, WILD_FOOD, doorstep, buildingCenter, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
-import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, GNOME_CALLING, MOODS, type Mood, type DishKind, ORDER, YARD, GNOME_PACK, ITEM, MASS, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, zeroFood, BOAR, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
+import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, GNOME_CALLING, MOODS, type Mood, type DishKind, ORDER, YARD, GNOME_PACK, ITEM, MASS, BODY, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, zeroFood, BOAR, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
 import type { Mods } from './meta';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle } from './characters';
 import type { VillageScene } from './main';
@@ -23,6 +23,8 @@ export abstract class Mover implements Agent {
   maxHp = 10;
   speed = 35; // px/s
   radius = 3;
+  /** how much room the body takes in a crowd (see BODY); never less than its hit radius */
+  get space(): number { return this.radius; }
   color = 0xffffff;
   attackCd = 0;
   /** true while tucked away inside a house (not drawn, not targetable). */
@@ -393,6 +395,10 @@ export class Villager extends Mover {
   /** Work-speed multiplier from upbringing. */
   get workMul(): number {
     return (this.skilled ? 1.4 : 1) * (1 + STAR_BONUS * this.stars) * (this.trait === 'tireless' ? 1.25 : 1) * (1 + this.dietBonus.work) * (this.elder ? ELDER_MUL : 1);
+  }
+  override get space(): number {
+    const base = this.gnome ? (this.isChild ? BODY.gnomeKid : BODY.gnome) : this.isChild ? BODY.kid : BODY.adult;
+    return Math.max(this.radius, base * (this.moodNow?.bulk?.scale ?? 1));
   }
   /** A swollen gnome shoulders bodies aside instead of giving way. */
   override get mass(): number { return (this.isChild ? MASS.kid : MASS.villager) * (this.moodNow?.bulk ? 3 : 1); }
@@ -1134,6 +1140,7 @@ export interface RaiderOpts {
  * every `instanceof Raider` check — soldier targeting, the sword arc, villagers fleeing — covers them.
  */
 export class Raider extends Mover {
+  override get space(): number { return this.radius * (this.kind === 'rat' || this.kind === 'boar' ? BODY.beastMul : BODY.humanoidMul); }
   override get mass(): number { return this.boss ? MASS.warlord : this.kind === 'rat' ? MASS.rat : this.kind === 'snatcher' ? MASS.snatcher : MASS.raider; }
   protected siege: { defense: Defense; t: number; struck: boolean } | null = null;
   /** Enemies can breach fortifications, while homes and supply buildings remain indestructible. */
@@ -1298,6 +1305,7 @@ export class Player extends Mover {
   override takeOut(kind: BulkKind, n: number, food?: FoodKind): number { return this.pack.take(kind, n, food); }
   override canCarry(kind: BulkKind, food?: FoodKind): boolean { return this.roomFor(kind, food) > 0; }
   override get mass(): number { return MASS.player; }
+  override get space(): number { return Math.max(this.radius, BODY.player); }
   facing = { x: 0, y: 1 };
   tool: Tool = 'sword'; // the club you always have: there is no empty-handed tool, the right button is your hands
   /** which crop the seeds sow, and which food the basket takes */

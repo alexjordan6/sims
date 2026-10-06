@@ -1768,9 +1768,9 @@ export class VillageScene extends SimScene {
     }
     this.bodies.rebuild(solid);
     for (const a of solid) {
-      this.bodies.forEachInRadius(a.x, a.y, a.radius + 6, (b, d2) => {
+      this.bodies.forEachInRadius(a.x, a.y, a.space + 16, (b, d2) => {
         if (b === a || b.id < a.id || b.elevated !== a.elevated) return; // each pair once
-        const minD = a.radius + b.radius;
+        const minD = a.space + b.space;
         if (d2 >= minD * minD) return;
         let d = Math.sqrt(d2), ux: number, uy: number;
         if (d < 0.01) { const ang = (a.id * 2.399 + b.id) % (Math.PI * 2); ux = Math.cos(ang); uy = Math.sin(ang); d = 0.01; } // dead centre: pick a direction
