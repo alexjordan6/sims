@@ -672,3 +672,12 @@ body::after {
 }
 @keyframes grain { 0% { transform: translate(0, 0); } 33% { transform: translate(-12px, 7px); } 66% { transform: translate(9px, -10px); } }
 @media (prefers-reduced-motion: reduce) { body::after { animation: none; } }
+
+/* ---- the MOBA ability bar: Q W E R over the tool belt ---- */
+.abilities { display: flex; gap: 6px; pointer-events: auto; }
+.ability { position: relative; width: 58px; height: 46px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: 8px solid transparent; border-image: url(../assets/ui/brown_inlay.png) 14 fill repeat; filter: brightness(0.74) saturate(0.5) contrast(1.08) sepia(0.12); overflow: hidden; }
+.ability kbd { font-family: var(--font-head); font-size: 10px; color: var(--accent); }
+.ability .ab-name { font-size: 11px; color: var(--ink); line-height: 1; }
+.ability::after { content: ''; position: absolute; inset: 0; background: conic-gradient(rgba(0,0,0,0.72) var(--cd, 0%), transparent 0); pointer-events: none; }
+.ability.off { opacity: 0.45; }
+body.touch .abilities { display: none; }

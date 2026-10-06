@@ -78,7 +78,7 @@ export class Interior {
       this.furniture.push({ x: 212, y: 52, w: 67, h: 24, kind: 'bar', label: 'Hot stew · 2 food' });
       for (const [x, y] of [[42, 92], [216, 105], [55, 146], [208, 153]]) this.furniture.push({ x, y, w: 43, h: 22, kind: 'table', label: 'Gather around the table' });
     }
-    this.s.event('info', `Inside ${BUILDINGS[b.kind].name}. Move with WASD, the joystick, or tap the floor.`, true);
+    this.s.event('info', `Inside ${BUILDINGS[b.kind].name}. Right-click the floor to walk there; click a bed, the hearth or the door to go and use it.`, true);
   }
   leave(): void {
     if (!this.building) return;
@@ -89,9 +89,17 @@ export class Interior {
   }
   /** A tap on the room's floor at room pixels (x, y): walk there, or act when it is the head itself (or the right button). */
   tap(x: number, y: number, right: boolean): void {
-    if (Math.hypot(x - this.x, y - this.y) < 20 || right) { this.act(); return; }
-    this.destination = { x, y };
+    if (Math.hypot(x - this.x, y - this.y) < 20) { this.act(); return; }
+    // tapping a piece of furniture (or the door) walks up to it and uses it on arrival, MOBA style
+    const f = this.furniture.find((q) => x > q.x - 4 && x < q.x + q.w + 4 && y > q.y - 4 && y < q.y + q.h + 4);
+    const door = y > 190 && Math.abs(x - 160) < 30;
+    this.actOnArrive = !!f || door || right;
+    this.destination = f ? { x: Math.max(26, Math.min(294, f.x + f.w / 2)), y: Math.min(204, f.y + f.h + 8) } : { x, y };
+    this.stuckT = 0;
   }
+  /** use whatever is at the end of the walk (a tapped bed, the hearth, the door) */
+  private actOnArrive = false;
+  private stuckT = 0;
   private free(x: number, y: number): boolean {
     if (x < 23 || x > 297 || y < 58 || y > 205) return false;
     return !this.furniture.some(f => x > f.x - 4 && x < f.x + f.w + 4 && y > f.y - 2 && y < f.y + f.h + 4);
@@ -104,13 +112,16 @@ export class Interior {
     if (dx || dy) this.destination = null;
     else if (this.destination) {
       dx = this.destination.x - this.x; dy = this.destination.y - this.y;
-      if (Math.hypot(dx, dy) < 3) { this.destination = null; dx = dy = 0; }
+      if (Math.hypot(dx, dy) < 3 || this.stuckT > 0.4) { this.destination = null; dx = dy = 0; if (this.actOnArrive) { this.actOnArrive = false; this.act(); } }
     }
     this.moving = !!(dx || dy);
     const len = Math.hypot(dx, dy) || 1; dx /= len; dy /= len;
     const nx = this.x + dx * 55 * dt, ny = this.y + dy * 55 * dt;
+    const ox = this.x, oy = this.y;
     if (this.free(nx, this.y)) this.x = nx;
     if (this.free(this.x, ny)) this.y = ny;
+    // walking into furniture: count how long the walk has made no headway, and stop (and act) soon after
+    this.stuckT = this.destination && Math.hypot(this.x - ox, this.y - oy) < 0.01 ? this.stuckT + dt : 0;
     if (dx) p.dir = dx < 0 ? -1 : 1;
     if (this.y > 201 && Math.abs(this.x - 160) < 14) this.leave();
   }

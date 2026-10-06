@@ -124,6 +124,11 @@ export class Overlay {
       const a = s.itemRoom(it) > 0 && !it.playerDropPending ? 1 : 0.3;
       this.ring(it.x * U, it.y * U, 0.4 + 0.08 * pulse, 0xffe066, 0.85 * a, (0.1 + 0.08 * pulse) * a);
     }
+    // the standing order: where the head is walking, who it is hunting, what it is going to use
+    const c = s.command;
+    if (c?.kind === 'move') this.ring(c.x * U, c.y * U, 0.25 + 0.1 * pulse, 0x7fd37f, 0.9, 0.12);
+    else if (c?.kind === 'attack' && !c.target.dead) this.moverRing(c.target, 0xff4040, pulse);
+    else if (c?.kind === 'use') this.rect(c.q.tx + 0.05, c.q.ty + 0.05, 0.9, 0.9, 0x7fd37f, 0.6 + 0.3 * pulse);
     const tool = pl.tool;
     // a wall, gate or stairs where the held tool would put it
     if (tool === 'wall' || tool === 'gate' || tool === 'stairs') {

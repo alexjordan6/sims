@@ -1650,6 +1650,41 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       s.stashOf(barracks).length = 0;
     }
 
+    // ---- MOBA commands: the head walks where it is sent, hunts what it is told to, uses what it is pointed at ----
+    {
+      // full ticks: the standing order is driven by the scene's tick, not by the agents alone
+      const run = (secs: number) => { for (let i = 0; i < Math.ceil(secs * 60); i++) { s.grid.rebuild(s.agents); s.tick(1 / 60); } };
+      s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(120, 100)); s.world.items.length = 0;
+      // a walk round a wall: the path is found, and the order clears on arrival
+      for (let y = 97; y <= 103; y++) s.world.placeDefense('wall', 123, y);
+      const there = World.center(126, 100);
+      s.order({ kind: 'move', x: there.x, y: there.y });
+      run(6);
+      assert(s.player.dist(there) < 4 && s.command === null, `a right-click walks the head round the wall to the spot (${s.player.dist(there).toFixed(1)} px off)`);
+      for (let y = 97; y <= 103; y++) { const d = s.world.get(123, y)!.defense; if (d) s.world.damageDefense(d, d.hp); }
+      // the axe, sent at a tree a few tiles off, walks over and keeps chopping until it is down
+      s.world.set(129, 100, 'tree'); s.player.tool = 'axe'; clearBulk(s);
+      s.useAt({ tx: 129, ty: 100 });
+      run(6);
+      assert(s.world.get(129, 100)!.kind !== 'tree' && s.player.carriedOf('wood') === p.playerTreeYield && s.command === null, `one click with the axe fells the tree (${s.world.get(129, 100)!.kind}, ${s.player.carriedOf('wood')} wood)`);
+      // an attack order chases the raider and the sword does the rest
+      const foe = s.spawn(new Raider(s.player.x + 60, s.player.y + 20)); foe.update = () => {};
+      s.player.tool = 'sword';
+      s.fog?.update(1); // (the view refreshes sight as it draws; the test never draws)
+      s.order({ kind: 'attack', target: foe });
+      run(8);
+      assert(foe.dead && s.command === null, `an attack order hunts the raider down (${foe.hp} hp left)`);
+      s.removeDead();
+      // E rolls toward the cursor, not the way the head is walking
+      s.player.sinceRoll = 99; s.player.swing = null; s.player.recover = 0;
+      s.hoverPoint = { x: s.player.x, y: s.player.y - 40 }; s.hoverTile = World.toTile(s.hoverPoint.x, s.hoverPoint.y);
+      const rollFrom = s.player.y;
+      s.paused = false; s.ability('E'); s.paused = true; // (abilities wait while the game is paused)
+      run(p.rollTime + 0.1);
+      assert(s.player.y < rollFrom - p.rollDist * 0.6, `E rolls toward the cursor (${(rollFrom - s.player.y).toFixed(1)} px north)`);
+      s.hoverPoint = null; s.hoverTile = null;
+    }
+
     // ---- toasts never bury the screen ----------------------------------------------------
     {
       const ui = (s as unknown as { ui: { toast(t: string, k: string): void } }).ui;

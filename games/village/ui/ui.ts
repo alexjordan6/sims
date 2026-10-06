@@ -137,6 +137,7 @@ export class UI {
     const slot = (tool: Tool, key: string, frame: number, label: string, title: string, cost?: number) =>
       `<div class="slot" data-tool="${tool}" title="${esc(title)}">${spr(key, frame, 32)}<span class="lbl">${label}</span>${cost ? `<span class="cost">${cost}${spr('town', TOWN.iconWood, 16)}</span>` : ''}</div>`;
     this.hotbar = h(`<div class="hotbar">
+      <div class="abilities">${(["Q", "W", "E", "R"] as const).map((k) => `<div class="ability" data-ab="${k}"><kbd>${k}</kbd><span class="ab-name"></span><span class="ab-cd"></span></div>`).join("")}</div>
       <div class="slots panel">
         <span class="cap slots-cap">TOOLS <kbd>1-9</kbd></span>
         ${slot('hoe', 'town', TOWN.iconHoe, 'HOE', 'Till grass into soil; clears stumps; three hits on soil flatten it back to grass')}
@@ -235,18 +236,19 @@ export class UI {
           ['HELP', 'how to play'],
         ]
       : [
-          ['W A S D', 'move'],
-          ['Space', 'dodge roll — through bodies, not walls'],
+          ['right click', 'walk there · attack an enemy · use a plant, crop, pot, gate or door'],
+          ['Q W E R', 'strike · shoot · roll · rally — toward the cursor'],
           ['G', 'throw the largest supply stack'],
           ['T', 'eat a meal — your pack first, then the granary'],
-          ['click · C', 'use the held tool, toward the cursor'],
-          ['right click · X', 'check a villager'],
+          ['click · C', 'walk over and use the held tool there (with a weapon: look things over)'],
+          ['X', 'check a villager'],
           ['1 – 9', 'pick a tool'],
           ['Tab', 'next tool'],
-          ['← → ↑ ↓ · middle-drag', 'turn the camera'],
+          ['screen edge · ← → ↑ ↓ · middle-drag', 'pan the camera'],
+          ['Space · Y', 'camera back to you · lock it on you'],
           ['wheel · Z', 'camera distance'],
           ['H', 'call the gnomes to your heels / send them foraging'],
-          ['E · Esc', 'menu'],
+          ['Esc', 'menu'],
           ['- · =', 'game speed'],
           ['K', 'this panel'],
           ['M', 'sound on / off'],
@@ -571,6 +573,20 @@ export class UI {
       if (tool === 'basket') { const lbl = el.querySelector('.lbl')!, want = `BASKET · ${s.player.carriedOf('food',s.player.basketKind)} ${FOODS[s.player.basketKind].name.toUpperCase()}`; if (lbl.textContent !== want) lbl.textContent = want; }
       if (tool === 'seeds') { const lbl = el.querySelector('.lbl')!, want = FOODS[s.player.cropKind].name.toUpperCase(); if (lbl.textContent !== want) lbl.textContent = want; }
     });
+    // the ability bar: a dark sweep over each key while it cools down, greyed when it cannot fire at all
+    for (const a of s.abilityState()) {
+      const el = this.hotbar.querySelector<HTMLElement>(`.ability[data-ab="${a.key}"]`);
+      if (!el) continue;
+      const pct = a.left > 0 ? Math.round((a.left / a.full) * 100) : 0;
+      const memo = `${a.name}|${pct}|${a.usable}|${a.note}`;
+      if (el.dataset.memo === memo) continue;
+      el.dataset.memo = memo;
+      el.querySelector('.ab-name')!.textContent = a.name;
+      el.style.setProperty('--cd', `${pct}%`);
+      el.classList.toggle('cooling', pct > 0);
+      el.classList.toggle('off', !a.usable);
+      el.title = `${a.key} · ${a.name}: ${a.note}`;
+    }
     const hint = this.hotbar.querySelector('.hint-text')!;
     const carry = s.carryHint();
     const raw = s.hint();
@@ -1133,13 +1149,14 @@ export class UI {
           <p class="sub">The last village here is gone. Farm the dark soil, raise a family behind thin walls, and teach the children to hold a blade, because something walks out of the trees every few nights.<br>
           Survive ${p.bossDay} days of raids and <b>beat the Warlord</b>.</p>
           <div class="controls">
-            <kbd>WASD</kbd><span>move</span><kbd>Space</kbd><span>dodge roll</span>
+            <kbd>right click</kbd><span>walk there — or attack the enemy, or go and use the plant, crop, pot, gate or door under the cursor</span>
+            <kbd>Q W E R</kbd><span>strike · shoot · roll · rally, toward the cursor</span>
             <kbd>G</kbd><span>throw the largest supply stack</span>
             <kbd>T</kbd><span>eat one meal. Your pack is eaten before the granary, and raw food before cooked so a dish's warmth is never spent on a routine meal. Meat and honey fill twice as much per unit, a cooked dish three or four times.</span>
-            <kbd>click / C</kbd><span>use the tool you hold, toward the cursor</span>
-            <kbd>right click / X</kbd><span>check a villager</span><kbd>1-9 · Tab</kbd><span>pick a tool</span>
-            <kbd>arrows · middle-drag</kbd><span>turn the camera</span><kbd>wheel · Z</kbd><span>camera distance</span>
-            <kbd>E / Esc</kbd><span>menu</span><kbd>- / =</kbd><span>game speed</span>
+            <kbd>click / C</kbd><span>walk over and use the tool you hold there</span>
+            <kbd>X</kbd><span>check a villager</span><kbd>1-9 · Tab</kbd><span>pick a tool</span>
+            <kbd>screen edge · arrows</kbd><span>pan the camera</span><kbd>Space · Y</kbd><span>back to you · lock on</span>
+            <kbd>wheel · Z</kbd><span>camera distance</span><kbd>Esc</kbd><span>menu</span><kbd>- / =</kbd><span>game speed</span>
           </div>
           <div class="row"><label class="sub">seed <input class="seed" value="${s.seed}"></label></div>
           <div class="row"><button class="btn ok start">NEW VILLAGE</button><button class="btn howto">HOW TO PLAY</button></div>
@@ -1279,15 +1296,19 @@ export class UI {
         <section>
           <h3>CONTROLS</h3>
           <div class="controls">
-            <kbd>WASD</kbd><span>move (joystick on phone)</span>
-            <kbd>Space</kbd><span>dodge roll — a committed tumble the way you are moving (or facing). It goes clean through bodies but not through walls, and you cannot steer or swing until it lands. A raider's blow checks its reach at the moment it strikes, so rolling out of a wind-up beats it.</span>
+            <kbd>right click</kbd><span>the command. On open ground: walk there (the way round walls and thorns is found for you). On an enemy: chase it and attack with the sword or bow in hand. On a ripe crop or plant, the great pot, a gate or stairs: walk up and use it with your hands. On a door: go in. (Joystick on phone.)</span>
+            <kbd>Q</kbd><span>strike: the sword toward the cursor; press again inside the swing to combo</span>
+            <kbd>W</kbd><span>shoot: a bow shot at the cursor (needs a bow and arrows)</span>
+            <kbd>E</kbd><span>roll: a committed tumble toward the cursor. It goes clean through bodies but not through walls, and you cannot steer or swing until it lands. A raider's blow checks its reach at the moment it strikes, so rolling out of a wind-up beats it.</span>
+            <kbd>R</kbd><span>rally: every fighter (or your wand squad) to the cursor — or onto the raider under it</span>
             <kbd>G</kbd><span>throw the largest wood, food or scrap stack toward the cursor. Drag any pack item onto the world to drop it. Walk away from your dropped items before returning to pick them up.</span>
-            <kbd>click / C</kbd><span>use the tool you hold. A click also turns you toward the cursor. The bottom bar says what the tool will do. The sword swings an arc; it only hits what it reaches.</span>
-            <kbd>right click / X</kbd><span>check a villager (opens the inspector)</span>
+            <kbd>click / C</kbd><span>use the tool you hold on the clicked tile: you walk into reach first, and the axe keeps chopping until the tree is down. The bottom bar says what the tool will do. With the sword or bow in hand, a click looks the thing over instead.</span>
+            <kbd>X</kbd><span>check a villager (opens the inspector)</span>
             <kbd>1-9 · Tab</kbd><span>pick a tool — hoe, seeds, axe, sword, house, barracks, hammer</span>
-            <kbd>arrows · middle-drag</kbd><span>turn the camera round you; WASD walks the way the camera faces</span>
+            <kbd>screen edge · arrows · middle-drag</kbd><span>pan the camera; it looks down from a fixed angle, north up</span>
+            <kbd>Space · Y</kbd><span>camera back to you (held: stays on you) · Y locks it on you</span>
             <kbd>wheel · Z</kbd><span>camera distance — the wheel eases in and out, Z steps through presets</span>
-            <kbd>E / Esc</kbd><span>menu (pause, restart, how to play)</span>
+            <kbd>Esc</kbd><span>menu (pause, restart, how to play)</span>
             <kbd>- / =</kbd><span>game speed 1x / 4x / 16x</span>
             <kbd>\`</kbd><span>tuning sliders (debug)</span>
           </div>

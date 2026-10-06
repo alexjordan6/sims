@@ -4,7 +4,7 @@ import Phaser from 'phaser';
 import { SimScene, launch, button, getGui, Rng, SpatialGrid } from '@shared/index';
 import { launch as throwItem, type Item } from './items';
 import { World, WILD_FOOD, doorstep, buildingCenter, buildingMaxHp, hasHearth, hearthCost, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos, type Hive } from './world';
-import { Villager, Raider, Player, Mover, Arrow, TOOLS, type Role, type Tool, type Order } from './agents';
+import { Villager, Raider, Player, Mover, Arrow, TOOLS, SWING, type Role, type Tool, type Order } from './agents';
 import { DEFENSE_COST, WALL_HEIGHT } from './config';
 import { Interior } from './interior';
 import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, Bolt, Troll, Skulk, waveComposition } from './enemies';
@@ -61,6 +61,15 @@ export type FxEvent =
   | { kind: 'roll'; who: Mover; ux: number; uy: number; ms: number };
 
 export type Screen = 'title' | 'playing' | 'paused' | 'over' | 'won';
+
+/** The head's standing order, MOBA style: walk somewhere, hunt something, go and use a thing, or go indoors. */
+export type Command =
+  | { kind: 'move'; x: number; y: number }
+  | { kind: 'attack'; target: Mover }
+  | { kind: 'use'; q: TilePos; how: 'hands' | 'tool'; repeat: boolean }
+  | { kind: 'enter'; b: Building };
+/** the four abilities on Q W E R, aimed at the cursor */
+export type AbilityKey = 'Q' | 'W' | 'E' | 'R';
 
 /** A pointer on the 3D view: where on the ground it is (sim pixels), what it landed on, and the event. */
 export interface Ptr {
@@ -189,7 +198,8 @@ export class VillageScene extends SimScene {
   private hovered: Mover | null = null;
   view?: View;
   private ui?: UI;
-  private wasd!: Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>;
+  /** WASD no longer steers (right-click does): the player reads keys that are never down */
+  private wasd = { W: { isDown: false }, A: { isDown: false }, S: { isDown: false }, D: { isDown: false } };
   /** camera follows the player when the world is bigger than the viewport (phones) */
   following = false;
 
@@ -539,7 +549,6 @@ export class VillageScene extends SimScene {
 
   create(): void {
     const kb = this.input.keyboard!;
-    this.wasd = kb.addKeys('W,A,S,D') as typeof this.wasd;
     const clearMovementInput = (): void => {
       kb.resetKeys();
       if (this.player) this.player.touch = { x: 0, y: 0 };
@@ -580,7 +589,7 @@ export class VillageScene extends SimScene {
       button('+20 scrap', () => { this.scrap += 20; }, 'Scrap iron for iron and steel forging.');
     }
     // Stardew-style: C / left click = use tool, X / right click = check, E / Esc = menu, 1-8 or Tab / wheel = tools
-    kb.on('keydown-C', () => this.interact());
+    kb.on('keydown-C', () => { if (this.hoverTile) this.useAt(this.hoverTile); else this.interact(); });
     kb.on('keydown-X', () => {
       if (this.interior.active) { this.interior.act(); return; }
       if (this.handsAt(this.target)) return;
@@ -596,20 +605,20 @@ export class VillageScene extends SimScene {
       else if (this.armoryFor) this.openArmory(null);
       else this.togglePause();
     };
-    kb.on('keydown-E', closePanel);
     kb.on('keydown-ESC', closePanel);
+    for (const k of ['Q', 'W', 'E', 'R'] as const) kb.on(`keydown-${k}`, (e: KeyboardEvent) => { if (!e.repeat) this.ability(k); });
     kb.on('keydown-B', () => this.ui?.toggleBag());
     kb.on('keydown-V', () => this.openArmory(this.armoryFor ? null : this.player));
     kb.on('keydown-TAB', (e: KeyboardEvent) => { e.preventDefault?.(); this.player.cycleTool(e.shiftKey ? -1 : 1, this.locked); });
-    kb.on('keydown-Q', () => this.player.cycleTool(1, this.locked));
     kb.on('keydown-F', () => this.cycleVariant());
     kb.on('keydown-M', () => this.toggleMute());
     kb.on('keydown-Z', () => this.cycleZoom());
     kb.on('keydown-H', (e: KeyboardEvent) => { if (!e.repeat) this.summonGnomes(); });
 
     super.create(); // creates gfx + hud, then calls reset() -> setup()
-    kb.removeAllListeners('keydown-SPACE'); // Esc handles pause; Space is the dodge roll
-    kb.on('keydown-SPACE', () => this.dodge());
+    kb.removeAllListeners('keydown-SPACE'); // Esc handles pause; Space brings the camera back to the head
+    kb.on('keydown-SPACE', () => this.view?.recentre());
+    kb.on('keydown-Y', () => this.view?.toggleLock());
     kb.on('keydown-G', () => this.tossLoad());
     kb.on('keydown-T', () => { if (this.screen === 'playing' && !this.paused) this.eat(); });
     // number keys pick tools; game speed moves to - / =
@@ -621,7 +630,7 @@ export class VillageScene extends SimScene {
     // and R only works on the end screens where it means "new run"
     kb.removeAllListeners('keydown-R');
     kb.removeAllListeners('keydown-N');
-    kb.on('keydown-R', () => { if (this.screen === 'over' || this.screen === 'won') this.startGame(); });
+    kb.on('keydown-R', (e: KeyboardEvent) => { if (this.screen === 'over' || this.screen === 'won') this.startGame(); else if (!e.repeat) this.ability('R'); });
     this.hud.setVisible(false);
 
     ensureFlora(this); ensureBuildingArt(this); // the DOM UI's icons are still drawn from these
@@ -641,19 +650,213 @@ export class VillageScene extends SimScene {
       if (this.posting) { const q = ptr.wallTile ?? World.toTile(ptr.worldX, ptr.worldY); this.assignPost(this.posting, q); return; }
       if (this.player.tool === 'wand' && this.screen === 'playing' && !this.interior.active) { this.wandDown(ptr); return; }
       if (document.body.classList.contains('touch')) { this.pick(ptr); return; }
-      // the right button is your hands: pick, harvest, climb, work a gate, open the pot — and when
-      // there is none of that under the cursor, look the thing over instead
-      if (ptr.rightButtonDown()) {
-        if (this.screen === 'playing' && this.handsAt(World.toTile(ptr.worldX, ptr.worldY))) return;
-        this.pick(ptr);
+      // the right button is the command: walk, hunt, or go and use whatever is there
+      if (ptr.rightButtonDown()) { this.rightCommand(ptr); return; }
+      if (this.screen !== 'playing') return;
+      // the left button: a weapon in hand looks things over; any other tool is walked over and used there
+      const tool = this.player.tool;
+      if (tool === 'sword' || tool === 'bow') { this.pick(ptr); return; }
+      this.useAt(World.toTile(ptr.worldX, ptr.worldY));
+  }
+
+  // ---- MOBA command: right-click orders, left-click tool use, QWER abilities ---------------------
+
+  command: Command | null = null;
+  private cmdPath: TilePos[] = [];
+  private cmdGoal = '';
+  private cmdRepath = 0;
+  /** seconds until a repeated use (felling a tree, hacking thorns) strikes again */
+  private cmdNext = 0;
+  private cmdStuck = { x: 0, y: 0, t: 0 };
+  /** while a command acts: the tile it acts on and the point a bow aims at, in place of the cursor */
+  private forcedTile: TilePos | null = null;
+  private forcedAim: { x: number; y: number } | null = null;
+  /** the rally's cooldown, seconds */
+  rallyCd = 0;
+
+  /** Give the head a standing order (it replaces whatever it was doing). */
+  order(c: Command | null): void { this.command = c; this.cmdPath = []; this.cmdGoal = ''; this.cmdNext = 0; this.cmdStuck = { x: this.player.x, y: this.player.y, t: 0 }; }
+
+  /** Right-click: hunt an enemy, go indoors, go and use a plant / crop / pot / gate / stairs, else walk there. */
+  private rightCommand(ptr: Ptr): void {
+    if (this.screen !== 'playing') return;
+    const m = ptr.agent;
+    if (m instanceof Raider && !m.dead) {
+      if (this.player.tool !== 'sword' && this.player.tool !== 'bow') this.setTool('sword');
+      this.order({ kind: 'attack', target: m }); return;
+    }
+    if (m && m !== this.player) { this.select(m); return; } // a friend: look them over
+    const q = ptr.wallTile ?? World.toTile(ptr.worldX, ptr.worldY), t = this.world.get(q.tx, q.ty);
+    const b = t?.building;
+    if (b && hasInterior(b.kind) && !b.ruined && !b.wild) { this.order({ kind: 'enter', b }); return; }
+    if (t && (t.defense?.kind === 'gate' || t.defense?.kind === 'stairs' || t.kind === 'cookpot' || (!t.defense && this.handsHint(q) && (t.kind === 'crop' ? this.isRipe(t) : true)))) { this.order({ kind: 'use', q, how: 'hands', repeat: false }); return; }
+    this.order({ kind: 'move', x: ptr.worldX, y: ptr.worldY });
+  }
+
+  /** Left-click (or C) with a tool: walk into reach of q and use it there; an axe keeps chopping till the tree is down. */
+  useAt(q: TilePos): void {
+    if (this.screen !== 'playing') return;
+    if (this.interior.active) { this.interior.act(); return; }
+    const t = this.world.get(q.tx, q.ty);
+    const repeat = this.player.tool === 'axe' && (t?.kind === 'tree' || t?.kind === 'thicket');
+    this.order({ kind: 'use', q, how: 'tool', repeat });
+  }
+
+  /** How far the held tool reaches, in tiles (Chebyshev). */
+  private toolReach(): number {
+    const tool = this.player.tool;
+    if (tool === 'basket') return p.tossRange;
+    if (tool === 'wall' || tool === 'gate' || tool === 'stairs' || tool === 'house' || tool === 'tavern' || tool === 'gnomehouse' || tool === 'barracks') return Math.min(3, VillageScene.BUILD_REACH);
+    return VillageScene.TOOL_REACH;
+  }
+
+  /** Turn the head to face a point (four ways, as the sim faces). */
+  private faceTo(x: number, y: number): void {
+    const pl = this.player, dx = x - pl.x, dy = y - pl.y;
+    if (Math.hypot(dx, dy) > 1) pl.facing = Math.abs(dx) >= Math.abs(dy) ? { x: Math.sign(dx), y: 0 } : { x: 0, y: Math.sign(dy) };
+    if (dx) pl.dir = dx < 0 ? -1 : 1;
+  }
+
+  /** Run `act` as if the cursor were on q (tools read the pointed tile, buildings their footprint from it). */
+  private performAt(q: TilePos, act: () => void): void {
+    const hv = this.hoverTile, hp = this.hoverPoint;
+    this.forcedTile = q; this.hoverTile = q; this.hoverPoint = World.center(q.tx, q.ty);
+    try { act(); } finally { this.forcedTile = null; this.hoverTile = hv; this.hoverPoint = hp; }
+  }
+
+  /**
+   * Steer the head along a path toward (x, y) on tile `goal`: A* round walls, buildings and thorns, re-planned
+   * when the goal moves to another tile or the head stops making headway. Returns false when there is no way there.
+   */
+  private walkToward(x: number, y: number, goal: TilePos): boolean {
+    const pl = this.player, here = pl.tile;
+    const key = `${goal.tx},${goal.ty}`;
+    this.cmdStuck.t += this.game.loop.delta / 1000;
+    if (this.cmdStuck.t > 0.7) {
+      if (Math.hypot(pl.x - this.cmdStuck.x, pl.y - this.cmdStuck.y) < 2) { this.cmdGoal = ''; } // no headway: plan again
+      this.cmdStuck = { x: pl.x, y: pl.y, t: 0 };
+    }
+    if (key !== this.cmdGoal || this.cmdRepath <= 0) {
+      this.cmdGoal = key; this.cmdRepath = 1.5;
+      this.cmdPath = here.tx === goal.tx && here.ty === goal.ty ? [] : this.world.bfs(here, goal, false, pl.elevated);
+      if (!this.cmdPath.length && Math.abs(here.tx - goal.tx) + Math.abs(here.ty - goal.ty) > 1) { pl.steer = null; return false; }
+    }
+    while (this.cmdPath.length && this.cmdPath[0].tx === here.tx && this.cmdPath[0].ty === here.ty) this.cmdPath.shift();
+    const wp = this.cmdPath.length ? World.center(this.cmdPath[0].tx, this.cmdPath[0].ty) : { x, y };
+    const dx = wp.x - pl.x, dy = wp.y - pl.y, d = Math.hypot(dx, dy);
+    pl.steer = d > 0.5 ? { x: dx / d, y: dy / d } : null;
+    return true;
+  }
+
+  /** Each tick: carry the standing order forward (walk, swing, shoot, use, step indoors). */
+  driveCommand(dt: number): void {
+    const pl = this.player, c = this.command;
+    pl.steer = null;
+    if (!c) return;
+    if (pl.dead || pl.hidden || this.interior.active) { this.command = null; return; }
+    this.cmdNext -= dt; this.cmdRepath -= dt;
+    switch (c.kind) {
+      case 'move': {
+        if (Math.hypot(c.x - pl.x, c.y - pl.y) < 3) { this.command = null; return; }
+        if (!this.walkToward(c.x, c.y, World.toTile(c.x, c.y))) this.command = null;
         return;
       }
-      if (this.screen !== 'playing') return;
-      // left click: face the cursor and use the tool there
-      const dx = ptr.worldX - this.player.x, dy = ptr.worldY - this.player.y;
-      if (Math.hypot(dx, dy) > 4) this.player.facing = Math.abs(dx) >= Math.abs(dy) ? { x: Math.sign(dx), y: 0 } : { x: 0, y: Math.sign(dy) };
-      if (dx) this.player.dir = dx < 0 ? -1 : 1;
-      this.interact();
+      case 'attack': {
+        const m = c.target;
+        if (m.dead || m.hidden || (m instanceof Raider && m.lurking) || (this.fog && this.fog.visibleAt(m.x, m.y) <= 0.35)) { this.command = null; return; }
+        const bow = pl.tool === 'bow' && pl.weapons.bow >= 0 && this.arrows > 0, d = pl.dist(m);
+        if (d <= (bow ? 150 : SWING.reach + m.radius - 3) && (!bow || this.world.lineClear(pl, m, pl.elevated))) {
+          this.faceTo(m.x, m.y);
+          if (bow) { this.forcedAim = { x: m.x, y: m.y }; try { this.interact(); } finally { this.forcedAim = null; } }
+          else { const stage = pl.pressAttack(); if (stage >= 0) this.fx.push({ kind: 'swing', who: pl, dx: pl.facing.x, dy: pl.facing.y, stage }); }
+          return;
+        }
+        if (!this.walkToward(m.x, m.y, m.tile)) this.command = null;
+        return;
+      }
+      case 'use': {
+        const q = c.q, at = World.center(q.tx, q.ty), here = pl.tile;
+        const near = c.how === 'hands' ? pl.dist(at) <= ITEM.reach + TILE - 2 : Math.max(Math.abs(q.tx - here.tx), Math.abs(q.ty - here.ty)) <= this.toolReach();
+        if (!near) { if (!this.walkToward(at.x, at.y, q)) this.command = null; return; }
+        if (this.cmdNext > 0 || pl.busy > 0) return;
+        this.faceTo(at.x, at.y);
+        const before = this.world.get(q.tx, q.ty)?.kind;
+        this.performAt(q, () => { if (c.how === 'hands') this.handsAt(q); else this.interact(); });
+        const now = this.world.get(q.tx, q.ty)?.kind;
+        if (c.repeat && now === before && (now === 'tree' || now === 'thicket') && pl.tool === 'axe') { this.cmdNext = 0.45; return; } // keep chopping
+        this.command = null;
+        return;
+      }
+      case 'enter': {
+        const d = doorstep(c.b), at = World.center(d.tx, d.ty);
+        if (c.b.ruined) { this.command = null; return; }
+        if (pl.dist(at) < 7) { this.command = null; this.interior.enter(c.b); return; }
+        if (!this.walkToward(at.x, at.y, d)) this.command = null;
+        return;
+      }
+    }
+  }
+
+  /** Where the cursor points on the ground, for abilities (falls back to straight ahead). */
+  private aimAt(): { x: number; y: number } {
+    const pl = this.player;
+    return this.view?.aimPoint() ?? this.hoverPoint ?? { x: pl.x + pl.facing.x * 32, y: pl.y + pl.facing.y * 32 };
+  }
+
+  /**
+   * Q W E R, aimed at the cursor. Each is something the head could already do, on the cooldown it already had:
+   * Q the sword (the combo strike), W a bow shot, E the dodge roll, R a rally of the fighters to the cursor.
+   */
+  ability(k: AbilityKey): void {
+    if (this.screen !== 'playing' || this.paused || this.interior.active) return;
+    const pl = this.player, aim = this.aimAt();
+    if (pl.dead || pl.hidden || pl.busy > 0) return;
+    switch (k) {
+      case 'Q': {
+        if (pl.weapons.melee < 0) { this.event('info', 'No blade to swing — forge one at the barracks.', true); return; }
+        this.faceTo(aim.x, aim.y);
+        const stage = pl.pressAttack();
+        if (stage >= 0) this.fx.push({ kind: 'swing', who: pl, dx: pl.facing.x, dy: pl.facing.y, stage });
+        return;
+      }
+      case 'W': {
+        if (pl.weapons.bow < 0) { this.event('info', 'No bow yet — forge one at the barracks.', true); return; }
+        if (pl.attackCd > 0) return;
+        this.faceTo(aim.x, aim.y);
+        this.shoot(pl, aim.x - pl.x, aim.y - pl.y, Math.round(14 * weaponMul(pl.weapons, 'bow') * this.mods.playerDmgMul * this.buffMul('dmg')));
+        return;
+      }
+      case 'E': {
+        // the roll goes the way the cursor is, not the way the standing order walks
+        const dx = aim.x - pl.x, dy = aim.y - pl.y, d = Math.hypot(dx, dy);
+        const keep = pl.steer;
+        pl.steer = d > 1 ? { x: dx / d, y: dy / d } : null;
+        this.dodge();
+        pl.steer = keep;
+        if (pl.roll) this.order(null);
+        return;
+      }
+      case 'R': {
+        if (this.rallyCd > 0) return;
+        if (!this.recipients().length) { this.event('info', 'No fighters to rally.', true); return; }
+        this.rallyCd = 1.5;
+        const hit = this.hovered;
+        this.wandOrder({ worldX: aim.x, worldY: aim.y, agent: hit, wallTile: null, event: new MouseEvent('click'), rightButtonDown: () => true }, hit);
+        return;
+      }
+    }
+  }
+
+  /** Each ability's state for the bar: seconds left on its cooldown out of its full length, and whether it can fire. */
+  abilityState(): { key: AbilityKey; name: string; left: number; full: number; usable: boolean; note: string }[] {
+    const pl = this.player;
+    const swingLeft = pl.swing ? Math.max(0, 0.3 - pl.swing.t) : pl.recover;
+    return [
+      { key: 'Q', name: 'Strike', left: swingLeft, full: 0.45, usable: pl.weapons.melee >= 0, note: pl.weapons.melee >= 0 ? 'sword toward the cursor; press again to combo' : 'no blade' },
+      { key: 'W', name: 'Shoot', left: Math.max(0, pl.attackCd), full: 0.65, usable: pl.weapons.bow >= 0 && this.arrows > 0, note: pl.weapons.bow < 0 ? 'no bow' : `${this.arrows} arrows` },
+      { key: 'E', name: 'Roll', left: Math.max(0, p.rollCd - pl.sinceRoll), full: p.rollCd, usable: true, note: 'dodge toward the cursor' },
+      { key: 'R', name: 'Rally', left: Math.max(0, this.rallyCd), full: 1.5, usable: this.recipients().length > 0, note: 'send the fighters to the cursor (or at the raider under it)' },
+    ];
   }
   /** The pointer left the map. */
   onPointerOut(): void { this.hovered = null; this.hoverTile = null; this.hoverPoint = null; this.ui?.tooltip(null); }
@@ -1313,6 +1516,7 @@ export class VillageScene extends SimScene {
 
   /** Refresh from screen coordinates so a stationary mouse still aims correctly as the camera follows. */
   private bowAim(): { x: number; y: number } | null {
+    if (this.forcedAim) return this.forcedAim;
     if (!this.hoverPoint || document.body.classList.contains('touch')) return null;
     return this.view?.aimPoint() ?? null;
   }
@@ -1378,6 +1582,8 @@ export class VillageScene extends SimScene {
     }
 
 
+    this.rallyCd = Math.max(0, this.rallyCd - dt);
+    this.driveCommand(dt);
     for (const a of this.agents) a.update(dt, this);
     this.separate();
     this.tickAges(dt);
@@ -2779,6 +2985,7 @@ export class VillageScene extends SimScene {
   }
   /** The tile a tool acts on: the hovered tile when it's next to you (mouse), else the tile you face. */
   get target(): TilePos {
+    if (this.forcedTile) return this.forcedTile;
     return this.cursorAiming ? this.hoverTile! : this.player.faced;
   }
   /** flatten-in-progress bookkeeping: the tile being hammered/flattened resets when you move on */

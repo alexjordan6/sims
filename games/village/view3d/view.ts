@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Raider, type Mover } from '../agents';
 import type { VillageScene, Ptr } from '../main';
 import { BUILDINGS, doorstep, type Defense, type TilePos } from '../world';
-import { TILE, p } from '../config';
+import { TILE, COLS, ROWS, p } from '../config';
 import { Terrain, groundHeight } from './terrain';
 import { Structures } from './structures';
 import { Actors, standHeight } from './actors';
@@ -19,10 +19,16 @@ import { U, WALL_UNITS } from './models';
 // The 3D view of the village. Phaser still runs the sim loop, the keyboard and the debug sliders,
 // but draws nothing: its canvas is hidden and this one sits in its place. Each frame the view reads
 // the scene's state and the fx queue; it never changes the sim except through the same pointer
-// handlers the 2D canvas used to call, and the camera yaw the head's WASD is turned by.
+// handlers the 2D canvas used to call.
+//
+// The camera is a MOBA's: a fixed high angle with north up, panned by pushing the mouse against a
+// screen edge (or the arrow keys, or a middle-button drag), Space to snap back to the head, Y to lock
+// it there, the wheel to zoom.
 
 /** camera distances the Z key / zoom button steps through (in tiles) */
-const DISTANCES = [5, 8, 11, 15, 20, 26] as const;
+const DISTANCES = [8, 11, 14, 18, 23] as const;
+/** how close to a screen edge the mouse pans the camera, px */
+const EDGE = 14;
 
 export class View {
   readonly renderer: THREE.WebGLRenderer;
@@ -49,10 +55,13 @@ export class View {
   /** set on frames where tiles were repainted (the minimap redraws its terrain then) */
   tilesChanged = false;
 
-  // the orbit camera: yaw round the head, pitch above the ground, distance out
-  yaw = 0;
-  pitch = 0.82;
+  // the camera: fixed yaw (north up) and pitch, distance out, and whether it is locked onto the head
+  readonly yaw = 0;
+  readonly pitch = 0.96;
+  locked = false;
   dist: number = DISTANCES[2];
+  /** where the camera looks when it is not following the head (edge-panned) */
+  private pan = new THREE.Vector3();
   private focus = new THREE.Vector3();
   private shakeAmt = 0;
   private bumpAmt = 0; private bumpT = 0; private bumpMs = 1;
@@ -127,8 +136,13 @@ export class View {
   /** Put the camera straight onto the head, no easing (a new run, a teleport). */
   snapCamera(): void {
     const pl = this.scene.player;
-    if (pl) this.focus.set(pl.x * U, groundHeight(pl.x * U, pl.y * U) + standHeight(pl) + 0.8, pl.y * U);
+    if (pl) { this.focus.set(pl.x * U, groundHeight(pl.x * U, pl.y * U) + standHeight(pl) + 0.8, pl.y * U); this.pan.copy(this.focus); }
   }
+
+  /** Space: the camera jumps back onto the head (and stays while Space is held). */
+  recentre(): void { this.snapCamera(); }
+  /** Y: lock the camera onto the head, or free it to pan. */
+  toggleLock(): void { this.locked = !this.locked; if (this.locked) this.snapCamera(); }
 
   cycleZoom(): void {
     const i = DISTANCES.findIndex((d) => d > this.dist + 0.01);
@@ -143,9 +157,11 @@ export class View {
     canvas.addEventListener('pointermove', (e) => {
       this.mouse = { x: e.clientX, y: e.clientY };
       if (this.dragging) {
-        this.yaw -= (e.clientX - this.dragging.x) * 0.008;
-        this.pitch = Math.max(0.2, Math.min(1.4, this.pitch + (e.clientY - this.dragging.y) * 0.005));
+        // grab the ground and drag it
+        const k = this.dist * 0.0022;
+        this.pan.x -= (e.clientX - this.dragging.x) * k; this.pan.z -= (e.clientY - this.dragging.y) * k * 1.3;
         this.dragging = { x: e.clientX, y: e.clientY };
+        this.locked = false;
         return;
       }
       s.onPointerMove(this.ptrAt(e));
@@ -153,7 +169,7 @@ export class View {
     canvas.addEventListener('pointerdown', (e) => {
       try { canvas.setPointerCapture(e.pointerId); } catch { /* a synthetic or already-gone pointer */ }
       if (e.button === 1) { e.preventDefault(); this.dragging = { x: e.clientX, y: e.clientY }; return; }
-      if (s.interior.active) { const q = this.room.floorAt(e.clientX, e.clientY, canvas); if (q) s.interior.tap(q.x, q.y, e.button === 2); return; }
+      if (s.interior.active) { const q = this.room.floorAt(e.clientX, e.clientY, canvas); if (q) s.interior.tap(q.x, q.y, false); return; }
       s.onPointerDown(this.ptrAt(e));
     });
     canvas.addEventListener('pointerup', (e) => {
@@ -163,9 +179,9 @@ export class View {
     canvas.addEventListener('pointerleave', () => { this.mouse = null; s.onPointerOut(); });
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
-      this.dist = Math.max(3.5, Math.min(30, this.dist * (e.deltaY > 0 ? 1.12 : 1 / 1.12)));
+      this.dist = Math.max(DISTANCES[0], Math.min(DISTANCES[DISTANCES.length - 1], this.dist * (e.deltaY > 0 ? 1.1 : 1 / 1.1)));
     }, { passive: false });
-    window.addEventListener('keydown', (e) => { if (e.key.startsWith('Arrow')) { this.keys.add(e.key); if (!(e.target instanceof HTMLInputElement)) e.preventDefault(); } });
+    window.addEventListener('keydown', (e) => { if (e.key.startsWith('Arrow') || e.key === ' ') { this.keys.add(e.key); if (!(e.target instanceof HTMLInputElement)) e.preventDefault(); } });
     window.addEventListener('keyup', (e) => this.keys.delete(e.key));
     window.addEventListener('blur', () => this.keys.clear());
   }
@@ -257,17 +273,25 @@ export class View {
     const s = this.scene;
     this.t += dt;
     // the camera: arrows turn it, the head is followed, a jolt or a punch-in when fx ask
-    const k = this.keys;
-    if (k.has('ArrowLeft')) this.yaw += dt * 1.8;
-    if (k.has('ArrowRight')) this.yaw -= dt * 1.8;
-    if (k.has('ArrowUp')) this.pitch = Math.min(1.4, this.pitch + dt * 1.0);
-    if (k.has('ArrowDown')) this.pitch = Math.max(0.2, this.pitch - dt * 1.0);
-    const pl = s.player;
-    if (pl) pl.camYaw = this.yaw;
-    if (pl) {
-      const want = new THREE.Vector3(pl.x * U, groundHeight(pl.x * U, pl.y * U) + standHeight(pl) + 0.8, pl.y * U);
-      this.focus.lerp(want, Math.min(1, dt * 8));
+    const k = this.keys, pl = s.player;
+    if (pl) pl.camYaw = 0;
+    // pan: arrow keys, or the mouse pushed against an edge of the view
+    let px = (k.has('ArrowRight') ? 1 : 0) - (k.has('ArrowLeft') ? 1 : 0), pz = (k.has('ArrowDown') ? 1 : 0) - (k.has('ArrowUp') ? 1 : 0);
+    const r = this.renderer.domElement.getBoundingClientRect(), m = this.mouse;
+    if (m && !document.body.classList.contains('touch') && s.screen === 'playing') {
+      if (m.x < r.left + EDGE) px = -1; else if (m.x > r.right - EDGE) px = 1;
+      if (m.y < r.top + EDGE) pz = -1; else if (m.y > r.bottom - EDGE) pz = 1;
     }
+    const following = this.locked || k.has(' ') || document.body.classList.contains('touch') || s.screen !== 'playing';
+    if (pl && following) {
+      const want = new THREE.Vector3(pl.x * U, groundHeight(pl.x * U, pl.y * U) + standHeight(pl) + 0.8, pl.y * U);
+      this.pan.copy(want);
+    } else if (px || pz) {
+      const sp = this.dist * 1.6 * dt;
+      this.pan.x = Math.max(0, Math.min(COLS, this.pan.x + px * sp)); this.pan.z = Math.max(0, Math.min(ROWS, this.pan.z + pz * sp));
+      this.pan.y = groundHeight(this.pan.x, this.pan.z) + 0.8;
+    }
+    this.focus.lerp(this.pan, Math.min(1, dt * (following ? 8 : 14)));
     this.bumpT += dt * 1000;
     const bump = this.bumpT < this.bumpMs ? this.bumpAmt * Math.sin((this.bumpT / this.bumpMs) * Math.PI) : 0;
     const dist = this.dist * (1 - bump * 3) * p.cameraZoom / 2;

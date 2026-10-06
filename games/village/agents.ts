@@ -1325,17 +1325,19 @@ export class Player extends Mover {
   private nextStage = 0;
   private sinceSwing = 99;
   /** recovery after the spin finisher */
-  private recover = 0;
+  recover = 0;
   /** kills within the last 1.2 s, for DOUBLE!/TRIPLE! pops */
   private recentKills: number[] = [];
   /** dodge roll in progress: seconds elapsed and the unit direction it commits to */
   roll: { t: number; ux: number; uy: number } | null = null;
   /** seconds since the last roll ended, for the cooldown */
-  private sinceRoll = 99;
+  sinceRoll = 99;
   /** set by the scene: W/A/S/D key objects */
   keys!: Record<'W' | 'A' | 'S' | 'D', { isDown: boolean }>;
   /** the 3D camera's turn round the head (set by the view each frame); WASD and the stick walk relative to it */
   camYaw = 0;
+  /** the way the head's standing order walks it this tick, a unit vector (MOBA right-click), or null */
+  steer: { x: number; y: number } | null = null;
   /** virtual joystick axis (-1..1), set by the touch UI */
   touch = { x: 0, y: 0 };
 
@@ -1415,6 +1417,8 @@ export class Player extends Mover {
     }
     // W is away from the camera, wherever it has swung round to
     if (this.camYaw) { const c = Math.cos(this.camYaw), s = Math.sin(this.camYaw); [mx, my] = [mx * c + my * s, -mx * s + my * c]; }
+    // no keys, no stick: the standing order walks (VillageScene.driveCommand sets it in world space)
+    if (!mx && !my && this.steer) return { mx: this.steer.x, my: this.steer.y };
     return { mx, my };
   }
 
