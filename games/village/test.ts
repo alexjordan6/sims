@@ -1737,6 +1737,22 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       for (const g of [...fed, left]) g.dead = true; s.removeDead();
     }
 
+    // ---- the crowd: gnomes and rank-and-file raiders are drawn as instanced flipbook bodies ----------
+    {
+      s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(120, 100));
+      const v = s.view!;
+      const g = s.spawn(new Villager(World.center(123, 100).x, World.center(123, 100).y, s.world.houses[0], 'soldier', 20, 'Crowded', s.mods));
+      g.gnome = true; g.weapon = 'pike'; g.applyRole(s.mods); g.update = () => {};
+      v.snapCamera(); s.draw(); s.draw();
+      const actorOf = (id: number) => (v as unknown as { actors: { actors: Map<number, unknown> } }).actors.actors.has(id);
+      assert(v.crowd.drawn.has(g.id) && !actorOf(g.id), 'a gnome is drawn by the crowd, not as a rig of its own');
+      assert(!v.crowd.drawn.has(s.player.id) && actorOf(s.player.id), 'the head stays a full actor');
+      const at = v.projectWorld(g.x, g.y, 0.4);
+      assert(v.pickAt(at.x, at.y).agent === g, 'pointing at a crowd body picks that gnome');
+      g.dead = true; s.removeDead(); s.draw();
+      assert(!v.crowd.drawn.has(g.id), 'a dead one leaves the crowd (it lies down and sinks)');
+    }
+
     // ---- MOBA commands: the head walks where it is sent, hunts what it is told to, uses what it is pointed at ----
     {
       // full ticks: the standing order is driven by the scene's tick, not by the agents alone

@@ -451,6 +451,34 @@ export class VillageScene extends SimScene {
     if (p.campCount > 0 && this.day % 3 === 0 && this.camps.length < p.campCount * 2) this.foundCamp();
   }
 
+  /**
+   * Stress bench: `gnomes` pike gnomes in a block round the head (following it) and `raiders` raiders in a ring
+   * 20-30 tiles out, coming in. ?bench=1000 runs it at load; the debug panel has a button.
+   */
+  bench(gnomes: number, raiders: number): void {
+    const pl = this.player, home = this.world.gnomeHouses[0] ?? this.world.houses[0], rng = new Rng(7);
+    // fill open tiles outward from the head, four gnomes to a tile, until all are placed
+    const here = pl.tile, spots: { x: number; y: number }[] = [];
+    for (let r = 1; spots.length < gnomes && r < 60; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) !== r || spots.length >= gnomes) continue;
+      const tx = here.tx + dx, ty = here.ty + dy;
+      if (!this.world.inBounds(tx, ty) || this.world.isBlocked(tx, ty)) continue;
+      const c = World.center(tx, ty);
+      for (const [ox, oy] of [[-4, -4], [4, -4], [-4, 4], [4, 4]]) if (spots.length < gnomes) spots.push({ x: c.x + ox, y: c.y + oy });
+    }
+    for (let i = 0; i < spots.length; i++) {
+      const { x, y } = spots[i];
+      const g = this.spawn(new Villager(x, y, home, 'soldier', 20, `Pike ${i}`, this.mods));
+      g.gnome = true; g.weapon = 'pike'; g.applyRole(this.mods); g.order = { kind: 'follow' };
+    }
+    for (let i = 0; i < raiders; i++) {
+      const a = rng.range(0, Math.PI * 2), d = rng.range(20, 30) * TILE, x = pl.x + Math.cos(a) * d, y = pl.y + Math.sin(a) * d, t = World.toTile(x, y);
+      if (!this.world.inBounds(t.tx, t.ty) || this.world.isBlocked(t.tx, t.ty, true)) continue;
+      this.spawn(new Raider(x, y, { hpMul: this.mods.raiderHpMul }));
+    }
+    this.event('info', `Bench: ${gnomes} gnomes and ${raiders} raiders.`, true);
+  }
+
   private spawnTrolls(): void {
     const hx = COLS / 2, hy = ROWS / 2;
     const rng = new Rng(this.seed ^ 0x7201);
@@ -654,6 +682,7 @@ export class VillageScene extends SimScene {
       button('+50 food', () => { this.food = Math.min(this.foodCap, this.food + 50); }, 'Food into the granary, up to its cap.');
       button('copy settings', () => this.copySettings(), 'Copies every slider as JSON — paste it into games/village/defaults.json to make it the new default.');
       button('+20 scrap', () => { this.scrap += 20; }, 'Scrap iron for iron and steel forging.');
+      button('bench: 1000 gnomes', () => this.bench(1000, 150), 'Stress test: a thousand gnome pikemen at your heels and 150 raiders closing in. Watch the frame time.');
     }
     // Stardew-style: C / left click = use tool, X / right click = check, E / Esc = menu, 1-8 or Tab / wheel = tools
     kb.on('keydown-C', () => { if (this.hoverTile) this.useAt(this.hoverTile); else this.interact(); });
@@ -3448,6 +3477,8 @@ const query = new URLSearchParams(location.search);
 if (query.get('start') === 'gnome') p.gnomeStart = true;
 if (query.has('peaceful')) p.peaceful = true;
 if (query.has('nohunger')) p.hunger = false;
+// ?bench=1000: a stress test once the first village is up (see VillageScene.bench)
+if (query.has('bench')) window.setTimeout(() => { const s = (window as unknown as { game?: { scene: { scenes: VillageScene[] } } }).game?.scene.scenes[0]; if (s) { if (s.screen !== 'playing') s.startGame(); s.bench(Number(query.get('bench')) || 1000, 150); } }, 2500);
 // lil-gui caches its controllers' values at module load, so the panel needs telling the flag moved.
 if (p.gnomeStart || p.peaceful || query.has('nohunger')) getGui().controllersRecursive().forEach((c) => c.updateDisplay());
 

@@ -53,18 +53,29 @@ function pixels(img: CanvasImageSource & { width: number; height: number }): { d
 
 const srgb = new THREE.Color();
 /** Merge a loaded scene into one non-indexed geometry with baked vertex colours. */
-function bake(scene: THREE.Object3D): THREE.BufferGeometry {
+/**
+ * Merge a scene (or a posed character rig) into one geometry with baked vertex colours. A skinned mesh is
+ * baked in whatever pose its skeleton holds right now, so stepping a mixer and baking again gives a frame.
+ */
+export function bake(scene: THREE.Object3D): THREE.BufferGeometry {
   scene.updateMatrixWorld(true);
   const parts: THREE.BufferGeometry[] = [];
   scene.traverse((o) => {
-    if (!(o instanceof THREE.Mesh)) return;
+    if (!(o instanceof THREE.Mesh) || !o.visible) return;
     const mats = Array.isArray(o.material) ? o.material : [o.material];
-    const src = o.geometry as THREE.BufferGeometry;
+    let src = o.geometry as THREE.BufferGeometry;
+    if (o instanceof THREE.SkinnedMesh) {
+      // pose the vertices: run each through its bones, so the bake holds the frame the mixer is on
+      o.skeleton.update();
+      src = src.clone();
+      const pos = src.getAttribute('position') as THREE.BufferAttribute, v = new THREE.Vector3();
+      for (let i = 0; i < pos.count; i++) { v.fromBufferAttribute(pos, i); o.applyBoneTransform(i, v); pos.setXYZ(i, v.x, v.y, v.z); }
+    }
     // split an indexed geometry by its material groups; anything else is one piece in the first material
     const indexed = !!src.index;
     const groups = indexed && src.groups.length ? src.groups : [{ start: 0, count: Infinity, materialIndex: 0 }];
     for (const grp of groups) {
-      const m = mats[grp.materialIndex ?? 0] as THREE.MeshStandardMaterial;
+      const m = (mats[grp.materialIndex ?? 0] ?? mats[0]) as THREE.MeshStandardMaterial; // a box has six face groups but often one material
       let g = src.clone();
       g.clearGroups();
       if (indexed) {

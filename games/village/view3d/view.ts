@@ -6,6 +6,7 @@ import { TILE, COLS, ROWS, p } from '../config';
 import { Terrain, groundHeight } from './terrain';
 import { Structures } from './structures';
 import { Actors, standHeight } from './actors';
+import { Crowd } from './crowd';
 import { Overlay } from './overlay';
 import { Fx3d } from './fx3d';
 import { skyAt } from './sky';
@@ -39,6 +40,7 @@ export class View {
   private structures: Structures;
   private actors: Actors;
   private overlay: Overlay;
+  readonly crowd: Crowd;
   private hemi = new THREE.HemisphereLight(0x8090a0, 0x2a2018, 0.6);
   private sun = new THREE.DirectionalLight(0xffffff, 0.9);
   private torch = new THREE.PointLight(0xffa860, 0, 9, 1.4);
@@ -99,12 +101,14 @@ export class View {
     this.structures = new Structures(scene);
     this.actors = new Actors(scene);
     this.overlay = new Overlay(scene);
+    this.crowd = new Crowd(scene, this.actors.kicks);
+    this.actors.crowdDrawn = this.crowd.drawn;
     this.fx = new Fx3d(scene, this.actors, {
       project: (v) => this.project(v),
       shake: (a) => { this.shakeAmt = Math.max(this.shakeAmt, a); },
       bump: (z, ms) => { this.bumpAmt = z; this.bumpT = 0; this.bumpMs = ms; },
     });
-    this.world.add(this.terrain.group, this.structures.group, this.actors.group, this.overlay.group, this.fx.group);
+    this.world.add(this.terrain.group, this.structures.group, this.crowd.group, this.actors.group, this.overlay.group, this.fx.group);
 
     new ResizeObserver(() => this.resize()).observe(host);
     this.resize();
@@ -128,6 +132,7 @@ export class View {
   rebuild(): void {
     this.structures.clear();
     this.actors.clear();
+    this.crowd.clear();
     this.fx.clear();
     this.terrain.rebuildAll();
     this.snapCamera();
@@ -193,8 +198,11 @@ export class View {
     const r = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
     this.ray.setFromCamera(ndc, this.camera);
-    const hitAgent = this.ray.intersectObjects(this.actors.pickable, true).find((h) => h.object.visible && (h.object.userData.agent as Mover | undefined) && isShown(h.object));
-    const agent = (hitAgent?.object.userData.agent as Mover | undefined) ?? null;
+    // a crowd body (an instance of a pose) or a full actor, whichever is nearer
+    const hitActor = this.ray.intersectObjects(this.actors.pickable, true).find((h) => h.object.visible && (h.object.userData.agent as Mover | undefined) && isShown(h.object));
+    const hitCrowd = this.ray.intersectObjects(this.crowd.meshes, false).find((h) => h.instanceId !== undefined && this.crowd.moverAt(h.object, h.instanceId));
+    const hitAgent = hitCrowd && (!hitActor || hitCrowd.distance < hitActor.distance) ? hitCrowd : hitActor;
+    const agent = (hitAgent === hitCrowd && hitCrowd ? this.crowd.moverAt(hitCrowd.object, hitCrowd.instanceId!) : (hitAgent?.object.userData.agent as Mover | undefined)) ?? null;
     const hitFort = this.ray.intersectObjects(this.structures.pickable, true)[0];
     const defense = (hitFort?.object.userData.defense as Defense | undefined) ?? null;
     // the ground: a plane at 0, nudged twice onto the rolling surface
@@ -329,6 +337,7 @@ export class View {
     this.syncFow();
     this.tilesChanged = this.terrain.sync();
     this.structures.sync(sky.night, this.t);
+    this.crowd.sync(dt);
     this.actors.sync(dt);
     for (const ev of s.fx) this.fx.handle(ev);
     s.fx.length = 0;

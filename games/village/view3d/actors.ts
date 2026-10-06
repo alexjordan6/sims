@@ -21,7 +21,7 @@ const box = new THREE.BoxGeometry(1, 1, 1);
 const cone = new THREE.ConeGeometry(0.5, 1, 6);
 const ico = new THREE.IcosahedronGeometry(0.5, 0);
 
-function piece(colour: number, sx: number, sy: number, sz: number, x: number, y: number, z: number, g: THREE.BufferGeometry = box): THREE.Mesh {
+export function piece(colour: number, sx: number, sy: number, sz: number, x: number, y: number, z: number, g: THREE.BufferGeometry = box): THREE.Mesh {
   const m = new THREE.Mesh(g, lambert({ color: colour }));
   m.scale.set(sx, sy, sz); m.position.set(x, y + sy / 2, z);
   return m;
@@ -43,7 +43,7 @@ const FOE: Record<EnemyKind, { body: number; head: number; eyes: number }> = {
 };
 const ROLE: Record<string, number> = { farmer: 0x4a6a34, woodcutter: 0x6a4a2e, soldier: 0x5a5a62, kid: 0x7a6a4a, infant: 0x8a7a5a };
 
-function heldMesh(held: string): THREE.Object3D | null {
+export function heldMesh(held: string): THREE.Object3D | null {
   const g = new THREE.Group();
   switch (held) {
     case 'sword': g.add(piece(0xb8bcc4, 0.05, 0.55, 0.05, 0, 0, 0), piece(0x5a3a1a, 0.18, 0.04, 0.05, 0, 0.02, 0)); break;
@@ -75,10 +75,10 @@ interface Actor {
 interface Anim { mixer: THREE.AnimationMixer; actions: Map<string, THREE.AnimationAction>; current: string }
 
 /** how tall a grown person stands, in units */
-const PERSON = 1.25;
+export const PERSON = 1.25;
 
 /** The pack character that plays this mover, if there is one (rats, boars, bolts, arrows and swarms keep code bodies). */
-function modelFor(m: Mover): { key: string; tint?: number } | null {
+export function modelFor(m: Mover): { key: string; tint?: number } | null {
   if (m instanceof Player) return { key: HEAD };
   if (m instanceof Villager) return { key: FOLK[m.id % FOLK.length] };
   if (m instanceof Raider && !(m instanceof Boar) && m.kind !== 'rat' && m.kind !== 'boar') return FOE_MODEL[m.boss ? 'warlord' : m.kind] ?? null;
@@ -175,7 +175,7 @@ function actorKey(m: Mover): string {
   return `${md && MODELS.characters.has(md.key) ? md.key : 'box'}|${m.constructor.name}|${look?.held ?? ''}|${look?.body ?? ''}|${m instanceof Villager ? m.role + m.gnome + m.elder : ''}|${m instanceof Raider ? m.kind + m.boss : ''}`;
 }
 
-function scaleOf(m: Mover): number {
+export function scaleOf(m: Mover): number {
   const swollen = m instanceof Villager ? m.moodNow?.bulk?.scale ?? 1 : 1;
   const base = m instanceof Villager ? (m.gnome ? (m.isChild ? 0.38 : 0.55) : m.isChild ? (m.role === 'infant' ? 0.45 : 0.68) : 1)
     : m instanceof Boar ? (m.young ? BOAR.youngScale : 1)
@@ -200,6 +200,8 @@ export class Actors {
   private items = new Map<number, THREE.Mesh>();
   private bars = new Map<number, { bg: THREE.Sprite; fill: THREE.Sprite }>();
   readonly kicks = new Map<number, Kick>();
+  /** who the crowd renderer draws (view3d/crowd.ts): the actor path leaves them be */
+  crowdDrawn: ReadonlySet<number> = new Set();
   /** body meshes a pointer can land on, rebuilt as agents come and go */
   readonly pickable: THREE.Object3D[] = [];
   private t = 0;
@@ -235,6 +237,15 @@ export class Actors {
     for (const ag of s.agents) {
       const m = ag as Mover;
       seen.add(m.id);
+      if (this.crowdDrawn.has(m.id)) {
+        // drawn by the crowd: drop any actor it had before its look baked, and only keep its hp bar
+        // (on raiders, and on the one gnome you are looking at — a thousand bars would be noise)
+        const old = this.actors.get(m.id);
+        if (old) { this.group.remove(old.group); this.actors.delete(m.id); pickDirty = true; }
+        const seenHere = !m.hidden && !(m.hostile && fog && fog.visibleAt(m.x, m.y) <= 0.35);
+        this.bar(m, seenHere && m.hp < m.maxHp && (m.hostile || s.selected === m));
+        continue;
+      }
       let a = this.actors.get(m.id);
       const key = actorKey(m);
       if (a && a.key !== key) { this.group.remove(a.group); a = undefined; pickDirty = true; }
