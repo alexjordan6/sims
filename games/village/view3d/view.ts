@@ -179,6 +179,7 @@ export class View {
     canvas.addEventListener('pointerleave', () => { this.mouse = null; s.onPointerOut(); });
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
+      if (s.mealAim) { s.cycleMeal(e.deltaY > 0 ? 1 : -1); return; } // aiming a meal: the wheel picks which
       this.dist = Math.max(DISTANCES[0], Math.min(DISTANCES[DISTANCES.length - 1], this.dist * (e.deltaY > 0 ? 1.1 : 1 / 1.1)));
     }, { passive: false });
     window.addEventListener('keydown', (e) => { if (e.key.startsWith('Arrow') || e.key === ' ') { this.keys.add(e.key); if (!(e.target instanceof HTMLInputElement)) e.preventDefault(); } });

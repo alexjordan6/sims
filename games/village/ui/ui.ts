@@ -164,6 +164,7 @@ export class UI {
       <div class="inventory-host"></div>
     </div>`);
     this.hotbar.querySelector('.bag')!.addEventListener('click', () => this.toggleBag());
+    this.hotbar.querySelector('.ability[data-ab="R"]')?.addEventListener('click', () => s.cycleMeal(1)); // which meal R throws
     this.bag.querySelector('.close')!.addEventListener('click', () => this.toggleBag(false));
     this.feed = h('<div class="feed"></div>');
     this.toasts = h('<div class="toasts"></div>');
@@ -221,7 +222,8 @@ export class UI {
   private mountControls(): void {
     const rows: [string, string][] = [
       ['right click', 'walk there · attack an enemy · use a plant, crop, pot, gate or door'],
-      ['Q W E R', 'strike · shoot · roll · rally — toward the cursor'],
+      ['Q W E', 'strike · shoot · roll — toward the cursor'],
+      ['hold R', 'aim a meal (wheel picks which) — let go to lob it; everyone in the splash eats'],
       ['G', 'throw the largest supply stack'],
       ['T', 'eat a meal — your pack first, then the granary'],
       ['click · C', 'walk over and use the held tool there (with a weapon: look things over)'],
@@ -964,7 +966,7 @@ export class UI {
           Survive ${p.bossDay} days of raids and <b>beat the Warlord</b>.</p>
           <div class="controls">
             <kbd>right click</kbd><span>walk there — or attack the enemy, or go and use the plant, crop, pot, gate or door under the cursor</span>
-            <kbd>Q W E R</kbd><span>strike · shoot · roll · rally, toward the cursor</span>
+            <kbd>Q W E</kbd><span>strike · shoot · roll, toward the cursor</span><kbd>hold R</kbd><span>aim a meal, let go to lob it</span>
             <kbd>G</kbd><span>throw the largest supply stack</span>
             <kbd>T</kbd><span>eat one meal. Your pack is eaten before the granary, and raw food before cooked so a dish's warmth is never spent on a routine meal. Meat and honey fill twice as much per unit, a cooked dish three or four times.</span>
             <kbd>click / C</kbd><span>walk over and use the tool you hold there</span>
@@ -1114,7 +1116,7 @@ export class UI {
             <kbd>Q</kbd><span>strike: the sword toward the cursor; press again inside the swing to combo</span>
             <kbd>W</kbd><span>shoot: a bow shot at the cursor (needs a bow and arrows)</span>
             <kbd>E</kbd><span>roll: a committed tumble toward the cursor. It goes clean through bodies but not through walls, and you cannot steer or swing until it lands. A raider's blow checks its reach at the moment it strikes, so rolling out of a wind-up beats it.</span>
-            <kbd>R</kbd><span>rally: every fighter (or your wand squad) to the cursor — or onto the raider under it</span>
+            <kbd>hold R</kbd><span>meal: a reticle shows the throw's reach and where it will land; let go to lob a cooked meal from your pack there (a left-click throws too, a right-click puts it away). Every gnome, villager — and you — inside the splash eats it: gnomes take its mood (Sporeburst, Emboldened…), you its heal and buff. The wheel, or clicking the R button, picks which meal. Cook meals at the Great Pot.</span>
             <kbd>G</kbd><span>throw the largest wood, food or scrap stack toward the cursor. Drag any pack item onto the world to drop it. Walk away from your dropped items before returning to pick them up.</span>
             <kbd>click / C</kbd><span>use the tool you hold on the clicked tile: you walk into reach first, and the axe keeps chopping until the tree is down. The bottom bar says what the tool will do. With the sword or bow in hand, a click looks the thing over instead.</span>
             <kbd>X</kbd><span>check a villager (opens the inspector)</span>

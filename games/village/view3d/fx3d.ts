@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Mover, Villager, Raider, Player } from '../agents';
 import { Bolt } from '../enemies';
-import { TILE, OGRE, GNOME_HOME } from '../config';
+import { TILE, OGRE, GNOME_HOME, FOODS } from '../config';
 import { buildingCenter, BUILDINGS, type Building } from '../world';
 import { Sfx } from '../sfx';
 import type { VillageScene, FxEvent } from '../main';
@@ -43,6 +43,8 @@ export class Fx3d {
   private lastBlow = new Map<number, { ux: number; uy: number; crit: boolean }>();
   private wasPaused = false;
   private windLevel = 0; private windWarned = false; private windAcc = 0;
+  /** the bowls of meals in the air, one mesh each */
+  private bowls = new Map<object, THREE.Mesh>();
   private gladeLevel = 0; private gladeWarned = false; private gladeAcc = 0; private gladeHome: Building | null = null;
   private wasRaid = false;
   /** seconds until the dark next makes a sound of its own */
@@ -331,10 +333,30 @@ export class Fx3d {
     if (Math.random() < 0.35) this.sfx.creak();
   }
 
+  /** Draw each lobbed meal along its arc; a bowl whose meal has landed goes. */
+  private flyBowls(): void {
+    const s = this.scene, live = new Set<object>();
+    for (const l of s.lobs) {
+      live.add(l);
+      let m = this.bowls.get(l);
+      if (!m) {
+        m = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.14, 0.16, 7), new THREE.MeshBasicMaterial({ color: parseInt(FOODS[l.dish].colour.slice(1), 16) }));
+        this.group.add(m); this.bowls.set(l, m);
+      }
+      const f = Math.min(1, l.t / l.T), x0 = l.x0 * U, z0 = l.y0 * U, x1 = l.x1 * U, z1 = l.y1 * U;
+      const peak = 1.2 + Math.hypot(x1 - x0, z1 - z0) * 0.12;
+      const y = groundHeight(x0, z0) + 0.9 + (groundHeight(x1, z1) - groundHeight(x0, z0) - 0.85) * f + 4 * peak * f * (1 - f);
+      m.position.set(x0 + (x1 - x0) * f, y, z0 + (z1 - z0) * f);
+      m.rotation.z = f * 6;
+    }
+    for (const [l, m] of this.bowls) if (!live.has(l)) { this.group.remove(m); this.bowls.delete(l); }
+  }
+
   // ---- per frame -----------------------------------------------------------------------
 
   update(dt: number): void {
     const s = this.scene;
+    this.flyBowls();
     if (s.paused !== this.wasPaused) this.wasPaused = s.paused;
     if (this.wasPaused) { this.sfx.wind(0); this.sfx.glade(0); this.sfx.drone(0); }
     else { this.wind(dt); this.glade(dt); this.dread(dt); }

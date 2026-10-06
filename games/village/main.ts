@@ -298,6 +298,7 @@ export class VillageScene extends SimScene {
     this.boss = null;
     this.ogre = this.world.lair ? this.spawn(new Ogre(this.world.lair)) : null;
     this.sounders = []; this.meatClaims.clear();
+    this.lobs = []; this.mealAim = false; this.mealCd = 0; this.mealPick = null;
     this.thicketRng = new Rng(this.seed ^ 0x7b1c0de);
     this.thornT = 0; this.thornWarned = -Infinity;
     this.spawnSounders();
@@ -665,14 +666,16 @@ export class VillageScene extends SimScene {
       if (b) this.selectBuilding(b); else this.select(null);
     });
     const closePanel = (): void => {
-      if (this.ui?.bagShowing) this.ui.toggleBag(false);
+      if (this.mealAim) this.mealAim = false; // Esc lets go of an aimed meal first
+      else if (this.ui?.bagShowing) this.ui.toggleBag(false);
       else if (this.cookingAt) this.openCooking(null);
       else if (this.pouchOf) this.openPouch(null);
       else if (this.armoryFor) this.openArmory(null);
       else this.togglePause();
     };
     kb.on('keydown-ESC', closePanel);
-    for (const k of ['Q', 'W', 'E', 'R'] as const) kb.on(`keydown-${k}`, (e: KeyboardEvent) => { if (!e.repeat) this.ability(k); });
+    for (const k of ['Q', 'W', 'E'] as const) kb.on(`keydown-${k}`, (e: KeyboardEvent) => { if (!e.repeat) this.ability(k); });
+    kb.on('keyup-R', () => this.releaseMeal());
     kb.on('keydown-B', () => this.ui?.toggleBag());
     kb.on('keydown-V', () => this.openArmory(this.armoryFor ? null : this.player));
     kb.on('keydown-TAB', (e: KeyboardEvent) => { e.preventDefault?.(); this.player.cycleTool(e.shiftKey ? -1 : 1, this.locked); });
@@ -696,7 +699,7 @@ export class VillageScene extends SimScene {
     // and R only works on the end screens where it means "new run"
     kb.removeAllListeners('keydown-R');
     kb.removeAllListeners('keydown-N');
-    kb.on('keydown-R', (e: KeyboardEvent) => { if (this.screen === 'over' || this.screen === 'won') this.startGame(); else if (!e.repeat) this.ability('R'); });
+    kb.on('keydown-R', (e: KeyboardEvent) => { if (this.screen === 'over' || this.screen === 'won') this.startGame(); else if (!e.repeat) this.beginMealAim(); });
     this.hud.setVisible(false);
 
     ensureFlora(this); ensureBuildingArt(this); // the DOM UI's icons are still drawn from these
@@ -715,6 +718,8 @@ export class VillageScene extends SimScene {
   onPointerDown(ptr: Ptr): void {
       if (this.posting) { const q = ptr.wallTile ?? World.toTile(ptr.worldX, ptr.worldY); this.assignPost(this.posting, q); return; }
       if (this.player.tool === 'wand' && this.screen === 'playing' && !this.interior.active) { this.wandDown(ptr); return; }
+      // aiming a meal: the right button lets go of the aim, the left throws it
+      if (this.mealAim) { if (ptr.rightButtonDown()) this.mealAim = false; else this.releaseMeal(); return; }
       // the right button is the command: walk, hunt, or go and use whatever is there
       if (ptr.rightButtonDown()) { this.rightCommand(ptr); return; }
       if (this.screen !== 'playing') return;
@@ -736,8 +741,14 @@ export class VillageScene extends SimScene {
   /** while a command acts: the tile it acts on and the point a bow aims at, in place of the cursor */
   private forcedTile: TilePos | null = null;
   private forcedAim: { x: number; y: number } | null = null;
-  /** the rally's cooldown, seconds */
-  rallyCd = 0;
+  /** R held: the meal reticle is up */
+  mealAim = false;
+  /** the meal R throws (null: whichever you carry most of) */
+  mealPick: DishKind | null = null;
+  /** seconds until another meal can be thrown */
+  mealCd = 0;
+  /** meals in the air: from, to, how far along, how long the flight takes */
+  lobs: { x0: number; y0: number; x1: number; y1: number; t: number; T: number; dish: DishKind }[] = [];
 
   /** Give the head a standing order (it replaces whatever it was doing). */
   order(c: Command | null): void { this.command = c; this.cmdPath = []; this.cmdGoal = ''; this.cmdNext = 0; this.cmdStuck = { x: this.player.x, y: this.player.y, t: 0 }; }
@@ -870,9 +881,9 @@ export class VillageScene extends SimScene {
 
   /**
    * Q W E R, aimed at the cursor. Each is something the head could already do, on the cooldown it already had:
-   * Q the sword (the combo strike), W a bow shot, E the dodge roll, R a rally of the fighters to the cursor.
+   * Q the sword (the combo strike), W a bow shot, E the dodge roll. (R is the meal: hold to aim, release to lob — see beginMealAim.)
    */
-  ability(k: AbilityKey): void {
+  ability(k: Exclude<AbilityKey, 'R'>): void {
     if (this.screen !== 'playing' || this.paused || this.interior.active) return;
     const pl = this.player, aim = this.aimAt();
     if (pl.dead || pl.hidden || pl.busy > 0) return;
@@ -901,15 +912,74 @@ export class VillageScene extends SimScene {
         if (pl.roll) this.order(null);
         return;
       }
-      case 'R': {
-        if (this.rallyCd > 0) return;
-        if (!this.recipients().length) { this.event('info', 'No fighters to rally.', true); return; }
-        this.rallyCd = 1.5;
-        const hit = this.hovered;
-        this.wandOrder({ worldX: aim.x, worldY: aim.y, agent: hit, wallTile: null, event: new MouseEvent('click'), rightButtonDown: () => true }, hit);
-        return;
-      }
     }
+  }
+
+  /** The meal R would throw: the one picked, while you still carry it, else whichever you carry most of. */
+  loadedMeal(): DishKind | null {
+    const pl = this.player;
+    if (this.mealPick && pl.carriedOf('food', this.mealPick) >= 1) return this.mealPick;
+    let best: DishKind | null = null, n = 0;
+    for (const d of DISHES) { const c = pl.carriedOf('food', d); if (c >= 1 && c > n) { n = c; best = d; } }
+    return best;
+  }
+  /** Step which meal R throws, through the dishes you carry. */
+  cycleMeal(dir = 1): void {
+    const held = DISHES.filter((d) => this.player.carriedOf('food', d) >= 1);
+    if (!held.length) return;
+    const i = Math.max(0, held.indexOf(this.loadedMeal() ?? held[0]));
+    this.mealPick = held[(i + dir + held.length) % held.length];
+  }
+  /** Where a meal thrown now would come down: the cursor, pulled in to the throwing range. */
+  mealTarget(): { x: number; y: number } {
+    const pl = this.player, aim = this.aimAt(), max = p.mealRange * TILE;
+    const dx = aim.x - pl.x, dy = aim.y - pl.y, d = Math.hypot(dx, dy);
+    return d <= max ? aim : { x: pl.x + (dx / d) * max, y: pl.y + (dy / d) * max };
+  }
+  /** R pressed: put up the reticle. */
+  beginMealAim(): void {
+    if (this.screen !== 'playing' || this.paused || this.interior.active || this.player.dead) return;
+    this.mealAim = true;
+    if (!this.loadedMeal()) this.event('info', 'No cooked meal in your pack — cook one at the Great Pot, then hold R to lob it.', true);
+  }
+  /** R let go (or a left-click while aiming): lob the loaded meal at the reticle. */
+  releaseMeal(): void {
+    if (!this.mealAim) return;
+    this.mealAim = false;
+    if (this.screen !== 'playing' || this.paused || this.interior.active || this.mealCd > 0) return;
+    const dish = this.loadedMeal(), pl = this.player;
+    if (!dish || pl.takeOut('food', 1, dish) < 1) return;
+    const to = this.mealTarget(), d = Math.hypot(to.x - pl.x, to.y - pl.y);
+    this.lobs.push({ x0: pl.x, y0: pl.y, x1: to.x, y1: to.y, t: 0, T: 0.4 + (d / TILE) * 0.045, dish });
+    this.mealCd = p.mealCd;
+    this.faceTo(to.x, to.y);
+    this.fx.push({ kind: 'arrow', who: pl }); // the whoosh of the throw
+  }
+  /** Meals in the air come down; where one lands, everyone in the splash eats it. */
+  tickLobs(dt: number): void {
+    if (!this.lobs.length) return;
+    for (const lob of this.lobs) lob.t += dt;
+    const landed = this.lobs.filter((l) => l.t >= l.T);
+    this.lobs = this.lobs.filter((l) => l.t < l.T);
+    for (const l of landed) this.landMeal(l.x1, l.y1, l.dish);
+  }
+  /** A meal lands at (x, y): every grown villager in the splash gets the dish's mood, the head its heal and buff. */
+  landMeal(x: number, y: number, dish: DishKind): number {
+    const r = p.mealSplash * TILE;
+    let fed = 0;
+    for (const v of this.villagers()) {
+      if (!v.isAdult || v.dead || v.hidden || v.carriedBy || Math.hypot(v.x - x, v.y - y) > r) continue;
+      this.serveOne(v, dish); fed++;
+    }
+    const pl = this.player;
+    if (!pl.dead && !pl.hidden && Math.hypot(pl.x - x, pl.y - y) <= r) {
+      pl.hunger = Math.min(p.hungerMax, pl.hunger + this.hungerOf(dish));
+      this.dishBuff(dish); fed++;
+    }
+    this.fx.push({ kind: 'impact', x, y });
+    this.fx.push({ kind: 'deposit', x, y: y - TILE, text: fed ? `${FOODS[dish].name} · ${fed} fed` : `${FOODS[dish].name} · wasted`, colour: FOODS[dish].colour });
+    if (!fed) this.event('food', `The ${FOODS[dish].name.toLowerCase()} splashes on empty ground — nobody near enough to eat it.`);
+    return fed;
   }
 
   /** Each ability's state for the bar: seconds left on its cooldown out of its full length, and whether it can fire. */
@@ -920,7 +990,7 @@ export class VillageScene extends SimScene {
       { key: 'Q', name: 'Strike', left: swingLeft, full: 0.45, usable: pl.weapons.melee >= 0, note: pl.weapons.melee >= 0 ? 'sword toward the cursor; press again to combo' : 'no blade' },
       { key: 'W', name: 'Shoot', left: Math.max(0, pl.attackCd), full: 0.65, usable: pl.weapons.bow >= 0 && this.arrows > 0, note: pl.weapons.bow < 0 ? 'no bow' : `${this.arrows} arrows` },
       { key: 'E', name: 'Roll', left: Math.max(0, p.rollCd - pl.sinceRoll), full: p.rollCd, usable: true, note: 'dodge toward the cursor' },
-      { key: 'R', name: 'Rally', left: Math.max(0, this.rallyCd), full: 1.5, usable: this.recipients().length > 0, note: 'send the fighters to the cursor (or at the raider under it)' },
+      (() => { const d = this.loadedMeal(), n = d ? Math.floor(this.player.carriedOf('food', d)) : 0; return { key: 'R' as const, name: d ? FOODS[d].name.replace(/^(Mushroom|Boar|Berry|Garden|Honey) /, '') : 'Meal', left: Math.max(0, this.mealCd), full: Math.max(0.01, p.mealCd), usable: !!d, note: d ? `${n} ${FOODS[d].name.toLowerCase()} — hold R to aim, release to lob it into a crowd; the wheel (or a click here) picks which` : 'no cooked meal in your pack — cook one at the Great Pot' }; })(),
     ];
   }
   /** The pointer left the map. */
@@ -1684,7 +1754,8 @@ export class VillageScene extends SimScene {
     }
 
 
-    this.rallyCd = Math.max(0, this.rallyCd - dt);
+    this.mealCd = Math.max(0, this.mealCd - dt);
+    this.tickLobs(dt);
     this.driveCommand(dt);
     for (const a of this.agents) a.update(dt, this);
     this.separate();

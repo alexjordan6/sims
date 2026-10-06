@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Raider, type Mover } from '../agents';
 import { BUILDINGS, type BuildingKind } from '../world';
-import { TILE, p } from '../config';
+import { TILE, FOODS, p } from '../config';
 import type { VillageScene } from '../main';
 import { U, WALL_UNITS } from './models';
 import { groundHeight } from './terrain';
@@ -123,6 +123,19 @@ export class Overlay {
       if (fog && fog.visibleAt(it.x, it.y) <= 0.3) continue;
       const a = s.itemRoom(it) > 0 && !it.playerDropPending ? 1 : 0.3;
       this.ring(it.x * U, it.y * U, 0.4 + 0.08 * pulse, 0xffe066, 0.85 * a, (0.1 + 0.08 * pulse) * a);
+    }
+    // R held: the meal reticle — how far it can go, where it will come down, the arc it will fly, who it will feed
+    if (s.mealAim) {
+      const dish = s.loadedMeal(), to = s.mealTarget(), ok = !!dish && s.mealCd <= 0;
+      const colour = dish ? parseInt(FOODS[dish].colour.slice(1), 16) : 0xff4040;
+      const px = pl.x * U, pz = pl.y * U, tx = to.x * U, tz = to.y * U, splash = p.mealSplash;
+      this.ring(px, pz, p.mealRange, 0xffffff, 0.35, 0.025);
+      this.ring(tx, tz, splash, ok ? colour : 0xff4040, 0.95, ok ? 0.22 + 0.08 * pulse : 0.12);
+      this.ring(tx, tz, splash * 0.15, ok ? colour : 0xff4040, 0.9, 0.6);
+      const y0 = groundHeight(px, pz) + 0.9, y1 = groundHeight(tx, tz) + 0.05, peak = 1.2 + Math.hypot(tx - px, tz - pz) * 0.12;
+      const pt = (f: number) => [px + (tx - px) * f, y0 + (y1 - y0) * f + 4 * peak * f * (1 - f), pz + (tz - pz) * f] as const;
+      for (let i = 0; i < 14; i += 2) { const a = pt(i / 14), b = pt((i + 1) / 14); this.seg(a[0], a[1], a[2], b[0], b[1], b[2], ok ? colour : 0xff4040, 0.8); }
+      for (const v of s.villagers()) if (v.isAdult && !v.dead && !v.hidden && Math.hypot(v.x - to.x, v.y - to.y) <= splash * TILE) this.moverRing(v, ok ? colour : 0xff4040, pulse);
     }
     // the standing order: where the head is walking, who it is hunting, what it is going to use
     const c = s.command;

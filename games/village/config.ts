@@ -36,6 +36,9 @@ export const p = live(
     waveHpGrowth: [D.waveHpGrowth, 0, 0.3, 0.01, 'Raider HP multiplier grows this much per wave (0.08 = +8% each raid).'],
   }, 'pacing'),
   params({
+    mealRange: [D.mealRange, 3, 16, 0.5, 'Tiles a meal can be lobbed (hold R to aim, release to throw).'],
+    mealSplash: [D.mealSplash, 0.5, 5, 0.25, 'Tiles round where a lobbed meal lands: every ally inside eats it (gnomes get its mood, you its heal and buff).'],
+    mealCd: [D.mealCd, 0, 10, 0.25, 'Seconds between lobbed meals.'],
     campCount: [D.campCount, 0, 30, 1, 'Raider camps out in the wild at the start of a run (outside the thorn ring). Camps guard their ground and never come for the village.'],
     campAggro: [D.campAggro, 2, 16, 1, 'Tiles from a camp raider at which it notices you (or a villager) and attacks.'],
     campLeash: [D.campLeash, 4, 30, 1, 'Tiles from its camp a raider will chase before it gives up, walks home and heals.'],

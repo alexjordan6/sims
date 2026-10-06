@@ -1707,6 +1707,36 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       for (const m of camp.members) m.dead = true; s.removeDead(); s.camps = [];
     }
 
+    // ---- R: a cooked meal lobbed at the reticle feeds everyone in the splash ----------------------------
+    {
+      const run = (secs: number) => { for (let i = 0; i < Math.ceil(secs * 60); i++) { s.grid.rebuild(s.agents); s.tick(1 / 60); } };
+      s = fresh(); clearing(s); s.agents = [s.player]; s.world.items.length = 0;
+      Object.assign(s.player, World.center(120, 100)); clearBulk(s);
+      const spot = World.center(125, 100), home3 = s.world.houses[0];
+      const gnome = (dx: number, dy: number, name: string) => { const g = s.spawn(new Villager(spot.x + dx, spot.y + dy, home3, 'farmer', 20, name, s.mods)); g.gnome = true; g.applyRole(s.mods); g.update = () => {}; return g; };
+      const fed = [gnome(0, 0, 'A'), gnome(10, 0, 'B'), gnome(0, 10, 'C')], left = gnome(80, 0, 'Far');
+      // with nothing cooked, R puts up the reticle but throws nothing
+      s.paused = false;
+      s.beginMealAim(); s.releaseMeal();
+      assert(s.lobs.length === 0, 'with no meal in the pack, R throws nothing');
+      s.player.pickUp('food', 2, 'stew');
+      s.hoverPoint = { x: spot.x, y: spot.y }; s.hoverTile = World.toTile(spot.x, spot.y);
+      s.beginMealAim();
+      assert(s.mealAim && s.loadedMeal() === 'stew', 'holding R puts the reticle up with the stew loaded');
+      s.releaseMeal();
+      assert(s.lobs.length === 1 && s.player.carriedOf('food', 'stew') === 1, 'letting go lobs one stew out of the pack');
+      run(1.5);
+      assert(s.lobs.length === 0 && fed.every((g) => g.mood?.dish === 'stew') && !left.mood, `it lands and every gnome in the splash eats it, and none outside (${fed.filter((g) => g.mood).length} fed)`);
+      // a meal thrown at your own feet feeds you too
+      s.player.hp = 10;
+      s.hoverPoint = { x: s.player.x, y: s.player.y }; s.hoverTile = s.player.tile;
+      run(1.1); // the throw's cooldown
+      s.beginMealAim(); s.releaseMeal(); run(1);
+      assert(s.player.hp > 10 && s.buffMul('work') > 1 && s.player.carriedOf('food', 'stew') === 0, `inside the splash the head eats it: healed to ${s.player.hp}, and the stew's buff`);
+      s.paused = true; s.hoverPoint = null; s.hoverTile = null;
+      for (const g of [...fed, left]) g.dead = true; s.removeDead();
+    }
+
     // ---- MOBA commands: the head walks where it is sent, hunts what it is told to, uses what it is pointed at ----
     {
       // full ticks: the standing order is driven by the scene's tick, not by the agents alone
