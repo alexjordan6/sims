@@ -156,7 +156,8 @@ export class UI {
       </div>
       <div class="hint"><kbd>click / C</kbd><span class="hint-text"></span></div>
     </div>`);
-    this.hotbar.querySelectorAll<HTMLElement>('.slot').forEach((el) => el.addEventListener('click', () => s.setTool(el.dataset.tool as Tool)));
+    // only the tool slots pick a tool: the BAG shares the slot look but opens the backpack
+    this.hotbar.querySelectorAll<HTMLElement>('.slot[data-tool]').forEach((el) => el.addEventListener('click', () => s.setTool(el.dataset.tool as Tool)));
 
     this.bag = h(`<div class="bagpanel panel" hidden>
       <div class="ph"><h2>Backpack</h2><span class="cap">B or ESC to shut it</span><button class="btn small close">CLOSE</button></div>
@@ -382,7 +383,7 @@ export class UI {
 
   private renderHotbar(): void {
     const s = this.scene;
-    this.hotbar.querySelectorAll<HTMLElement>('.slot').forEach((el) => {
+    this.hotbar.querySelectorAll<HTMLElement>('.slot[data-tool]').forEach((el) => {
       const tool = el.dataset.tool as Tool;
       el.classList.toggle('on', s.player.tool === tool);
       el.classList.toggle('off', !!s.toolLocked(tool) || ((tool === 'house' || tool === 'barracks') && s.wood < COST[tool]));

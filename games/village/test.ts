@@ -1700,6 +1700,17 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       s.hoverPoint = null; s.hoverTile = null;
     }
 
+    // ---- the BAG on the belt opens the backpack and never empties the head's hand --------------
+    {
+      const ui = (s as unknown as { ui: { bagShowing: boolean; toggleBag(open?: boolean): void } }).ui;
+      s.player.tool = 'axe';
+      (document.querySelector('.hotbar .bag') as HTMLElement).click();
+      assert(s.player.tool === 'axe' && ui.bagShowing, `clicking BAG opens the backpack and leaves the axe in hand (${String(s.player.tool)})`);
+      ui.toggleBag(false);
+      s.setTool(undefined as unknown as typeof s.player.tool);
+      assert(s.player.tool === 'axe', 'and nothing but a tool can be put in the head\'s hand');
+    }
+
     // ---- toasts never bury the screen ----------------------------------------------------
     {
       const ui = (s as unknown as { ui: { toast(t: string, k: string): void } }).ui;

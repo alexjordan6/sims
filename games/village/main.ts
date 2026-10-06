@@ -972,6 +972,7 @@ export class VillageScene extends SimScene {
     throwItem(it,this.player,this.clampThrow(aim),this.rng);this.validateTool();return true;
   }
   setTool(tool: Tool): void {
+    if (!TOOLS.includes(tool)) return; // nothing but a tool goes in the head's hand
     const why = this.toolLocked(tool);
     if (why) { this.event('build', why); return; }
     this.player.tool = tool;

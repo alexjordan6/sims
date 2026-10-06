@@ -2,7 +2,7 @@ import type { VillageScene } from '../main';
 import { EQUIPMENT, isBulk, slotKey, slotName, type EquipmentSlot, type Slot } from '../pack';
 import { gearUrl } from '../gear-art';
 import { FLORA, frameDataUrl } from '../pixelart';
-import { STASH_SLOTS } from '../config';
+import { STASH_SLOTS, TILE } from '../config';
 
 /** Where a dragged thing came from, and where it may go. */
 type Source = { k: 'pack'; i: number } | { k: 'equip'; slot: EquipmentSlot } | { k: 'stash'; i: number } | { k: 'pouch'; i: number };
@@ -140,10 +140,10 @@ export class PackUI {
           const stash = this.s.stashOf(chest), [g] = stash.splice(d.source.i, 1);
           stash.splice(Math.min(dest.i, stash.length), 0, g);
         }
-      } else if (target === this.s.game.canvas && !this.s.interior.active && (d.source.k === 'pack' || d.source.k === 'equip')) {
-        const rect = this.s.game.canvas.getBoundingClientRect();
-        const point = this.s.cameras.main.getWorldPoint((e.clientX - rect.left) * this.s.scale.width / rect.width, (e.clientY - rect.top) * this.s.scale.height / rect.height);
-        this.s.dropPackItem(d.source.k === 'pack' ? d.source.i : d.source.slot, point);
+      } else if (this.s.view && target === this.s.view.renderer.domElement && !this.s.interior.active && (d.source.k === 'pack' || d.source.k === 'equip')) {
+        // dropped on the map: the ground point under the pointer, through the 3D camera
+        const hit = this.s.view.pickAt(e.clientX, e.clientY);
+        this.s.dropPackItem(d.source.k === 'pack' ? d.source.i : d.source.slot, { x: hit.x * TILE, y: hit.z * TILE });
       }
       this.s.validateTool();
     }
