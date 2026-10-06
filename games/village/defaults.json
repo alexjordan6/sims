@@ -70,6 +70,7 @@
   "rollCd": 0.9,
   "soldierHp": 60,
   "soldierDmg": 10,
+  "pikeSight": 224,
   "pikeReach": 40,
   "pikeDeadZone": 7,
   "pikeWindup": 0.4,

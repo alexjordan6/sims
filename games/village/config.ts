@@ -124,6 +124,7 @@ export const p = live(
     rollCd: [D.rollCd, 0, 4, 0.05, 'Seconds after a roll ends before another can start.'],
     soldierHp: [D.soldierHp, 5, 100, 1, 'Soldiers\' base HP before barracks level, stars and armor.'],
     soldierDmg: [D.soldierDmg, 1, 30, 1, 'Soldiers\' base damage at a ×1 weapon.'],
+    pikeSight: [D.pikeSight, 80, 400, 8, 'How far a pikeman sees and goes looking for a fight, px (a tile is 16). Following you, it closes on any raider this near the band, not just ones already on you.'],
     pikeReach: [D.pikeReach, 16, 80, 1, 'Pixels a pike thrust reaches (a tile is 16). Everything on the line out to here is struck.'],
     pikeDeadZone: [D.pikeDeadZone, 0, 24, 1, 'Pixels inside which a pike is useless: a raider this close is too near to thrust at, and the pikeman steps back.'],
     pikeWindup: [D.pikeWindup, 0.1, 1.5, 0.05, 'Seconds a pikeman draws back before the thrust lands.'],

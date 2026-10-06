@@ -1059,6 +1059,21 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       for (let i = 0; i < 90 && mark.hp === 500; i++) { s.grid.rebuild(s.agents); pk.update(1 / 60, s); if (pk.task === 'levelling the pike') thrust = true; }
       assert(thrust && mark.hp < 500, `at pike's length it levels the pike and the thrust lands (${pk.task})`);
       mark.dead = true; pk.dead = true; s.removeDead();
+      // following the head, a pikeman goes to meet a raider it sees near the band, not only one already on the head
+      {
+        Object.assign(s.player, World.center(120, 100));
+        const scout = s.spawn(new Villager(World.center(121, 100).x, World.center(121, 100).y, s.world.houses[0], 'soldier', 20, 'Scout', s.mods));
+        scout.gnome = true; scout.weapon = 'pike'; scout.applyRole(s.mods); scout.order = { kind: 'follow' };
+        const far = s.spawn(new Raider(World.center(130, 100).x, World.center(130, 100).y)); far.update = () => {}; far.hp = far.maxHp = 500;
+        const startGap = scout.dist(far);
+        for (let i = 0; i < 60; i++) { s.grid.rebuild(s.agents); scout.update(1 / 60, s); }
+        assert((scout as unknown as { target: unknown }).target === far && scout.dist(far) < startGap - 10, `a following pikeman closes on a raider ${Math.round(startGap / TILE)} tiles off that is not on the head (${scout.task}, ${(startGap - scout.dist(far)).toFixed(0)} px closer)`);
+        const plain = s.spawn(new Villager(World.center(121, 101).x, World.center(121, 101).y, s.world.houses[0], 'soldier', 20, 'Swordsman', s.mods));
+        plain.order = { kind: 'follow' };
+        for (let i = 0; i < 30; i++) { s.grid.rebuild(s.agents); plain.update(1 / 60, s); }
+        assert((plain as unknown as { target: unknown }).target === null, 'a swordsman at the head\'s heels still waits for a raider to come at the head');
+        for (const m of [scout, far, plain]) m.dead = true; s.removeDead();
+      }
     }
     // ---- thicket: thorns that slow, hurt and spread, and an axe to cut them back ------------
     {

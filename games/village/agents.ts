@@ -974,10 +974,13 @@ export class Villager extends Mover {
     if (this.retarget <= 0) {
       this.retarget = 0.4;
       const leash = ORDER.leash * TILE;
+      // a pikeman sees much further and goes to meet what it sees: following the head, it closes on any raider near
+      // the band rather than waiting for one to be on the head; on patrol it looks out to its full sight
+      const pike = this.weapon === 'pike';
       this.target = order?.kind === 'attack' ? (order.target as Raider)
         : order?.kind === 'hold' ? s.bestTarget((order.tx + 0.5) * TILE, (order.ty + 0.5) * TILE, leash)
-        : order?.kind === 'follow' ? s.attackingPlayer(s.player.x, s.player.y, leash)
-        : s.bestTarget(this.x, this.y, this.weapon === 'bow' ? 190 : 130);
+        : order?.kind === 'follow' ? s.attackingPlayer(s.player.x, s.player.y, leash) ?? (pike ? s.bestTarget(s.player.x, s.player.y, p.pikeSight) : null)
+        : s.bestTarget(this.x, this.y, this.weapon === 'bow' ? 190 : pike ? p.pikeSight : 130);
     }
     if (this.target && !this.target.dead) {
       this.task = 'fighting';
