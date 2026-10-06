@@ -873,36 +873,46 @@ export class UI {
   renderCooking(): void {
     const s = this.scene, b = s.cookingAt;
     if (!b) { this.cookEl?.remove(); this.cookEl = null; this.lastCooking = ''; return; }
-    const stock = s.potStock(b), made = s.potServings(b);
+    const stock = s.potStock(b), made = s.potServings(b), packed = s.packMeals();
     const inPot = (Object.entries(stock) as [FoodKind, number][]).filter(([, n]) => n >= 0.05)
       .map(([k, n]) => `<span style="color:${FOODS[k].colour}">${foodCount(Math.round(n * 10) / 10, k)}</span>`).join(' · ');
-    const ready = DISHES.reduce((n, d) => n + Math.floor(made[d] ?? 0), 0);
     const why = s.servingProblem();
-    // one row per dish: the dish, what it turns a gnome into, and every ingredient named, pictured and
-    // counted — the recipe has to be readable off the card without hovering anything
-    const chips = DISHES.map((d) => {
-      const r = RECIPES[d], no = s.cookProblem(r), have = Math.floor(made[d] ?? 0), m = MOODS[d];
-      const needs = (Object.entries(r.needs) as [FoodKind, number][]).map(([k, n]) => {
-        const got = Math.floor(stock[k] ?? 0);
-        return `<span class="ing ${got >= n ? 'got' : 'short'}" title="${esc(`${FOODS[k].name}: ${FOODS[k].blurb}`)}">`
-          + `${this.tilePortrait({ key: 'flora', frame: FLORA.pile[k][2] })}`
-          + `<i style="color:${FOODS[k].colour}">${got}/${n}</i> ${esc(FOODS[k].one)}</span>`;
+    // one row per recipe, the ones you can cook first: what it is, what it does (to a gnome, and to you),
+    // every ingredient with how many you have of how many it needs, where a missing one comes from, and COOK
+    const rows = [...DISHES].sort((x, y) => Number(!!s.cookProblem(RECIPES[x])) - Number(!!s.cookProblem(RECIPES[y]))).map((d) => {
+      const r = RECIPES[d], no = s.cookProblem(r), m = MOODS[d];
+      const chips = (Object.entries(r.needs) as [FoodKind, number][]).map(([k, n]) => {
+        const have = s.ingredientHave(k, b), ok = have.total >= n;
+        const from = [have.pot >= 0.05 ? `${Math.floor(have.pot)} in the pot` : '', have.pack >= 1 ? `${Math.floor(have.pack)} in your pack` : '', have.granary >= 1 ? `${Math.floor(have.granary)} in the granary` : ''].filter(Boolean).join(', ') || 'none anywhere';
+        return `<span class="ing ${ok ? 'got' : 'short'}" title="${esc(`${FOODS[k].name}: ${from}${ok ? '' : ' — ' + s.ingredientSource(k)}`)}">`
+          + `${this.tilePortrait({ key: 'flora', frame: FLORA.pile[k][2] })}<i>${Math.floor(have.total)}/${n}</i> ${esc(FOODS[k].one)}</span>`;
       }).join('');
-      return `<button class="potchip ${no ? '' : 'can'}" data-cook="${d}" ${no ? 'disabled' : ''}
-        title="${esc(`${FOODS[d].name} — ${r.makes} servings. A gnome given one is ${m.name}: it ${m.blurb}, for ${m.secs}s`)}">
+      const short = (Object.entries(r.needs) as [FoodKind, number][]).filter(([k, n]) => s.ingredientHave(k, b).total < n)
+        .map(([k]) => `<div class="potsrc">${esc(FOODS[k].name)}: ${esc(s.ingredientSource(k))}</div>`).join('');
+      const stat = FOODS[d].stat as keyof typeof DIET_STAT_NAME;
+      return `<div class="potrow ${no ? '' : 'can'}">
         ${this.tilePortrait({ key: 'flora', frame: FLORA.pile[d][2] })}
-        <span class="potmain"><b style="color:${m.colour}">${esc(FOODS[d].name)}</b>
-          <span class="potneeds">${needs}</span></span>
-        ${have ? `<em>×${have}</em>` : ''}</button>`;
+        <div class="potmain">
+          <b style="color:${m.colour}">${esc(FOODS[d].name)}</b> <span class="potmakes">makes ${r.makes}</span>
+          <div class="poteff"><span>Gnomes: <b style="color:${m.colour}">${esc(m.name)}</b> — ${esc(m.blurb)}</span><span>You: +${r.heal} HP, +${Math.round(r.buffAdd * 100)}% ${esc(DIET_STAT_NAME[stat])} for ${r.buffSecs}s</span></div>
+          <div class="potneeds">${chips}</div>${short}
+        </div>
+        <button class="btn cook ${no ? '' : 'ok'}" data-cook="${d}" ${no ? 'disabled' : ''}>COOK</button>
+      </div>`;
     }).join('');
-    const bowls = DISHES.filter((d) => (made[d] ?? 0) >= 1)
-      .map((d) => `<button class="btn small eat" data-eat="${d}" title="Eat one yourself: +${RECIPES[d].heal} HP and a while of ${DIET_STAT_NAME[FOODS[d].stat]}">${FOODS[d].name} ×${Math.floor(made[d] ?? 0)}</button>`).join('');
-    const key = `${b.tx},${b.ty}|${b.ruined}|${FOOD_KINDS.map((k) => Math.round((stock[k as FoodKind] ?? 0) * 10)).join(',')}|${DISHES.map((d) => Math.floor(made[d] ?? 0)).join(',')}|${why ?? ''}`;
-    const html = `<div class="pothead"><b>The Great Pot</b><span>${inPot || 'empty — throw food in'}</span><button class="btn small close">×</button></div>
-      <div class="potchips">${chips}</div>
-      ${ready ? `<button class="btn serve ${why ? '' : 'ok'}" ${why ? 'disabled' : ''}>DISH OUT · ${ready}</button>
-        <div class="potwhy">${esc(why ?? `a bowl each to every grown gnome within ${SERVE_RANGE} tiles`)}</div>` : ''}
-      ${bowls ? `<div class="potbowls"><span>yours:</span>${bowls}</div>` : ''}`;
+    const mine = DISHES.filter((d) => (packed[d] ?? 0) >= 1).map((d) => `<span style="color:${FOODS[d].colour}">${esc(FOODS[d].name)} ×${Math.floor(packed[d] ?? 0)}</span>`).join(' · ');
+    const standing = DISHES.filter((d) => (made[d] ?? 0) >= 1).map((d) => `${esc(FOODS[d].name)} ×${Math.floor(made[d] ?? 0)}`).join(' · ');
+    const edible = DISHES.filter((d) => (made[d] ?? 0) >= 1 || (packed[d] ?? 0) >= 1);
+    const bowls = edible.map((d) => `<button class="btn small eat" data-eat="${d}" title="Eat one yourself: +${RECIPES[d].heal} HP and a while of ${DIET_STAT_NAME[FOODS[d].stat as keyof typeof DIET_STAT_NAME]}">EAT ${esc(FOODS[d].one)}</button>`).join('');
+    const servings = DISHES.reduce((n, d) => n + Math.floor(made[d] ?? 0) + Math.floor(packed[d] ?? 0), 0);
+    const key = `${b.tx},${b.ty}|${b.ruined}|${FOOD_KINDS.map((k) => Math.round(s.ingredientHave(k as FoodKind, b).total * 10)).join(',')}|${DISHES.map((d) => `${Math.floor(made[d] ?? 0)}/${Math.floor(packed[d] ?? 0)}`).join(',')}|${why ?? ''}`;
+    const html = `<div class="pothead"><b>The Great Pot</b><span>ingredients come from your pack and the granary${inPot ? ` · thrown in: ${inPot}` : ''}</span><button class="btn small close">×</button></div>
+      <div class="potrows">${rows}</div>
+      <div class="potfoot">
+        <div class="potmine">${mine ? `In your pack: ${mine} — <b>hold R</b> to lob one into a crowd, <b>T</b> to eat` : 'Cooked meals go into your pack.'}${standing ? ` · standing in the pot: ${standing}` : ''}</div>
+        ${servings ? `<div class="potact"><button class="btn serve ${why ? '' : 'ok'}" ${why ? 'disabled' : ''}>DISH OUT TO GNOMES</button>${bowls}</div>
+          <div class="potwhy">${esc(why ?? `a bowl each to every grown gnome within ${SERVE_RANGE} tiles of the pot`)}</div>` : ''}
+      </div>`;
     if (!this.cookEl) this.cookEl = h('<div class="potcard panel"></div>');
     if (!this.cookEl.isConnected) { this.overlay.append(this.cookEl); this.lastCooking = ''; }
     const el = this.cookEl;

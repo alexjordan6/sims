@@ -1247,32 +1247,67 @@ export class VillageScene extends SimScene {
       this.event('food', `${foodCount(it.n, it.food)} into the pot.`);
     }
   }
+  /**
+   * How much of an ingredient the cook can lay hands on: what was thrown in the pot, what the head
+   * carries, and what the granary holds (a ruined granary holds nothing anyone can reach).
+   */
+  ingredientHave(k: FoodKind, b = this.cookingAt ?? this.world.cookpot): { pot: number; pack: number; granary: number; total: number } {
+    const pot = b ? this.potStock(b)[k] ?? 0 : 0, pack = this.player.carriedOf('food', k);
+    const g = this.world.granary, granary = g && !g.ruined ? this.pantry[k] ?? 0 : 0;
+    return { pot, pack, granary, total: pot + pack + granary };
+  }
+  /** Where an ingredient comes from, in a few words, for a card that is missing it. */
+  ingredientSource(k: FoodKind): string {
+    const plant: Partial<Record<FoodKind, string>> = { berry: 'a berry bush', mushroom: 'a mushroom patch', hazelnut: 'a hazel', garlic: 'wild garlic', burdock: 'a burdock plant' };
+    switch (FOODS[k].source) {
+      case 'wild': return `pick it wild: right-click a ripe ${plant[k] ?? FOODS[k].name.toLowerCase()} out past the thorns`;
+      case 'crop': return `grow it: till a field (hoe), sow ${FOODS[k].name.toLowerCase()} (seeds, F picks the crop)`;
+      case 'hunt': return 'hunt boars in the woods';
+      case 'hive': return 'knock down a beehive with the axe (and run)';
+      default: return 'cook it';
+    }
+  }
   /** Why this dish can't be made right now, or null. */
   cookProblem(r: Recipe): string | null {
     const b = this.cookingAt;
     if (!b) return 'no pot here';
     if (b.ruined) return 'the pot is tipped over — set it right with the hammer';
-    const stock = this.potStock(b);
     for (const [k, n] of Object.entries(r.needs) as [FoodKind, number][]) {
-      const have = stock[k] ?? 0;
-      if (have < n) return `needs ${foodCount(n, k)} in the pot (${Math.floor(have)} of it so far)`;
+      const have = this.ingredientHave(k, b).total;
+      if (have < n) return `needs ${foodCount(n, k)} (you have ${Math.floor(have)}) — ${this.ingredientSource(k)}`;
     }
     return null;
   }
-  /** Spend what is in the pot and leave the servings standing in it. */
+  /**
+   * Cook a dish: the ingredients come out of the pot first, then the head's pack, then the granary, and
+   * the servings go into the head's pack (ready to eat, or to lob with R). What the pack has no room for
+   * stands in the pot to be ladled out.
+   */
   cook(r: Recipe): boolean {
     const b = this.cookingAt;
     if (!b || this.cookProblem(r)) return false;
-    const stock = this.potStock(b), made = this.potServings(b);
+    const stock = this.potStock(b), made = this.potServings(b), pl = this.player;
     for (const [k, n] of Object.entries(r.needs) as [FoodKind, number][]) {
-      stock[k] = Math.max(0, (stock[k] ?? 0) - n);
-      if ((stock[k] ?? 0) < 1e-9) delete stock[k];
+      let left = n;
+      const fromPot = Math.min(left, stock[k] ?? 0);
+      if (fromPot > 0) { stock[k] = (stock[k] ?? 0) - fromPot; left -= fromPot; if ((stock[k] ?? 0) < 1e-9) delete stock[k]; }
+      if (left > 1e-9) left -= pl.takeOut('food', Math.min(left, pl.carriedOf('food', k)), k);
+      if (left > 1e-9) this.pantry[k] = Math.max(0, this.pantry[k] - left);
     }
-    made[r.dish] = (made[r.dish] ?? 0) + r.makes;
+    const packed = Math.min(r.makes, pl.roomFor('food', r.dish));
+    const took = packed > 0 ? pl.pickUp('food', packed, r.dish) : 0;
+    if (r.makes - took > 1e-9) made[r.dish] = (made[r.dish] ?? 0) + (r.makes - took);
     const c = buildingCenter(b);
     this.fx.push({ kind: 'deposit', x: c.tx * TILE, y: (b.ty + BUILDINGS[b.kind].h) * TILE - 6, text: `+${foodCount(r.makes, r.dish)}`, colour: FOODS[r.dish].colour });
-    this.event('food', `${FOODS[r.dish].name} in the pot — ${r.makes} servings, ready to ladle out.`, true);
+    const where = took >= r.makes ? `${r.makes} in your pack — hold R to lob one into a crowd, or eat one (T)` : took > 0 ? `${took} in your pack, ${r.makes - took} left standing in the pot` : `${r.makes} standing in the pot (your pack is full)`;
+    this.event('food', `${FOODS[r.dish].name} cooked — ${where}.`, true);
     return true;
+  }
+  /** Every cooked meal the head carries, by dish. */
+  packMeals(): Partial<Record<DishKind, number>> {
+    const out: Partial<Record<DishKind, number>> = {};
+    for (const d of DISHES) { const n = this.player.carriedOf('food', d); if (n >= 1) out[d] = n; }
+    return out;
   }
   /** the thicket's own random stream (see reset) */
   private thicketRng = new Rng(1);
@@ -1336,8 +1371,8 @@ export class VillageScene extends SimScene {
   /** Why nobody can be served right now, or null. */
   servingProblem(b = this.world.cookpot): string | null {
     if (!b) return 'there is no pot';
-    const made = this.potServings(b);
-    if (!DISHES.some((d) => (made[d] ?? 0) >= 1)) return 'nothing cooked to ladle out yet';
+    const made = this.potServings(b), packed = this.packMeals();
+    if (!DISHES.some((d) => (made[d] ?? 0) >= 1 || (packed[d] ?? 0) >= 1)) return 'nothing cooked to ladle out yet';
     if (!this.gnomesAtPot(b).length) return `no grown gnome within ${SERVE_RANGE} tiles of the pot — call them (H) and serve them here`;
     return null;
   }
@@ -1350,10 +1385,11 @@ export class VillageScene extends SimScene {
     const made = this.potServings(b), taken: Record<string, number> = {};
     let served = 0;
     for (const v of this.gnomesAtPot(b)) {
-      const dish = DISHES.find((d) => (made[d] ?? 0) >= 1);
+      // the pot's own servings first, then the meals in the head's pack
+      const dish = DISHES.find((d) => (made[d] ?? 0) >= 1) ?? DISHES.find((d) => this.player.carriedOf('food', d) >= 1);
       if (!dish) break;
-      made[dish] = (made[dish] ?? 0) - 1;
-      if ((made[dish] ?? 0) < 1e-9) delete made[dish];
+      if ((made[dish] ?? 0) >= 1) { made[dish] = (made[dish] ?? 0) - 1; if ((made[dish] ?? 0) < 1e-9) delete made[dish]; }
+      else this.player.takeOut('food', 1, dish);
       this.serveOne(v, dish);
       taken[dish] = (taken[dish] ?? 0) + 1;
       served++;
@@ -1437,9 +1473,9 @@ export class VillageScene extends SimScene {
     const b = this.cookingAt ?? this.world.cookpot;
     if (!b) return false;
     const made = this.potServings(b);
-    if ((made[dish] ?? 0) < 1) return false;
-    made[dish] = (made[dish] ?? 0) - 1;
-    if ((made[dish] ?? 0) < 1e-9) delete made[dish];
+    if ((made[dish] ?? 0) >= 1) { made[dish] = (made[dish] ?? 0) - 1; if ((made[dish] ?? 0) < 1e-9) delete made[dish]; }
+    else if (this.player.carriedOf('food', dish) >= 1) this.player.takeOut('food', 1, dish); // one of your own
+    else return false;
     this.player.hunger = Math.min(p.hungerMax, this.player.hunger + this.hungerOf(dish));
     this.dishBuff(dish);
     return true;
@@ -1515,7 +1551,7 @@ export class VillageScene extends SimScene {
     const made = this.potServings(b);
     const ready = DISHES.filter((d) => (made[d] ?? 0) >= 1).map((d) => foodCount(made[d] ?? 0, d)).join(', ');
     const inPot = (Object.entries(this.potStock(b)) as [FoodKind, number][]).filter(([, n]) => n >= 0.05).map(([k, n]) => foodCount(Math.round(n * 10) / 10, k)).join(', ');
-    return `The Great Pot · ${ready ? `${ready} ready to ladle out` : can.length ? `${can.length} dish${can.length === 1 ? '' : 'es'} you can cook` : inPot ? 'not enough of anything yet' : 'empty — throw food in (BASKET, or G with an armful)'}${inPot ? ` · holding ${inPot}` : ''}`;
+    return `open the Great Pot · ${can.length ? `${can.length} dish${can.length === 1 ? '' : 'es'} you can cook` : 'nothing you can cook yet — it shows what each dish needs'}${ready ? ` · ${ready} standing in it` : ''}${inPot ? ` · holding ${inPot}` : ''}`;
   }
 
   // ---- child rearing ----------------------------------------------------------------------

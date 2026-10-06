@@ -1202,8 +1202,9 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(/burdock/.test(s.cookProblem(RECIPES.stew) ?? ''), `with only mushrooms in it the pot says what else it wants (${s.cookProblem(RECIPES.stew)})`);
     const burdock = s.world.dropItem('food', 1, potC.tx * TILE, potC.ty * TILE, 'burdock'); s.potAbsorb();
     assert(!s.world.items.includes(burdock) && s.cookProblem(RECIPES.stew) === null && s.cook(RECIPES.stew), 'throw the rest in and it cooks');
-    assert(s.potServings(pot).stew === RECIPES.stew.makes && !s.potStock(pot).mushroom && !s.potStock(pot).burdock,
-      'the servings stand in the pot and the ingredients are spent');
+    const stews = () => (s.potServings(pot).stew ?? 0) + s.player.carriedOf('food', 'stew');
+    assert(stews() === RECIPES.stew.makes && s.player.carriedOf('food', 'stew') > 0 && !s.potStock(pot).mushroom && !s.potStock(pot).burdock,
+      `the cooked stew goes into the head's pack (${s.player.carriedOf('food', 'stew')} carried) and the ingredients are spent`);
     assert(s.pantry.stew === 0, 'nothing of it goes to the granary — it is ladled out, not stored');
     assert(/needs/.test(s.cookProblem(RECIPES.roast) ?? ''), 'a dish never started says what it wants');
 
@@ -1223,8 +1224,8 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(s.gnomesAtPot().includes(diner) && !s.gnomesAtPot().includes(farGnome), `only the gnomes within ${SERVE_RANGE} tiles are at the pot`);
     assert(s.servingProblem() === null, 'with a gnome at it and stew in it, the pot can be ladled out');
     const hurt = diner.maxHp - 5; diner.hp = hurt;
-    const stewWas = s.potServings(pot).stew ?? 0;
-    assert(s.serveGnomes() === 1 && (s.potServings(pot).stew ?? 0) === stewWas - 1, 'one bowl, one gnome, one serving gone');
+    const stewWas = stews();
+    assert(s.serveGnomes() === 1 && stews() === stewWas - 1, 'one bowl, one gnome, one serving gone');
     assert(diner.mood?.dish === 'stew' && diner.moodNow === MOODS.stew && diner.hp > hurt, 'the gnome takes the mood of what it ate, and the meal heals it');
     assert(!farGnome.mood, 'and the one across the square gets nothing');
     // every bowl is a way of fighting, not a number: none of them touches how fast it works
@@ -1297,12 +1298,12 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(fedKid.dietNow().work > rawKid.dietNow().work * 2, `a child raised on stew far outgrows one raised on raw (${fedKid.dietNow().work.toFixed(2)} vs ${rawKid.dietNow().work.toFixed(2)} work)`);
 
     // eating one: a meal now, and a while of being better at something
-    const stewLeft = s.potServings(pot).stew ?? 0;
+    const stewLeft = stews();
     s.player.hp = 10; s.simTime = 100;
     assert(s.buffMul('work') === 1 && s.workHits(3) === 3, 'an unfed head works at the usual pace');
     assert(s.eatFromPot('stew') && s.player.hp > 10, 'a bowl out of the pot heals the head');
     assert(s.buffMul('work') > 1 && s.workHits(3) === 2, 'and a stew takes a swing off every tool');
-    assert((s.potServings(pot).stew ?? 0) === stewLeft - 1, 'one serving is spent');
+    assert(stews() === stewLeft - 1, 'one serving is spent');
     s.simTime += RECIPES.stew.buffSecs + 1;
     assert(s.buffMul('work') === 1 && s.workHits(3) === 3, 'and it wears off');
     s.pantry.roast = 1; s.eatDish('roast');
@@ -1527,8 +1528,22 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     Object.assign(s.potStock(honeyPot), { honey: 2, wheat: 1 });
     s.openCooking(honeyPot);
     assert(s.cookProblem(RECIPES.cake) === null && s.cook(RECIPES.cake), 'and the great pot bakes a honey cake from it');
-    assert(s.potServings(honeyPot).cake === RECIPES.cake.makes && !s.potStock(honeyPot).honey, 'spending the honey exactly');
+    assert((s.potServings(honeyPot).cake ?? 0) + s.player.carriedOf('food', 'cake') === RECIPES.cake.makes && !s.potStock(honeyPot).honey, 'spending the honey exactly');
     s.openCooking(null);
+    // the cook reaches into the head's pack and the granary: nothing has to be thrown in the pot any more
+    {
+      const pot2 = s.world.cookpot!;
+      for (const k of Object.keys(s.potStock(pot2))) delete s.potStock(pot2)[k as never];
+      clearBulk(s); s.player.pickUp('food', 1, 'mushroom');
+      s.pantry.mushroom = 1; s.pantry.burdock = 0;
+      s.openCooking(pot2);
+      assert(/burdock/.test(s.cookProblem(RECIPES.stew) ?? '') && /pick it wild/.test(s.cookProblem(RECIPES.stew) ?? ''), `short of burdock, the card says where it grows (${s.cookProblem(RECIPES.stew)})`);
+      s.pantry.burdock = 1;
+      assert(s.cook(RECIPES.stew), 'with one mushroom carried and the rest in the granary, it cooks');
+      assert(s.player.carriedOf('food', 'mushroom') === 0 && s.pantry.mushroom === 0 && s.pantry.burdock === 0 && s.player.carriedOf('food', 'stew') === RECIPES.stew.makes,
+        `the pack's mushroom and the granary's go into it, and ${RECIPES.stew.makes} stews come out into the pack`);
+      s.openCooking(null); clearBulk(s);
+    }
     p.hives = wasHives;
 
     // ---- skulks: what the long grass keeps ------------------------------------------------

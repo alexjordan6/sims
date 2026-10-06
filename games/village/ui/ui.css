@@ -544,3 +544,26 @@ body::after {
 .ability::after { content: ''; position: absolute; inset: 0; background: conic-gradient(rgba(0,0,0,0.72) var(--cd, 0%), transparent 0); pointer-events: none; }
 .ability.off { opacity: 0.45; }
 
+
+/* ---- the Great Pot's recipe card ---- */
+.potcard { width: 360px; max-height: 70vh; overflow-y: auto; }
+.potcard .potrows { display: flex; flex-direction: column; gap: 4px; margin: 5px 0; }
+.potcard .potrow { display: flex; align-items: center; gap: 6px; padding: 4px 5px; border: 1px solid #5a4c38; background: #2a241c; }
+.potcard .potrow.can { border-color: var(--accent); background: #353024; }
+.potcard .potrow > img { width: 26px; height: 26px; image-rendering: pixelated; flex-shrink: 0; align-self: flex-start; }
+.potcard .potmain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.potcard .potmain > b { font-size: 12px; }
+.potcard .potmakes { font-size: 9px; color: var(--ink-dim); }
+.potcard .poteff { display: flex; flex-direction: column; font-size: 9px; color: var(--ink-dim); line-height: 1.25; }
+.potcard .potneeds { display: flex; flex-wrap: wrap; gap: 2px 8px; font-size: 10px; margin-top: 1px; }
+.potcard .potneeds .ing { display: inline-flex; align-items: center; gap: 3px; }
+.potcard .potneeds .ing img { width: 14px; height: 14px; image-rendering: pixelated; }
+.potcard .potneeds .ing i { font-style: normal; font-weight: bold; }
+.potcard .potneeds .ing.got i { color: var(--ok); }
+.potcard .potneeds .ing.short i { color: var(--danger); }
+.potcard .potsrc { font-size: 9px; color: #c8a878; }
+.potcard .btn.cook { flex-shrink: 0; font-size: 11px; padding: 6px 8px; }
+.potcard .potfoot { display: flex; flex-direction: column; gap: 4px; font-size: 10px; color: var(--ink-dim); }
+.potcard .potact { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.potcard .potrow > img { width: 28px !important; height: 28px !important; }
+.potcard .potneeds .ing img { width: 16px !important; height: 16px !important; }
