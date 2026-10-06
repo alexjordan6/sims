@@ -5,7 +5,7 @@ import { SimScene, launch, button, getGui, Rng, SpatialGrid } from '@shared/inde
 import { launch as throwItem, type Item } from './items';
 import { World, WILD_FOOD, doorstep, buildingCenter, buildingMaxHp, hasHearth, hearthCost, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos, type Hive } from './world';
 import { Villager, Raider, Player, Mover, Arrow, TOOLS, SWING, type Role, type Tool, type Order } from './agents';
-import { DEFENSE_COST, WALL_HEIGHT } from './config';
+import { DEFENSE_COST, WALL_HEIGHT, WARREN, SOLDIER_CAP_PER_LEVEL } from './config';
 import { Interior } from './interior';
 import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, Bolt, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm, type Sounder } from './wildlife';
@@ -272,7 +272,7 @@ export class VillageScene extends SimScene {
     this.interior.leave();
     this.posting = null;
     this.squad = []; this.drag = null;
-    this.regiments = []; this.regimentSeq = 0; this.placing = null; this.enlistT = 0;
+    this.regiments = []; this.regimentSeq = 0; this.placing = null; this.enlistT = 0; this.warrenBorn = this.warrenToddled = 0;
     this.arrows = 30; this.feverWas = null;
     this.scrap = 0;
     this.armoryFor = null;
@@ -633,7 +633,7 @@ export class VillageScene extends SimScene {
     const c = World.center(d.tx, d.ty);
     const v = new Villager(c.x + this.rng.range(-4, 4), c.y + this.rng.range(-4, 4), home, role, age, NAMES[this.nameIdx++ % NAMES.length], this.mods);
     if (role === 'soldier') v.order = { kind: 'follow' };
-    if (home.kind === 'gnomehouse') { v.gnome = true; v.followingPlayer = this.gnomesFollow; v.applyRole(this.mods); v.hp = v.maxHp; } // born under a toadstool: a gnome for life, and one of your train
+    if (home.kind === 'gnomehouse' || home.kind === 'warren') { v.gnome = true; v.followingPlayer = this.gnomesFollow; v.applyRole(this.mods); v.hp = v.maxHp; } // born under a toadstool: a gnome for life, and one of your train
     if (role === 'soldier') { v.barracksHp = this.world.barracksLevel >= 3 ? 30 : this.world.barracksLevel >= 2 ? 15 : 0; v.applyRole(this.mods); v.hp = v.maxHp; }
     // infants live in the nursery, unseen until they walk out
     if (role === 'infant') { v.hidden = true; v.indoors = home; const c = buildingCenter(home); v.x = c.tx * TILE; v.y = c.ty * TILE; }
@@ -813,7 +813,7 @@ export class VillageScene extends SimScene {
   private toolReach(): number {
     const tool = this.player.tool;
     if (tool === 'basket') return p.tossRange;
-    if (tool === 'wall' || tool === 'gate' || tool === 'stairs' || tool === 'house' || tool === 'tavern' || tool === 'gnomehouse' || tool === 'barracks') return Math.min(3, VillageScene.BUILD_REACH);
+    if (tool === 'wall' || tool === 'gate' || tool === 'stairs' || tool === 'house' || tool === 'tavern' || tool === 'gnomehouse' || tool === 'warren' || tool === 'barracks') return Math.min(3, VillageScene.BUILD_REACH);
     return VillageScene.TOOL_REACH;
   }
 
@@ -1096,6 +1096,7 @@ export class VillageScene extends SimScene {
   toolLocked(tool: Tool): string | null {
     if (isImplement(tool) && !this.player.pack.hasTool(tool)) { const name = TOOL_NAME[tool].toLowerCase(); return `Recover or pick up ${/^[aeiou]/.test(name) ? 'an' : 'a'} ${name}`; }
     if ((tool === 'sword' && this.player.weapons.melee < 0) || (tool === 'bow' && this.player.weapons.bow < 0)) return 'Equip a weapon first';
+    if (tool === 'warren' && !this.gnomesFound) return 'Find the gnomes first: they dig the warrens';
     return tool === 'gnomehouse' && !this.gnomesFound ? 'You have never seen how a toadstool cottage is built' : null;
   }
   validateTool(): void { if (this.toolLocked(this.player.tool)) { this.player.tool = 'sword'; this.player.swing = null; } }
@@ -1701,7 +1702,7 @@ export class VillageScene extends SimScene {
   nearestShelter(x: number, y: number): Building | null {
     let best: Building | null = null, bd = Infinity;
     for (const b of this.world.buildings) {
-      if ((b.kind !== 'house' && b.kind !== 'barracks' && b.kind !== 'tavern' && b.kind !== 'gnomehouse') || b.ruined) continue;
+      if ((b.kind !== 'house' && b.kind !== 'barracks' && b.kind !== 'tavern' && b.kind !== 'gnomehouse' && b.kind !== 'warren') || b.ruined) continue;
       const d = doorstep(b), c = World.center(d.tx, d.ty), dd = (c.x - x) ** 2 + (c.y - y) ** 2;
       if (dd < bd) { bd = dd; best = b; }
     }
@@ -1764,7 +1765,7 @@ export class VillageScene extends SimScene {
         html = `<div class="t">${t.stage < 2 ? 'Stump' : 'Sapling'}</div><div class="d">grows into a tree in ${days} day${days === 1 ? '' : 's'}${this.world.treeNeighbours(tx, ty) >= 2 ? ' · sheltered by the grove' : ''}</div>`;
         break;
       }
-      case 'house': case 'barracks': case 'granary': case 'woodyard': case 'tavern': case 'gnomehouse': {
+      case 'house': case 'barracks': case 'granary': case 'woodyard': case 'tavern': case 'gnomehouse': case 'warren': {
         const b = t.building!;
         html = `<div class="t">${this.buildingTitle(b)}</div><div class="d">${this.buildingBlurb(b)}</div>`;
         break;
@@ -1891,6 +1892,10 @@ export class VillageScene extends SimScene {
     if (this.day === 3 && this.world.wildGnomeHouse) this.event('info', 'The children swear a little red cap watches them from the ferns. They say it smiles.');
 
     this.burnHearths();
+    // the warrens' night, in one line each rather than one a child
+    if (this.warrenBorn) this.event('birth', `${this.warrenBorn} gnome${this.warrenBorn === 1 ? ' was' : 's were'} born in the warrens`);
+    if (this.warrenToddled) this.event('grow', `${this.warrenToddled} gnome child${this.warrenToddled === 1 ? '' : 'ren'} toddled out of the warrens`);
+    this.warrenBorn = this.warrenToddled = 0;
     // Baby Fever is judged on the larder as the day breaks, before anyone eats
     const fever = this.feverActive();
     if (this.mods.babyFever && this.feverWas !== null && fever !== this.feverWas) this.event('birth', fever ? 'Baby fever: full larders, and the village knows it.' : 'The surplus is gone — births return to normal.', true);
@@ -1902,7 +1907,7 @@ export class VillageScene extends SimScene {
       if (v.role === 'infant') continue; // nursed: judged after the grown have eaten, below
       const ration = this.rationOf(v);
       let wellFed = false;
-      if (v.role === 'kid') {
+      if (v.role === 'kid' && v.home.kind !== 'warren') {
         // children eat nothing but what lands in their home yard: yesterday's meal came off a pile, or it didn't
         if (p.kidFood <= 0 || v.ateDay >= this.day - 1) { v.hungerDays = 0; wellFed = true; }
         else if (++v.hungerDays >= p.kidStarveDays) { v.dead = true; v.hp = 0; v.starved = true; this.event('death', `${v.name} starved in the yard at ${v.gnome ? 'the gnome house' : 'home'}`, true); continue; }
@@ -1927,7 +1932,7 @@ export class VillageScene extends SimScene {
     let nurseryWarned = false;
     for (const v of villagers) {
       if (v.role !== 'infant' || v.dead) continue;
-      const nursed = villagers.some((o) => o !== v && o.home === v.home && o.isAdult && !o.dead && o.hungerDays === 0);
+      const nursed = villagers.some((o) => o !== v && (v.home.kind === 'warren' ? o.gnome : o.home === v.home) && o.isAdult && !o.dead && o.hungerDays === 0);
       if (nursed) { v.hungerDays = 0; continue; }
       if (++v.hungerDays >= p.kidStarveDays) { v.dead = true; v.hp = 0; v.starved = true; this.event('death', `${v.name} starved in the nursery — nobody at home was fed`, true); continue; }
       if (!nurseryWarned) { nurseryWarned = true; this.event('food', `${v.name} goes hungry in the nursery — a fed grown-up at home nurses the infants`, true); }
@@ -1955,7 +1960,7 @@ export class VillageScene extends SimScene {
   // ---- the breeding program: nurseries, ages, pens ------------------------------------
 
   /** Cribs in a house's nursery: p.cribs, one more per level. */
-  cribs(h: Building): number { return h.ruined ? 0 : p.cribs + h.level - 1; }
+  cribs(h: Building): number { return h.ruined ? 0 : h.kind === 'warren' ? WARREN.cribs : p.cribs + h.level - 1; }
   infantsOf(h: Building): Villager[] { return this.villagers().filter((v) => v.role === 'infant' && v.home === h && !v.dead); }
   /** Beds in use: residents less the infants, who sleep in cribs. */
   bedsTaken(h: Building): number { return h.residents - this.infantsOf(h).length; }
@@ -1967,7 +1972,7 @@ export class VillageScene extends SimScene {
    * allows another p.soldierCap warriors. A ruin keeps nobody, so losing a granary closes its places.
    */
   callingCap(c: Calling): number {
-    if (c === 'soldier') return p.soldierCap * this.world.barracks.length;
+    if (c === 'soldier') return this.world.barracks.reduce((n, b) => n + p.soldierCap + SOLDIER_CAP_PER_LEVEL * (Math.min(3, b.level) - 1), 0);
     if (c === 'woodcutter') return p.woodcutterCap * this.world.woodyards.length;
     return p.farmerCap * this.world.granaries.length;
   }
@@ -1999,7 +2004,8 @@ export class VillageScene extends SimScene {
   birthProblem(h: Building): string | null {
     if (h.ruined) return 'in ruins';
     if (!h.warm) return 'the hearth is cold';
-    if (this.villagers().filter((v) => v.home === h && v.isAdult && !v.dead).length < 2) return 'needs a couple living here';
+    if (h.kind === 'warren') { if (this.villagers().filter((v) => v.gnome && v.isAdult && !v.dead).length < 2) return 'needs two grown gnomes in the village'; }
+    else if (this.villagers().filter((v) => v.home === h && v.isAdult && !v.dead).length < 2) return 'needs a couple living here';
     if (this.infantsOf(h).length >= this.cribs(h)) return 'the nursery is full';
     if (this.food <= 10) return 'food to spare first';
     // no place to grow into, no child: the village raises nobody it cannot put to work
@@ -2037,9 +2043,10 @@ export class VillageScene extends SimScene {
     for (const h of this.world.familyHouses) {
       if (h.nextBirth === undefined) h.nextBirth = this.simTime + this.rng.range(0, p.birthEvery);
       if (h.nextBirth > this.simTime) continue;
-      h.nextBirth = this.simTime + p.birthEvery;
+      const warren = h.kind === 'warren';
+      h.nextBirth = this.simTime + (warren ? p.warrenBirthEvery : p.birthEvery);
       if (this.birthProblem(h) || !this.rng.chance(this.birthChance(h, fever))) continue;
-      const adults = this.villagers().filter((v) => v.home === h && v.isAdult && !v.dead);
+      const adults = this.villagers().filter((v) => (warren ? v.gnome : v.home === h) && v.isAdult && !v.dead);
       const kid = this.addVillager(h, 'infant', 0);
       kid.calling = this.pickCalling(); // the place is theirs from birth, gnome or not
       kid.parents = [adults[0], adults[1]];
@@ -2048,8 +2055,9 @@ export class VillageScene extends SimScene {
         const twin = this.addVillager(h, 'infant', 0);
         twin.calling = this.pickCalling();
         twin.parents = [adults[0], adults[1]];
-        this.event('birth', `Twins! ${kid.name} and ${twin.name} were born`);
-      } else this.event('birth', `${kid.name} was born`);
+        if (warren) this.warrenBorn += 2; else this.event('birth', `Twins! ${kid.name} and ${twin.name} were born`);
+      } else if (warren) this.warrenBorn++; // a warren's births are told once a dawn, all together
+      else this.event('birth', `${kid.name} was born`);
     }
   }
   /** Everyone ages every tick; the stages turn as the thresholds pass. */
@@ -2070,6 +2078,7 @@ export class VillageScene extends SimScene {
     v.unhide(this);
     v.mealAt = this.simTime + p.dayLength / 4;
     v.ateDay = this.day;
+    if (v.home.kind === 'warren') { this.warrenToddled++; return; }
     this.event('grow', v.gnome ? `${v.name} toddled out of the gnome house` : v.calling ? `${v.name} left the nursery to learn the ${v.calling}'s trade` : `${v.name} left the nursery`);
   }
   /** A new adult takes a bed near where they trained, else the least crowded house. */
@@ -2471,8 +2480,21 @@ export class VillageScene extends SimScene {
 
   /** What one villager eats from the granary at dawn: grown villagers only (infants are nursed, children eat from the pens). */
   rationOf(v: Villager): number {
+    const full = p.foodPerDay * this.mods.foodPerDayMul;
+    // a warren's children eat from the granary like the grown; everywhere else they eat what lies in their yard
+    if (v.role === 'kid' && v.home.kind === 'warren') return full * p.gnomeRation;
     if (v.isChild) return 0; // infants are nursed, children eat only what lies in their home yard
-    return p.foodPerDay * this.mods.foodPerDayMul;
+    return v.gnome ? full * p.gnomeRation : full;
+  }
+  /** births in the warrens since the last dawn, and children who left a warren's nursery: told once a dawn, together */
+  warrenBorn = 0;
+  warrenToddled = 0;
+  /** A warren's card line: beds, cribs, how fast it breeds, what its people eat. */
+  warrenReport(b: Building): string {
+    const folk = this.villagers().filter((v) => v.home === b && !v.dead);
+    const kids = folk.filter((v) => v.role === 'kid').length, eat = folk.reduce((n, v) => n + this.rationOf(v), 0);
+    const perDay = this.birthProblem(b) ? 0 : (p.dayLength / p.warrenBirthEvery) * this.birthChance(b);
+    return `${this.bedsTaken(b)}/${this.beds(b)} beds · nursery ${this.infantsOf(b).length}/${this.cribs(b)} · ${kids} children eating from the granary · ${perDay ? `about ${Math.round(perDay)} births a day (the cribs allowing)` : `no births: ${this.birthProblem(b)}`} · its folk eat ${eat.toFixed(1)} food a dawn`;
   }
   /** Everyone's rations for one dawn. */
   dailyRation(): number { return this.villagers().reduce((n, v) => n + this.rationOf(v), 0); }
@@ -2489,6 +2511,7 @@ export class VillageScene extends SimScene {
   /** Beds in a house: by level, or the Big Families boon if that is higher. */
   beds(h: Building): number {
     if (h.ruined) return 0;
+    if (h.kind === 'warren') return WARREN.beds;
     if (h.kind === 'gnomehouse') return Math.max(0, (GNOME_BEDS[h.level] ?? 3) + this.mods.bedBonus + p.bedBonus);
     return Math.max(0, Math.max(HOUSE_BEDS[h.level] ?? 4, this.mods.houseCap) + this.mods.bedBonus + p.bedBonus);
   }
@@ -2535,7 +2558,8 @@ export class VillageScene extends SimScene {
   buildingBlurb(b: Building): string {
     if (b.ruined) return `in ruins · nothing works until the hammer rebuilds it (${this.rebuildCost(b)} wood)`;
     const hearth = hasHearth(b) ? (b.warm ? ` · hearth ${hearthCost(b)} wood/night · ${b.firewood} night${b.firewood === 1 ? '' : 's'} stocked` : ` · COLD — ${b.firewood ? 'lit again at dawn' : 'the pile is empty'}`) : '';
-    const now = b.kind === 'house' || b.kind === 'gnomehouse' ? `${this.bedsTaken(b)}/${this.beds(b)} beds · nursery ${this.infantsOf(b).length}/${this.cribs(b)}${b.level >= 3 ? ' · births +15%' : ''}`
+    const now = b.kind === 'warren' ? this.warrenReport(b)
+      : b.kind === 'house' || b.kind === 'gnomehouse' ? `${this.bedsTaken(b)}/${this.beds(b)} beds · nursery ${this.infantsOf(b).length}/${this.cribs(b)}${b.level >= 3 ? ' · births +15%' : ''}`
       : b.kind === 'granary' ? `${this.food | 0}/${CAPS[b.level]} food (${FOOD_KINDS.filter((k) => this.pantry[k] >= 1).map((k) => `${this.pantry[k] | 0} ${FOODS[k].one}`).join(', ') || 'empty'}) · the harvest is carried here`
       : b.kind === 'woodyard' ? `${this.wood | 0}/${CAPS[b.level]} wood · chopped logs are carried here`
       : LEVEL_PERKS[b.kind][b.level];
@@ -2547,6 +2571,7 @@ export class VillageScene extends SimScene {
   /** Why the hammer can't upgrade `b` right now, or null. */
   upgradeProblem(b: Building): string | null {
     if (b.kind === 'lair') return "The lair is not yours to improve";
+    if (b.kind === 'warren') return 'a warren comes in one size — dig another';
     if (b.ruined) return `rebuild it first (${this.rebuildCost(b)} wood)`;
     if (b.level >= MAX_LEVEL) return `${BUILDINGS[b.kind].name} is already max level`;
     const cost = this.upgradeCost(b);
@@ -2610,7 +2635,7 @@ export class VillageScene extends SimScene {
   /** Why `b` can't be demolished right now, or null. */
   demolishProblem(b: Building): string | null {
     if (!(b.kind in COST)) return 'only houses, barracks, gnome houses and the tavern can be taken down';
-    if ((b.kind === 'house' || b.kind === 'gnomehouse') && this.villagers().some((v) => v.home === b && !v.dead) && !(b.kind === 'house' ? this.world.houses : this.world.gnomeHouses).some((h) => h !== b && !h.ruined)) return 'its tenants would have nowhere to live';
+    if ((b.kind === 'house' || b.kind === 'gnomehouse' || b.kind === 'warren') && this.villagers().some((v) => v.home === b && !v.dead) && !(b.kind === 'house' ? this.world.houses : this.world.gnomeHouses).some((h) => h !== b && !h.ruined)) return 'its tenants would have nowhere to live';
     return null;
   }
   /** Take a building down: tenants move to another house, anyone inside steps out, half the wood comes back. */
@@ -3427,6 +3452,7 @@ export class VillageScene extends SimScene {
       case 'house':
       case 'tavern':
       case 'gnomehouse':
+      case 'warren':
       case 'barracks': {
         const a = this.buildAnchor(pl.tool);
         const why = this.buildProblem(a, pl.tool);
@@ -3603,9 +3629,10 @@ export class VillageScene extends SimScene {
       case 'house':
       case 'tavern':
       case 'gnomehouse':
+      case 'warren':
       case 'barracks': {
         const why = this.buildProblem(this.buildAnchor(pl.tool), pl.tool);
-        return `E: build ${BUILDINGS[pl.tool].name.toLowerCase()} ${this.cursorPlacing ? 'where you point' : 'ahead'} (${this.buildCost(pl.tool)} wood)${pl.tool === 'barracks' ? ' · the ring is its arrow range' : pl.tool === 'gnomehouse' ? ' · a gnome couple moves in' : ''}${why ? ' — ' + why : ''}`;
+        return `E: build ${BUILDINGS[pl.tool].name.toLowerCase()} ${this.cursorPlacing ? 'where you point' : 'ahead'} (${this.buildCost(pl.tool)} wood)${pl.tool === 'barracks' ? ' · the ring is its arrow range' : pl.tool === 'gnomehouse' ? ' · a gnome couple moves in' : pl.tool === 'warren' ? ` · sleeps ${WARREN.beds}, ${WARREN.cribs} cribs, its children eat from the granary` : ''}${why ? ' — ' + why : ''}`;
       }
       case 'hammer': {
         if (t?.defense) return t.defense.hp < t.defense.maxHp ? `E: repair ${t.kind} (${Math.ceil(t.defense.hp)}/${t.defense.maxHp} HP · 1 wood repairs ${p.wallRepair})` : `E: take down ${t.kind} (${DISMANTLE.hits - t.work} more hits · ${Math.round(this.defenseCost(t.kind as DefenseKind) * DISMANTLE.refund)} wood back)`;

@@ -69,7 +69,7 @@ function tileFrames(t: Tile, cropDays: number, dayTime: number, oldDays: number,
     case 'house':
     case 'barracks':
     case 'granary':
-    case 'woodyard': case 'tavern': case 'lair': case 'gnomehouse': case 'cookpot': case 'wall': case 'gate': case 'stairs': return { ground: grass, object: EMPTY }; // the building sprite sits on top
+    case 'woodyard': case 'tavern': case 'lair': case 'gnomehouse': case 'warren': case 'cookpot': case 'wall': case 'gate': case 'stairs': return { ground: grass, object: EMPTY }; // the building sprite sits on top
   }
 }
 

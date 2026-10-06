@@ -9,6 +9,7 @@ import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, Wrecker, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm } from './wildlife';
 import { SLOT_GAP } from './regiment';
+import { WARREN, SOLDIER_CAP_PER_LEVEL } from './config';
 import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, GNOME_PACK, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS, YARD, CALLINGS, TREE_RESERVE, MOODS, SERVE_RANGE, POT_INGREDIENTS, BODY } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
@@ -695,7 +696,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     const den = s.world.place('gnomehouse', 125, 100), [gma, gpa] = s.foundGnomes(den);
     assert(gma.gnome && gpa.gnome && gma.isAdult && gma.role === 'farmer' && gpa.role === 'woodcutter' && den.residents === 2 && gma.home === den, 'a new gnome house comes with a grown couple: one for the wild, one for the axe');
     { const hp0 = gma.maxHp, was = p.gnomeHp; p.gnomeHp = was * 2; gma.applyRole(s.mods); assert(gma.maxHp > hp0 && gma.speed === p.gnomeSpeed, 'grown gnomes take their stats from the sliders'); p.gnomeHp = was; gma.applyRole(s.mods); gma.hp = gma.maxHp; }
-    assert(s.beds(den) === 3 && s.rationOf(gma) === p.foodPerDay * s.mods.foodPerDayMul, 'a Lv1 gnome house has 3 beds and its gnomes eat a full ration');
+    assert(s.beds(den) === 3 && s.rationOf(gma) === p.foodPerDay * s.mods.foodPerDayMul * p.gnomeRation, 'a Lv1 gnome house has 3 beds and its gnomes eat gnomeRation of a full ration');
     den.nextBirth = 0;
     assert(births(s, 40) > 0, 'a gnome couple in a warm cottage has children');
     const sprout = s.villagers().find((v) => v.role === 'infant')!;
@@ -1840,6 +1841,53 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(s.regimentKey('H') && (reg.stance as string) === 'follow' && s.regimentKey('G') && (reg.stance as string) === 'hold', 'H sets it following, G holding');
       s.clearSquad(); s.player.tool = 'sword';
       assert(!s.regimentKey('F'), 'with nothing picked (or the wand away) the keys keep their old jobs');
+    }
+
+    // ---- the warren and the army economy: quick births, a granary-fed nursery, bigger barracks, gnome rations ----
+    {
+      s = fresh(); clearing(s); s.agents = [s.player]; s.world.items.length = 0; s.mods.babyFever = false;
+      s.gnomesFound = false;
+      assert(!!s.toolLocked('warren'), 'the warren is locked until the gnomes are found');
+      s.gnomesFound = true;
+      assert(!s.toolLocked('warren'), 'and open once they are');
+      let wt = -1, wy = -1;
+      for (let ty = 90; ty < 110 && wt < 0; ty++) for (let tx = 110; tx < 140; tx++) if (s.world.canBuild('warren', tx, ty)) { wt = tx; wy = ty; break; }
+      const warren = s.world.place('warren', wt, wy);
+      warren.firewood = 99; warren.warm = true; s.food = 500;
+      const ma = s.spawn(new Villager(0, 0, warren, 'farmer', 20, 'Warren Ma', s.mods)), pa = s.spawn(new Villager(0, 0, warren, 'woodcutter', 20, 'Warren Pa', s.mods)); warren.residents = 2;
+      for (const g of [ma, pa]) { g.gnome = true; g.applyRole(s.mods); g.update = () => {}; }
+      assert(s.beds(warren) === WARREN.beds && s.cribs(warren) === WARREN.cribs && s.world.gnomeHouses.includes(warren), `a warren sleeps ${WARREN.beds} and keeps ${WARREN.cribs} cribs, and is a gnome home`);
+      assert(!s.birthProblem(warren), `two grown gnomes anywhere in the village are enough for it to breed (${s.birthProblem(warren)})`);
+      const wasChance = p.birthChance, wasTwins = s.mods.twinChance; p.birthChance = 1; s.mods.twinChance = 0;
+      warren.nextBirth = 0; s.tickBirths();
+      const said = s.journal.length;
+      let rolls = 0;
+      while (s.infantsOf(warren).length < WARREN.cribs && rolls < 40) { s.simTime += p.warrenBirthEvery; s.tickBirths(); rolls++; }
+      s.simTime += p.warrenBirthEvery * 5; s.tickBirths();
+      const born = s.infantsOf(warren);
+      assert(born.length === WARREN.cribs && born.every((v) => v.gnome) && rolls <= WARREN.cribs * 2, `a birth roll every ${p.warrenBirthEvery}s fills its ${WARREN.cribs} cribs with gnomes, and no more (${born.length} in ${rolls} rolls)`);
+      assert(!s.journal.slice(said).some((j) => /was born/.test(j.text)), 'and says nothing child by child');
+      // the nursery walks out: its children eat from the granary at dawn, with nothing thrown in the yard
+      for (const v of born) { v.age = p.infantDays; v.update = () => {}; }
+      s.tickAges(0);
+      const kids = born.filter((v) => v.role === 'kid');
+      const ration = p.foodPerDay * s.mods.foodPerDayMul * p.gnomeRation;
+      assert(Math.abs(s.dailyRation() - (kids.length + 2) * ration) < 1e-6, `a dawn's rations are gnomes × foodPerDay × gnomeRation (${s.dailyRation().toFixed(2)} for ${kids.length + 2} gnomes)`);
+      const before = s.food, ask = s.dailyRation(), told = s.journal.length;
+      s.day++; s.newDay();
+      assert(kids.length === WARREN.cribs && kids.every((v) => !v.dead && v.hungerDays === 0) && Math.abs(before - s.food - ask) < 1e-6, `the warren's ${kids.length} children ate from the granary at dawn, nothing thrown in their yard (${(before - s.food).toFixed(2)} food eaten)`);
+      const lines = s.journal.slice(told).map((j) => j.text);
+      assert(lines.some((t) => t === `${WARREN.cribs} gnomes were born in the warrens`) && lines.some((t) => /toddled out of the warrens/.test(t)) && !lines.some((t) => /going hungry/.test(t)),
+        `and the dawn tells the warrens' night in a line or two (${lines.filter((t) => /warren/.test(t)).join(' / ')})`);
+      p.birthChance = wasChance; s.mods.twinChance = wasTwins;
+      // barracks: forty under arms, twenty more for each level above the first
+      const bk = s.world.barracks[0], lvl = bk.level;
+      bk.level = 1; const one = s.callingCap('soldier');
+      bk.level = 3; const three = s.callingCap('soldier');
+      bk.level = lvl;
+      assert(p.soldierCap === 40 && one === 40 * s.world.barracks.length && three === one + 2 * SOLDIER_CAP_PER_LEVEL, `a barracks keeps 40 under arms, ${SOLDIER_CAP_PER_LEVEL} more a level (${one} at Lv1, ${three} at Lv3)`);
+      s.view?.snapCamera(); s.draw();
+      assert(true, 'the warren mound draws');
     }
 
     // ---- MOBA commands: the head walks where it is sent, hunts what it is told to, uses what it is pointed at ----

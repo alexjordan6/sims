@@ -571,7 +571,7 @@ export class Villager extends Mover {
     if (s.dayTime > BEDTIME.start || s.dayTime < BEDTIME.end) { this.task = 'off to bed'; this.goHome(s, dt); return; }
 
     // every child eats what lies in the yard of their own home — thrown there from the BASKET, or nothing
-    const hungry = this.mealAt <= s.simTime && p.kidFood > 0;
+    const hungry = this.mealAt <= s.simTime && p.kidFood > 0 && this.home.kind !== 'warren'; // a warren's children are fed from the granary at dawn
     if (hungry) {
       const item = s.world.nearestYardItem(this.x, this.y, this.home, YARD);
       if (item) { this.eatFrom(dt, s, item); return; }
@@ -1406,8 +1406,8 @@ export class Arrow extends Mover {
 // player
 
 /** What the player holds. The equipped tool decides what E does. */
-export type Tool = 'hoe' | 'seeds' | 'axe' | 'sword' | 'house' | 'barracks' | 'hammer' | 'bow' | 'tavern' | 'wall' | 'gate' | 'stairs' | 'basket' | 'gnomehouse' | 'wand';
-export const TOOLS: Tool[] = ['hoe', 'seeds', 'axe', 'sword', 'house', 'barracks', 'hammer', 'bow', 'tavern', 'wall', 'gate', 'stairs', 'basket', 'gnomehouse', 'wand'];
+export type Tool = 'hoe' | 'seeds' | 'axe' | 'sword' | 'house' | 'barracks' | 'hammer' | 'bow' | 'tavern' | 'wall' | 'gate' | 'stairs' | 'basket' | 'gnomehouse' | 'warren' | 'wand';
+export const TOOLS: Tool[] = ['hoe', 'seeds', 'axe', 'sword', 'house', 'barracks', 'hammer', 'bow', 'tavern', 'wall', 'gate', 'stairs', 'basket', 'gnomehouse', 'warren', 'wand'];
 
 /** A sword swing in progress: an arc in front of the player that connects during its active window. */
 /** A sword swing in progress: an arc in front of the player that connects during its active window. */
@@ -1487,7 +1487,7 @@ export class Player extends Mover {
 
   /** The building the tool would place, if it's a building tool. */
   get build(): BuildingKind | 'none' {
-    return this.tool === 'house' || this.tool === 'barracks' || this.tool === 'tavern' || this.tool === 'gnomehouse' ? this.tool : 'none';
+    return this.tool === 'house' || this.tool === 'barracks' || this.tool === 'tavern' || this.tool === 'gnomehouse' || this.tool === 'warren' ? this.tool : 'none';
   }
 
   /** The tile just in front of the player. */

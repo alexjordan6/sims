@@ -1,7 +1,8 @@
 import { PackUI } from './pack-ui';
 import { slotName, slotKey } from '../pack';
 import { gearUrl } from '../gear-art';
-import { STACK, type BulkKind } from '../config';
+import { STACK, WARREN, SOLDIER_CAP_PER_LEVEL, type BulkKind } from '../config';
+import { REGIMENT_SIZE } from '../regiment';
 import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type Tool } from '../agents';
 import { Boar } from '../wildlife';
@@ -37,6 +38,7 @@ export function spr(key: string, frame: number, size = 32, extra = ''): string {
 const ROLE_LABEL: Record<string, string> = { infant: 'Infant', kid: 'Child', farmer: 'Farmer', woodcutter: 'Woodcutter', soldier: 'Soldier', gnome: 'Gnome' };
 /** a grown gnome's portrait, for chips and outlooks */
 /** the GNOME HOUSE slot's tooltip once the craft is learned (locked, it says how to learn it) */
+const WARREN_TITLE = () => `A gnome warren: a burrow mound that sleeps ${WARREN.beds} and keeps ${WARREN.cribs} cribs. Any two grown gnomes in the village are enough for it to breed — a roll every ${p.warrenBirthEvery}s — and its children eat from the granary by themselves (${p.gnomeRation} of a ration each a dawn), so nobody throws food in its yard. The army of hundreds is raised here`;
 const GNOME_TITLE = 'A toadstool cottage: a gnome couple moves in and raises a family like any house. Their grown ones take a calling like anyone else — the wild instead of the fields, the axe, or the club — and H calls the whole train to your heels';
 
 const ENEMY_LABEL: Record<string, string> = { raider: 'Hollow raider', warlord: 'The Warlord', rat: 'Plague rat — eats crops', snatcher: 'Snatcher — steals children', brute: 'Butcher — heavy', shaman: 'Bone shaman — ranged', wrecker: 'Wrecker — tears down buildings', boar: 'Boar — wild game, fights back', troll: 'Bog troll — prowls the wild', skulk: 'Skulk — creeps from long grass, hunts gnomes' };
@@ -150,6 +152,7 @@ export class UI {
         ${slot('stairs', 'town', TOWN.iconHammer, 'STAIRS', 'Connect stairs to your walls. Right click or X to climb and descend', 10)}
         ${slot('tavern', 'town', TOWN.wallWoodDoor, 'TAVERN', 'A cozy place to eat, rest and gather', COST.tavern)}
         ${slot('gnomehouse', 'town', TOWN.wallWoodDoor, 'GNOME HOUSE', GNOME_TITLE, COST.gnomehouse)}
+        ${slot('warren', 'town', TOWN.wallWoodDoor, 'WARREN', WARREN_TITLE(), COST.warren)}
         ${slot('wand', 'dungeon', DUNGEON.wizard, 'WAND', 'Shaman wand: left click or drag a box to pick soldiers, right click to send them — open ground = go there and hold, a raider = attack it, a wall top = take that archer post. F = follow me (again to stop). With no one picked, orders go to everyone')}
         ${slot('basket', 'farm', FARM.crate, 'BASKET', 'F picks a kind of food; walk up to the granary to fill the basket with it, then throw it into a home yard. It flies where you point, bounces and rolls; children only eat what lies in the yard of the home they live in, and what they eat is who they become')}
         <div class="slot bag" data-bag="1" title="Your backpack: what you are carrying, and what you are wearing. B opens it">${spr('farm', FARM.crate, 32)}<span class="lbl">BAG</span><span class="cost bagfull"></span></div>
@@ -401,6 +404,7 @@ export class UI {
       const tool = el.dataset.tool as Tool;
       el.classList.toggle('on', s.player.tool === tool);
       el.classList.toggle('off', !!s.toolLocked(tool) || ((tool === 'house' || tool === 'barracks') && s.wood < COST[tool]));
+      if (tool === 'warren') { const want = s.toolLocked(tool) ? 'Find the gnomes first: they dig the warrens.' : WARREN_TITLE(); if (el.title !== want) el.title = want; }
       if (tool === 'gnomehouse') { const want = s.toolLocked(tool) ? 'Somewhere in these woods a gnome family keeps house. Warm motes drift over their glade — walk into it and they will teach you the craft.' : GNOME_TITLE; if (el.title !== want) el.title = want; }
       if (tool === 'basket') { const lbl = el.querySelector('.lbl')!, want = `BASKET · ${s.player.carriedOf('food',s.player.basketKind)} ${FOODS[s.player.basketKind].name.toUpperCase()}`; if (lbl.textContent !== want) lbl.textContent = want; }
       if (tool === 'seeds') { const lbl = el.querySelector('.lbl')!, want = FOODS[s.player.cropKind].name.toUpperCase(); if (lbl.textContent !== want) lbl.textContent = want; }
@@ -535,6 +539,13 @@ export class UI {
         html += `<b>Beds</b><span>${s.bedsTaken(b)} / ${s.beds(b)}${s.bedsTaken(b) > s.beds(b) ? ' <em class="warn">· crowded</em>' : ''}</span>`;
         html += `<b>Nursery</b><span>${infants} / ${s.cribs(b)} cribs${b.ruined ? '' : why ? ` · <em class="warn">no births: ${esc(why)}</em>` : ` · ${Math.round(100 * s.birthChance(b))}% every ${p.birthEvery}s · next roll in ${Math.ceil(s.birthIn(b))}s${s.feverActive() ? ' <em class="fever-txt">· baby fever</em>' : ''}`}<em class="d"> infants walk out into the yard after ${p.infantDays} days</em></span>`;
       }
+      if (b.kind === 'warren') {
+        const infants = s.infantsOf(b).length, why = s.birthProblem(b), folk = s.villagers().filter((v) => v.home === b && !v.dead);
+        const kids = folk.filter((v) => v.role === 'kid').length, eat = folk.reduce((n, v) => n + s.rationOf(v), 0);
+        html += `<b>Beds</b><span>${s.bedsTaken(b)} / ${s.beds(b)}</span>`;
+        html += `<b>Nursery</b><span>${infants} / ${s.cribs(b)} cribs${b.ruined ? '' : why ? ` · <em class="warn">no births: ${esc(why)}</em>` : ` · ${Math.round(100 * s.birthChance(b))}% every ${p.warrenBirthEvery}s · next roll in ${Math.ceil(s.birthIn(b))}s`}<em class="d"> any two grown gnomes in the village will do</em></span>`;
+        html += `<b>Larder</b><span>${kids} children and ${folk.length - kids - infants} grown eat ${eat.toFixed(1)} food from the granary a dawn<em class="d"> nobody needs to throw food in this yard</em></span>`;
+      }
       if (b.kind === 'granary') {
         const bin = (ks: readonly FoodKind[]) => ks.filter((k) => s.pantry[k] >= 1).map((k) => `<span style="color:${FOODS[k].colour}">${s.pantry[k] | 0}</span> ${FOODS[k].one}`).join(' · ');
         const raw = bin(RAW_KINDS), cooked = bin(DISHES);
@@ -544,7 +555,7 @@ export class UI {
         const ammo = b.ammo ?? 0, cap = s.towerCap(b);
         html += `<b>Arrows</b><span>${ammo ? `${ammo} / ${cap}` : `<em class="warn">OUT OF ARROWS</em> · 0 / ${cap}`} · range ${s.towerRange(b)} px<div class="bar ammo ${ammo / cap <= 0.25 ? 'low' : ''}"><i style="width:${Math.round(100 * ammo / cap)}%"></i></div></span>`;
       }
-      html += `<b>Next</b><span>${b.level < MAX_LEVEL ? `Lv${b.level + 1}: ${LEVEL_PERKS[b.kind][b.level + 1]} <em>· ${cost} wood with the hammer</em>` : 'max level'}</span></div>`;
+      html += `<b>Next</b><span>${b.kind === 'warren' ? 'one size — dig another' : b.level < MAX_LEVEL ? `Lv${b.level + 1}: ${LEVEL_PERKS[b.kind][b.level + 1]} <em>· ${cost} wood with the hammer</em>` : 'max level'}</span></div>`;
       if (b.kind === 'gnomehouse') html += `<p class="d">A gnome couple raises children here; grown gnomes potter about it and fight whatever comes.</p>`;
       if (hasInterior(b.kind)) {
         const onStep = s.doorAt() === b;
@@ -555,7 +566,7 @@ export class UI {
         html += `<p>The tower shoots raiders inside the ring while the chest has arrows.</p><button class="btn small ${why ? '' : 'ok'} restock" ${why ? 'disabled' : ''} title="${why ? esc(why) : ''}">RESTOCK ${TOWER.restockArrows} ARROWS · ${TOWER.restockWood} WOOD</button>${why ? `<span class="d"> ${esc(why)}</span>` : ''}`;
         html += `<p>Equip soldiers with bows in their cards. SET WALL POST, then click a connected battlement. Stairs are required.</p><button class="btn small craft-arrows">FLETCH 10 ARROWS · 2 WOOD</button> <button class="btn small ok open-armory" title="The chest inside: armor and tower arrows">ARMOR CHEST</button><p class="d">Forges leather now, iron at Lv2, steel at Lv3. Scrap iron drops where a raider falls — walk over it.</p>`;
       }
-      if (b.kind === 'house' || b.kind === 'barracks' || b.kind === 'tavern' || b.kind === 'gnomehouse') {
+      if (b.kind === 'house' || b.kind === 'barracks' || b.kind === 'tavern' || b.kind === 'gnomehouse' || b.kind === 'warren') {
         const why = s.demolishProblem(b), refund = s.demolishRefund(b), arming = this.confirmDemolish === b;
         html += `<p class="d"><button class="btn small ${arming ? 'danger' : ''} demolish" ${why ? 'disabled' : ''} title="${why ? esc(why) : 'Take it down'}">${arming ? `REALLY TAKE IT DOWN? · ${refund} WOOD BACK` : `DEMOLISH · ${refund} WOOD BACK`}</button>${why ? ` ${esc(why)}` : arming ? ' <em class="warn">tenants move out, anyone inside steps out</em>' : b.ruined ? ' rubble is worth nothing' : ''}</p>`;
       }
@@ -1102,7 +1113,8 @@ export class UI {
           <p>Every building can be wrecked. The <b>HAMMER</b> mends a damaged one (1 wood = 60 HP) and raises a ruin again for half its build cost; on a sound building, 3 hits upgrade it for wood. Every building has three levels — the brass studs on the sign by the door count them, and each level changes the building itself:</p>
           ${building('house', 'House · ' + COST.house + ' wood', 'A couple here has children.')}
           ${building('gnomehouse', 'Gnome House · ' + COST.gnomehouse + ' wood', 'Comes with a gnome couple — one for the wild, one for the axe — who raise a family like any house (cribs, a hearth, food to spare). Gnome children are raised in the cottage yard, eating only what you throw within a few tiles of it (BASKET), and take a calling like anyone else, out of the same places your buildings keep in work. A gnome <b>forager</b> fills a granary place: the wild is their field, so they walk to the nearest ripe plant, pick one unit and carry it in. A gnome <b>woodcutter</b> fells trees like any other. A gnome <b>warrior</b> fills a barracks place and fights — though it is a little person, with a little person’s HP, whatever armor you forge it. Workers still run home from raiders. <b>You start without the craft:</b> one cottage stands out in the woods, ringed by mushrooms, with a glade of warm motes drifting over it. Walk into the glade and keep going until the cottage itself comes into sight — the family is yours, and they teach you to raise more.')}
-          ${building('barracks', 'Barracks · ' + COST.barracks + ' wood', 'Keeps ' + p.soldierCap + ' warriors under arms and drills the children promised a sword; its tower shoots raiders.')}
+          ${building('warren', 'Gnome Warren · ' + COST.warren + ' wood', WARREN_TITLE() + '. Unlocked once you have found the gnomes; it comes in one size — dig another for more.')}
+          ${building('barracks', 'Barracks · ' + COST.barracks + ' wood', 'Keeps ' + p.soldierCap + ' warriors under arms (' + SOLDIER_CAP_PER_LEVEL + ' more at each level above the first) and drills the children promised a sword; its tower shoots raiders. Gnome warriors fall in under banners of ' + REGIMENT_SIZE + ' — see Regiments in the roster.')}
           ${building('granary', 'Granary', 'Holds your food and keeps ' + p.farmerCap + ' farmers in work. The crate stack beside it climbs as the store fills.')}
           ${building('woodyard', 'Woodyard', 'Holds your wood and keeps ' + p.woodcutterCap + ' woodcutters in work. The log stack beside the cabin climbs as it fills.')}
           <h3>FOOD & DIET</h3>

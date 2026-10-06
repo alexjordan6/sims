@@ -116,7 +116,9 @@ export const p = live(
   params({
     farmerCap: [D.farmerCap, 0, 40, 1, 'Farmers one granary can keep in work (a foraging gnome fills the same place). With no free place anywhere in the village, no child is born at all.'],
     woodcutterCap: [D.woodcutterCap, 0, 40, 1, 'Woodcutters one woodyard can keep in work.'],
-    soldierCap: [D.soldierCap, 0, 60, 1, 'Warriors one barracks can keep under arms. Build a second barracks and the village may raise that many again.'],
+    soldierCap: [D.soldierCap, 0, 120, 1, 'Warriors one barracks can keep under arms (+20 for each level above the first). Build a second barracks and the village may raise that many again.'],
+    warrenBirthEvery: [D.warrenBirthEvery, 1, 60, 1, 'Real seconds between birth rolls in a gnome warren (it needs two grown gnomes in the village, a warm hearth, a free crib and food to spare).'],
+    gnomeRation: [D.gnomeRation, 0, 1, 0.05, 'Share of foodPerDay a gnome eats at dawn — grown gnomes, and the warren children who eat from the granary. A thousand gnomes at 0.25 eat like 250 people.'],
     startFarmers: [D.startFarmers, 0, 10, 1, 'Farmers the village opens with (foragers in a gnome start). Founders are spawned as written, so an opening roster may sit over its cap.'],
     startWoodcutters: [D.startWoodcutters, 0, 10, 1, 'Woodcutters the village opens with.'],
     startPikemen: [D.startPikemen, 0, 20, 1, 'Gnome warriors the gnome start opens with, every one of them carrying a pike (in place of startWarriors there). The warrior cap is per barracks, so more than it holds means no warrior is born until you build another.'],
@@ -195,10 +197,14 @@ export const TOWER = {
 } as const;
 
 /** Every kind of building on the map (world.ts re-exports this; the per-kind tables below key on it so a new kind can't be forgotten). */
-export type BuildingKind = 'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern' | 'lair' | 'gnomehouse' | 'cookpot';
+export type BuildingKind = 'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern' | 'lair' | 'gnomehouse' | 'cookpot' | 'warren';
 /** The shaman wand's orders, in tiles: how far a holding squad engages from its spot, how close followers keep to the head, and the ring a squad spreads over when sent somewhere. */
 export const ORDER = { leash: 5, followGap: 2.5, spread: 1 } as const;
-export const COST = { house: 20, barracks: 30, tavern: 50, gnomehouse: 25 } as const;
+export const COST = { house: 20, barracks: 30, tavern: 50, gnomehouse: 25, warren: 60 } as const;
+/** The gnome warren: a burrow mound that sleeps a crowd, keeps a big nursery, and feeds its children from the granary. */
+export const WARREN = { beds: 30, cribs: 8 } as const;
+/** warriors each barracks level above the first adds to that barracks' place count */
+export const SOLDIER_CAP_PER_LEVEL = 20;
 export const DEFENSE_COST = { wall: 4, gate: 12, stairs: 10 } as const;
 export const WALL_HEIGHT = 64;
 
@@ -225,6 +231,7 @@ export const UPGRADE_COST: Record<BuildingKind, readonly number[]> = {
   lair: [0, 0, 0],
   cookpot: [0, 0, 0], // the great pot was here before you and takes no hammer
   gnomehouse: [0, 20, 40],
+  warren: [0, 0, 0], // one size: build another
   tavern: [0, 40, 80],
   house: [0, 30, 60], barracks: [0, 40, 80], granary: [0, 30, 60], woodyard: [0, 30, 60],
 };
@@ -233,6 +240,7 @@ export const LEVEL_PERKS: Record<BuildingKind, readonly [string, string, string,
   lair: ['', 'the Ogre sleeps here by day', '', ''],
   cookpot: ['', 'throw food in, cook it, ladle it out to the gnomes', '', ''],
   gnomehouse: ['', '3 beds', '4 beds', '6 beds'],
+  warren: ['', `${WARREN.beds} beds · ${WARREN.cribs} cribs · quick births · its children eat from the granary`, '', ''],
   tavern: ['', 'hearth meals restore 20 HP', 'hearth meals restore 35 HP', 'hearth meals restore 50 HP · family hall'],
   house: ['', '4 beds', '6 beds', '8 beds · births +15%'],
   barracks: ['', 'fires arrows at raiders · drills the drill yard', 'soldiers +15 HP · iron forge · tower +1.5 dmg', 'soldiers +30 HP · +20% dmg · regen · steel forge · tower +3 dmg'],
@@ -244,6 +252,7 @@ export const LEVEL_LOOKS: Record<BuildingKind, readonly [string, string, string,
   lair: ['', 'a cave mouth, bones, a fire', '', ''],
   cookpot: ['', 'a black cauldron over a fire, steaming when there is something in it', '', ''],
   gnomehouse: ['', 'a toadstool cottage', 'a lantern and a second cap', 'a chimney and a fairy ring'],
+  warren: ['', 'a grassy burrow mound with round doors and toadstool chimneys', '', ''],
   tavern: ['', 'green roof, hanging mug sign', 'flower boxes and second chimney', 'guest loft and lanterns'],
   house: ['', 'cottage', 'chimney, flower boxes, porch', 'second storey'],
   barracks: ['', 'stone keep', 'shields and stakes', 'tower and torches'],
@@ -663,6 +672,7 @@ export const HEARTH_WOOD: Record<BuildingKind, readonly [number, number, number,
   lair: [0, 0, 0, 0],
   cookpot: [0, 0, 0, 0], // its fire is never out; no woodcutter stocks it
   gnomehouse: [0, 1, 1, 2],
+  warren: [0, 2, 2, 2],
 };
 /** scrap iron looted from slain raiders */
 export const SCRAP_DROP = { raider: 2, brute: 4, warlord: 10, snatcher: 1, shaman: 2, rat: 0, ogre: 30, wrecker: 3, boar: 0, troll: 0, skulk: 0 } as const;
@@ -678,6 +688,7 @@ export const BUILDING_HP: Record<BuildingKind, readonly [number, number, number,
   lair: [0, 0, 0, 0],
   cookpot: [0, 0, 0, 0], // iron and older than the village: raiders can tip it about but never break it
   gnomehouse: [0, 180, 260, 340],
+  warren: [0, 360, 360, 360],
 };
 /** hammer on a damaged building: HP per wood; rebuilding a ruin costs this share of the build cost (buildings without a shop price use `rebuildDefault`) */
 export const REPAIR = { perWood: 60, rebuildFraction: 0.5, rebuildDefault: 15 } as const;

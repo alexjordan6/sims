@@ -456,6 +456,7 @@ function buildingTexture(scene: Phaser.Scene, key: string, w: number, h: number,
  * pixels from the sprite's top-left, per level (index = level). `warm` = firelight (torches).
  */
 export const LIGHTS: Record<BuildingKind, readonly (readonly { x: number; y: number; r: number; warm?: boolean }[])[]> = {
+  warren: [[], [], [], []], // drawn in 3D only
   gnomehouse: [[], [{ x: 19, y: 33, r: 12 }], [{ x: 19, y: 33, r: 12 }, { x: 26, y: 36, r: 10 }], [{ x: 19, y: 33, r: 12 }, { x: 26, y: 36, r: 10 }, { x: 19, y: 43, r: 12 }, { x: 9, y: 46, r: 14, warm: true }]],
   cookpot: [[], [{ x: 24, y: 56, r: 26, warm: true }], [{ x: 24, y: 56, r: 26, warm: true }], [{ x: 24, y: 56, r: 26, warm: true }]], // the fire under it lights the square
   tavern: [[], [{ x: 14, y: 48, r: 22 }, { x: 45, y: 48, r: 22 }], [{ x: 14, y: 48, r: 24 }, { x: 45, y: 48, r: 24 }], [{ x: 14, y: 48, r: 24 }, { x: 45, y: 48, r: 24 }, { x: 31, y: 19, r: 16 }, { x: 7, y: 65, r: 20, warm: true }]],
@@ -483,6 +484,7 @@ export const LIGHTS: Record<BuildingKind, readonly (readonly { x: number; y: num
 };
 /** Chimney tops (smoke rises from here), per level. */
 export const CHIMNEYS: Record<BuildingKind, readonly (readonly { x: number; y: number }[])[]> = {
+  warren: [[], [], [], []],
   gnomehouse: [[], [], [], [{ x: 23, y: 1 }]],
   cookpot: [[], [{ x: 24, y: 30 }], [{ x: 24, y: 30 }], [{ x: 24, y: 30 }]], // steam off the pot reads like smoke
   tavern: [[], [{ x: 50, y: 7 }], [{ x: 50, y: 7 }, { x: 11, y: 15 }], [{ x: 50, y: 7 }, { x: 11, y: 15 }]],
@@ -516,9 +518,9 @@ export function ensureGlowTexture(scene: Phaser.Scene): void {
 }
 
 /** Texture key for a building kind; frame = level - 1. */
-export const BUILDING_TEXTURE: Record<BuildingKind, string> = { house: 'bld-house', barracks: 'bld-barracks', granary: 'bld-granary', woodyard: 'cabin', tavern: 'bld-tavern', lair: 'bld-lair', gnomehouse: 'bld-gnomehouse', cookpot: 'bld-cookpot' };
+export const BUILDING_TEXTURE: Record<BuildingKind, string> = { house: 'bld-house', barracks: 'bld-barracks', granary: 'bld-granary', woodyard: 'cabin', tavern: 'bld-tavern', lair: 'bld-lair', gnomehouse: 'bld-gnomehouse', cookpot: 'bld-cookpot', warren: 'bld-gnomehouse' };
 /** The same buildings' windows, lanterns and torches alone — laid over the body at night. */
-export const LIT_TEXTURE: Record<BuildingKind, string> = { house: 'bld-house-lit', barracks: 'bld-barracks-lit', granary: 'bld-granary-lit', woodyard: 'cabin-lit', tavern: 'bld-tavern-lit', lair: 'bld-lair-lit', gnomehouse: 'bld-gnomehouse-lit', cookpot: 'bld-cookpot-lit' };
+export const LIT_TEXTURE: Record<BuildingKind, string> = { house: 'bld-house-lit', barracks: 'bld-barracks-lit', granary: 'bld-granary-lit', woodyard: 'cabin-lit', tavern: 'bld-tavern-lit', lair: 'bld-lair-lit', gnomehouse: 'bld-gnomehouse-lit', cookpot: 'bld-cookpot-lit', warren: 'bld-gnomehouse-lit' };
 
 /** Create every building and stock texture (safe to call more than once). */
 /** What people carry: a bundle of logs on the shoulder, a basket of produce. 14x8 each. */

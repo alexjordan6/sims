@@ -22,6 +22,7 @@ export const BUILDINGS: Record<BuildingKind, { w: number; h: number; door: numbe
   tavern: { w: 4, h: 4, door: 1, name: 'The Copper Acorn' },
   lair: { w: 5, h: 4, door: 2, name: "The Ogre's Lair" },
   gnomehouse: { w: 2, h: 2, door: 0, name: 'Gnome House' },
+  warren: { w: 4, h: 3, door: 1, name: 'Gnome Warren' },
   cookpot: { w: 3, h: 3, door: 1, name: 'The Great Pot' },
 };
 export const MAX_LEVEL = 3;
@@ -123,7 +124,7 @@ export interface Hive {
 
 export const BLOCKING: Record<TileKind, boolean> = {
   grass: false, tilled: false, crop: false, sapling: false, bush: false, mushroom: false, hazel: false, garlic: false, burdock: false, thicket: false, tree: true, house: true, barracks: true, granary: true, woodyard: true,
-  tavern: true, lair: true, gnomehouse: true, cookpot: true, wall: true, gate: false, stairs: false,
+  tavern: true, lair: true, gnomehouse: true, warren: true, cookpot: true, wall: true, gate: false, stairs: false,
 };
 
 export class World {
@@ -154,11 +155,13 @@ export class World {
   hiveAt(tx: number, ty: number): Hive | undefined { return this.hives.get(ty * this.cols + tx); }
   get houses(): Building[] { return this.buildings.filter((b) => b.kind === 'house'); }
   /** gnome families live apart: their own cottages, never a human house */
-  get gnomeHouses(): Building[] { return this.buildings.filter((b) => b.kind === 'gnomehouse' && !b.wild); }
+  /** where gnomes live: toadstool cottages and warrens */
+  get gnomeHouses(): Building[] { return this.buildings.filter((b) => (b.kind === 'gnomehouse' || b.kind === 'warren') && !b.wild); }
+  get warrens(): Building[] { return this.buildings.filter((b) => b.kind === 'warren'); }
   /** the toadstool cottage out in the woods, until the head walks into its glade and claims it */
   get wildGnomeHouse(): Building | undefined { return this.buildings.find((b) => b.kind === 'gnomehouse' && b.wild); }
   /** every roof a family can be raised under: houses and gnome houses */
-  get familyHouses(): Building[] { return this.buildings.filter((b) => (b.kind === 'house' || b.kind === 'gnomehouse') && !b.wild); }
+  get familyHouses(): Building[] { return this.buildings.filter((b) => (b.kind === 'house' || b.kind === 'gnomehouse' || b.kind === 'warren') && !b.wild); }
   /** buildings the village can use (everything but the Ogre's lair) */
   get villageBuildings(): Building[] { return this.buildings.filter((b) => b.kind !== 'lair' && !b.wild); }
   /** standing barracks: a ruined one sponsors nothing, fires nothing and forges nothing */

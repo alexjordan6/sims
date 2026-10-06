@@ -32,6 +32,7 @@ const STYLE: Record<BuildingKind, { wall: number; roof: number; h: number }> = {
   tavern: { wall: 0x705a40, roof: 0x3e2420, h: 1.6 },
   lair: { wall: 0x2a2626, roof: 0x1a1818, h: 1.8 },
   gnomehouse: { wall: 0xcfc2a8, roof: 0x9a2a22, h: 0.9 },
+  warren: { wall: 0x4e6a30, roof: 0x9a2a22, h: 1.2 },
   cookpot: { wall: 0x2a2a2e, roof: 0x8a4a1a, h: 0.9 },
 };
 
@@ -69,6 +70,21 @@ function makeBuilding(b: Building): Built {
       if (!ruined) for (let k = 0; k < 5; k++) { const a = k * 1.3; g.add(part(box, 0xf0e8d8, 0.16, 0.08, 0.16, cx + Math.cos(a) * 0.65, h + 0.35, cz + Math.sin(a) * 0.65)); }
       g.add(part(box, 0x2a1a14, 0.35, 0.55, 0.06, doorX, 0, cz + 0.55));
       g.add(part(box, 0x1a1410, 0.22, 0.22, 0.06, cx + 0.35, 0.45, cz + 0.55, windows));
+      return { group: g, key: '', windows };
+    }
+    case 'warren': {
+      // a gnome warren: a long grassy mound, round doors along its face, toadstools for chimneys
+      const dome = new THREE.SphereGeometry(0.5, 10, 5, 0, Math.PI * 2, 0, Math.PI / 2);
+      g.add(part(dome, wallC, w * 0.98, h * 1.6, d * 0.95, cx, 0, cz));
+      g.add(part(dome, ruined ? CHARRED : 0x5c7a38, w * 0.55, h * 1.1, d * 0.6, cx - 0.6, 0.35, cz - 0.3));
+      for (const dx of [-1.2, 0, 1.2]) {
+        g.add(part(cyl, 0x3a2a1a, 0.62, 0.12, 0.62, cx + dx, 0.28, d - 0.32).rotateX(Math.PI / 2));
+        g.add(part(cyl, 0x120c08, 0.46, 0.14, 0.46, cx + dx, 0.27, d - 0.3, dx === 0 ? windows : undefined).rotateX(Math.PI / 2));
+      }
+      if (!ruined) for (const [tx, tz] of [[0.9, 0.9], [w - 1, 1.1], [cx + 0.3, 0.6]]) {
+        g.add(part(cyl, 0xe8dcc4, 0.16, 0.5, 0.16, tx, h * 1.2, tz));
+        g.add(part(new THREE.SphereGeometry(0.5, 6, 3, 0, Math.PI * 2, 0, Math.PI / 2), roofC, 0.5, 0.3, 0.5, tx, h * 1.2 + 0.48, tz));
+      }
       return { group: g, key: '', windows };
     }
     case 'lair': {

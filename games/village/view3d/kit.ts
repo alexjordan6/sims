@@ -68,7 +68,7 @@ export function kitBuilding(b: Building): KitBuilt | null {
     for (const [x, z, k] of [[0.4, d - 0.2, 'grave/gravestone-round'], [w - 0.4, d - 0.3, 'grave/gravestone-cross'], [w + 0.2, 1, 'grave/gravestone-broken']] as const) piece(g, k, 0xb0a8a0, x, 0, z, 0.3, 1.6, 1.6, 1.6);
     return { group: g, windows, top: 2.4 };
   }
-  if (b.kind === 'woodyard' || b.kind === 'cookpot' || b.kind === 'gnomehouse') return null; // these keep their code-built shapes
+  if (b.kind === 'woodyard' || b.kind === 'cookpot' || b.kind === 'gnomehouse' || b.kind === 'warren') return null; // these keep their code-built shapes
   const stone = b.kind === 'barracks';
   const W = stone ? 'town/wall' : 'town/wall-wood', DOOR = stone ? 'town/wall-door' : 'town/wall-wood-door';
   const WIN = stone ? 'town/wall-window-stone' : 'town/wall-wood-window-shutters', BROKEN = stone ? 'town/wall-broken' : 'town/wall-wood-broken';
