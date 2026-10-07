@@ -2,7 +2,7 @@ import { PackUI } from './pack-ui';
 
 /** An armory tier as pips: three for the forged tiers, and a gold star for a found piece. */
 const pips = (tier: number) => `${'●'.repeat(Math.min(3, Math.max(0, tier)))}${'○'.repeat(Math.max(0, 3 - Math.max(0, tier)))}${tier >= 4 ? '<b class="found" title="found, never forged">★</b>' : ''}`;
-import { slotName } from '../pack';
+import { slotName, type Gear, type EquipmentSlot } from '../pack';
 import { gearUrl } from '../gear-art';
 import { STACK, WARREN, SOLDIER_CAP_PER_LEVEL } from '../config';
 import { REGIMENT_SIZE } from '../regiment';
@@ -10,14 +10,14 @@ import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, BUILDS, type Tool } from '../agents';
 import { Boar } from '../wildlife';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
-import { OGRE, BOAR, HAUL, TILE, COST, ORDER, YARD, GNOME_PACK, p, TOWER, HEARTH_WOOD, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, TRAITS, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type ArmorSlot, UPGRADE_COST, SERVE_RANGE, MOODS, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, isDish, foodCount, hasInterior, type DishKind, CROP_KINDS, DISMANTLE, DIET_CAP, DIET_STAT_NAME, type FoodKind, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS } from '../config';
+import { BANDAGE, OGRE, BOAR, HAUL, TILE, COST, ORDER, YARD, GNOME_PACK, p, TOWER, HEARTH_WOOD, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, TRAITS, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type ArmorSlot, UPGRADE_COST, SERVE_RANGE, MOODS, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, isDish, foodCount, hasInterior, type DishKind, CROP_KINDS, DISMANTLE, DIET_CAP, DIET_STAT_NAME, type FoodKind, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS } from '../config';
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
 import { frameDataUrl, BUILDING_TEXTURE, FLORA } from '../pixelart';
 import { charImg, armorStats, weaponMul } from '../characters';
 import { lookFor, tileArt } from '../look';
-import { BUILDINGS, MAX_LEVEL, hasHearth, hearthCost, WILD_FOOD, type BuildingKind, type TilePos } from '../world';
+import { BUILDINGS, MAX_LEVEL, hasHearth, hearthCost, WILD_FOOD, type BuildingKind, type TilePos, type Building } from '../world';
 import type { Item } from '../items';
 
 // ---------------------------------------------------------------------------
@@ -563,6 +563,7 @@ export class UI {
         html += `<p>The tower shoots raiders inside the ring while the chest has arrows.</p><button class="btn small ${why ? '' : 'ok'} restock" ${why ? 'disabled' : ''} title="${why ? esc(why) : ''}">RESTOCK ${TOWER.restockArrows} ARROWS · ${TOWER.restockWood} WOOD</button>${why ? `<span class="d"> ${esc(why)}</span>` : ''}`;
         html += `<p>Equip soldiers with bows in their cards. SET WALL POST, then click a connected battlement. Stairs are required.</p><button class="btn small craft-arrows">FLETCH 10 ARROWS · 2 WOOD</button> <button class="btn small ok open-armory" title="The chest inside: armor and tower arrows">ARMOR CHEST</button><p class="d">Forges leather now, iron at Lv2, steel at Lv3. Scrap iron drops where a raider falls — walk over it.</p>`;
       }
+      if ((b.kind === 'gnomehouse' || b.kind === 'warren') && !b.wild && !b.ruined) html += `<p class="d">A gear chest: stow loot here for your soldiers to FETCH. <button class="btn small ok open-armory">OPEN CHEST</button></p>`;
       if (b.kind === 'house' || b.kind === 'barracks' || b.kind === 'tavern' || b.kind === 'gnomehouse' || b.kind === 'warren') {
         const why = s.demolishProblem(b), refund = s.demolishRefund(b), arming = this.confirmDemolish === b;
         html += `<p class="d"><button class="btn small ${arming ? 'danger' : ''} demolish" ${why ? 'disabled' : ''} title="${why ? esc(why) : 'Take it down'}">${arming ? `REALLY TAKE IT DOWN? · ${refund} WOOD BACK` : `DEMOLISH · ${refund} WOOD BACK`}</button>${why ? ` ${esc(why)}` : arming ? ' <em class="warn">tenants move out, anyone inside steps out</em>' : b.ruined ? ' rubble is worth nothing' : ''}</p>`;
@@ -808,6 +809,21 @@ export class UI {
     const look = lookFor(who)!;
     const st = armorStats(who.armor);
     const list = wearers.map((m) => `<button class="wearer ${m === who ? 'on' : ''}" data-wearer="${m.id}"><img class="art" src="${charImg(lookFor(m)!)}" alt=""><span>${esc(name(m))}</span></button>`).join('');
+    // a soldier's FETCH buttons: what lies in the chests for each slot, best first; the soldier walks over and takes it
+    const fetchList: { b: Building; gear: Gear }[] = [];
+    const withFetch = (html: string, slot: EquipmentSlot | 'kit') => {
+      if (!(who instanceof Villager)) return html;
+      const opts = s.fetchOptions(who, slot).slice(0, 3);
+      if (!opts.length) return html;
+      const many = s.gearChests().length > 1;
+      const btns = opts.map((o) => {
+        const i = fetchList.push(o) - 1, why = s.fetchProblem(who, o.b, o.gear);
+        return `<button class="btn small ${why ? '' : 'ok'} fetch" data-fetch="${i}" ${why ? `disabled title="${esc(why)}"` : ''}>FETCH ${esc(slotName(o.gear).toUpperCase())}${many ? ` · ${esc(BUILDINGS[o.b.kind].name.toLowerCase())}` : ''}</button>`;
+      }).join('');
+      return html.replace(/<\/div>\s*$/, `<div class="fetches">${btns}</div></div>`);
+    };
+    const kitRow = who instanceof Villager && who.pouch
+      ? withFetch(`<div class="aslot"><div class="aname">Bandages</div><div class="acur">${who.pouch.slots.filter((g) => g?.kind === 'kit').length} in the pouch <small>used below ${Math.round(BANDAGE.selfAt * 100)}% HP</small></div></div>`, 'kit') : '';
     const slots = ARMOR_SLOTS.map((slot) => {
       const tier = who.armor[slot], cur = ARMOR[slot].tiers[tier], next = ARMOR[slot].tiers[tier + 1];
       const why = s.craftProblem(who, slot);
@@ -815,7 +831,7 @@ export class UI {
       return `<div class="aslot"><div class="aname">${ARMOR[slot].name} <span class="tier">${pips(tier)}</span></div>
         <div class="acur">${cur.name} <small>${stat(cur)}</small></div>
         ${next ? `<button class="btn small ${why ? '' : 'ok'} forge" data-slot="${slot}" ${why ? 'disabled' : ''}>${s.isReforge(tier + 1) ? 'REFORGE TO' : 'FORGE'} ${next.name.toUpperCase()} · ${s.forgeCost(next).wood} wood${s.forgeCost(next).scrap ? ` + ${s.forgeCost(next).scrap} scrap` : ''}</button><div class="d">${why ? `<em class="warn">${esc(why)}</em>` : stat(next)}</div>` : '<div class="d">the best there is</div>'}</div>`;
-    }).join('');
+    }).map((html, i) => withFetch(html, ARMOR_SLOTS[i])).join('') + kitRow;
     // weapons: the crude club and hunting bow everyone starts with, forged up like armor
     const weapons = WEAPON_SLOTS.map((slot) => {
       const tier = who.weapons[slot], cur = WEAPONS[slot].tiers[tier], next = WEAPONS[slot].tiers[tier + 1];
@@ -823,14 +839,15 @@ export class UI {
       return `<div class="aslot"><div class="aname">${WEAPONS[slot].name} <span class="tier">${pips(tier)}</span></div>
         <div class="acur">${cur?.name ?? 'Empty'} <small>×${cur?.mul ?? 0} damage</small></div>
         ${next ? `<button class="btn small ${why ? '' : 'ok'} forge" data-weapon-slot="${slot}" ${why ? 'disabled' : ''}>${s.isReforge(tier + 1) ? 'REFORGE TO' : 'FORGE'} ${next.name.toUpperCase()} · ${s.forgeCost(next).wood} wood${s.forgeCost(next).scrap ? ` + ${s.forgeCost(next).scrap} scrap` : ''}</button><div class="d">${why ? `<em class="warn">${esc(why)}</em>` : `×${next.mul} damage`}</div>` : '<div class="d">the best there is</div>'}</div>`;
-    }).join('');
+    }).map((html, i) => withFetch(html, WEAPON_SLOTS[i])).join('');
     const dyes = DYES.map((c, i) => `<button class="swatch ${who.dye === i ? 'on' : ''}" data-dye="${i}" style="background:${c}" title="${DYE_NAMES[i]}"></button>`).join('');
     const helms = ['CAP', 'KETTLE', 'GREAT HELM'].map((n, i) => `<button class="btn small ${who.helmetStyle === i ? 'on' : ''}" data-helm="${i}">${n}</button>`).join('');
     const plumes = PLUMES.map((c, i) => `<button class="swatch ${who.plume === i ? 'on' : ''}" data-plume="${i}" style="background:${c === 'none' ? 'transparent' : c}" title="${c === 'none' ? 'no plume' : 'plume'}">${c === 'none' ? '×' : ''}</button>`).join('');
     // the chest this armory was opened from: its tower arrows, restocked here for wood
     const chest = s.armoryChest;
     let chestHtml = '';
-    if (chest) {
+    if (chest && chest.kind !== 'barracks') chestHtml = `<div class="chest"><div class="aname">GEAR CHEST <span class="tier">${esc(BUILDINGS[chest.kind].name)}</span></div><div class="d">Stow loot here; soldiers FETCH from any chest in the village.</div></div>`;
+    else if (chest) {
       const ammo = chest.ammo ?? 0, cap = s.towerCap(chest), why = s.restockProblem(chest);
       chestHtml = `<div class="chest ${ammo ? (ammo / cap <= 0.25 ? 'low' : '') : 'dry'}">
         <div class="aname">TOWER CHEST <span class="tier">Barracks Lv${chest.level} · range ${s.towerRange(chest)} px</span></div>
@@ -857,7 +874,7 @@ export class UI {
             <div class="cap">PLUME</div><div class="swatches">${plumes}</div></div>
         </div>
       </div>
-      <p class="sub small">Everyone starts with a wooden club and a hunting bow that hit for half. Bronze and leather cost wood; iron and steel need scrap iron from slain raiders and a Lv2 / Lv3 barracks. A bow needs both hands, so archers can't carry a shield.</p>
+      <p class="sub small">Everyone starts with a wooden club and a hunting bow that hit for half. The forge makes bronze and leather for wood; iron and steel are looted from camps, ruins and the fallen (a found iron piece reforges to steel at a Lv3 barracks), and the tower shield, warhammer and crossbow are only ever found. Stow loot in a chest, then send each soldier to FETCH what they should wear. A bow needs both hands, so archers can't carry a shield.</p>
     </div>`;
     if (!this.armoryEl) this.armoryEl = h('<div class="screen armory-screen"></div>');
     if(!this.armoryEl.isConnected){this.screens.append(this.armoryEl);this.lastArmory='';}
@@ -870,6 +887,7 @@ export class UI {
     el.querySelector('.chest .fletch')?.addEventListener('click', () => { s.craftArrows(); this.renderArmory(); });
     el.querySelectorAll<HTMLElement>('[data-wearer]').forEach((b) => b.addEventListener('click', () => { const m = wearers.find((w) => w.id === Number(b.dataset.wearer)); if (m) s.openArmory(m); }));
     el.querySelectorAll<HTMLElement>('[data-slot]').forEach((b) => b.addEventListener('click', () => { s.craftArmor(who, b.dataset.slot as ArmorSlot); this.renderArmory(); }));
+    el.querySelectorAll<HTMLElement>('[data-fetch]').forEach((b) => b.addEventListener('click', () => { const o = fetchList[Number(b.dataset.fetch)]; if (o && who instanceof Villager) s.orderFetch(who, o.b, o.gear); this.renderArmory(); }));
     el.querySelectorAll<HTMLElement>('[data-weapon-slot]').forEach((b) => b.addEventListener('click', () => { s.craftWeapon(who, b.dataset.weaponSlot as WeaponSlot); this.renderArmory(); }));
     el.querySelectorAll<HTMLElement>('[data-dye]').forEach((b) => b.addEventListener('click', () => { s.setDye(who, Number(b.dataset.dye)); this.renderArmory(); }));
     el.querySelectorAll<HTMLElement>('[data-helm]').forEach((b) => b.addEventListener('click', () => { s.setHelmetStyle(who, Number(b.dataset.helm)); this.renderArmory(); }));

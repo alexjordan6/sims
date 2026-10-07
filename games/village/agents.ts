@@ -5,7 +5,7 @@ import type { Mods } from './meta';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle, knockMul, reloadMul } from './characters';
 import type { VillageScene } from './main';
 import type { Item } from './items';
-import { Pack, START_TOOLS } from './pack';
+import { Pack, START_TOOLS, slotName, type Gear } from './pack';
 import { WorkerSafety, WORKER_DANGER, WORKER_CLEAR } from './worker-safety';
 import type { BulkKind } from './config';
 import type { Block, Regiment, Warband } from './regiment';
@@ -323,6 +323,8 @@ export type Role = 'infant' | 'kid' | Calling;
 export type Order = { kind: 'hold'; tx: number; ty: number } | { kind: 'attack'; target: Mover } | { kind: 'follow' };
 
 export class Villager extends Mover {
+  /** a FETCH order: the piece this soldier is off to take from a chest (VillageScene.orderFetch) */
+  kitFetch: { b: Building; gear: Gear } | null = null;
   weapon: 'sword' | 'bow' | 'pike' = 'sword';
   /** a pike thrust in progress: the line it runs along, and how far through the windup it is */
   private thrust: { t: number; ux: number; uy: number; dmg: number; struck: boolean } | null = null;
@@ -814,6 +816,19 @@ export class Villager extends Mover {
     return true;
   }
 
+  /** FETCH: walk to the chest's door and take the piece; a raid, a ruined building or an emptied chest calls it off. */
+  private fetchKit(dt: number, s: VillageScene): void {
+    const f = this.kitFetch!;
+    if (f.b.ruined || !s.stashOf(f.b).includes(f.gear)) { s.cancelFetch(this, 'it is gone from the chest'); return; }
+    if (s.raidActive) { s.cancelFetch(this, 'the raid comes first'); return; }
+    const door = doorstep(f.b), at = World.center(door.tx, door.ty);
+    this.task = `fetching the ${slotName(f.gear).toLowerCase()} from the ${BUILDINGS[f.b.kind].name.toLowerCase()}`;
+    if (this.adjacentTo(door) || this.dist(at) < TILE) { this.clearGoal(); this.vx = this.vy = 0; s.completeFetch(this); return; }
+    this.setGoal(s, door.tx, door.ty);
+    this.followPath(dt);
+    if (this.goal && !this.path.length && this.dist(at) > TILE * 1.5) s.cancelFetch(this, 'there is no way to the chest');
+  }
+
   /** Gnomes: walk to a claimed piece of meat and take it. Returns true while busy with it. */
   private fetchMeat(dt: number, s: VillageScene): boolean {
     const it = this.fetching;
@@ -822,12 +837,12 @@ export class Villager extends Mover {
     if (!s.world.items.includes(it) || it.n <= 0 || !it.rest) { this.dropFetch(s); return false; }
     const at = World.toTile(it.x, it.y);
     if (!this.goal || this.goal.tx !== at.tx || this.goal.ty !== at.ty) this.setGoal(s, at.tx, at.ty, true);
-    this.task = 'off to fetch the meat';
+    this.task = it.spoils ? 'stripping the spoils' : 'off to fetch the meat';
     const near = this.dist(it) <= ITEM.eatReach;
     if (!near && this.followPath(dt) && !near) { const d = this.dist(it) || 1; this.x += (it.x - this.x) / d * Math.min(d, this.speed * dt); this.y += (it.y - this.y) / d * Math.min(d, this.speed * dt); }
     if (!near && !this.path.length && this.dist(it) > TILE * 1.5) { this.dropFetch(s); this.unreachable.set(at.ty * s.world.cols + at.tx, s.simTime + 60); return false; } // no way there
     if (!near) return true;
-    const took = this.stow('food', Math.min(it.n, BOAR.meat), 'meat');
+    const took = it.spoils ? this.pouchTake(it) : this.stow('food', Math.min(it.n, BOAR.meat), 'meat');
     if (took <= 0) { this.dropFetch(s); return false; } // nowhere to put it after all
     it.n -= took;
     if (it.n <= 1e-9) s.world.removeItem(it);
@@ -835,6 +850,18 @@ export class Villager extends Mover {
     if (!this.toPouch) this.delivering = true; // a follower keeps it in the pouch
     this.clearGoal();
     return true;
+  }
+  /** Can this gnome's pouch take (some of) a spilled item? */
+  canHaulSpoils(it: Item): boolean {
+    if (!this.pouch) return false;
+    if (it.kind === 'gear') return !!it.gear && this.pouch.emptySlots > 0;
+    return this.pouch.room(it.kind, it.food) > 0;
+  }
+  /** Into the pouch with a piece of the spill: as much of a stack as fits, or the whole piece of gear. */
+  private pouchTake(it: Item): number {
+    if (!this.pouch) return 0;
+    if (it.kind === 'gear') return it.gear && this.pouch.put(it.gear) >= 0 ? it.n : 0;
+    return this.pouch.add(it.kind, it.n, it.food);
   }
   private dropFetch(s: VillageScene): void { if (this.fetching) s.meatClaims.delete(this.fetching.id); this.fetching = null; this.clearGoal(); }
 
@@ -899,6 +926,11 @@ export class Villager extends Mover {
         const it = w.nearestWildMeat(patch?.x ?? this.x, patch?.y ?? this.y, (m) => !s.meatClaims.has(m.id) && (!patch || Math.hypot(m.x - patch.x, m.y - patch.y) <= 6 * TILE) && ok(Math.floor(m.x / TILE), Math.floor(m.y / TILE)));
         if (it) { s.meatClaims.add(it.id); this.fetching = it; this.fetchMeat(dt, s); return; }
       }
+      // then what a broken-open chest left lying: into the pouch, and home with it
+      if (job === 'forage' && this.pouch) {
+        const it = w.nearestSpoils(this.x, this.y, (m) => !s.meatClaims.has(m.id) && this.canHaulSpoils(m) && ok(Math.floor(m.x / TILE), Math.floor(m.y / TILE)));
+        if (it) { s.meatClaims.add(it.id); this.fetching = it; this.fetchMeat(dt, s); return; }
+      }
       const spot = job === 'forage'
         ? (patch ? w.nearest(patch.x, patch.y, (t, tx, ty) => !!WILD_FOOD[t.kind] && s.wildLeft(t) > 0 && (!this.load || this.load.food === WILD_FOOD[t.kind]) && Math.hypot((tx + 0.5) * TILE - patch.x, (ty + 0.5) * TILE - patch.y) <= 6 * TILE && ok(tx, ty)) : null)
           ?? w.nearest(this.x, this.y, (t, tx, ty) => !!WILD_FOOD[t.kind] && s.wildLeft(t) > 0 && (!this.load || this.load.food === WILD_FOOD[t.kind]) && ok(tx, ty))
@@ -953,7 +985,16 @@ export class Villager extends Mover {
   /** Walk the load to its building and hand it in; falls back to the job loop if there is nowhere to take it. */
   private deliver(dt: number, s: VillageScene): void {
     const load = this.carriedLoads()[0]; // arms first, then the pouch: a gnome sent back to work walks its finds in
-    if (!load) { this.delivering = false; this.clearGoal(); return; }
+    if (!load) {
+      // nothing but gear in the pouch: it goes to the nearest gear chest
+      const chest = this.pouch && this.role !== 'soldier' && this.pouch.slots.some((g) => g && (g.kind === 'weapon' || g.kind === 'armor' || g.kind === 'kit')) ? s.nearestGearChest(this.x, this.y) : null;
+      if (!chest) { this.delivering = false; this.clearGoal(); return; }
+      const door = doorstep(chest);
+      this.setGoal(s, door.tx, door.ty);
+      this.task = `taking the spoils to the ${BUILDINGS[chest.kind].name.toLowerCase()}`;
+      if (this.followPath(dt)) { if (this.adjacentTo(door) || this.dist(World.center(door.tx, door.ty)) < TILE) s.stowPouchGear(this); this.delivering = false; this.clearGoal(); this.thinkTimer = 0.2; }
+      return;
+    }
     // wood goes to a hearth that needs it before the woodyard: the village stays warm on woodcutters' backs
     const hearth = load.kind === 'wood' ? (this.firewoodFor && !this.firewoodFor.ruined && this.firewoodFor.firewood < p.hearthNights ? this.firewoodFor : s.hearthNeeding(this.x, this.y, load.n)) : null;
     this.firewoodFor = hearth;
@@ -1023,6 +1064,7 @@ export class Villager extends Mover {
       if (exit) { this.setGoal(s, exit.tx, exit.ty); this.followPath(dt); if (this.dist(World.center(exit.tx, exit.ty)) < 3) { this.elevated = false; this.clearGoal(); } }
       this.task = 'returning down the stairs'; return;
     }
+    if (this.kitFetch) { this.fetchKit(dt, s); return; }
     // under a banner: the regiment thinks for the block; the member keeps its slot and fights what reaches it
     if (this.regiment && !this.order && !this.post) { this.rankTick(dt, s); return; }
     // an order's quarry is down: the squad holds the ground it took

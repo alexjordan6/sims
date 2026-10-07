@@ -14,6 +14,8 @@ export interface Item {
   id: number;
   gear?: Gear;
   playerDropPending?: boolean;
+  /** flung out of a chest: idle gnome foragers carry it home */
+  spoils?: boolean;
   kind: ItemKind;
   food?: FoodKind;
   n: number;

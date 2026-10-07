@@ -13,6 +13,8 @@ export interface Chest {
   stock?: { size: number; gear: number; bonus: number };
 }
 export type RuinKind = 'cart' | 'barrow' | 'tower';
+/** Does this building keep a gear chest? The barracks, and for the gnomes the toadstool cottage and the warren. */
+export function isGearChest(b: Building): boolean { return !b.ruined && !b.wild && (b.kind === 'barracks' || b.kind === 'gnomehouse' || b.kind === 'warren'); }
 /** A ruin or wreck in the wild with a chest in it: found once, looted once. */
 export interface Ruin { kind: RuinKind; tx: number; ty: number; chest: Chest; seen: boolean; roused: boolean }
 
@@ -293,6 +295,16 @@ export class World {
     return false;
   }
   /** The nearest resting meat lying outside every home's yard (what a gnome goes to fetch), among those `ok` allows. */
+  /** The nearest resting piece of a chest's spill (see Item.spoils). */
+  nearestSpoils(x: number, y: number, ok: (it: Item) => boolean = () => true): Item | null {
+    let best: Item | null = null, bd = Infinity;
+    for (const it of this.items) {
+      if (!it.spoils || !it.rest || it.n <= 0 || !ok(it)) continue;
+      const d = (it.x - x) ** 2 + (it.y - y) ** 2;
+      if (d < bd) { bd = d; best = it; }
+    }
+    return best;
+  }
   nearestWildMeat(x: number, y: number, ok: (it: Item) => boolean = () => true): Item | null {
     let best: Item | null = null, bd = Infinity;
     for (const it of this.items) {

@@ -211,7 +211,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     dummy.hp = dummy.maxHp; const bronzeHit = swingAt(); assert(bronzeHit === 9, `bronze hits for three quarters (${bronzeHit})`);
     s.wood = 100; s.scrap = 100; assert(s.weaponProblem(s.player, 'melee') === 'needs a Lv2 barracks', 'iron waits on a Lv2 barracks');
     const sworn = s.spawn(new Villager(0, 0, s.world.houses[0], 'soldier', 20, 'Sworn', s.mods));
-    assert(sworn.weapons.melee === 0 && s.craftWeapon(sworn, 'bow') && sworn.weapons.bow === 1, 'soldiers start crude and can be forged for too');
+    assert(sworn.weapons.melee === 0 && s.craftWeapon(sworn, 'bow') && sworn.weapons.bow === 0 && sworn.kitFetch?.gear.kind === 'weapon' && s.completeFetch(sworn) && (sworn.weapons.bow as number) === 1, 'soldiers start crude; what is forged for one goes into the chest, and the soldier fetches it');
     assert(s.towerDmg(s.world.barracks[0]) === p.towerDmg && p.towerDmg === 5, 'a Lv1 tower fires light arrows');
     // the dodge roll: a committed tumble on a cooldown, the way you are moving or facing
     s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(121, 100));
@@ -2060,6 +2060,69 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(s.openChest(barrow.chest) && barrow.chest.opened, 'with the skulks dead the barrow gives up its chest');
       const cart = ruins.find((r) => r.kind === 'cart');
       if (cart) assert(s.chestGuard(cart.chest) === null, 'a wrecked cart is nobody\'s: open it any time');
+    }
+
+    // ---- soldiers fetch their kit: each walks to the chest and takes the piece; the gnomes strip what is left ----
+    {
+      const run = (secs: number) => { for (let i = 0; i < Math.ceil(secs * 60); i++) { s.grid.rebuild(s.agents); s.tick(1 / 60); } };
+      s = fresh(); s.dayTime = 0.35; s.paused = false;
+      const bar = s.world.barracks[0], door = doorstep(bar), stash = s.stashOf(bar);
+      stash.length = 0;
+      const at = World.center(door.tx + 6, door.ty + 2);
+      const sol = s.spawn(new Villager(at.x, at.y, s.world.houses[0], 'soldier', 20, 'Ash', s.mods)); sol.armor = { ...sol.armor, helmet: 2 };
+      const other = s.spawn(new Villager(at.x + 8, at.y, s.world.houses[0], 'soldier', 20, 'Birch', s.mods));
+      const steel = { kind: 'armor' as const, slot: 'helmet' as const, tier: 3 }; stash.push(steel);
+      const opts = s.fetchOptions(sol, 'helmet');
+      assert(opts.length === 1 && opts[0].gear === steel && opts[0].b === bar && s.fetchOptions(sol, 'chest').length === 0, 'the armory offers a soldier what lies in the chests for each slot');
+      assert(s.orderFetch(sol, bar, steel) && sol.kitFetch?.gear === steel && sol.armor.helmet === 2, 'FETCH sends the soldier; nothing is worn until they get there');
+      assert(!s.orderFetch(other, bar, steel) && s.fetchOptions(other, 'helmet').length === 0, 'a piece promised to one soldier is not offered to another');
+      run(25);
+      assert(!sol.kitFetch && sol.armor.helmet === 3 && stash.some((g) => g.kind === 'armor' && g.slot === 'helmet' && g.tier === 2) && !stash.includes(steel),
+        `the soldier walks to the barracks, puts on the steel helm and leaves the iron one in the chest (${sol.task}; helm ${sol.armor.helmet})`);
+      const iron = stash.find((g) => g.kind === 'armor' && g.slot === 'helmet')!;
+      assert(s.orderFetch(other, bar, iron) && s.reserved(iron), 'the second soldier is sent for the iron helm');
+      other.dead = true; s.removeDead();
+      assert(!s.reserved(iron) && s.fetchOptions(sol, 'helmet').some((o) => o.gear === iron), 'a soldier who dies on the way frees the piece');
+      // the gnomes' chests: no barracks needed to keep loot at home
+      const savedStart = p.gnomeStart; p.gnomeStart = true;
+      s = fresh(); s.dayTime = 0.35; s.paused = false;
+      p.gnomeStart = savedStart;
+      const cottage = s.world.gnomeHouses[0];
+      assert(s.gearChests().includes(cottage), 'in the gnome start the toadstool cottage keeps a gear chest too');
+      s.selectBuilding(cottage); s.openArmory(s.player);
+      assert(s.armoryChest === cottage, 'and the armory opens on it from its card');
+      s.openArmory(null); s.selectBuilding(null);
+      const warrior = s.spawn(new Villager(s.player.x + 20, s.player.y, cottage, 'soldier', 20, 'Thorn', s.mods)); warrior.gnome = true; warrior.applyRole(s.mods);
+      const cap = { kind: 'armor' as const, slot: 'helmet' as const, tier: 2 }; s.stashOf(cottage).push(cap);
+      const roll = { kind: 'kit' as const, kit: 'bandage' as const }; s.stashOf(cottage).push(roll);
+      assert(s.orderFetch(warrior, cottage, cap), 'a gnome warrior is sent for a helm in the cottage chest');
+      run(25);
+      assert(warrior.armor.helmet === 2 && !s.stashOf(cottage).includes(cap), `and wears it (${warrior.task})`);
+      assert(s.orderFetch(warrior, cottage, roll) && (run(15), warrior.pouch!.slots.some((g) => g?.kind === 'kit')), 'a bandage fetched goes in the warrior\'s pouch');
+      // the spill: what you leave lying round a broken chest, the gnome foragers carry home
+      warrior.dead = true; s.removeDead();
+      const home = World.toTile(s.player.x, s.player.y);
+      const spot = s.world.nearest((home.tx + 10) * TILE, home.ty * TILE, (t, tx, ty) => !s.world.isBlocked(tx, ty) && !t.building && Math.hypot(tx - home.tx, ty - home.ty) >= 8)!;
+      const ch: Chest = { tx: spot.tx, ty: spot.ty, source: 'cart', loot: [{ kind: 'scrap', n: 4 }, { kind: 'armor', slot: 'legs', tier: 1 }, { kind: 'wood', n: 6 }], opened: false };
+      s.world.chests.push(ch);
+      s.gnomesFollow = false; for (const v of s.villagers()) if (v.gnome && v.role !== 'soldier') v.followPlayer(s, false); // back to work, not at your heels
+      Object.assign(s.player, World.center(home.tx - 40, home.ty)); // out of the way: the head would pick it all up
+      const scrap0 = s.scrap, wood0 = s.wood;
+      assert(s.openChest(ch), 'a cart broken open near home');
+      settle(s);
+      const spoils = () => s.world.items.filter((it) => it.spoils);
+      assert(spoils().length === 3, `its spill lies on the ground (${spoils().length} things)`);
+      run(150);
+      const stowedLegs = s.gearChests().some((b) => s.stashOf(b).some((g) => g.kind === 'armor' && g.slot === 'legs'));
+      assert(spoils().length === 0 && s.scrap >= scrap0 + 4 && stowedLegs,
+        `the gnome foragers strip it: scrap to the woodyard (+${s.scrap - scrap0}), the wood home (to the woodyard or a hearth; +${Math.round(s.wood - wood0)} in the yard), the boots into a gear chest (${stowedLegs}); ${spoils().length} left lying`);
+      // a spill with a raider still standing over it is left alone
+      const ch2: Chest = { tx: spot.tx, ty: spot.ty, source: 'cart', loot: [{ kind: 'scrap', n: 3 }, { kind: 'scrap', n: 2 }], opened: false };
+      s.world.chests.push(ch2); s.openChest(ch2); settle(s);
+      const keeper = s.spawn(new Raider((spot.tx + 0.5) * TILE, (spot.ty + 0.5) * TILE)); keeper.speed = 0; keeper.update = () => {}; keeper.lairBound = true; keeper.hp = keeper.maxHp = 1e6; // (the barracks tower would shoot it)
+      run(40);
+      assert(spoils().length >= 1 && !keeper.dead, `gnomes leave a spill alone while a raider stands over it (${spoils().length} still lying)`);
+      keeper.dead = true; s.removeDead();
     }
 
     // ---- the opening: gnomes by default, no farm, wild food by the door ------------------------------

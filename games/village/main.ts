@@ -4,7 +4,7 @@ import { isImplement, IMPLEMENTS, START_TOOLS, LOST_TOOLS, type Implement, TOOL_
 import Phaser from 'phaser';
 import { SimScene, launch, button, getGui, Rng } from '@shared/index';
 import { launch as throwItem, type Item } from './items';
-import { World, WILD_FOOD, doorstep, buildingCenter, buildingMaxHp, hasHearth, hearthCost, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos, type Hive, type Chest, type Ruin } from './world';
+import { World, WILD_FOOD, doorstep, buildingCenter, buildingMaxHp, hasHearth, hearthCost, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos, type Hive, type Chest, type Ruin, isGearChest } from './world';
 import { Villager, Raider, Player, Mover, Arrow, TOOLS, BELT, BUILDS, SWING, type Role, type Tool, type Order } from './agents';
 import { DEFENSE_COST, WALL_HEIGHT, WARREN, SOLDIER_CAP_PER_LEVEL, MAP_AREA, PLAINS } from './config';
 import { Interior } from './interior';
@@ -543,6 +543,7 @@ export class VillageScene extends SimScene {
     for (const slot of ch.loot) {
       const it = isBulk(slot) ? this.world.dropItem(slot.kind, slot.n, from.x, from.y, slot.kind === 'food' ? slot.food : undefined) : this.world.dropItem('gear', 1, from.x, from.y);
       if (isBulk(slot)) sup++; else { it.gear = { ...slot }; gear++; }
+      it.spoils = true; // what you leave lying, the gnomes carry home
       const a = this.lootRng.range(0, Math.PI * 2), r = this.lootRng.range(1, 2.4) * TILE;
       throwItem(it, from, { x: from.x + Math.cos(a) * r, y: from.y + Math.sin(a) * r }, this.lootRng, 6);
     }
@@ -1477,6 +1478,93 @@ export class VillageScene extends SimScene {
 
   // ---- armory ---------------------------------------------------------------------------------
 
+  /** Every chest gear is kept in: the barracks', and (for the gnomes) the toadstool cottages' and the warrens'. */
+  gearChests(): Building[] { return this.world.buildings.filter(isGearChest); }
+  nearestGearChest(x: number, y: number): Building | null {
+    let best: Building | null = null, bd = Infinity;
+    for (const b of this.gearChests()) { const c = buildingCenter(b); const d = (c.tx * TILE - x) ** 2 + (c.ty * TILE - y) ** 2; if (d < bd) { bd = d; best = b; } }
+    return best;
+  }
+  /** Is this piece already promised to a soldier on the way to fetch it? */
+  reserved(g: Gear): boolean { return this.villagers().some((v) => v.kitFetch?.gear === g); }
+  /** What lies in the chests for a soldier's `slot`, best first (not what another is already off to fetch). */
+  fetchOptions(v: Villager, slot: EquipmentSlot | 'kit'): { b: Building; gear: Gear }[] {
+    const out: { b: Building; gear: Gear }[] = [];
+    for (const b of this.gearChests()) for (const g of this.stashOf(b)) {
+      if (this.reserved(g)) continue;
+      if (slot === 'kit' ? g.kind === 'kit' && !!v.pouch : (g.kind === 'weapon' || g.kind === 'armor') && g.slot === slot) out.push({ b, gear: g });
+    }
+    const tier = (g: Gear) => g.kind === 'weapon' || g.kind === 'armor' ? g.tier : 0;
+    return out.sort((a, b) => tier(b.gear) - tier(a.gear));
+  }
+  /** Why `v` can't be sent for `gear` in `b`, or null. */
+  fetchProblem(v: Villager, b: Building, gear: Gear): string | null {
+    if (v.dead || v.role !== 'soldier') return 'only soldiers draw gear from the chests';
+    if (!this.stashOf(b).includes(gear)) return 'it is no longer in the chest';
+    if (this.reserved(gear) && v.kitFetch?.gear !== gear) return 'another soldier is already on the way for it';
+    if (gear.kind === 'kit' && !v.pouch) return 'only a gnome carries a pouch to keep bandages in';
+    if (gear.kind === 'armor' && gear.slot === 'shield' && v.weapon === 'bow') return 'a bow needs both hands';
+    if (gear.kind === 'tool') return 'tools are for your own hands';
+    return null;
+  }
+  /** FETCH: send a soldier to `b` to take `gear` and put it on (their old piece goes back in the chest). */
+  orderFetch(v: Villager, b: Building, gear: Gear): boolean {
+    const why = this.fetchProblem(v, b, gear);
+    if (why) { this.event('info', `Can't fetch: ${why}`, true); return false; }
+    v.kitFetch = { b, gear };
+    v.post = null; // down off the wall first
+    v.clearGoal();
+    this.event('soldier', `${v.name} goes to fetch the ${slotName(gear).toLowerCase()} from the ${BUILDINGS[b.kind].name.toLowerCase()}.`);
+    return true;
+  }
+  /** Call a fetch off (the piece is gone, a raid is on, there is no way there). */
+  cancelFetch(v: Villager, why: string): void {
+    const f = v.kitFetch;
+    v.kitFetch = null; v.clearGoal();
+    if (f && !v.dead) this.event('info', `${v.name} gives up fetching the ${slotName(f.gear).toLowerCase()}: ${why}.`);
+  }
+  /** At the chest: take the piece, put it on, and leave the old one in its place. */
+  completeFetch(v: Villager): boolean {
+    const f = v.kitFetch;
+    v.kitFetch = null;
+    if (!f) return false;
+    const stash = this.stashOf(f.b), i = stash.indexOf(f.gear), g = f.gear;
+    if (i < 0) return false;
+    if (g.kind === 'kit') { if (!v.pouch || v.pouch.put(g) < 0) return false; stash.splice(i, 1); this.event('soldier', `${v.name} tucks a bandage in the pouch.`); return true; }
+    if (g.kind !== 'weapon' && g.kind !== 'armor') return false;
+    stash.splice(i, 1);
+    const old = g.kind === 'weapon' ? v.weapons[g.slot] : v.armor[g.slot];
+    if (g.kind === 'weapon') v.weapons = { ...v.weapons, [g.slot]: g.tier }; else v.armor = { ...v.armor, [g.slot]: g.tier };
+    // the old piece goes back in the chest (a crude club or nothing at all is left behind); a full chest leaves it at the door
+    if (old > 0) {
+      const back: Gear = g.kind === 'weapon' ? { kind: 'weapon', slot: g.slot, tier: old } : { kind: 'armor', slot: g.slot, tier: old };
+      if (stash.length < STASH_SLOTS) stash.push(back);
+      else { const d = World.center(doorstep(f.b).tx, doorstep(f.b).ty); this.world.dropItem('gear', 1, d.x, d.y, undefined, this.rng).gear = back; }
+    }
+    this.refitArmor(v);
+    this.event('soldier', `${v.name} now ${g.kind === 'weapon' ? 'carries' : 'wears'} ${slotName(g).toLowerCase()}.`);
+    return true;
+  }
+  /** Forge a piece for a soldier: it is made into the chest, and the soldier sent to fetch it. */
+  private forgeInto(v: Villager, piece: Gear, tier: { wood: number; scrap: number }): boolean {
+    const chest = (this.armoryChest && this.armoryChest.kind === 'barracks' && !this.armoryChest.ruined ? this.armoryChest : null) ?? this.nearestBarracks(v.x, v.y);
+    if (!chest) { this.event('info', "Can't forge: build a barracks first", true); return false; }
+    if (this.stashOf(chest).length >= STASH_SLOTS) { this.event('info', "Can't forge: the barracks chest is full", true); return false; }
+    const paid = this.forgeCost(tier); this.wood -= paid.wood; this.scrap -= paid.scrap;
+    this.stashOf(chest).push(piece);
+    this.fx.push({ kind: 'tool', tool: 'hammer', tx: v.tile.tx, ty: v.tile.ty });
+    this.orderFetch(v, chest, piece);
+    return true;
+  }
+  /** Gear a gnome carried home in its pouch goes into the nearest gear chest. */
+  stowPouchGear(v: Villager): void {
+    if (!v.pouch) return;
+    const b = this.nearestGearChest(v.x, v.y);
+    if (!b) return;
+    const stash = this.stashOf(b);
+    v.pouch.slots.forEach((g, i) => { if (g && !isBulk(g) && g.kind !== 'tool' && !(g.kind === 'kit' && v.role === 'soldier') && stash.length < STASH_SLOTS) { stash.push(g); v.pouch!.removeAt(i); } });
+  }
+
   /** Everyone who can wear armor: you and your soldiers. */
   wearers(): Mover[] {
     return [this.player as Mover, ...this.villagers().filter((v) => v.role === 'soldier' && !v.dead)];
@@ -1503,6 +1591,7 @@ export class VillageScene extends SimScene {
     const why = this.weaponProblem(who, slot);
     if (why) { this.event('info', `Can't forge: ${why}`, true); return false; }
     const next = who.weapons[slot] + 1, tier = WEAPONS[slot].tiers[next];
+    if (who instanceof Villager) return this.forgeInto(who, { kind: 'weapon', slot, tier: next }, tier);
     const paid = this.forgeCost(tier); this.wood -= paid.wood; this.scrap -= paid.scrap;
     if (who instanceof Player && who.weapons[slot]>=0) this.stowGear({kind:'weapon',slot,tier:who.weapons[slot]});
     who.weapons = { ...who.weapons, [slot]: next };
@@ -1536,6 +1625,7 @@ export class VillageScene extends SimScene {
     const why = this.craftProblem(who, slot);
     if (why) { this.event('info', `Can't forge: ${why}`, true); return false; }
     const next = who.armor[slot] + 1, tier = ARMOR[slot].tiers[next];
+    if (who instanceof Villager) return this.forgeInto(who, { kind: 'armor', slot, tier: next }, tier);
     const paid = this.forgeCost(tier); this.wood -= paid.wood; this.scrap -= paid.scrap;
     if (who instanceof Player && who.armor[slot]>0) this.stowGear({kind:'armor',slot,tier:who.armor[slot]});
     who.armor = { ...who.armor, [slot]: next };
@@ -1566,10 +1656,10 @@ export class VillageScene extends SimScene {
     this.ui?.renderPouch();
   }
   openArmory(who: Mover | null, chest?: Building | null): void {
-    if (who && !this.world.barracks.length) { this.event('info', 'Build a barracks to open an armory', true); return; }
+    if (who && !this.gearChests().length) { this.event('info', 'Build a barracks (or a gnome cottage or warren) to keep a gear chest', true); return; }
     this.armoryFor = who;
-    const sel = this.interior.building?.kind === 'barracks' ? this.interior.building : this.selectedBuilding?.kind === 'barracks' ? this.selectedBuilding : null;
-    this.armoryChest = who ? chest ?? sel ?? this.nearestBarracks(this.player.x, this.player.y) : null;
+    const sel = this.interior.building && isGearChest(this.interior.building) ? this.interior.building : this.selectedBuilding && isGearChest(this.selectedBuilding) ? this.selectedBuilding : null;
+    this.armoryChest = who ? chest ?? sel ?? this.nearestBarracks(this.player.x, this.player.y) ?? this.nearestGearChest(this.player.x, this.player.y) : null;
     this.ui?.renderArmory();
   }
 
@@ -2831,6 +2921,7 @@ export class VillageScene extends SimScene {
   /** Add to the stockpile, respecting storage; says so (once a day) when the store is full. */
   /** Hand a carried load in at its building: the stockpile takes it (up to the cap) and the arms are free. */
   deposit(m: Mover, at?: Building): void {
+    if (m instanceof Villager && m.gnome && m.role !== 'soldier') this.stowPouchGear(m);
     for (const load of m.carriedLoads()) {
       const b = load.kind === 'food' ? this.world.granary : this.world.woodyard;
       if (!b || (at && at !== b) || b.ruined) continue;

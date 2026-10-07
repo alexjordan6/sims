@@ -660,3 +660,6 @@ body::after {
 
 /* a found piece in the armory: a gold star after the pips */
 #overlay .tier .found { color: #e8c860; font-weight: normal; margin-left: 2px; }
+
+/* a soldier's FETCH buttons under a slot in the armory */
+#overlay .aslot .fetches, .armory .aslot .fetches { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
