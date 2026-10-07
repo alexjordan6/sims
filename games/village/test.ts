@@ -10,6 +10,7 @@ import { Brute, Rat, Ogre, Wrecker, Troll, Skulk, waveComposition } from './enem
 import { Boar, Swarm } from './wildlife';
 import { SLOT_GAP, Warband } from './regiment';
 import { hostSize, hostCounts } from './host';
+const BATTLE_BIG_TEST = 20;
 import { WARREN, SOLDIER_CAP_PER_LEVEL, PLAINS } from './config';
 import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, GNOME_PACK, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS, YARD, CALLINGS, TREE_RESERVE, MOODS, SERVE_RANGE, POT_INGREDIENTS, BODY } from './config';
 
@@ -1929,6 +1930,38 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(host.state === 'routed' && host.warbands.every((w) => !w.members.length || (w.goal && Math.hypot(w.goal.x - host.at.x, w.goal.y - host.at.y) < 1 && w.members.every((r) => r.lairBound))), `cut to ${host.alive()} of ${host.peak}, the host breaks and runs for its muster ground`);
       for (const r of host.bodies()) r.dead = true; s.removeDead(); run(0.1);
       assert(!s.raidActive && s.hosts.length === 0, 'and when the last of it is gone the raid is over');
+    }
+
+    // ---- the news: a fight is told once it is over, not body by body; the night's hunger in one line ----
+    {
+      const run = (secs: number) => { for (let i = 0; i < Math.ceil(secs * 60); i++) { s.grid.rebuild(s.agents); s.tick(1 / 60); } };
+      s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(COLS / 2, ROWS / 2)); s.world.items.length = 0;
+      const at = World.center(COLS / 2 + 40, ROWS / 2);
+      const kill = (n: number, make: (i: number) => Raider | Villager) => { for (let i = 0; i < n; i++) { const m = make(i); m.update = () => {}; m.hp = 0; m.dead = true; } };
+      const told = s.journal.length;
+      kill(30, (i) => s.spawn(new Raider(at.x + (i % 6) * 8, at.y + Math.floor(i / 6) * 8)));
+      kill(10, (i) => s.spawn(new Villager(at.x - 30 + i * 6, at.y, s.world.houses[0], 'soldier', 20, `Fallen${i}`, s.mods)));
+      run(1);
+      const during = s.journal.slice(told);
+      assert(!during.some((j) => /slain|is dead|falls/.test(j.text)) && !during.some((j) => j.toast), `while the fight lasts nothing is posted body by body, and nothing toasts (${during.map((j) => j.text).join(' / ') || 'silence'})`);
+      assert(s.battle?.slain === 30 && s.battle?.lost === 10, `but the fallen are counted (${s.battle?.slain} slain, ${s.battle?.lost} lost)`);
+      run(6.5);
+      const after = s.journal.slice(told).filter((j) => /slain/.test(j.text));
+      assert(after.length === 1 && /30 raiders slain, 10 of yours lost/.test(after[0].text) && /to the east/.test(after[0].text) && !after[0].toast && !s.battle,
+        `six quiet seconds later the fight is told once, and no alert for ten lost (${after[0]?.text})`);
+      const told2 = s.journal.length;
+      kill(25, (i) => s.spawn(new Villager(at.x + i * 4, at.y + 20, s.world.houses[0], 'soldier', 20, `Fell${i}`, s.mods)));
+      run(7);
+      const big = s.journal.slice(told2).find((j) => /25 of yours lost/.test(j.text));
+      assert(!!big && big.toast, `losing ${BATTLE_BIG_TEST} or more is worth an alert (${big?.text})`);
+      // a night's starving: one line, no alert for one or two
+      const told3 = s.journal.length;
+      const hungry = [0, 1].map((i) => s.spawn(new Villager(at.x, at.y, s.world.houses[0], 'farmer', 20, `Hungry${i}`, s.mods)));
+      for (const v of hungry) { v.update = () => {}; v.hungerDays = 99; }
+      s.food = 0; s.day++; s.newDay();
+      const night = s.journal.slice(told3).filter((j) => /starved/.test(j.text));
+      assert(hungry.every((v) => v.dead) && night.length === 1 && /2 starved in the night/.test(night[0].text) && !night[0].toast, `two who starve in one night make one line and no alert (${night.map((j) => j.text).join(' / ')})`);
+      s.removeDead();
     }
 
     // ---- the warren and the army economy: quick births, a granary-fed nursery, bigger barracks, gnome rations ----

@@ -18,6 +18,9 @@ import { View } from './view3d/view';
 import { UI } from './ui/ui';
 import { weaponMul } from './characters';
 import { AdaptiveSpawner } from './adaptive-spawn';
+/** seconds of nobody falling before a fight is told; and how many fallen make it worth an alert */
+const BATTLE_QUIET = 6;
+const BATTLE_BIG = 20;
 import { Host, hostSize, hostCounts, ASSAULT_RANGE, ROUT_SHARE, WARBAND_SIZE } from './host';
 import { Regiment, Warband, WARBAND_COLOURS, REGIMENT_SIZE, BANNER_COLOURS, SHAPES, SLOT_GAP, layout, type Shape, type Stance } from './regiment';
 
@@ -273,6 +276,7 @@ export class VillageScene extends SimScene {
     this.interior.leave();
     this.posting = null;
     this.squad = []; this.drag = null;
+    this.battle = null;
     this.regiments = []; this.warbands = []; this.hosts = []; this.hostSeq = 0; this.awakeT = 0; this.regimentSeq = 0; this.placing = null; this.enlistT = 0; this.warrenBorn = this.warrenToddled = 0;
     this.arrows = 30; this.feverWas = null;
     this.scrap = 0;
@@ -348,7 +352,7 @@ export class VillageScene extends SimScene {
     this.event('info', p.gnomeStart
       ? `A gnome band keeps house in ${where}, ten of them under pikes. Nobody comes this far out without a reason. Set the pikes where a raid will run onto them, forage what grows wild, and cook it in the great pot in the square.`
       : `A new village in ${where}. The last one here is gone, and nobody says how. Follow the trails to explore. Build walls and stairs, then station archers.`);
-    if (p.thicketRing > 0 && this.world.thicketCount) this.event('info', 'A ring of thorns hems the village in. It was not here last spring. The trails still run through it, but it creeps closer every night — cut it back with the axe, or it will close the trails and take the fields.', true);
+    if (p.thicketRing > 0 && this.world.thicketCount) this.event('info', 'A ring of thorns hems the village in. It was not here last spring. The trails still run through it, but it creeps closer every night — cut it back with the axe, or it will close the trails and take the fields.');
   }
 
   /** The ground out to the thorn ring starts charted, so you can see what hems you in. */
@@ -501,7 +505,7 @@ export class VillageScene extends SimScene {
       this.hosts = this.hosts.filter((h) => h.state !== 'mustering');
       if (spot && this.musterHost(false, this.day, host, spot)) this.spawnRaid();
     }
-    this.event('info', `Bench: ${gnomes} gnomes and ${raiders} raiders${host ? ` against a host of ${host}` : ''}.`, true);
+    this.event('info', `Bench: ${gnomes} gnomes and ${raiders} raiders${host ? ` against a host of ${host}` : ''}.`);
   }
 
   private spawnTrolls(): void {
@@ -1283,7 +1287,7 @@ export class VillageScene extends SimScene {
     if (who instanceof Player && who.weapons[slot]>=0) this.stowGear({kind:'weapon',slot,tier:who.weapons[slot]});
     who.weapons = { ...who.weapons, [slot]: next };
     this.fx.push({ kind: 'tool', tool: 'hammer', tx: who.tile.tx, ty: who.tile.ty });
-    this.event('build', `${who instanceof Player ? 'You' : (who as Villager).name} now carr${who instanceof Player ? 'y' : 'ies'} a ${tier.name.toLowerCase()}`, true);
+    this.event('build', `${who instanceof Player ? 'You' : (who as Villager).name} now carr${who instanceof Player ? 'y' : 'ies'} a ${tier.name.toLowerCase()}`);
     return true;
   }
   /** The forge rules armor and weapons share: a standing barracks of the tier's level, and the wood and scrap. */
@@ -1306,7 +1310,7 @@ export class VillageScene extends SimScene {
     who.armor = { ...who.armor, [slot]: next };
     this.refitArmor(who);
     this.fx.push({ kind: 'tool', tool: 'hammer', tx: who.tile.tx, ty: who.tile.ty });
-    this.event('build', `${who instanceof Player ? 'You' : (who as Villager).name} now wear${who instanceof Player ? '' : 's'} ${tier.name.toLowerCase()}`, true);
+    this.event('build', `${who instanceof Player ? 'You' : (who as Villager).name} now wear${who instanceof Player ? '' : 's'} ${tier.name.toLowerCase()}`);
     return true;
   }
   /** Re-derive max HP after armor changes (soldiers via applyRole; the head keeps a base + bonus). */
@@ -1426,7 +1430,7 @@ export class VillageScene extends SimScene {
     const c = buildingCenter(b);
     this.fx.push({ kind: 'deposit', x: c.tx * TILE, y: (b.ty + BUILDINGS[b.kind].h) * TILE - 6, text: `+${foodCount(r.makes, r.dish)}`, colour: FOODS[r.dish].colour });
     const where = took >= r.makes ? `${r.makes} in your pack — hold R to lob one into a crowd, or eat one (T)` : took > 0 ? `${took} in your pack, ${r.makes - took} left standing in the pot` : `${r.makes} standing in the pot (your pack is full)`;
-    this.event('food', `${FOODS[r.dish].name} cooked — ${where}.`, true);
+    this.event('food', `${FOODS[r.dish].name} cooked — ${where}.`);
     return true;
   }
   /** Every cooked meal the head carries, by dish. */
@@ -1459,8 +1463,8 @@ export class VillageScene extends SimScene {
       a.hp -= bite; a.hurtT = 0;
       if (a.hp > 0) continue;
       a.hp = 0; a.dead = true;
-      if (a instanceof Player) this.event('death', 'The thorns drank you dry.', true);
-      else if (a instanceof Villager) this.event('death', `${a.name} was caught in the thicket and bled out. The thorns are a little thicker there now.`, true);
+      if (a instanceof Player) this.event('death', 'The thorns drank you dry.');
+      else if (a instanceof Villager) this.battleNow().thorns++; // counted with the fallen when it is removed (onDeath)
     }
     const pl = this.player;
     if (!pl.dead && this.world.thicketAt(pl.x, pl.y) && this.simTime - this.thornWarned > 20) {
@@ -1479,7 +1483,7 @@ export class VillageScene extends SimScene {
     // what the village actually lost is what makes the warning worth reading
     // the ring itself creeps every night; only what it takes inside it (or in a lane) is news
     const near = took.filter((q) => Math.abs(q.tx - COLS / 2) < 18 && Math.abs(q.ty - ROWS / 2) < 13 || this.world.get(q.tx, q.ty)?.trail).length;
-    if (near) this.event('info', `In the night the thorns crept ${near} tile${near === 1 ? '' : 's'} closer. Something feeds them. Cut them back with the axe before they take the fields and close the trails.`, true);
+    if (near) this.event('info', `In the night the thorns crept ${near} tile${near === 1 ? '' : 's'} closer. Something feeds them. Cut them back with the axe before they take the fields and close the trails.`);
   }
   /** Is there a bowl standing in the pot for someone? */
   potHasServings(b = this.world.cookpot): boolean {
@@ -1521,7 +1525,7 @@ export class VillageScene extends SimScene {
       served++;
     }
     const what = Object.entries(taken).map(([d, n]) => `${n} ${FOODS[d as DishKind].name.toLowerCase()}`).join(', ');
-    if (served) this.event('food', `${what} ladled out — ${served} gnome${served === 1 ? '' : 's'} fed.`, true);
+    if (served) this.event('food', `${what} ladled out — ${served} gnome${served === 1 ? '' : 's'} fed.`);
     return served;
   }
   /** One bowl into one gnome: the mood takes hold, and its stats are rewritten to match. */
@@ -1556,7 +1560,7 @@ export class VillageScene extends SimScene {
     }
     this.fx.push({ kind: 'impact', x: v.x, y: v.y });
     this.fx.push({ kind: 'deposit', x: v.x, y: v.y - TILE, text: 'SPORES', colour: MOODS.stew.colour });
-    if (caught) this.event('soldier', `${v.name} bursts — ${caught} raider${caught === 1 ? ' is' : 's are'} left reeling in the spores.`, true);
+    if (caught) this.event('soldier', `${v.name} bursts — ${caught} raider${caught === 1 ? ' is' : 's are'} left reeling in the spores.`);
   }
   /**
    * Sharp-eyed: the gnome picks up a stone and slings it. It is an arrow in everything but name, and
@@ -1648,7 +1652,7 @@ export class VillageScene extends SimScene {
     const r = RECIPES[kind], stat = FOODS[kind].stat as Exclude<DietStat, 'care'>;
     this.player.hp = Math.min(this.player.maxHp, this.player.hp + r.heal);
     this.buff = { stat, mul: 1 + r.buffAdd, until: this.simTime + r.buffSecs, dish: kind };
-    this.event('food', `${FOODS[kind].name}: +${r.heal} HP and +${Math.round(r.buffAdd * 100)}% ${DIET_STAT_NAME[stat]} for ${r.buffSecs}s.`, true);
+    this.event('food', `${FOODS[kind].name}: +${r.heal} HP and +${Math.round(r.buffAdd * 100)}% ${DIET_STAT_NAME[stat]} for ${r.buffSecs}s.`);
   }
   /** T: one meal of whatever eatKind() picks. Refuses a full belly rather than wasting the food. */
   eat(): boolean {
@@ -1803,6 +1807,7 @@ export class VillageScene extends SimScene {
   tick(dt: number): void {
     if (this.screen !== 'playing') return;
     this.world.beginTick();
+    this.newsClock += dt;
 
     this.dayTime += dt / p.dayLength;
     if (this.dayTime >= 1) {
@@ -1850,6 +1855,7 @@ export class VillageScene extends SimScene {
       const c = buildingCenter(den);
       if (this.fog.visibleAt(c.tx * TILE, c.ty * TILE) > 0.5) this.findGnomes(den);
     }
+    if (this.battle && (this.newsClock - this.battle.last >= BATTLE_QUIET || (this.raidActive && !this.agents.some((a) => a instanceof Raider && !a.lairBound)))) this.tellBattle();
     if (this.raidActive && !this.agents.some((a) => a instanceof Raider && !a.lairBound)) {
       this.raidActive = false;
       this.stats.raidsRepelled++;
@@ -1873,7 +1879,7 @@ export class VillageScene extends SimScene {
   newDay(): void {
     // a night's rest — but not on an empty belly
     if (!p.hunger || this.player.hunger > 0) this.player.hp = Math.min(this.player.maxHp, this.player.hp + 30);
-    else this.event('food', 'You slept badly on an empty belly, and dreamt of teeth.', true);
+    else this.event('food', 'You slept badly on an empty belly, and dreamt of teeth.');
     // crops grow
     this.world.tiles.forEach((t, i) => { if (t.kind === 'crop') { t.stage++; this.world.dirty.add(i); } });
     this.creepThicket();
@@ -1927,11 +1933,11 @@ export class VillageScene extends SimScene {
     this.warrenBorn = this.warrenToddled = 0;
     // Baby Fever is judged on the larder as the day breaks, before anyone eats
     const fever = this.feverActive();
-    if (this.mods.babyFever && this.feverWas !== null && fever !== this.feverWas) this.event('birth', fever ? 'Baby fever: full larders, and the village knows it.' : 'The surplus is gone — births return to normal.', true);
+    if (this.mods.babyFever && this.feverWas !== null && fever !== this.feverWas) this.event('birth', fever ? 'Baby fever: full larders, and the village knows it.' : 'The surplus is gone — births return to normal.');
     this.feverWas = fever;
 
     // villagers: eat (children from the piles in their yard, everyone else from the granary), tally the children's day
-    const villagers = this.villagers(), warnedHomes = new Set<Building>();
+    const villagers = this.villagers(), warnedHomes = new Set<Building>(), starved: Villager[] = [];
     for (const v of villagers) {
       if (v.role === 'infant') continue; // nursed: judged after the grown have eaten, below
       const ration = this.rationOf(v);
@@ -1939,11 +1945,11 @@ export class VillageScene extends SimScene {
       if (v.role === 'kid' && v.home.kind !== 'warren') {
         // children eat nothing but what lands in their home yard: yesterday's meal came off a pile, or it didn't
         if (p.kidFood <= 0 || v.ateDay >= this.day - 1) { v.hungerDays = 0; wellFed = true; }
-        else if (++v.hungerDays >= p.kidStarveDays) { v.dead = true; v.hp = 0; v.starved = true; this.event('death', `${v.name} starved in the yard at ${v.gnome ? 'the gnome house' : 'home'}`, true); continue; }
+        else if (++v.hungerDays >= p.kidStarveDays) { v.dead = true; v.hp = 0; v.starved = true; starved.push(v); continue; }
         else if (!warnedHomes.has(v.home)) { warnedHomes.add(v.home); this.event('food', `Children at ${v.gnome ? 'the gnome house' : 'a house'} are going hungry — throw food in their yard (BASKET)`, true); }
       }
       else if (this.food >= ration) { this.food -= ration; v.hungerDays = 0; }
-      else if (++v.hungerDays >= 3 + this.mods.starveDaysDelta) { v.dead = true; v.hp = 0; v.starved = true; this.event('death', `${v.name} starved`, true); continue; }
+      else if (++v.hungerDays >= 3 + this.mods.starveDaysDelta) { v.dead = true; v.hp = 0; v.starved = true; starved.push(v); continue; }
       else this.event('food', `${v.name} went hungry`);
       if (v.role === 'kid') {
         // yesterday's care, tallied at dawn: what they ate, who was around, where they live, whether you came by
@@ -1963,9 +1969,13 @@ export class VillageScene extends SimScene {
       if (v.role !== 'infant' || v.dead) continue;
       const nursed = villagers.some((o) => o !== v && (v.home.kind === 'warren' ? o.gnome : o.home === v.home) && o.isAdult && !o.dead && o.hungerDays === 0);
       if (nursed) { v.hungerDays = 0; continue; }
-      if (++v.hungerDays >= p.kidStarveDays) { v.dead = true; v.hp = 0; v.starved = true; this.event('death', `${v.name} starved in the nursery — nobody at home was fed`, true); continue; }
+      if (++v.hungerDays >= p.kidStarveDays) { v.dead = true; v.hp = 0; v.starved = true; starved.push(v); continue; }
       if (!nurseryWarned) { nurseryWarned = true; this.event('food', `${v.name} goes hungry in the nursery — a fed grown-up at home nurses the infants`, true); }
     }
+
+    // the night's hunger, told once: one name, or how many and who
+    if (starved.length === 1) this.event('death', `${starved[0].name} starved in the night${starved[0].role === 'infant' ? ', in the nursery — nobody at home was fed' : starved[0].isChild ? ' — nothing lay in their yard' : ''}.`);
+    else if (starved.length) this.event('death', `${starved.length} starved in the night: ${starved.slice(0, 4).map((v) => v.name).join(', ')}${starved.length > 4 ? ` and ${starved.length - 4} more` : ''}. Feed the yards and fill the granary.`, starved.length >= 3);
 
     // move-ins: adults from crowded houses take a spare room elsewhere
     for (const h of this.world.familyHouses) {
@@ -2334,7 +2344,7 @@ export class VillageScene extends SimScene {
   cropEaten(): void {
     if (this.cropsEatenThisRaid) return;
     this.cropsEatenThisRaid = true;
-    this.event('food', 'Rats in the crops — hundreds of them, gnawing!', true);
+    this.event('food', 'Rats in the crops — hundreds of them, gnawing!');
   }
   childGrabbed(kid: Villager, by: Raider): void {
     this.event('raid', `A ${by.name.toLowerCase()} has taken ${kid.name}! Get them back before the trees do!`, true);
@@ -2344,7 +2354,7 @@ export class VillageScene extends SimScene {
     kid.dead = true;
     kid.hp = 0;
     kid.hungerDays = 99; // keeps onDeath from logging "was killed"
-    this.event('death', `${kid.name} was carried off into the woods. Nobody heard them scream.`, true);
+    this.event('death', `${kid.name} was carried off into the woods. Nobody heard them scream.`);
   }
 
 
@@ -2366,14 +2376,14 @@ export class VillageScene extends SimScene {
     if (a instanceof Villager) {
       a.home.residents--;
       for (const k of this.villagers()) if (k.isChild && k.parents.includes(a)) k.care -= 1; // losing a parent
-      if (a.hp <= 0 && !a.starved && a.age < a.deathAt(this)) this.event('death', `${a.name} the ${a.role} is dead.`, true);
+      if (a.hp <= 0 && !a.starved && a.age < a.deathAt(this)) this.tallyLoss(a);
     } else if (a instanceof Boar) {
       // game, not an enemy: the meat lies where it fell for the head's hands or a gnome
       a.sounder.members = a.sounder.members.filter((b) => b !== a);
       if (a.hp <= 0) {
         this.stats.boarsHunted++;
         this.world.dropItem('food', a.meat, a.x, a.y, 'meat', this.rng);
-        this.event('food', `A ${a.name.toLowerCase()} falls — ${a.meat} meat lies where it fell${a.sounder.members.length ? '' : '; the sounder is no more'}`);
+        this.tallyKill(a, 'beast', a.meat);
       }
     } else if (a instanceof Skulk) {
       // no meat on one of these: it leaves the club it swung, or a single scrap off its trappings
@@ -2383,16 +2393,17 @@ export class VillageScene extends SimScene {
           const it = this.world.dropItem('gear', 1, a.x, a.y, undefined, this.rng);
           it.gear = { kind: 'weapon', slot: 'melee', tier: 0 };
         } else this.world.dropItem('scrap', 1, a.x, a.y, undefined, this.rng);
+        this.tallyKill(a, 'foe');
       }
     } else if (a instanceof Troll) {
       // a monster, but the meat is good: it lies where it fell for the head's hands or a gnome
       if (a.hp <= 0) {
         this.stats.raidersKilled++;
         this.world.dropItem('food', a.meat, a.x, a.y, 'meat', this.rng);
-        this.event('raid', `A troll falls — ${a.meat} meat lies where it fell`);
+        this.tallyKill(a, 'troll', a.meat);
       }
     } else if (a instanceof Raider) {
-      if (a.carrying && !a.carrying.dead) { const kid = a.carrying; kid.carriedBy = null; a.carrying = null; this.event('grow', `${kid.name} was rescued!`, true); }
+      if (a.carrying && !a.carrying.dead) { const kid = a.carrying; kid.carriedBy = null; a.carrying = null; this.event('grow', `${kid.name} was rescued!`); }
       if (a.hp <= 0) {
         this.stats.raidersKilled++;
         const scrap = (SCRAP_DROP as Record<string, number>)[a.kind] ?? 2;
@@ -2406,7 +2417,8 @@ export class VillageScene extends SimScene {
           a.lair.level = 3; this.world.refresh(a.lair); // the fire goes out
           this.slowMo();
           this.event('raid', 'The Ogre is slain! His lair falls silent — for the first time in living memory.', true);
-        } else this.event('raid', a.boss ? 'The Warlord has fallen!' : `${a.name} slain`, a.boss);
+        } else if (a.boss) this.event('raid', 'The Warlord has fallen!', true);
+        else this.tallyKill(a, 'foe');
       }
     }
   }
@@ -2650,7 +2662,7 @@ export class VillageScene extends SimScene {
     const max = buildingMaxHp(b); b.hp += max - b.maxHp; b.maxHp = max;
     this.world.refresh(b);
     this.fx.push({ kind: 'upgrade', building: b });
-    this.event('build', `${BUILDINGS[b.kind].name} is now Lv${b.level} — ${LEVEL_PERKS[b.kind][b.level]}`, true);
+    this.event('build', `${BUILDINGS[b.kind].name} is now Lv${b.level} — ${LEVEL_PERKS[b.kind][b.level]}`);
   }
 
   // ---- building damage ------------------------------------------------------
@@ -2712,7 +2724,7 @@ export class VillageScene extends SimScene {
     this.world.remove(b);
     this.wood += refund;
     this.fx.push({ kind: 'demolish', building: b });
-    this.event('build', `Took down the ${BUILDINGS[b.kind].name.toLowerCase()}${refund ? ` — ${refund} wood recovered` : ''}`, true);
+    this.event('build', `Took down the ${BUILDINGS[b.kind].name.toLowerCase()}${refund ? ` — ${refund} wood recovered` : ''}`);
     return true;
   }
   /** Why the hammer can't mend `b` right now, or null. */
@@ -2732,7 +2744,7 @@ export class VillageScene extends SimScene {
       b.ruined = false; b.hp = b.maxHp; b.alarmed = false;
       this.world.refresh(b);
       this.fx.push({ kind: 'upgrade', building: b });
-      this.event('build', `The ${BUILDINGS[b.kind].name.toLowerCase()} stands again.`, true);
+      this.event('build', `The ${BUILDINGS[b.kind].name.toLowerCase()} stands again.`);
       return true;
     }
     this.wood--; b.hp = Math.min(b.maxHp, b.hp + REPAIR.perWood);
@@ -3070,7 +3082,7 @@ export class VillageScene extends SimScene {
     if (!this.world.get(q.tx, q.ty)?.defense || !this.reachableStairs(v, q)) { this.event('info', 'Choose a wall top connected to reachable stairs.', true); return false; }
     if (this.villagers().some(o => o !== v && o.post?.tx === q.tx && o.post?.ty === q.ty)) { this.event('info', 'That post is already occupied.', true); return false; }
     v.post = q; v.order = null; this.equipSoldier(v, 'bow'); this.posting = null;
-    this.event('soldier', `${v.name} is taking an archer post.`, true); return true;
+    this.event('soldier', `${v.name} is taking an archer post.`); return true;
   }
   // ---- the shaman wand: a squad and its orders ------------------------------------------------
 
@@ -3209,6 +3221,53 @@ export class VillageScene extends SimScene {
     return this.cropCache.tiles;
   }
   private cropCache: { at: number; tiles: TilePos[] } | null = null;
+
+  // ---- the fighting, told once it is over --------------------------------------------------------
+
+  /**
+   * A fight in progress: who has fallen on either side, and where. Nothing is posted body by body — a
+   * battle of a thousand would bury the journal — and once BATTLE_QUIET seconds pass with nobody falling
+   * (or the raid ends) it is told in one line, toasted only when it was a big one.
+   */
+  /** seconds of play, as the tick counts them (the fight's quiet is timed by it) */
+  private newsClock = 0;
+  battle: { slain: number; trolls: number; beasts: number; meat: number; lost: number; gnomes: number; thorns: number; sx: number; sy: number; n: number; host: boolean; last: number } | null = null;
+  private battleNow(): NonNullable<VillageScene['battle']> {
+    return this.battle ??= { slain: 0, trolls: 0, beasts: 0, meat: 0, lost: 0, gnomes: 0, thorns: 0, sx: 0, sy: 0, n: 0, host: false, last: this.newsClock };
+  }
+  /** One of yours has fallen in a fight. */
+  tallyLoss(v: Villager): void {
+    const b = this.battleNow();
+    b.lost++; if (v.gnome) b.gnomes++;
+    b.sx += v.x; b.sy += v.y; b.n++; b.last = this.newsClock;
+    if (this.hosts.some((h) => h.state === 'marching')) b.host = true;
+  }
+  /** An enemy (or game) has been cut down; `meat` is what it leaves. */
+  tallyKill(m: Mover, what: 'foe' | 'troll' | 'beast', meat = 0): void {
+    const b = this.battleNow();
+    if (what === 'troll') b.trolls++; else if (what === 'beast') b.beasts++; else b.slain++;
+    b.meat += meat;
+    b.sx += m.x; b.sy += m.y; b.n++; b.last = this.newsClock;
+    if (this.hosts.some((h) => h.state === 'marching')) b.host = true;
+  }
+  /** Tell the fight in one line and start a fresh tally. */
+  tellBattle(): void {
+    const b = this.battle;
+    this.battle = null;
+    if (!b) return;
+    const c = this.villageCentre(), x = b.sx / Math.max(1, b.n), y = b.sy / Math.max(1, b.n);
+    const where = Math.hypot(x - c.x, y - c.y) < 25 * TILE ? 'at the village' : `to the ${this.bearing(x, y)}`;
+    const parts: string[] = [];
+    if (b.slain) parts.push(`${b.slain} ${b.slain === 1 ? 'raider' : 'raiders'} slain`);
+    if (b.trolls) parts.push(`${b.trolls} troll${b.trolls === 1 ? '' : 's'} felled`);
+    if (b.beasts) parts.push(`${b.beasts} boar${b.beasts === 1 ? '' : 's'} hunted`);
+    const lost = b.lost ? `${b.lost} of yours lost${b.gnomes && b.gnomes < b.lost ? ` (${b.gnomes} gnome${b.gnomes === 1 ? '' : 's'})` : b.gnomes ? ` — all gnomes` : ''}${b.thorns ? `, ${b.thorns} to the thorns` : ''}` : parts.length ? 'none of yours lost' : '';
+    if (lost) parts.push(lost);
+    if (!parts.length) return;
+    const meat = b.meat ? ` — ${b.meat} meat lies where they fell` : '';
+    const big = b.lost >= BATTLE_BIG || (b.host && b.slain + b.lost >= BATTLE_BIG);
+    this.event(b.lost && !b.slain && !b.trolls && !b.beasts ? 'death' : 'raid', `${b.slain + b.trolls + b.lost >= 10 ? 'The battle' : 'A fight'} ${where}: ${parts.join(', ')}${meat}.`, big);
+  }
 
   // ---- hosts: the enemy's armies ------------------------------------------------------------------
 
@@ -3724,7 +3783,7 @@ export class VillageScene extends SimScene {
         this.stepOut(b);
         if (b.kind === 'gnomehouse') this.foundGnomes(b);
         this.fx.push({ kind: 'tool', tool: 'hammer', tx: a.tx + 1, ty: a.ty + BUILDINGS[pl.tool].h - 1 });
-        this.event('build', `Built a ${BUILDINGS[pl.tool].name.toLowerCase()}`, true);
+        this.event('build', `Built a ${BUILDINGS[pl.tool].name.toLowerCase()}`);
         return;
       }
       case 'hammer': {
