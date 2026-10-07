@@ -2106,6 +2106,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       const ch: Chest = { tx: spot.tx, ty: spot.ty, source: 'cart', loot: [{ kind: 'scrap', n: 4 }, { kind: 'armor', slot: 'legs', tier: 1 }, { kind: 'wood', n: 6 }], opened: false };
       s.world.chests.push(ch);
       s.gnomesFollow = false; for (const v of s.villagers()) if (v.gnome && v.role !== 'soldier') v.followPlayer(s, false); // back to work, not at your heels
+      for (const v of s.villagers()) v.pouch?.clear(); s.wood = 20; s.food = 20; // room at home, and empty pouches (a full granary would leave them carrying their forage)
       Object.assign(s.player, World.center(home.tx - 40, home.ty)); // out of the way: the head would pick it all up
       const scrap0 = s.scrap, wood0 = s.wood;
       assert(s.openChest(ch), 'a cart broken open near home');
@@ -2159,6 +2160,61 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(Math.abs(wallFront - 0.375) < 0.04 && Math.abs(lineFront - 0.25) < 0.04 && Math.abs(wallBack - 0.25) < 0.04,
         `an iron-rimmed shield blocks ${(lineFront * 100).toFixed(0)}% in a line, ${(wallFront * 100).toFixed(0)}% in the front of a shield wall, ${(wallBack * 100).toFixed(0)}% from behind`);
       wall.members = []; v.block = null; v.dead = true; s.removeDead();
+    }
+
+    // ---- formation orders: groups by weapon, transfer, charge, retreat, facing, fire --------------------
+    {
+      const run = (secs: number) => { for (let i = 0; i < Math.ceil(secs * 60); i++) { s.grid.rebuild(s.agents); s.tick(1 / 60); } };
+      s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(104, 100)); s.world.items.length = 0; s.dayTime = 0.35;
+      const raise = (weapon: 'sword' | 'pike' | 'bow', i: number, tag: string) => {
+        const at = World.center(118 + (i % 4), 96 + Math.floor(i / 4));
+        const g = s.spawn(new Villager(at.x, at.y, s.world.houses[0], 'soldier', 20, `${tag}${i}`, s.mods)); g.gnome = true; g.applyRole(s.mods); g.weapon = weapon; return g;
+      };
+      const swords = [0, 1, 2, 3].map((i) => raise('sword', i, 'Sw')), pikes = [0, 1, 2, 3].map((i) => raise('pike', i + 4, 'Pk')), bows = [0, 1, 2, 3].map((i) => raise('bow', i + 8, 'Bw'));
+      run(0.1);
+      const grp = (g: Villager) => g.regiment?.group;
+      assert(s.regiments.length === 3 && swords.every((g) => grp(g) === 1) && pikes.every((g) => grp(g) === 2) && bows.every((g) => grp(g) === 3),
+        `gnomes fall in by weapon: swords to I, pikes to II, bows to III (${s.regiments.map((r) => `${r.group}:${r.members.length}`).join(' ')})`);
+      s.equipSoldier(pikes[0], 'bow'); run(0.6);
+      assert(grp(pikes[0]) === 3 && pikes[0].regiment === bows[0].regiment, 'a pikeman handed a bow joins the archers');
+      const inf = swords[0].regiment!, arch = bows[0].regiment!, pk = pikes[1].regiment!;
+      s.transferGroup([inf], 5);
+      const recruit = raise('sword', 13, 'Rc'); run(0.6);
+      assert(inf.group === 5 && grp(recruit) === 1 && recruit.regiment !== inf, 'a banner moved to group V stays there, and a new swordsman raises a fresh banner in I');
+      assert(s.selectGroup(5).length === 1 && s.pickedRegiments().length === 1 && s.pickedRegiments()[0] === inf && s.selectGroup(0).length === s.regiments.length, 'a group number picks its banners; 0 picks them all');
+      s.clearSquad();
+      recruit.dead = true; s.removeDead();
+      // charge: holding, the infantry keep their places with a raider six tiles off; charging, they go for it
+      inf.place(World.center(134, 105).x, World.center(134, 105).y, 1, 0); run(8);
+      const foe = s.spawn(new Raider(inf.x + 6 * TILE, inf.y)); foe.speed = 0; foe.update = () => {}; foe.hp = foe.maxHp = 1e6; foe.lairBound = true;
+      run(3);
+      const nearest = () => Math.min(...inf.active().map((g) => g.dist(foe)));
+      const held = nearest(), untouched = foe.hp === 1e6;
+      s.charge([inf]); run(5);
+      assert(untouched && held > 2 * TILE && nearest() < 1.5 * TILE && foe.hp < 1e6, `held, the nearest stood ${(held / TILE).toFixed(1)} tiles off; charging, they close and strike (${(nearest() / TILE).toFixed(1)} tiles, ${1e6 - foe.hp} damage)`);
+      // retreat: back to the village at a run, nobody stopping to fight
+      const c = (s as unknown as { villageCentre(): { x: number; y: number } }).villageCentre();
+      s.retreat([inf]); run(0.5);
+      const d0 = Math.hypot(inf.x - c.x, inf.y - c.y), hp0 = foe.hp;
+      run(4);
+      assert(inf.stance === 'retreat' && d0 - Math.hypot(inf.x - c.x, inf.y - c.y) > 2 * TILE && foe.hp === hp0, `retreating, the banner runs for the village (${((d0 - Math.hypot(inf.x - c.x, inf.y - c.y)) / TILE).toFixed(1)} tiles nearer) and nobody swings`);
+      foe.dead = true; s.removeDead();
+      // hold fire: archers in the ranks loose only when told
+      arch.place(World.center(126, 92).x, World.center(126, 92).y, 1, 0); run(6);
+      const mark = s.spawn(new Raider(arch.x + 6 * TILE, arch.y)); mark.speed = 0; mark.update = () => {}; mark.hp = mark.maxHp = 1e6; mark.lairBound = true;
+      s.arrows = 200; s.fireOrder([arch], true); run(3);
+      const a0 = s.arrows;
+      s.fireOrder([arch], false); run(3);
+      assert(a0 === 200 && s.arrows < a0, `holding fire, the archers loose nothing at a raider in range (${200 - a0}); at will, they shoot (${a0 - s.arrows} arrows)`);
+      mark.dead = true; s.removeDead();
+      // facing: face the enemy turns the block, and keeps it turned
+      pk.place(World.center(124, 100).x, World.center(124, 100).y, 0, -1); run(6);
+      const east = s.spawn(new Raider(pk.x + 7 * TILE, pk.y)); east.speed = 0; east.update = () => {}; east.hp = east.maxHp = 1e6; east.lairBound = true;
+      s.faceOrder([pk], 'enemy'); run(1.5);
+      assert(pk.faceEnemy && pk.fx > 0.9, `told to face the enemy, the pikes wheel toward it (facing ${pk.fx.toFixed(2)}, ${pk.fy.toFixed(2)})`);
+      s.faceOrder([pk], 'point', pk.x, pk.y + 50);
+      assert(!pk.faceEnemy && pk.fy > 0.9, 'face this direction turns them where you point');
+      east.dead = true; s.removeDead();
     }
 
     // ---- the opening: gnomes by default, no farm, wild food by the door ------------------------------

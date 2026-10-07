@@ -23,7 +23,7 @@ import { AdaptiveSpawner } from './adaptive-spawn';
 const BATTLE_QUIET = 6;
 const BATTLE_BIG = 20;
 import { Host, hostSize, hostCounts, ASSAULT_RANGE, ROUT_SHARE, WARBAND_SIZE } from './host';
-import { Regiment, Warband, WARBAND_COLOURS, REGIMENT_SIZE, BANNER_COLOURS, SHAPES, layout, type Shape, type Stance } from './regiment';
+import { Regiment, Warband, WARBAND_COLOURS, REGIMENT_SIZE, BANNER_COLOURS, SHAPES, SHAPE_NAME, GROUP_NAME, weaponGroup, layout, type Shape, type Stance } from './regiment';
 
 const NAMES = ['Ada', 'Bram', 'Cass', 'Dov', 'Eli', 'Fen', 'Gil', 'Hana', 'Ivo', 'Juno', 'Kai', 'Lior', 'Mara', 'Nils', 'Orla', 'Pim', 'Quin', 'Rue', 'Sol', 'Tova', 'Uli', 'Vera', 'Wren', 'Xan', 'Yael', 'Zed'];
 
@@ -3374,6 +3374,9 @@ export class VillageScene extends SimScene {
   equipSoldier(v: Villager, weapon: 'sword' | 'bow' | 'pike'): void {
     if (v.role !== 'soldier' || v.dead) return;
     v.weapon = weapon; v.attack = null; v.clearGoal();
+    // a gnome with a new weapon leaves its banner for its weapon's group (it falls in again within half a second)
+    const r = v.regiment;
+    if (r && r.group <= 3 && r.group !== weaponGroup(weapon)) r.prune((m) => m !== v);
   }
   /**
    * A pike thrust lands: every raider along the line from the pikeman out to pike's length is struck.
@@ -3808,10 +3811,13 @@ export class VillageScene extends SimScene {
   }
   /** A gnome soldier falls in under the newest banner with room, or a new banner is raised for it. */
   enlist(v: Villager): Regiment {
-    let r = this.regiments[this.regiments.length - 1];
-    if (!r || r.members.length >= REGIMENT_SIZE) {
+    // by weapon, as Bannerlord groups them: swords to I, pikes to II, bows to III (a banner moved to another group takes no recruits)
+    const g = weaponGroup(v.weapon);
+    let r = [...this.regiments].reverse().find((x) => x.group === g && x.members.length < REGIMENT_SIZE);
+    if (!r) {
       this.regimentSeq++;
       r = new Regiment(this.regimentSeq, BANNER_COLOURS[(this.regimentSeq - 1) % BANNER_COLOURS.length], v.x, v.y);
+      r.group = g;
       this.regiments.push(r);
     }
     r.add(v);
@@ -3848,8 +3854,7 @@ export class VillageScene extends SimScene {
    * Where a wand placement puts each ordered regiment: side by side across the drag's facing, centred on
    * the press. A click (no drag) faces the blocks the way they would walk; a line is two deep, and a longer drag stretches it wider.
    */
-  placementPlan(pl: { x0: number; y0: number; x1: number; y1: number }): { reg: Regiment; x: number; y: number; fx: number; fy: number; cols: number; slots: { x: number; y: number }[] }[] {
-    const regs = this.orderedRegiments();
+  placementPlan(pl: { x0: number; y0: number; x1: number; y1: number }, regs = this.orderedRegiments()): { reg: Regiment; x: number; y: number; fx: number; fy: number; cols: number; slots: { x: number; y: number }[] }[] {
     if (!regs.length) return [];
     const dx = pl.x1 - pl.x0, dy = pl.y1 - pl.y0, len = Math.hypot(dx, dy);
     let fx: number, fy: number;
@@ -3883,7 +3888,56 @@ export class VillageScene extends SimScene {
     }
     if (regs.length) this.wandFx(regs[0].x, regs[0].y - 12, stance === 'hold' ? 'HOLD' : stance === 'advance' ? 'ADVANCE' : 'FOLLOW');
   }
-  /** The next shape for these regiments: square, line, wedge. */
+  // ---- formation orders: what the F-key menus send (see the command bar) -------------------------
+
+  /** Pick a formation group (1-8), or all of them (0); `add` keeps what was picked. */
+  selectGroup(n: number, add = false): Regiment[] {
+    const regs = n === 0 ? [...this.regiments] : this.regiments.filter((r) => r.group === n);
+    if (!add) this.clearSquad();
+    if (regs.length) this.selectSquad(regs.flatMap((r) => r.members), true);
+    return regs;
+  }
+  /** Move banners into group `n` (Bannerlord's transfer). They keep it; recruits still go to I-III by weapon. */
+  transferGroup(regs: Regiment[], n: number): void {
+    for (const r of regs) r.group = Math.max(1, Math.min(8, n));
+    if (regs.length) this.wandFx(regs[0].x, regs[0].y - 12, `TO ${GROUP_NAME[regs[0].group].toUpperCase()}`);
+  }
+  /** F1 F1: march to where the cursor points, facing the way they walk (side by side, as a right-click places them). */
+  moveTo(regs: Regiment[], x: number, y: number): void {
+    for (const g of this.placementPlan({ x0: x, y0: y, x1: x, y1: y }, regs)) { g.reg.place(g.x, g.y, g.fx, g.fy, g.cols); g.reg.faceEnemy = false; }
+    if (regs.length) this.wandFx(x, y - 8, 'MOVE');
+  }
+  /** F1 F3: break ranks and go for them. */
+  charge(regs: Regiment[]): void {
+    for (const r of regs) { r.stance = 'charge'; r.quarry = null; r.faceEnemy = false; r.rally = null; }
+    if (regs.length) this.wandFx(regs[0].x, regs[0].y - 12, 'CHARGE!');
+  }
+  /** F1 F6: fall back to the village at a run, side by side about its centre, and hold there. */
+  retreat(regs: Regiment[]): void {
+    const c = this.villageCentre();
+    for (const g of this.placementPlan({ x0: c.x, y0: c.y, x1: c.x, y1: c.y }, regs)) { const r = g.reg; r.rally = { x: g.x, y: g.y }; r.stance = 'retreat'; r.quarry = null; r.faceEnemy = false; r.dest = { x: g.x, y: g.y }; }
+    if (regs.length) this.wandFx(regs[0].x, regs[0].y - 12, 'FALL BACK');
+  }
+  /** F2: face the nearest enemy (and keep facing it), or face where the cursor points. A follower stops to do it. */
+  faceOrder(regs: Regiment[], how: 'enemy' | 'point', x = 0, y = 0): void {
+    for (const r of regs) {
+      if (r.stance !== 'hold') r.place(r.x, r.y, r.fx, r.fy, r.cols);
+      if (how === 'enemy') r.faceEnemy = true;
+      else { r.faceEnemy = false; r.face(x - r.x, y - r.y); r.dirty = true; }
+    }
+    if (regs.length) this.wandFx(regs[0].x, regs[0].y - 12, how === 'enemy' ? 'FACE THE ENEMY' : 'FACE');
+  }
+  /** F3: take a formation. */
+  formOrder(regs: Regiment[], shape: Shape): void {
+    for (const r of regs) r.setShape(shape);
+    if (regs.length) this.wandFx(regs[0].x, regs[0].y - 12, SHAPE_NAME[shape].toUpperCase());
+  }
+  /** F4: archers in these ranks loose at will, or hold their fire. */
+  fireOrder(regs: Regiment[], hold: boolean): void {
+    for (const r of regs) r.holdFire = hold;
+    if (regs.length) this.wandFx(regs[0].x, regs[0].y - 12, hold ? 'HOLD FIRE' : 'FIRE AT WILL');
+  }
+  /** The next shape for these regiments, in the Form menu's order. */
   cycleShape(regs: Regiment[]): void {
     if (!regs.length) return;
     const next: Shape = SHAPES[(SHAPES.indexOf(regs[0].shape) + 1) % SHAPES.length];

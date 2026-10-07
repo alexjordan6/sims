@@ -2,7 +2,7 @@ import type { Agent } from '@shared/index';
 import { World, WILD_FOOD, doorstep, buildingCenter, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
 import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, GNOME_CALLING, MOODS, type Mood, type DishKind, ORDER, YARD, GNOME_PACK, ITEM, MASS, BODY, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, zeroFood, BOAR, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
 import type { Mods } from './meta';
-import { SHIELD_WALL } from './regiment';
+import { SHIELD_WALL, ADVANCE_SIGHT } from './regiment';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle, knockMul, reloadMul } from './characters';
 import type { VillageScene } from './main';
 import type { Item } from './items';
@@ -1155,12 +1155,32 @@ export class Villager extends Mover {
    * a little out of the rank to meet one only when the block is advancing. Otherwise it walks straight
    * to its slot, and falls back on a path only after 1.5 s without getting closer.
    */
+  /** A charge: the nearest raider in sight, gone for with no leash to the slot. False when there is nothing in sight (the gnome forms on the banner). */
+  private chargeTick(dt: number, s: VillageScene, pike: boolean, bow: boolean, reach: number): boolean {
+    this.retarget -= dt;
+    if (this.retarget <= 0 || (this.target && (this.target.dead || this.target.hidden))) { this.retarget = 0.4; this.target = s.nearestRaider(this.x, this.y, ADVANCE_SIGHT); }
+    const foe = this.target;
+    if (!foe || foe.dead) { this.target = null; return false; }
+    const d = this.dist(foe), dmg = this.soldierDmg(s);
+    this.task = 'charging';
+    if (bow) {
+      if (d <= reach && s.world.lineClear(this, foe, this.elevated)) { this.vx = this.vy = 0; if (!this.regiment!.holdFire && this.attackCd <= 0) { s.shoot(this, foe.x - this.x, foe.y - this.y, Math.round(dmg)); this.attackCd = 0.9 * reloadMul(this.weapons); } return true; }
+    } else if (pike) {
+      if (d <= p.pikeReach + foe.radius) { this.pikeTick(dt, s, dmg); return true; }
+    } else if (this.startAttack(s, foe, Math.round(dmg), 13, 0.15, 0.45)) return true;
+    this.stepToward(dt, s, foe.x, foe.y);
+    return true;
+  }
   private rankTick(dt: number, s: VillageScene): void {
     const reg = this.regiment!, slot = this.slot;
     if (this.thrust && this.thrustTick(dt, s)) return;
     if (this.attackTick(dt, s)) return;
     const pike = this.weapon === 'pike', bow = this.weapon === 'bow';
     const reach = pike ? p.pikeReach : bow ? 160 : 13;
+    // falling back: nobody stops to fight on the way
+    if (reg.stance === 'retreat') { this.target = null; this.toSlot(dt, s, reg.fx, 'falling back to the village'); this.task = 'falling back to the village'; return; }
+    // charging: ranks broken, every gnome hunts what it can see
+    if (reg.stance === 'charge' && this.chargeTick(dt, s, pike, bow, reach)) return;
     const lunge = reg.stance === 'advance' ? TILE * 1.5 : 4;
     this.retarget -= dt;
     if (this.retarget <= 0 || (this.target && (this.target.dead || this.target.hidden))) {
@@ -1174,6 +1194,7 @@ export class Villager extends Mover {
       this.task = 'fighting in the ranks';
       if (bow) {
         if (d <= reach && s.world.lineClear(this, foe, this.elevated)) {
+          if (reg.holdFire) { this.target = null; this.toSlot(dt, s, reg.fx, 'holding fire'); this.task = 'holding fire'; return; }
           this.vx = this.vy = 0;
           if (this.attackCd <= 0) { s.shoot(this, foe.x - this.x, foe.y - this.y, Math.round(dmg)); this.attackCd = 0.9 * reloadMul(this.weapons); }
           return;

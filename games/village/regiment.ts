@@ -3,7 +3,7 @@ import { TILE, BODY } from './config';
 import type { Mover, Villager, Raider } from './agents';
 
 export type Shape = 'line' | 'shieldwall' | 'loose' | 'circle' | 'square' | 'wedge' | 'column';
-export type Stance = 'hold' | 'advance' | 'follow';
+export type Stance = 'hold' | 'advance' | 'follow' | 'charge' | 'retreat';
 /** the formations, in the order the Form menu lists them (F1-F7) */
 export const SHAPES: Shape[] = ['line', 'shieldwall', 'loose', 'circle', 'square', 'wedge', 'column'];
 export const SHAPE_NAME: Record<Shape, string> = { line: 'Line', shieldwall: 'Shield wall', loose: 'Loose', circle: 'Circle', square: 'Square', wedge: 'Wedge', column: 'Column' };
@@ -13,7 +13,12 @@ export const SHAPE_GAP: Record<Shape, number> = { line: 1, shieldwall: 0.75, loo
 export const SHAPE_PACE: Record<Shape, number> = { line: 0.85, shieldwall: 0.6, loose: 0.85, circle: 0.85, square: 0.85, wedge: 0.85, column: 1 };
 /** the shield wall: a front-rank shield blocks this much more often against blows from the front (up to `cap`); `front` is the cosine of the arc it covers */
 export const SHIELD_WALL = { mul: 1.5, cap: 0.6, front: 0.5 } as const;
-export const STANCES: Stance[] = ['follow', 'hold', 'advance'];
+export const STANCES: Stance[] = ['follow', 'hold', 'advance', 'charge', 'retreat'];
+/** the formation groups, Bannerlord's way: I-III fill by weapon, IV-VIII are yours to transfer banners into */
+export const GROUP_NAME = ['All', 'Infantry', 'Pikes', 'Archers', 'IV', 'V', 'VI', 'VII', 'VIII'];
+export const GROUPS = 8;
+/** The group a gnome with this weapon falls in under. */
+export function weaponGroup(weapon: 'sword' | 'pike' | 'bow'): number { return weapon === 'pike' ? 2 : weapon === 'bow' ? 3 : 1; }
 
 /** how many gnomes one banner carries before a new regiment is raised */
 export const REGIMENT_SIZE = 50;
@@ -128,6 +133,8 @@ export abstract class Block<M extends Mover = Mover> {
 
   /** Members the block is laying out right now (on their feet, and the block's to place). */
   abstract active(): M[];
+  /** Going at the slowest member's full pace, ranks or no ranks (a retreat, a charge). */
+  protected hurried(): boolean { return false; }
 
   /** Drop those who are no longer the block's (the ranks close on the next tick). */
   prune(keep: (m: M) => boolean): void {
@@ -218,7 +225,7 @@ export abstract class Block<M extends Mover = Mover> {
     lag = who.length ? lag / who.length : 0;
     // (a column keeps its own loose order on the march: it dresses its ranks only when they trail far behind)
     const column = this.shape === 'column', slack = column ? 2 * TILE : TILE, give = column ? 4 * TILE : 3 * TILE;
-    this.march(dt, world, pace * SHAPE_PACE[this.shape] * Math.min(1, Math.max(0.1, 1 - (lag - slack) / give)));
+    this.march(dt, world, this.hurried() ? pace : pace * SHAPE_PACE[this.shape] * Math.min(1, Math.max(0.1, 1 - (lag - slack) / give)));
     this.slots = this.slotsAt(this.x, this.y, this.fx, this.fy, who.length).map((q) => this.footing(world, q));
     if (this.dirty || who.length !== this.lastActive) {
       // where the block is going to stand decides who goes where, not where it stands now
@@ -281,13 +288,22 @@ export class Regiment extends Block<Villager> {
   stance: Stance = 'follow';
   /** following: where the block keeps station, in pixels to the right of the head and back from it (the scene ranks the followers) */
   trail = { side: 0, back: 2 * TILE };
+  /** the formation group (1-8) the banner answers to: I-III fill by weapon, IV-VIII by transfer */
+  group = 1;
+  /** archers in the ranks loose only when this is off (F4: hold fire / fire at will) */
+  holdFire = false;
+  /** F2: keep turning to face the nearest raider while it holds */
+  faceEnemy = false;
+  /** retreating: where the banner is running to (the village) */
+  rally: { x: number; y: number } | null = null;
+  protected override hurried(): boolean { return this.stance === 'retreat' || this.stance === 'charge'; }
 
   /** Members the block is laying out: on their feet, without a wand order or a wall post of their own. */
   active(): Villager[] { return this.members.filter((v) => !v.order && !v.post && !v.hidden && !v.carriedBy); }
 
   /** Put the banner down at (x, y) facing (fx, fy): the block marches there and holds. */
   place(x: number, y: number, fx: number, fy: number, cols = 0): void {
-    this.dest = { x, y }; this.face(fx, fy); this.stance = 'hold'; this.quarry = null; this.cols = cols; this.dirty = true;
+    this.dest = { x, y }; this.face(fx, fy); this.stance = 'hold'; this.quarry = null; this.cols = cols; this.dirty = true; this.rally = null;
     this.path = []; this.pathTo = null; this.lookT = 0;
   }
 
@@ -305,6 +321,19 @@ export class Regiment extends Block<Villager> {
       }
       const { side, back } = this.trail;
       this.dest = { x: head.x - this.fx * back - this.fy * side, y: head.y - this.fy * back + this.fx * side };
+    } else if (this.stance === 'charge') {
+      // ranks broken: every member hunts on its own; the banner drifts to where they are, to form on it after
+      const who = this.active();
+      if (who.length) { let x = 0, y = 0; for (const v of who) { x += v.x; y += v.y; } this.dest = { x: x / who.length, y: y / who.length }; }
+    } else if (this.stance === 'retreat') {
+      const to = this.rally ?? this.dest;
+      this.face(to.x - this.x, to.y - this.y);
+      this.dest = { ...to };
+      if (Math.hypot(to.x - this.x, to.y - this.y) < TILE) this.place(to.x, to.y, this.fx, this.fy, this.cols); // home: hold there
+    } else if (this.stance === 'hold' && this.faceEnemy && this.think <= 0) {
+      this.think = 0.5;
+      const foe = pick(this.x, this.y, ADVANCE_SIGHT);
+      if (foe) { const dx = foe.x - this.x, dy = foe.y - this.y, d = Math.hypot(dx, dy) || 1; if (dx / d * this.fx + dy / d * this.fy < 0.97) { this.face(dx, dy); this.dirty = true; } }
     } else if (this.stance === 'advance') {
       if (this.quarry && (this.quarry.dead || this.quarry.hidden)) this.quarry = null;
       if (!this.quarry && this.think <= 0) { this.think = 0.5; this.quarry = pick(this.x, this.y, ADVANCE_SIGHT); }
