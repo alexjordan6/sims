@@ -4009,6 +4009,7 @@ const query = new URLSearchParams(location.search);
 
 // Dev starts, so a link is enough: ?start=gnome and ?peaceful set the debug sliders before the first setup().
 if (query.get('start') === 'gnome') p.gnomeStart = true;
+if (query.get('start') === 'village') p.gnomeStart = false;
 if (query.has('peaceful')) p.peaceful = true;
 if (query.has('nohunger')) p.hunger = false;
 // ?bench=1000: a stress test once the first village is up (see VillageScene.bench)

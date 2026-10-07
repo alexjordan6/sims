@@ -69,7 +69,8 @@ function step(s: VillageScene, seconds: number) {
 }
 document.getElementById('run-checks')!.addEventListener('click', () => {
   output.textContent = ''; summary.textContent = 'Running';
-  const savedAdaptiveSpawns = p.adaptiveSpawns;
+  const savedAdaptiveSpawns = p.adaptiveSpawns, savedGnomeStart = p.gnomeStart;
+  p.gnomeStart = false; // the checks below are laid out on the village start (the game starts gnomes by default)
   try {
     p.adaptiveSpawns = false; // Legacy timed scenarios isolate their own enemies.
     assert(COLS * ROWS > 80 * 44 * 10, 'world is over ten times the old area');
@@ -1932,6 +1933,21 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(!s.raidActive && s.hosts.length === 0, 'and when the last of it is gone the raid is over');
     }
 
+    // ---- the opening: gnomes by default, no farm, wild food by the door ------------------------------
+    {
+      assert(savedGnomeStart === true && p.ps1Height === 1080, `the game starts as gnomes (${savedGnomeStart}) and draws 1080 rows (${p.ps1Height})`);
+      for (const gnomes of [false, true]) {
+        p.gnomeStart = gnomes; s = fresh();
+        const field = s.world.tiles.filter((t) => t.kind === 'crop' || t.kind === 'tilled').length;
+        const hx = COLS / 2, hy = ROWS / 2, near: { kind: string; tx: number; ty: number }[] = [], from = s.world.nearest((hx + 0.5) * TILE, (hy + 0.5) * TILE, (_t, tx, ty) => !s.world.isBlocked(tx, ty))!;
+        for (let ty = hy - 15; ty <= hy + 15; ty++) for (let tx = hx - 15; tx <= hx + 15; tx++) { const t = s.world.get(tx, ty); if (t && t.kind in WILD_FOOD && t.stage >= 99 && Math.hypot(tx - hx, ty - hy) <= 14 && s.world.bfs(from, { tx, ty }).length) near.push({ kind: t.kind, tx, ty }); } // ripe, and a walk from the square
+        const n = (k: string) => near.filter((q) => q.kind === k).length;
+        assert(field === 0 && near.length >= 24 && n('mushroom') >= 4 && n('burdock') >= 2 && n('garlic') >= 1,
+          `a new ${gnomes ? 'gnome' : 'village'} start has no field (${field}) and ${near.length} ripe wild plants by the door — ${n('mushroom')} mushroom, ${n('burdock')} burdock, ${n('garlic')} garlic, ${n('bush')} berry, all a walk from the square`);
+      }
+      p.gnomeStart = false;
+    }
+
     // ---- the news: a fight is told once it is over, not body by body; the night's hunger in one line ----
     {
       const run = (secs: number) => { for (let i = 0; i < Math.ceil(secs * 60); i++) { s.grid.rebuild(s.agents); s.tick(1 / 60); } };
@@ -2139,7 +2155,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
 
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;
-  } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); } finally { p.adaptiveSpawns = savedAdaptiveSpawns; }
+  } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); } finally { p.adaptiveSpawns = savedAdaptiveSpawns; p.gnomeStart = savedGnomeStart; }
 });
 document.querySelectorAll<HTMLButtonElement>('[data-preview]').forEach(btn => btn.addEventListener('click', () => {
   const s = fresh(), kind = btn.dataset.preview!;

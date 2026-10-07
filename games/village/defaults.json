@@ -1,6 +1,6 @@
 {
   "cameraZoom": 2,
-  "ps1Height": 300,
+  "ps1Height": 1080,
   "ps1Colours": 18,
   "shadows": true,
   "dayLength": 120,
@@ -113,7 +113,8 @@
   "godMode": false,
   "freeBuild": false,
   "collide": true,
-  "gnomeStart": false,
+  "gnomeStart": true,
+  "homeForage": 1,
   "peaceful": false,
   "packSlots": 16,
   "pickupRange": 2.5,

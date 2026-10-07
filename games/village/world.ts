@@ -1,5 +1,5 @@
 import { Rng } from '@shared/index';
-import { TILE, COLS, ROWS, PLAINS, BUILDING_HP, HEARTH_WOOD, ITEM, GNOME_HOME, YARD, p, CROP_KINDS, type DishKind, type FoodKind, type BuildingKind, type StartKind } from './config';
+import { TILE, COLS, ROWS, PLAINS, BUILDING_HP, HEARTH_WOOD, ITEM, GNOME_HOME, YARD, p, type DishKind, type FoodKind, type BuildingKind, type StartKind } from './config';
 export type { BuildingKind } from './config';
 import { tickItem, hop, type Item, type ItemKind } from './items';
 import type { Gear } from './pack';
@@ -714,9 +714,7 @@ export class World {
     // is the block's only rng consumer, so skipping the draws would shift the whole wilderness downstream.
     for (let ty = hy + 1; ty <= hy + 3; ty++)
       for (let tx = hx - half; tx <= hx + half; tx++) {
-        const stage = rng.int(0, 2);
-        if (start !== 'village') continue;
-        this.sow(tx, ty, CROP_KINDS[(ty - hy - 1) % CROP_KINDS.length]).stage = stage;
+        rng.int(0, 2); // nothing is sown at the start: the hoe and seeds come later (the draw stays, so the wilderness downstream does not move)
       }
     // the great pot in the middle of the village, in both starts: older than the houses round it
     this.place('cookpot', hx - 1, hy - 3);
@@ -796,6 +794,45 @@ export class World {
     }
     this.growThickets(hx, hy);
     if (big > 1) this.carvePlains(hx, hy);
+    this.scatterHomeForage(hx, hy);
+  }
+
+  /**
+   * Wild food by the door: clumps of ripe mushrooms, burdock, garlic and berry bushes 9-14 tiles from the
+   * village centre, inside the thorns, so the first stews (mushroom and burdock) and roasts (meat and
+   * garlic) need no cutting and no farm. Off buildings, doors, trails and anything blocked. Its own bag of
+   * numbers, last of all, so nothing else moves.
+   */
+  private scatterHomeForage(hx: number, hy: number): void {
+    const mul = Math.max(0, p.homeForage);
+    if (mul <= 0) return;
+    const rng = new Rng(this.seed ^ 0x40fa6e);
+    const doors = new Set(this.buildings.map((b) => { const d = doorstep(b); return d.ty * this.cols + d.tx; }));
+    const free = (tx: number, ty: number) => {
+      const t = this.get(tx, ty);
+      if (!t || t.kind !== 'grass' || t.trail || t.building || t.defense || doors.has(ty * this.cols + tx)) return false;
+      // keep a step clear of every building, so nobody's door or yard is choked with bushes
+      for (const b of this.buildings) { const f = BUILDINGS[b.kind]; if (tx >= b.tx - 1 && tx <= b.tx + f.w && ty >= b.ty - 1 && ty <= b.ty + f.h) return false; }
+      return true;
+    };
+    // where a walker in the village starts from: the first open tile at the centre
+    const from = this.nearest((hx + 0.5) * TILE, (hy + 0.5) * TILE, (_t, tx, ty) => !this.isBlocked(tx, ty)) ?? { tx: hx, ty: hy };
+    const want: [TileKind, number][] = [['mushroom', 10], ['burdock', 6], ['garlic', 8], ['bush', 8]];
+    for (const [kind, n0] of want) {
+      let left = Math.round(n0 * mul);
+      for (let tries = 0; left > 0 && tries < 400; tries++) {
+        // a clump: a centre on the ring, and its neighbours
+        const a = rng.range(0, Math.PI * 2), r = rng.range(9, 14);
+        const cx = Math.round(hx + Math.cos(a) * r), cy = Math.round(hy + Math.sin(a) * r * 0.8);
+        const size = Math.min(left, rng.int(2, 4));
+        for (let k = 0, put = 0; k < 12 && put < size; k++) {
+          const tx = cx + rng.int(-1, 1), ty = cy + rng.int(-1, 1);
+          if (!free(tx, ty) || Math.hypot(tx - hx, ty - hy) > 15) continue;
+          if (!this.bfs(from, { tx, ty }).length) continue; // not walled in by the grove or the buildings
+          this.set(tx, ty, kind).stage = 99; put++; left--;
+        }
+      }
+    }
   }
 
   /**
