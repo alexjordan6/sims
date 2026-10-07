@@ -2,7 +2,12 @@ import { Rng } from '@shared/index';
 import { TILE, COLS, ROWS, PLAINS, BUILDING_HP, HEARTH_WOOD, ITEM, GNOME_HOME, YARD, p, type DishKind, type FoodKind, type BuildingKind, type StartKind } from './config';
 export type { BuildingKind } from './config';
 import { tickItem, hop, type Item, type ItemKind } from './items';
-import type { Gear } from './pack';
+import type { Gear, Slot } from './pack';
+
+/** where a chest stands: a raider camp's, the Ogre's hoard, or one of the wild's ruins and wrecks */
+export type ChestSource = 'camp' | 'lair' | 'cart' | 'barrow' | 'tower';
+/** A chest out in the world: shut on its loot until somebody opens it, then it spills and stands empty. */
+export interface Chest { tx: number; ty: number; source: ChestSource; loot: Slot[]; opened: boolean }
 
 export type DefenseKind = 'wall' | 'gate' | 'stairs';
 export interface Defense extends TilePos { kind: DefenseKind; hp: number; maxHp: number; open: boolean }
@@ -139,6 +144,8 @@ export class World {
   plains: { tx: number; ty: number; rx: number; ry: number }[] = [];
   /** where the lost tools lie: the axe by a stump, the hammer in a ruined hut, the hoe in an overgrown field */
   toolCaches: { tool: 'axe' | 'hammer' | 'hoe'; site: 'stump' | 'hut' | 'field'; tx: number; ty: number }[] = [];
+  /** the loot chests standing in the world: camps', the lair's hoard, the ruins' (see Chest) */
+  chests: Chest[] = [];
   /** the gnome start's cottage in the clearing (see generate), so the scene needn't go looking for it */
   gnomeStart: Building | null = null;
   denseForests = false;

@@ -4,7 +4,7 @@ import { IMPLEMENTS } from './pack';
 import { STACK } from './config';
 const clearBulk = (s: VillageScene) => s.player.pack.slots.forEach((b,i)=>{if(b && ['wood','food','scrap'].includes(b.kind))s.player.pack.removeAt(i);});
 import type { VillageScene } from './main';
-import { World, WILD_FOOD, doorstep, buildingCenter, hearthCost, BUILDINGS, type BuildingKind } from './world';
+import { World, WILD_FOOD, doorstep, buildingCenter, hearthCost, BUILDINGS, type BuildingKind, type Chest } from './world';
 import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider, BELT, BUILDS } from './agents';
 import { Brute, Rat, Ogre, Wrecker, Troll, Skulk, waveComposition } from './enemies';
@@ -1972,6 +1972,36 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       s.player.armor.helmet = 2; // a found iron helm
       assert(s.craftArmor(s.player, 'helmet') && s.player.armor.helmet === 3 && s.isReforge(3), 'a found iron helm reforges to steel at a Lv3 barracks');
       p.forgeMaxTier = 3;
+    }
+
+    // ---- chests: a camp guards one, the Ogre sleeps on his hoard; opened, they spill for the taking ----
+    {
+      const run = (secs: number) => { for (let i = 0; i < Math.ceil(secs * 60); i++) { s.grid.rebuild(s.agents); s.tick(1 / 60); } };
+      s = fresh(); clearing(s); s.agents = [s.player]; s.world.items.length = 0;
+      const at = World.center(128, 100);
+      const camp: { x: number; y: number; members: Raider[]; cleared: number | null; born: number; chest?: Chest } = { x: at.x, y: at.y, members: [], cleared: null, born: 0 };
+      s.camps.push(camp); (s as unknown as { manCamp(c: typeof camp): void }).manCamp(camp);
+      const ch = camp.chest!;
+      assert(!!ch && s.world.chests.includes(ch) && !ch.opened && ch.loot.length === Math.round(6 * p.lootMul) && Math.hypot(ch.tx - 128, ch.ty - 100) <= 4,
+        `a camp keeps a shut chest of ${ch?.loot.length} things by its fire`);
+      assert(!s.openChest(ch) && /Guarded/.test(s.chestGuard(ch) ?? '') && !ch.opened, `it won't open while the camp is held (${s.chestGuard(ch)})`);
+      for (const m of camp.members) m.dead = true; s.removeDead();
+      // a right-click on it walks the head over and breaks it open
+      Object.assign(s.player, World.center(ch.tx - 6, ch.ty));
+      s.order({ kind: 'loot', chest: ch }); run(4); settle(s);
+      const spilt = s.world.items.filter((it) => Math.hypot(it.x - (ch.tx + 0.5) * TILE, it.y - (ch.ty + 0.5) * TILE) < 3.5 * TILE);
+      assert(ch.opened && ch.loot.length === 0 && spilt.length >= 1 && s.world.items.every((it) => it.rest), `cleared, the head walks to it and it bursts: ${spilt.length} things lie round it (some already in the pack)`);
+      assert(!s.openChest(ch) && s.chestNear((ch.tx + 0.5) * TILE, (ch.ty + 0.5) * TILE) === null, 'an open chest is empty, and a right-click passes it by');
+      (s as unknown as { manCamp(c: typeof camp): void }).manCamp(camp);
+      assert(!ch.opened && ch.loot.length > 0 && s.world.chests.filter((c) => c === ch).length === 1, 'when the camp is manned again its chest is stocked again');
+      // the hoard: shut while the Ogre is up; opened while he sleeps, it wakes him
+      s = fresh();
+      const hoard = s.world.chests.find((c) => c.source === 'lair')!, ogre = s.ogre!;
+      assert(!!hoard && hoard.loot.length === Math.round(16 * p.lootMul) && hoard.loot.filter((q) => q.kind === 'weapon' || q.kind === 'armor').length > hoard.loot.length / 3, `the Ogre's hoard holds ${hoard?.loot.length} things, mostly gear`);
+      ogre.state = 'roaming';
+      assert(!s.openChest(hoard) && /Ogre/.test(s.chestGuard(hoard) ?? ''), 'the hoard stays shut while the Ogre is up');
+      ogre.state = 'sleeping'; ogre.hidden = true;
+      assert(s.openChest(hoard) && (ogre.state as string) === 'roaming' && ogre.aggroed && !ogre.hidden, 'opened while he sleeps, the hoard wakes him');
     }
 
     // ---- the opening: gnomes by default, no farm, wild food by the door ------------------------------

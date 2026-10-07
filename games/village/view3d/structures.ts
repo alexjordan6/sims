@@ -168,6 +168,8 @@ export class Structures {
   private forts = new Map<number, { group: THREE.Group; key: string }>();
   /** the lost tools' sites: a stump, a ruined hut, an old field's fence */
   private sites = new Map<object, THREE.Group>();
+  /** the loot chests, rebuilt when one is opened (the lid thrown back) */
+  private chests = new Map<object, { g: THREE.Group; open: boolean }>();
   /** a fire at each raider camp in the wild */
   private campfires = new Map<object, THREE.Object3D>();
   /** the meshes a pointer can land on: wall tops, gates, stairs */
@@ -178,6 +180,8 @@ export class Structures {
   constructor(private scene: VillageScene) {}
 
   clear(): void {
+    for (const e of this.chests.values()) this.group.remove(e.g);
+    this.chests.clear();
     for (const f of this.campfires.values()) this.group.remove(f);
     this.campfires.clear();
     for (const b of this.built.values()) this.group.remove(b.group);
@@ -256,6 +260,26 @@ export class Structures {
       this.group.add(g); this.sites.set(c, g);
     }
     for (const [c, g] of this.sites) if (!w.toolCaches.includes(c as typeof w.toolCaches[number])) { this.group.remove(g); this.sites.delete(c); }
+    // the chests: a banded wooden box; the Ogre's hoard is bigger and iron-bound. Opened, the lid stands back
+    for (const ch of w.chests) {
+      const e = this.chests.get(ch);
+      if (e && e.open === ch.opened) continue;
+      if (e) this.group.remove(e.g);
+      const g = new THREE.Group(), x = ch.tx + 0.5, z = ch.ty + 0.5, k = ch.source === 'lair' ? 1.5 : 1;
+      const wood = ch.source === 'lair' ? 0x3e2a1a : 0x6a4626, band = ch.source === 'lair' ? 0x5a5a62 : 0x8a7a50;
+      g.add(part(box, wood, 0.7 * k, 0.4 * k, 0.45 * k, 0, 0, 0));
+      g.add(part(box, band, 0.74 * k, 0.06 * k, 0.49 * k, 0, 0.12 * k, 0));
+      g.add(part(box, band, 0.08 * k, 0.42 * k, 0.49 * k, -0.22 * k, 0, 0));
+      g.add(part(box, band, 0.08 * k, 0.42 * k, 0.49 * k, 0.22 * k, 0, 0));
+      const lid = part(box, wood, 0.72 * k, 0.12 * k, 0.47 * k, 0, 0.4 * k, 0);
+      if (ch.opened) { lid.position.set(0, 0.6 * k, -0.28 * k); lid.rotation.x = -1.2; }
+      g.add(lid);
+      if (!ch.opened) g.add(part(box, 0xd9b54a, 0.1 * k, 0.12 * k, 0.04 * k, 0, 0.28 * k, 0.24 * k)); // the hasp
+      g.traverse((o) => { o.castShadow = true; o.receiveShadow = true; });
+      g.position.set(x, groundHeight(x, z), z);
+      this.group.add(g); this.chests.set(ch, { g, open: ch.opened });
+    }
+    for (const [ch, e] of this.chests) if (!w.chests.includes(ch as typeof w.chests[number])) { this.group.remove(e.g); this.chests.delete(ch); }
     // the camps' fires: a ring of logs and a flame that dances; a cleared camp's fire is cold
     for (const camp of s.camps) {
       let fire = this.campfires.get(camp);

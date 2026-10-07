@@ -1,10 +1,10 @@
 import { STACK, SKULK, STASH_SLOTS, type BulkKind } from './config';
-import { enemyDrop } from './loot';
+import { enemyDrop, rollLoot, danger } from './loot';
 import { isImplement, IMPLEMENTS, START_TOOLS, LOST_TOOLS, type Implement, TOOL_NAME, Pack, type Gear, type EquipmentSlot, isBulk, slotName } from './pack';
 import Phaser from 'phaser';
 import { SimScene, launch, button, getGui, Rng } from '@shared/index';
 import { launch as throwItem, type Item } from './items';
-import { World, WILD_FOOD, doorstep, buildingCenter, buildingMaxHp, hasHearth, hearthCost, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos, type Hive } from './world';
+import { World, WILD_FOOD, doorstep, buildingCenter, buildingMaxHp, hasHearth, hearthCost, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos, type Hive, type Chest } from './world';
 import { Villager, Raider, Player, Mover, Arrow, TOOLS, BELT, BUILDS, SWING, type Role, type Tool, type Order } from './agents';
 import { DEFENSE_COST, WALL_HEIGHT, WARREN, SOLDIER_CAP_PER_LEVEL, MAP_AREA, PLAINS } from './config';
 import { Interior } from './interior';
@@ -73,7 +73,8 @@ export type Command =
   | { kind: 'move'; x: number; y: number }
   | { kind: 'attack'; target: Mover }
   | { kind: 'use'; q: TilePos; how: 'hands' | 'tool'; repeat: boolean }
-  | { kind: 'enter'; b: Building };
+  | { kind: 'enter'; b: Building }
+  | { kind: 'loot'; chest: Chest };
 /** the four abilities on Q W E R, aimed at the cursor */
 export type AbilityKey = 'Q' | 'W' | 'E' | 'R';
 
@@ -312,6 +313,7 @@ export class VillageScene extends SimScene {
     this.spawnSounders();
     this.spawnTrolls();
     this.spawnCamps();
+    this.placeHoard();
     this.spawnHives();
     this.lairFound = false;
     this.gnomesFound = p.gnomeStart; // you already keep a toadstool cottage: the craft needs no finding
@@ -397,7 +399,9 @@ export class VillageScene extends SimScene {
    * simply an agent standing where it was put, and from there it prowls wherever it likes.
    */
   /** the raider camps out in the wild, and the day each was last cleared (null while anyone holds it) */
-  camps: { x: number; y: number; members: Raider[]; cleared: number | null; born: number; war?: boolean }[] = [];
+  camps: { x: number; y: number; members: Raider[]; cleared: number | null; born: number; war?: boolean; chest?: Chest }[] = [];
+  /** loot's own stream off the seed, so stocking a chest never moves a camp or a raid */
+  private lootRng = new Rng(1);
   private campRng = new Rng(1);
   /**
    * Camps: raiders who live out in the wild and guard their ground (Raider.camp). They are where the fighting
@@ -406,6 +410,7 @@ export class VillageScene extends SimScene {
   private spawnCamps(): void {
     this.camps = [];
     this.campRng = new Rng(this.seed ^ 0xca3b5);
+    this.lootRng = new Rng(this.seed ^ 0x100750);
     for (let k = 0; k < Math.round(p.campCount * MAP_AREA); k++) this.foundCamp();
     // a war band on every open plain: the large map's set-piece battles, a block of raiders on open ground
     if (p.campCount > 0) for (const pl of this.world.plains) {
@@ -446,7 +451,7 @@ export class VillageScene extends SimScene {
    * Fill a camp: two to four raiders (more as the days go on), some of them butchers or bone shamans. A war
    * band on a plain is a dozen or more, spread wider and guarding more ground — a battle, not a skirmish.
    */
-  private manCamp(camp: { x: number; y: number; members: Raider[]; cleared: number | null; war?: boolean }): void {
+  private manCamp(camp: { x: number; y: number; members: Raider[]; cleared: number | null; war?: boolean; chest?: Chest }): void {
     const rng = this.campRng, war = !!camp.war;
     const n = war ? Math.min(PLAINS.warband[1], PLAINS.warband[0] + rng.int(0, 3) + Math.floor(this.day / 3)) : Math.min(5, 2 + rng.int(0, 2) + Math.floor(this.day / 7));
     camp.members = [];
@@ -463,7 +468,89 @@ export class VillageScene extends SimScene {
       camp.members.push(this.spawn(r));
     }
     camp.cleared = null;
+    this.stockCampChest(camp);
   }
+  // ---- chests: what camps guard and the Ogre sleeps on; opened, they spill for the taking -------------
+
+  /** A free, open tile near (tx, ty) for a chest: off buildings, walls and other chests. */
+  private chestSpot(tx: number, ty: number, ring = 2): TilePos | null {
+    for (let r = 1; r <= ring + 2; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+      const x = tx + dx, y = ty + dy, t = this.world.get(x, y);
+      if (!t || t.building || t.defense || this.world.isBlocked(x, y, true)) continue;
+      if (this.world.chests.some((c) => c.tx === x && c.ty === y)) continue;
+      return { tx: x, ty: y };
+    }
+    return null;
+  }
+  /** Tiles from the village centre. */
+  private tilesOut(tx: number, ty: number): number { const c = this.villageCentre(); return Math.hypot(tx - c.x / TILE, ty - c.y / TILE); }
+  /** A camp's chest by its fire, stocked afresh each time the camp is manned: a war band's holds more and better. */
+  private stockCampChest(camp: { x: number; y: number; war?: boolean; chest?: Chest }): void {
+    if (!camp.chest) {
+      const c = World.toTile(camp.x, camp.y), q = this.chestSpot(c.tx, c.ty);
+      if (!q) return;
+      camp.chest = { tx: q.tx, ty: q.ty, source: 'camp', loot: [], opened: false };
+      this.world.chests.push(camp.chest);
+    }
+    const ch = camp.chest;
+    ch.loot = rollLoot(this.lootRng, danger(this.tilesOut(ch.tx, ch.ty), this.day, camp.war ? 0.15 : 0), camp.war ? 10 : 6);
+    ch.opened = false;
+  }
+  /** The Ogre's hoard by the mouth of his cave: twice and more a camp's, and the best there is. */
+  private placeHoard(): void {
+    const l = this.world.lair;
+    if (!l) return;
+    const h = World.toTile(Ogre.homeOf(l).x, Ogre.homeOf(l).y), q = this.chestSpot(h.tx + 2, h.ty);
+    if (!q) return;
+    this.world.chests.push({ tx: q.tx, ty: q.ty, source: 'lair', loot: rollLoot(this.lootRng, danger(this.tilesOut(q.tx, q.ty), this.day, 0.35), 16, 0.7), opened: false });
+  }
+  /** Why a chest won't open right now (its keepers still stand), or null. */
+  chestGuard(ch: Chest): string | null {
+    if (ch.opened) return 'It stands open and empty';
+    if (ch.source === 'camp') {
+      const camp = this.camps.find((c) => c.chest === ch), left = camp ? camp.members.filter((m) => !m.dead).length : 0;
+      if (left) return `Guarded — ${left} still hold${left === 1 ? 's' : ''} the camp`;
+    }
+    if (ch.source === 'lair' && this.ogre && !this.ogre.dead && this.ogre.state !== 'sleeping') return 'The Ogre is up and about — come back while he sleeps, or kill him';
+    return null;
+  }
+  /** The nearest shut chest within `reach` pixels of (x, y). */
+  chestNear(x: number, y: number, reach = TILE * 1.2): Chest | null {
+    let best: Chest | null = null, bd = reach;
+    for (const ch of this.world.chests) {
+      if (ch.opened) continue;
+      const d = Math.hypot((ch.tx + 0.5) * TILE - x, (ch.ty + 0.5) * TILE - y);
+      if (d <= bd) { best = ch; bd = d; }
+    }
+    return best;
+  }
+  /**
+   * Open a chest: its loot bursts out and lands round it, to be picked up by walking over it (what you
+   * can't carry waits for a second trip). Opening the hoard while the Ogre sleeps wakes him.
+   */
+  openChest(ch: Chest): boolean {
+    const why = this.chestGuard(ch);
+    if (why) { this.event('info', why, true); return false; }
+    const from = World.center(ch.tx, ch.ty);
+    let gear = 0, sup = 0;
+    for (const slot of ch.loot) {
+      const it = isBulk(slot) ? this.world.dropItem(slot.kind, slot.n, from.x, from.y, slot.kind === 'food' ? slot.food : undefined) : this.world.dropItem('gear', 1, from.x, from.y);
+      if (isBulk(slot)) sup++; else { it.gear = { ...slot }; gear++; }
+      const a = this.lootRng.range(0, Math.PI * 2), r = this.lootRng.range(1, 2.4) * TILE;
+      throwItem(it, from, { x: from.x + Math.cos(a) * r, y: from.y + Math.sin(a) * r }, this.lootRng, 6);
+    }
+    ch.loot = []; ch.opened = true;
+    const what = ch.source === 'lair' ? "the Ogre's hoard" : ch.source === 'camp' ? 'the camp chest' : ch.source === 'cart' ? 'the wrecked cart' : ch.source === 'barrow' ? 'the barrow' : 'the watchtower chest';
+    this.event('build', `You broke open ${what}: ${gear} piece${gear === 1 ? '' : 's'} of gear, ${sup} lot${sup === 1 ? '' : 's'} of supplies.`);
+    const og = this.ogre;
+    if (ch.source === 'lair' && og && !og.dead && og.state === 'sleeping') {
+      og.state = 'roaming'; og.hidden = false; og.aggroed = true; og.emerged = true;
+      this.event('raid', 'The Ogre wakes — and he is between you and the door!', true);
+    }
+    return true;
+  }
+
   /** Dawn: cleared camps are re-manned after a while, and now and then a new one grows out of sight. */
   private tendCamps(): void {
     for (const camp of this.camps) {
@@ -831,6 +918,8 @@ export class VillageScene extends SimScene {
     if (m && m !== this.player) { this.select(m); return; } // a friend: look them over
     const q = ptr.wallTile ?? World.toTile(ptr.worldX, ptr.worldY), t = this.world.get(q.tx, q.ty);
     const b = t?.building;
+    const chest = this.chestNear(ptr.worldX, ptr.worldY);
+    if (chest) { this.order({ kind: 'loot', chest }); return; }
     if (b && hasInterior(b.kind) && !b.ruined && !b.wild) { this.order({ kind: 'enter', b }); return; }
     if (t && (t.defense?.kind === 'gate' || t.defense?.kind === 'stairs' || t.kind === 'cookpot' || (!t.defense && this.handsHint(q) && (t.kind === 'crop' ? this.isRipe(t) : true)))) { this.order({ kind: 'use', q, how: 'hands', repeat: false }); return; }
     this.order({ kind: 'move', x: ptr.worldX, y: ptr.worldY });
@@ -928,6 +1017,12 @@ export class VillageScene extends SimScene {
         const now = this.world.get(q.tx, q.ty)?.kind;
         if (c.repeat && now === before && (now === 'tree' || now === 'thicket') && pl.tool === 'axe') { this.cmdNext = 0.45; return; } // keep chopping
         this.command = null;
+        return;
+      }
+      case 'loot': {
+        const at = World.center(c.chest.tx, c.chest.ty);
+        if (pl.dist(at) < TILE * 1.3) { this.command = null; this.faceTo(at.x, at.y); this.openChest(c.chest); return; }
+        if (!this.walkToward(at.x, at.y, { tx: c.chest.tx, ty: c.chest.ty })) this.command = null;
         return;
       }
       case 'enter': {

@@ -241,7 +241,7 @@ export class UI {
    */
   private mountControls(): void {
     const rows: [string, string][] = [
-      ['right click', 'walk there · attack an enemy · use a plant, crop, pot, gate or door'],
+      ['right click', 'walk there · attack an enemy · use a plant, crop, pot, gate or door · open a chest'],
       ['Q W E', 'strike · shoot · roll — toward the cursor'],
       ['hold R', 'aim a meal (wheel picks which) — let go to lob it; everyone in the splash eats'],
       ['G', 'throw the largest supply stack'],
@@ -995,7 +995,7 @@ export class UI {
           <p class="sub">The last village here is gone. Farm the dark soil, raise a family behind thin walls, and teach the children to hold a blade, because something walks out of the trees every few nights.<br>
           Survive ${p.bossDay} days of raids and <b>beat the Warlord</b>.</p>
           <div class="controls">
-            <kbd>right click</kbd><span>walk there — or attack the enemy, or go and use the plant, crop, pot, gate or door under the cursor</span>
+            <kbd>right click</kbd><span>walk there — or attack the enemy, or go and use the plant, crop, pot, gate or door under the cursor, or break open a chest</span>
             <kbd>Q W E</kbd><span>strike · shoot · roll, toward the cursor</span><kbd>hold R</kbd><span>aim a meal, let go to lob it</span>
             <kbd>G</kbd><span>throw the largest supply stack</span>
             <kbd>T</kbd><span>eat one meal. Your pack is eaten before the granary, and raw food before cooked so a dish's warmth is never spent on a routine meal. Meat and honey fill twice as much per unit, a cooked dish three or four times.</span>

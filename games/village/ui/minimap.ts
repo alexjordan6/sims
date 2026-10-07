@@ -87,6 +87,13 @@ export class Minimap {
       c.fillStyle = '#1a1206'; c.fillRect(cache.tx - 2, cache.ty - 2, 5, 5);
       c.fillStyle = '#ffcf5a'; c.fillRect(cache.tx - 1, cache.ty - 1, 3, 3);
     }
+    // the chests: a brown box with a gold hasp once you have seen where it stands, until it is opened
+    for (const ch of s.world.chests) {
+      if (ch.opened || (s.fog && s.fog.enabled && !s.fog.isExplored(ch.tx, ch.ty))) continue;
+      c.fillStyle = '#1a1206'; c.fillRect(ch.tx - 2, ch.ty - 2, 5, 4);
+      c.fillStyle = '#9a6a3a'; c.fillRect(ch.tx - 1, ch.ty - 1, 3, 2);
+      c.fillStyle = '#ffcf5a'; c.fillRect(ch.tx, ch.ty, 1, 1);
+    }
     // the hosts: your scouts follow every warband, seen or not — a red pennant on a black field
     for (const w of s.warbands) {
       const x = Math.floor(w.x / TILE), y = Math.floor(w.y / TILE);
