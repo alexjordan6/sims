@@ -29,6 +29,16 @@ export interface FxHost {
 
 interface Word { el: HTMLDivElement; pos: THREE.Vector3; t: number; ttl: number }
 interface Streak { obj: THREE.Object3D; mat: THREE.Material & { opacity: number }; t: number; ttl: number; grow?: number }
+/** a line that fades: its ends, its colour, and its clock (drawn together with every other, see Lines) */
+interface Line { ax: number; ay: number; az: number; bx: number; by: number; bz: number; r: number; g: number; b: number; t: number; ttl: number }
+/** the shapes swings and shocks are drawn with: made once and shared, never one per blow */
+const ARC = new THREE.RingGeometry(0.55, 0.85, 14, 1, 0, 2.4).rotateX(-Math.PI / 2);
+const SPIN = new THREE.RingGeometry(0.55, 0.85, 14, 1, 0, Math.PI * 2).rotateX(-Math.PI / 2);
+const SHOCK = new THREE.RingGeometry(0.85, 1, 32).rotateX(-Math.PI / 2);
+/** at most this many arcs and shocks at once: in a battle of thousands the oldest give way */
+const ARCS_MAX = 160;
+/** room for this many fading lines (a pike's thrust, an arrow's flight) at once */
+const LINES_MAX = 2048;
 
 export class Fx3d {
   readonly sfx = new Sfx();
@@ -37,6 +47,16 @@ export class Fx3d {
   private mesh: THREE.InstancedMesh;
   private words: Word[] = [];
   private streaks: Streak[] = [];
+  /** every fading line, drawn as one batch: one geometry and one draw, however many pikes are thrusting */
+  private lines: Line[] = [];
+  private lineMesh: THREE.LineSegments = (() => {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(LINES_MAX * 6), 3).setUsage(THREE.DynamicDrawUsage));
+    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(LINES_MAX * 8), 4).setUsage(THREE.DynamicDrawUsage));
+    const m = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true }));
+    m.frustumCulled = false; geo.setDrawRange(0, 0);
+    return m;
+  })();
   private layer: HTMLDivElement;
   private m4 = new THREE.Matrix4();
   private col = new THREE.Color();
@@ -51,6 +71,7 @@ export class Fx3d {
   private eerieT = 8;
 
   constructor(private scene: VillageScene, private actors: Actors, private host: FxHost) {
+    this.group.add(this.lineMesh);
     this.mesh = new THREE.InstancedMesh(speck, new THREE.MeshBasicMaterial({ color: 0xffffff }), MAX);
     this.mesh.count = 0;
     this.mesh.frustumCulled = false;
@@ -64,8 +85,9 @@ export class Fx3d {
     this.specks = []; this.mesh.count = 0;
     for (const w of this.words) w.el.remove();
     this.words = [];
-    for (const s of this.streaks) this.group.remove(s.obj);
+    for (const s of this.streaks) { this.group.remove(s.obj); s.mat.dispose(); }
     this.streaks = [];
+    this.lines = [];
     this.windWarned = false; this.windLevel = 0; this.sfx.wind(0);
     this.gladeWarned = false; this.gladeLevel = 0; this.gladeHome = null; this.sfx.glade(0);
   }
@@ -95,35 +117,34 @@ export class Fx3d {
 
   /** A streak from a to b that fades out over ttl (a pike's line, an arrow's flight). */
   streak(a: THREE.Vector3, b: THREE.Vector3, colour: number, ttl = 0.16): void {
-    const geo = new THREE.BufferGeometry().setFromPoints([a, b]);
-    const mat = new THREE.LineBasicMaterial({ color: colour, transparent: true });
-    const line = new THREE.Line(geo, mat);
-    this.group.add(line);
-    this.streaks.push({ obj: line, mat, t: 0, ttl });
+    if (this.lines.length >= LINES_MAX) this.lines.shift(); // a flood of them: the oldest goes
+    this.lines.push({ ax: a.x, ay: a.y, az: a.z, bx: b.x, by: b.y, bz: b.z, r: ((colour >> 16) & 255) / 255, g: ((colour >> 8) & 255) / 255, b: (colour & 255) / 255, t: 0, ttl });
+  }
+  /** An arc or a shock ring: a shared shape with a material of its own (for its fade), at most ARCS_MAX at once. */
+  private ring(geo: THREE.BufferGeometry, colour: number, opacity: number): { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial } {
+    if (this.streaks.length >= ARCS_MAX) { const old = this.streaks.shift()!; this.group.remove(old.obj); old.mat.dispose(); }
+    const mat = new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity, side: THREE.DoubleSide, depthWrite: false });
+    const mesh = new THREE.Mesh(geo, mat);
+    this.group.add(mesh);
+    return { mesh, mat };
   }
 
   /** A swing's arc: a flat ribbon of the circle round `who`, facing (ux, uy), fading as it ends. */
   arc(who: Mover, ux: number, uy: number, ttl: number, spin = false, colour = 0xf0f0e0): void {
     const sweep = spin ? Math.PI * 2 : 2.4;
-    const geo = new THREE.RingGeometry(0.55, 0.85, 14, 1, 0, sweep).rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.75, side: THREE.DoubleSide, depthWrite: false });
-    const mesh = new THREE.Mesh(geo, mat);
     const x = who.x * U, z = who.y * U;
+    const { mesh, mat } = this.ring(spin ? SPIN : ARC, colour, 0.75);
     mesh.position.set(x, groundHeight(x, z) + (who.elevated ? 2.2 : 0) + 0.55, z);
     // RingGeometry starts at +x and runs anticlockwise seen from above; centre the sweep on the facing
     mesh.rotation.y = -Math.atan2(uy, ux) - (spin ? 0 : -sweep / 2) - sweep;
-    this.group.add(mesh);
     this.streaks.push({ obj: mesh, mat, t: 0, ttl });
   }
 
   /** A ring of shock running out over the ground. */
   shock(x: number, z: number, r: number, ttl: number): void {
-    const geo = new THREE.RingGeometry(0.85, 1, 32).rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshBasicMaterial({ color: 0xd8c8a0, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false });
-    const mesh = new THREE.Mesh(geo, mat);
+    const { mesh, mat } = this.ring(SHOCK, 0xd8c8a0, 0.9);
     mesh.position.set(x, groundHeight(x, z) + 0.05, z);
     mesh.scale.setScalar(r * 0.2);
-    this.group.add(mesh);
     this.streaks.push({ obj: mesh, mat, t: 0, ttl, grow: r });
   }
 
@@ -383,10 +404,29 @@ export class Fx3d {
     this.mesh.instanceMatrix.needsUpdate = true;
     if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
     // streaks and arcs fade (shock rings grow as they go)
+    // the lines: one buffer, rewritten with whoever is still fading
+    {
+      const pos = this.lineMesh.geometry.getAttribute('position') as THREE.BufferAttribute, col = this.lineMesh.geometry.getAttribute('color') as THREE.BufferAttribute;
+      const P = pos.array as Float32Array, C = col.array as Float32Array;
+      let n = 0;
+      for (const ln of this.lines) {
+        ln.t += dt;
+        const f = ln.t / ln.ttl;
+        if (f >= 1) continue;
+        const o = n * 6, c = n * 8, a = 0.85 * (1 - f);
+        P[o] = ln.ax; P[o + 1] = ln.ay; P[o + 2] = ln.az; P[o + 3] = ln.bx; P[o + 4] = ln.by; P[o + 5] = ln.bz;
+        C[c] = ln.r; C[c + 1] = ln.g; C[c + 2] = ln.b; C[c + 3] = a; C[c + 4] = ln.r; C[c + 5] = ln.g; C[c + 6] = ln.b; C[c + 7] = a;
+        this.lines[n++] = ln;
+      }
+      this.lines.length = n;
+      this.lineMesh.geometry.setDrawRange(0, n * 2);
+      this.lineMesh.visible = n > 0;
+      if (n) { pos.clearUpdateRanges(); pos.addUpdateRange(0, n * 6); pos.needsUpdate = true; col.clearUpdateRanges(); col.addUpdateRange(0, n * 8); col.needsUpdate = true; }
+    }
     this.streaks = this.streaks.filter((st) => {
       st.t += dt;
       const f = st.t / st.ttl;
-      if (f >= 1) { this.group.remove(st.obj); return false; }
+      if (f >= 1) { this.group.remove(st.obj); st.mat.dispose(); return false; }
       st.mat.opacity = 0.85 * (1 - f);
       if (st.grow) st.obj.scale.setScalar(st.grow * (0.2 + 0.9 * f));
       return true;

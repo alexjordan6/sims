@@ -1,7 +1,7 @@
 import { STACK, SKULK, STASH_SLOTS, type BulkKind } from './config';
 import { isImplement, IMPLEMENTS, TOOL_NAME, Pack, type Gear, type EquipmentSlot, isBulk, slotName } from './pack';
 import Phaser from 'phaser';
-import { SimScene, launch, button, getGui, Rng, SpatialGrid } from '@shared/index';
+import { SimScene, launch, button, getGui, Rng } from '@shared/index';
 import { launch as throwItem, type Item } from './items';
 import { World, WILD_FOOD, doorstep, buildingCenter, buildingMaxHp, hasHearth, hearthCost, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos, type Hive } from './world';
 import { Villager, Raider, Player, Mover, Arrow, TOOLS, SWING, type Role, type Tool, type Order } from './agents';
@@ -273,7 +273,7 @@ export class VillageScene extends SimScene {
     this.interior.leave();
     this.posting = null;
     this.squad = []; this.drag = null;
-    this.regiments = []; this.warbands = []; this.hosts = []; this.hostSeq = 0; this.regimentSeq = 0; this.placing = null; this.enlistT = 0; this.warrenBorn = this.warrenToddled = 0;
+    this.regiments = []; this.warbands = []; this.hosts = []; this.hostSeq = 0; this.awakeT = 0; this.regimentSeq = 0; this.placing = null; this.enlistT = 0; this.warrenBorn = this.warrenToddled = 0;
     this.arrows = 30; this.feverWas = null;
     this.scrap = 0;
     this.armoryFor = null;
@@ -1815,10 +1815,14 @@ export class VillageScene extends SimScene {
     this.mealCd = Math.max(0, this.mealCd - dt);
     this.tickLobs(dt);
     this.driveCommand(dt);
-    this.tickHosts(dt);
-    this.tickRegiments(dt);
-    this.updateAgents(dt);
-    this.separate();
+    // At 120 ticks a second (the game loop: see tickRate) the heavy work is shared between two ticks, so
+    // every frame carries half of it: the blocks think on one tick and bodies are pushed apart on the
+    // other, each with two ticks' time, and each agent moves on alternate ticks. A longer step (the
+    // checks call tick(1/60)) does all of it every time.
+    const half = dt < 1 / 90 ? (this.tickHalf ^= 1) : -1;
+    if (half !== 1) { const dt2 = half < 0 ? dt : dt * 2; this.tickHosts(dt2); this.tickRegiments(dt2); }
+    this.updateAgents(dt, half);
+    if (half !== 0) this.separate();
     this.tickAges(dt);
     this.tickHunger(dt);
     this.tickBirths();
@@ -2208,43 +2212,87 @@ export class VillageScene extends SimScene {
   }
   // ---- bodies ---------------------------------------------------------------------------------
 
-  /** a fine grid just for body-to-body pushes (the main grid's cells are sized for aggro queries) */
-  private bodies = new SpatialGrid<Mover>(COLS * TILE, ROWS * TILE, 12);
-  /** Nobody stands inside anybody: overlapping bodies push apart, the lighter one giving way, and nobody is pushed into a wall. */
+  /** separate()'s working arrays, kept between ticks: who is solid, where, how big and how heavy; and the cells as linked lists (each cell's first body, each body's next) */
+  private sep = { solid: [] as Mover[], x: new Float64Array(0), y: new Float64Array(0), sp: new Float64Array(0), ms: new Float64Array(0), next: new Int32Array(0), cell: new Int32Array(0), head: new Int32Array(0), touched: new Int32Array(0), big: [] as number[] };
+  /**
+   * Nobody stands inside anybody: overlapping bodies push apart, the lighter one giving way, and nobody is
+   * pushed into a wall. With armies of hundreds this runs over thousands of bodies a tick, so it is a flat
+   * pass that allocates nothing: each body's size, weight and place are read once into arrays, the bodies
+   * are threaded into 16 px cells as linked lists, and every pair is visited once through half its cell's
+   * neighbourhood. The few bodies too big for that (trolls, the Ogre, a warlord) are checked against the
+   * cells around them, and against each other.
+   */
   separate(): void {
     if (!p.collide) return;
-    const solid: Mover[] = [];
+    const S = this.sep, solid = S.solid;
+    solid.length = 0;
     for (const a of this.agents) {
       if (!(a instanceof Mover) || a.dead || a.hidden || a instanceof Arrow || a instanceof Bolt || a instanceof Swarm) continue;
       if (a instanceof Villager && (a.carriedBy || a.role === 'infant')) continue;
       if (a instanceof Player && a.roll) continue; // a roll goes through bodies — walls still stop it
       solid.push(a);
     }
-    this.bodies.rebuild(solid);
-    for (const a of solid) {
-      const as = a.space;
-      this.bodies.forEachInRadius(a.x, a.y, as * 2 + 0.5, (b, d2) => {
-        // each pair once, from the bigger body's side (its search reaches every body that can touch it)
-        if (b === a || b.elevated !== a.elevated) return;
-        // two of one block: their slots keep them apart; one walking to its place slips between its mates instead of shouldering them out of theirs
-        if (a.block && a.block === b.block && a.slot && b.slot && (a.vx || a.vy || b.vx || b.vy)) return;
-        const bs = b.space;
-        if (bs > as || (bs === as && b.id < a.id)) return;
-        const minD = a.space + b.space;
-        if (d2 >= minD * minD) return;
-        let d = Math.sqrt(d2), ux: number, uy: number;
-        if (d < 0.01) { const ang = (a.id * 2.399 + b.id) % (Math.PI * 2); ux = Math.cos(ang); uy = Math.sin(ang); d = 0.01; } // dead centre: pick a direction
-        else { ux = (b.x - a.x) / d; uy = (b.y - a.y) / d; }
-        const overlap = minD - d, share = b.mass / (a.mass + b.mass);
-        this.nudge(a, -ux * overlap * share, -uy * overlap * share);
-        this.nudge(b, ux * overlap * (1 - share), uy * overlap * (1 - share));
-      });
+    const n = solid.length;
+    if (S.x.length < n) { const cap = Math.max(256, n * 2); S.x = new Float64Array(cap); S.y = new Float64Array(cap); S.sp = new Float64Array(cap); S.ms = new Float64Array(cap); S.next = new Int32Array(cap); S.cell = new Int32Array(cap); S.touched = new Int32Array(cap); }
+    const C = 16, cols = Math.ceil(this.W / C) + 2, rows = Math.ceil(this.H / C) + 2, small = C / 2;
+    if (S.head.length !== cols * rows) { S.head = new Int32Array(cols * rows).fill(-1); }
+    const X = S.x, Y = S.y, SP = S.sp, MS = S.ms, next = S.next, cellOf = S.cell, head = S.head, touched = S.touched, big = S.big;
+    big.length = 0;
+    let nt = 0;
+    for (let i = 0; i < n; i++) {
+      const m = solid[i];
+      X[i] = m.x; Y[i] = m.y; SP[i] = m.space; MS[i] = m.mass;
+      if (SP[i] > small) { big.push(i); cellOf[i] = -1; continue; }
+      const cx = Math.min(cols - 1, Math.max(0, Math.floor(m.x / C) + 1)), cy = Math.min(rows - 1, Math.max(0, Math.floor(m.y / C) + 1)), c = cy * cols + cx;
+      if (head[c] === -1) touched[nt++] = c;
+      next[i] = head[c]; head[c] = i; cellOf[i] = c;
     }
+    const pair = (i: number, j: number) => {
+      // the arrays first: most neighbours are not touching, and those need no more than this
+      const dx = X[j] - X[i], dy = Y[j] - Y[i], minD = SP[i] + SP[j], d2 = dx * dx + dy * dy;
+      if (d2 >= minD * minD) return;
+      const a = solid[i], b = solid[j];
+      if (a.elevated !== b.elevated) return;
+      // two of one block: their slots keep them apart; one walking to its place slips between its mates instead of shouldering them out of theirs
+      if (a.block && a.block === b.block && a.slot && b.slot && (a.vx || a.vy || b.vx || b.vy)) return;
+      let d = Math.sqrt(d2), ux: number, uy: number;
+      if (d < 0.01) { const ang = (a.id * 2.399 + b.id) % (Math.PI * 2); ux = Math.cos(ang); uy = Math.sin(ang); d = 0.01; } // dead centre: pick a direction
+      else { ux = dx / d; uy = dy / d; }
+      const overlap = minD - d, share = MS[j] / (MS[i] + MS[j]);
+      this.nudge(a, -ux * overlap * share, -uy * overlap * share); X[i] = a.x; Y[i] = a.y;
+      this.nudge(b, ux * overlap * (1 - share), uy * overlap * (1 - share)); X[j] = b.x; Y[j] = b.y;
+    };
+    // small bodies: the rest of its own cell's list, then the cell to the right and the three below (each pair once)
+    const o1 = 1, o2 = cols - 1, o3 = cols, o4 = cols + 1, last = cols * rows;
+    for (let i = 0; i < n; i++) {
+      const c = cellOf[i];
+      if (c < 0) continue;
+      for (let j = next[i]; j !== -1; j = next[j]) pair(i, j);
+      let nb = c + o1; if (nb < last) for (let j = head[nb]; j !== -1; j = next[j]) pair(i, j);
+      nb = c + o2; if (nb < last) for (let j = head[nb]; j !== -1; j = next[j]) pair(i, j);
+      nb = c + o3; if (nb < last) for (let j = head[nb]; j !== -1; j = next[j]) pair(i, j);
+      nb = c + o4; if (nb < last) for (let j = head[nb]; j !== -1; j = next[j]) pair(i, j);
+    }
+    // big bodies: against every small one in the cells they could touch, and against each other
+    for (let bi = 0; bi < big.length; bi++) {
+      const i = big[bi], reach = SP[i] + small;
+      const x0 = Math.max(0, Math.floor((X[i] - reach) / C) + 1), x1 = Math.min(cols - 1, Math.floor((X[i] + reach) / C) + 1);
+      const y0 = Math.max(0, Math.floor((Y[i] - reach) / C) + 1), y1 = Math.min(rows - 1, Math.floor((Y[i] + reach) / C) + 1);
+      for (let cy = y0; cy <= y1; cy++) for (let cx = x0; cx <= x1; cx++) for (let j = head[cy * cols + cx]; j !== -1; j = next[j]) pair(i, j);
+      for (let bj = bi + 1; bj < big.length; bj++) {
+        const j = big[bj], r = SP[i] + SP[j];
+        if (Math.abs(X[j] - X[i]) < r && Math.abs(Y[j] - Y[i]) < r) pair(i, j);
+      }
+    }
+    // leave the grid empty for next time: only the cells used are reset
+    for (let t = 0; t < nt; t++) head[touched[t]] = -1;
   }
   /** Move a body by (dx, dy) unless that puts it in a blocked tile (then it stays and the other body takes the whole push next tick). */
   private nudge(m: Mover, dx: number, dy: number): void {
-    const nx = m.x + dx, ny = m.y + dy, t = World.toTile(nx, ny);
-    if (m instanceof Player ? !m.fits(nx, ny, this.world) : this.world.isBlocked(t.tx, t.ty, m.hostile, m.elevated)) return;
+    const nx = m.x + dx, ny = m.y + dy, tx = Math.floor(nx / TILE), ty = Math.floor(ny / TILE);
+    if (m instanceof Player) { if (!m.fits(nx, ny, this.world)) return; }
+    // a push within the tile it already stands on needs no look at the ground (it is standing there)
+    else if ((tx !== Math.floor(m.x / TILE) || ty !== Math.floor(m.y / TILE)) && this.world.isBlocked(tx, ty, m.hostile, m.elevated)) return;
     m.x = nx; m.y = ny;
   }
   /** Is another child already eating from this pile (within reach of it)? */
@@ -3295,30 +3343,50 @@ export class VillageScene extends SimScene {
 
   /** the map in 16-tile buckets: 1 where one of yours (the head, a villager) is within about three buckets */
   private awake = new Uint8Array(0);
+  private awakeSeed = new Uint8Array(0);
+  private awakeT = 0;
   private lodTick = 0;
+  /** which half of the interleaved work this tick carries (see tick) */
+  private tickHalf = 0;
+  /** 120 ticks a second, each carrying half the heavy work: smooth at 120 fps, and no heavier at 60 */
+  tickRate = 120;
+  maxTicksPerFrame = 40;
   /**
    * Update everyone. Your own people, the head, arrows and anything near them update every tick; a
    * troll, a boar or a camp raider out where nobody of yours is (more than about 48 tiles from all of
    * them) updates every fourth tick with four ticks' time, so it keeps its pace at a quarter of the cost.
    * On the large map most of the wild is like that most of the time.
    */
-  private updateAgents(dt: number): void {
+  private updateAgents(dt: number, half = -1): void {
     const B = 16 * TILE, cols = Math.ceil(this.W / B), rows = Math.ceil(this.H / B), R = 3;
-    if (this.awake.length !== cols * rows) this.awake = new Uint8Array(cols * rows);
-    const seed = new Uint8Array(cols * rows), aw = this.awake;
-    const mark = (x: number, y: number) => { const bx = Math.floor(x / B), by = Math.floor(y / B); if (bx >= 0 && by >= 0 && bx < cols && by < rows) seed[by * cols + bx] = 1; };
-    mark(this.player.x, this.player.y);
-    for (const a of this.agents) if (a instanceof Villager && !a.dead) mark(a.x, a.y);
-    aw.fill(0);
-    for (let by = 0; by < rows; by++) for (let bx = 0; bx < cols; bx++) {
-      if (!seed[by * cols + bx]) continue;
-      for (let y = Math.max(0, by - R); y <= Math.min(rows - 1, by + R); y++) for (let x = Math.max(0, bx - R); x <= Math.min(cols - 1, bx + R); x++) aw[y * cols + x] = 1;
+    if (this.awake.length !== cols * rows) { this.awake = new Uint8Array(cols * rows); this.awakeSeed = new Uint8Array(cols * rows); this.awakeT = 0; }
+    const aw = this.awake;
+    // who is near anyone of yours changes slowly: the map of it is redrawn every fourth tick
+    if ((this.awakeT++ & 3) === 0) {
+      const seed = this.awakeSeed;
+      seed.fill(0);
+      const mark = (x: number, y: number) => { const bx = Math.floor(x / B), by = Math.floor(y / B); if (bx >= 0 && by >= 0 && bx < cols && by < rows) seed[by * cols + bx] = 1; };
+      mark(this.player.x, this.player.y);
+      for (const a of this.agents) if (a instanceof Villager && !a.dead) mark(a.x, a.y);
+      aw.fill(0);
+      for (let by = 0; by < rows; by++) for (let bx = 0; bx < cols; bx++) {
+        if (!seed[by * cols + bx]) continue;
+        for (let y = Math.max(0, by - R); y <= Math.min(rows - 1, by + R); y++) for (let x = Math.max(0, bx - R); x <= Math.min(cols - 1, bx + R); x++) aw[y * cols + x] = 1;
+      }
     }
-    const k = this.lodTick++ & 3;
+    // interleaved (half 0 or 1): the head, arrows and bolts every tick; everyone else every other tick with
+    // twice the time, and the far wild every eighth with eight times. Otherwise as before: all every tick,
+    // the far wild every fourth.
+    const far = half < 0 ? 4 : 8, k = this.lodTick++ & (far - 1);
     for (const a of this.agents) {
       const m = a as Mover;
-      if (m instanceof Villager || m instanceof Player || m instanceof Arrow || m instanceof Bolt || m === this.boss || aw[Math.floor(m.y / B) * cols + Math.floor(m.x / B)]) { a.update(dt, this); continue; }
-      if (((m.id + k) & 3) === 0) a.update(dt * 4, this);
+      if (m instanceof Player || m instanceof Arrow || m instanceof Bolt) { a.update(dt, this); continue; }
+      if (m instanceof Villager || m === this.boss || aw[Math.floor(m.y / B) * cols + Math.floor(m.x / B)]) {
+        if (half < 0) a.update(dt, this);
+        else if (((m.id + half) & 1) === 0) a.update(dt * 2, this);
+        continue;
+      }
+      if (((m.id + k) & (far - 1)) === 0) a.update(dt * far, this);
     }
   }
 

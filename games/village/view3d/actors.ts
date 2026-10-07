@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { Bars } from './billboards';
 import { Mover, Villager, Raider, Player, Arrow, type EnemyKind } from '../agents';
 import { Bolt } from '../enemies';
 import { Boar, Swarm } from '../wildlife';
@@ -198,22 +199,20 @@ export class Actors {
   private actors = new Map<number, Actor>();
   private dying: Actor[] = [];
   private items = new Map<number, THREE.Mesh>();
-  private bars = new Map<number, { bg: THREE.Sprite; fill: THREE.Sprite }>();
   readonly kicks = new Map<number, Kick>();
   /** who the crowd renderer draws (view3d/crowd.ts): the actor path leaves them be */
-  crowdDrawn: ReadonlySet<number> = new Set();
+  crowdDrawn: { has(id: number): boolean } = new Set<number>();
   /** body meshes a pointer can land on, rebuilt as agents come and go */
   readonly pickable: THREE.Object3D[] = [];
   private t = 0;
 
-  constructor(private scene: VillageScene) {}
+  constructor(private scene: VillageScene) { this.group.add(this.hpBars.group); }
 
   clear(): void {
     for (const a of this.actors.values()) this.group.remove(a.group);
     for (const a of this.dying) this.group.remove(a.group);
     for (const i of this.items.values()) this.group.remove(i);
-    for (const b of this.bars.values()) this.group.remove(b.bg, b.fill);
-    this.actors.clear(); this.dying = []; this.items.clear(); this.bars.clear(); this.kicks.clear(); this.pickable.length = 0;
+    this.actors.clear(); this.dying = []; this.items.clear(); this.kicks.clear(); this.pickable.length = 0;
   }
 
   kick(id: number): Kick {
@@ -236,6 +235,11 @@ export class Actors {
   cull(x: number, z: number, r: number): void { this.cullX = x; this.cullZ = z; this.cullR2 = r * r; }
 
   sync(dt: number): void {
+    if (this.scene.view) this.hpBars.begin(this.scene.view.camera);
+    this.syncBodies(dt);
+    this.hpBars.end();
+  }
+  private syncBodies(dt: number): void {
     this.t += dt;
     const s = this.scene, fog = s.fog;
     const seen = new Set<number>();
@@ -312,7 +316,6 @@ export class Actors {
     }
     for (const [id, a] of this.actors) if (!seen.has(id)) {
       this.actors.delete(id); this.kicks.delete(id); pickDirty = true;
-      const bar = this.bars.get(id); if (bar) { this.group.remove(bar.bg, bar.fill); this.bars.delete(id); }
       if (a.key.startsWith('Arrow') || a.key.startsWith('Bolt')) { this.group.remove(a.group); continue; }
       a.dying = 0; this.dying.push(a);
     }
@@ -336,22 +339,14 @@ export class Actors {
     this.syncItems();
   }
 
+  /** every hp bar this frame: one batch of camera-facing quads (two draws for all of them) */
+  private hpBars = new Bars(10);
   private bar(m: Mover, show: boolean): void {
-    let b = this.bars.get(m.id);
-    if (!show) { if (b) { b.bg.visible = b.fill.visible = false; } return; }
-    if (!b) {
-      b = { bg: new THREE.Sprite(new THREE.SpriteMaterial({ color: 0x000000, opacity: 0.7, transparent: true, depthTest: false })), fill: new THREE.Sprite(new THREE.SpriteMaterial({ color: 0x5fdc5f, depthTest: false })) };
-      b.bg.renderOrder = b.fill.renderOrder = 10;
-      b.fill.center.set(0, 0.5); b.bg.center.set(0, 0.5);
-      this.group.add(b.bg, b.fill); this.bars.set(m.id, b);
-    }
+    if (!show) return;
     const huge = m instanceof Raider && (m.huge || m.boss);
     const w = huge ? 1.6 : 0.7, frac = Math.max(0, m.hp / m.maxHp);
     const head = this.headOf(m);
-    b.bg.visible = b.fill.visible = true;
-    b.bg.position.set(head.x - w / 2 - 0.03, head.y + 0.3, head.z); b.bg.scale.set(w + 0.06, 0.12, 1);
-    b.fill.position.set(head.x - w / 2, head.y + 0.3, head.z); b.fill.scale.set(Math.max(0.02, w * frac), 0.07, 1);
-    (b.fill.material as THREE.SpriteMaterial).color.setHex(frac > 0.4 ? 0x5fdc5f : 0xff4040);
+    this.hpBars.bar(head.x, head.y + 0.3, head.z, w, frac, frac > 0.4 ? 0x5fdc5f : 0xff4040, 0x000000, 0.07);
   }
 
   private syncItems(): void {

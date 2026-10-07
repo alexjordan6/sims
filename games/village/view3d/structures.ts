@@ -6,7 +6,7 @@ import { mat, WALL_UNITS, U } from './models';
 import { lambert } from './ps1';
 import { groundHeight } from './terrain';
 import { kitBuilding, kitDefense } from './kit';
-import { MODELS } from './assets';
+import { MODELS, bake } from './assets';
 
 // Buildings and fortifications. Each is a small group of flat-shaded boxes and cones, rebuilt only
 // when what it looks like changes (level, ruin, gate open/shut). Pack models replace these later
@@ -39,6 +39,30 @@ const STYLE: Record<BuildingKind, { wall: number; roof: number; h: number }> = {
 const CHARRED = 0x2a2420;
 
 interface Built { group: THREE.Group; key: string; windows: THREE.MeshLambertMaterial; light?: THREE.Mesh }
+
+/** the one material every merged building and wall is drawn with: its colours are in its vertices */
+let MERGED: THREE.MeshLambertMaterial | null = null;
+/**
+ * Fold a building's (or a wall's) many small meshes into one: a village is hundreds of boxes, roofs and kit
+ * pieces, and each was a draw of its own in both passes. What changes or glows stays apart (`keep`): the
+ * windows that light at night, the stew, flames, anything transparent or emissive.
+ */
+function mergeStatic(g: THREE.Object3D, keep: (m: THREE.Mesh) => boolean = () => false): void {
+  const fold: THREE.Mesh[] = [];
+  g.traverse((o) => {
+    if (!(o instanceof THREE.Mesh) || o instanceof THREE.SkinnedMesh || (o as THREE.InstancedMesh).isInstancedMesh || !o.visible || keep(o)) return;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    if (mats.some((m) => m.transparent || ((m as THREE.MeshLambertMaterial).emissive?.getHex() ?? 0) !== 0) || Object.keys(o.userData).length) return;
+    fold.push(o);
+  });
+  if (fold.length < 2) return;
+  const set = new Set(fold);
+  const geo = bake(g, (m) => set.has(m));
+  for (const m of fold) m.parent?.remove(m);
+  const merged = new THREE.Mesh(geo, MERGED ??= lambert({ vertexColors: true }));
+  merged.castShadow = true; merged.receiveShadow = true;
+  g.add(merged);
+}
 
 /**
  * Build a building at the origin of its footprint: x right, z south, one unit a tile. The front
@@ -171,6 +195,8 @@ export class Structures {
       if (!e) {
         const kit = kitBuilding(b);
         e = kit ? { group: kit.group, key, windows: kit.windows } : makeBuilding(b); e.key = key;
+        const ee = e;
+        mergeStatic(e.group, (m) => m.material === ee.windows || m === ee.light);
         e.group.position.set(b.tx, groundHeight(b.tx + BUILDINGS[b.kind].w / 2, b.ty + BUILDINGS[b.kind].h / 2), b.ty);
         e.group.traverse((o) => { o.userData.building = b; o.castShadow = true; o.receiveShadow = true; });
         this.group.add(e.group); this.built.set(b, e);
@@ -193,8 +219,10 @@ export class Structures {
       if (f && f.key !== key) { this.group.remove(f.group); f = undefined; pickDirty = true; }
       if (!f) {
         const kitted = kitDefense(d, open);
-        if (kitted) kitted.traverse((o) => { o.userData.defense = d; });
         f = { group: kitted ?? makeDefense(d, open), key };
+        f.group.traverse((o) => { delete o.userData.defense; });
+        mergeStatic(f.group);
+        f.group.traverse((o) => { o.userData.defense = d; });
         f.group.traverse((o) => { o.castShadow = true; o.receiveShadow = true; });
         f.group.position.set(d.tx, groundHeight(d.tx + 0.5, d.ty + 0.5), d.ty);
         this.group.add(f.group); this.forts.set(id, f); pickDirty = true;

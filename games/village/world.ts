@@ -248,6 +248,8 @@ export class World {
   // ---- items on the ground ------------------------------------------------------------------
   /** Put an item in the world at a pixel position (resting, unless it is launched or hopped afterwards). */
   dropItem(kind: ItemKind, n: number, x: number, y: number, food?: FoodKind, rng?: Rng): Item {
+    // scrap falls on scrap: a battlefield of a thousand dead is a few dozen piles to walk over, not a thousand
+    if (kind === 'scrap') for (const o of this.items) if (o.kind === 'scrap' && o.rest && (o.x - x) ** 2 + (o.y - y) ** 2 <= (1.5 * TILE) ** 2) { o.n += n; return o; }
     const it: Item = { id: this.nextItemId++, kind, food: kind === 'food' ? food : undefined, n, x, y, z: 0, vx: 0, vy: 0, vz: 0, rest: true, age: 0 };
     this.items.push(it);
     if (rng) hop(it, rng);

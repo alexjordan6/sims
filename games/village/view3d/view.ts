@@ -65,6 +65,10 @@ export class View {
   /** where the camera looks when it is not following the head (edge-panned) */
   private pan = new THREE.Vector3();
   private focus = new THREE.Vector3();
+  /** the camera's view this frame, for the crowd to skip what it cannot see */
+  private frustum = new THREE.Frustum();
+  private projView = new THREE.Matrix4();
+  private shadowFrame = 0;
   private shakeAmt = 0;
   private bumpAmt = 0; private bumpT = 0; private bumpMs = 1;
   private keys = new Set<string>();
@@ -337,8 +341,13 @@ export class View {
     this.syncFow();
     this.tilesChanged = this.terrain.sync();
     this.structures.sync(sky.night, this.t);
+    // only what the camera can reach is posed: the crowd and the actors both
+    const reach = this.dist * 2.5 + 30;
+    this.camera.updateMatrixWorld();
+    this.frustum.setFromProjectionMatrix(this.projView.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse));
+    this.crowd.cull(this.focus.x, this.focus.z, reach, this.frustum);
+    this.actors.cull(this.focus.x, this.focus.z, reach);
     this.crowd.sync(dt);
-    this.actors.cull(this.focus.x, this.focus.z, this.dist * 2.5 + 30);
     this.actors.sync(dt);
     for (const ev of s.fx) this.fx.handle(ev);
     s.fx.length = 0;
@@ -350,9 +359,16 @@ export class View {
     if (s.interior.active) {
       // indoors: the room's diorama, with no fog of war (its floor is not the map)
       setFowOn(false);
+      this.renderer.shadowMap.autoUpdate = true;
       this.ps1.render(this.renderer, this.room.scene, this.room.camera, dt, p.ps1Colours);
       setFowOn(true);
-    } else this.ps1.render(this.renderer, this.world, this.camera, dt, p.ps1Colours);
+    } else {
+      // above 90 fps the shadows are redrawn every other frame: half the shadow pass, a lag nobody can see
+      const sm = this.renderer.shadowMap;
+      sm.autoUpdate = false;
+      sm.needsUpdate = dt > 1 / 90 || (this.shadowFrame++ & 1) === 0;
+      this.ps1.render(this.renderer, this.world, this.camera, dt, p.ps1Colours);
+    }
     this.drawRaidArrows();
   }
 
@@ -398,29 +414,45 @@ export class View {
   }
 
   /** During a raid, a red arrow on the screen's edge for every raider out of view (the boss's is big and gold). */
+  /** which frame the edge arrows were last drawn on (they are redrawn every third frame), and scratch for the projection */
+  private arrowFrame = 0;
+  private arrowV = new THREE.Vector3();
+  private arrowBins = new Int32Array(36);
+  private arrowBoss = new Uint8Array(36);
+  /**
+   * Red arrows at the screen edge pointing at raiders out of sight. A host is hundreds strong, so they
+   * are gathered into 36 directions: one arrow each, bigger the more stand that way (gold for the
+   * Warlord), redrawn every third frame.
+   */
   private drawRaidArrows(): void {
     const g = this.actx, s = this.scene, W = this.arrows.width, H = this.arrows.height;
+    if (!s.raidActive || s.interior.active) { if (this.arrowFrame !== -1) { g.clearRect(0, 0, W, H); this.arrowFrame = -1; } return; }
+    if (this.arrowFrame !== -1 && this.arrowFrame++ % 3 !== 0) return;
+    if (this.arrowFrame === -1) this.arrowFrame = 1;
     g.clearRect(0, 0, W, H);
-    if (!s.raidActive || s.interior.active) return;
-    const r = this.renderer.domElement.getBoundingClientRect();
+    const bins = this.arrowBins, boss = this.arrowBoss, v = this.arrowV, n = bins.length;
+    bins.fill(0); boss.fill(0);
     for (const a of s.agents) {
       if (!(a instanceof Raider) || a.dead || a.lairBound) continue;
-      const v = new THREE.Vector3(a.x * U, 0.6, a.y * U).project(this.camera);
-      const behind = v.z > 1;
-      let nx = behind ? -v.x : v.x, ny = behind ? -v.y : v.y;
+      v.set(a.x * U, 0.6, a.y * U).project(this.camera);
+      const behind = v.z > 1, nx = behind ? -v.x : v.x, ny = behind ? -v.y : v.y;
       if (!behind && nx > -1 && nx < 1 && ny > -1 && ny < 1) continue;
-      const len = Math.hypot(nx, ny) || 1; nx /= len; ny /= len;
-      const pad = 18, hw = W / 2 - pad, hh = H / 2 - pad;
+      const b = Math.floor(((Math.atan2(ny, nx) / (Math.PI * 2)) + 1) % 1 * n) % n;
+      bins[b]++; if (a.boss) boss[b] = 1;
+    }
+    const pad = 18, hw = W / 2 - pad, hh = H / 2 - pad;
+    for (let b = 0; b < n; b++) {
+      if (!bins[b]) continue;
+      const ang0 = ((b + 0.5) / n) * Math.PI * 2, nx = Math.cos(ang0), ny = Math.sin(ang0);
       const t = Math.min(hw / Math.abs(nx || 1e-6), hh / Math.abs(ny || 1e-6));
-      const px = W / 2 + nx * t, py = H / 2 - ny * t, ang = Math.atan2(-ny, nx), size = a.boss ? 14 : 9;
-      g.fillStyle = a.boss ? '#ffcc33' : '#ff4a3d';
+      const px = W / 2 + nx * t, py = H / 2 - ny * t, ang = Math.atan2(-ny, nx), size = boss[b] ? 14 : Math.min(16, 8 + Math.log2(bins[b]) * 1.5);
+      g.fillStyle = boss[b] ? '#ffcc33' : '#ff4a3d';
       g.beginPath();
       g.moveTo(px + Math.cos(ang) * size, py + Math.sin(ang) * size);
       g.lineTo(px + Math.cos(ang + 2.4) * size, py + Math.sin(ang + 2.4) * size);
       g.lineTo(px + Math.cos(ang - 2.4) * size, py + Math.sin(ang - 2.4) * size);
       g.fill();
     }
-    void r;
   }
 }
 

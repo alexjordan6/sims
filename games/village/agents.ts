@@ -121,10 +121,11 @@ export abstract class Mover implements Agent {
     const dx = x - this.x, dy = y - this.y, d = Math.hypot(dx, dy);
     if (d < 1e-6) { this.vx = this.vy = 0; return 0; }
     const pace = this.speed * s.world.slowAt(this.x, this.y), step = Math.min(d, pace * dt);
-    const nx = this.x + (dx / d) * step, ny = this.y + (dy / d) * step, t = World.toTile(nx, ny);
+    const nx = this.x + (dx / d) * step, ny = this.y + (dy / d) * step, tx = Math.floor(nx / TILE), ty = Math.floor(ny / TILE);
     if (Math.abs(dx) > 0.5) this.dir = dx < 0 ? -1 : 1;
-    // never into a wall, and never into thorns from clear ground (one already caught in them walks out)
-    if (s.world.isBlocked(t.tx, t.ty, this.hostile, this.elevated) || (s.world.thicketAt(nx, ny) && !s.world.thicketAt(this.x, this.y))) { this.vx = this.vy = 0; return 0; }
+    // never into a wall, and never into thorns from clear ground (one already caught in them walks out);
+    // a step that stays on the tile it is on needs no look at the ground
+    if ((tx !== Math.floor(this.x / TILE) || ty !== Math.floor(this.y / TILE)) && (s.world.isBlocked(tx, ty, this.hostile, this.elevated) || (s.world.thicketAt(nx, ny) && !s.world.thicketAt(this.x, this.y)))) { this.vx = this.vy = 0; return 0; }
     this.x = nx; this.y = ny; this.vx = (dx / d) * pace; this.vy = (dy / d) * pace;
     return step;
   }

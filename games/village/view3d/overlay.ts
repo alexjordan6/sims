@@ -6,6 +6,7 @@ import type { VillageScene } from '../main';
 import { U, WALL_UNITS } from './models';
 import { groundHeight } from './terrain';
 import { standHeight } from './actors';
+import { Bars, Flags } from './billboards';
 
 // Marks laid on the world: the cursor, what is selected, the squad, held spots, build previews,
 // range rings, loot rings. Immediate mode: every frame asks for what it wants and pools hand out
@@ -65,6 +66,7 @@ export class Overlay {
     this.bars = new Pool(g, () => { const sp = new THREE.Sprite(new THREE.SpriteMaterial({ depthTest: false, transparent: true })); sp.center.set(0, 0.5); sp.renderOrder = 11; return sp; });
     this.ghost = new THREE.Mesh(ghostBox, new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.45, depthWrite: false }));
     g.add(this.ghost);
+    g.add(this.barBatch.group, this.flagBatch.group);
   }
 
   private rect(x: number, z: number, w: number, d: number, colour: number, alpha: number, y?: number): void {
@@ -109,8 +111,10 @@ export class Overlay {
     const s = this.scene, pl = s.player;
     const pulse = 0.5 + 0.5 * Math.sin(this.t * 4.5);
     const playing = s.screen === 'playing' && !s.interior.active;
+    if (s.view) this.barBatch.begin(s.view.camera);
     if (playing) this.draw(pulse);
     if (s.screen !== 'title' && !s.interior.active) this.drawBars();
+    this.barBatch.end(); this.flagBatch.end();
     this.rects.end(); this.bars.end(); this.fills.end(); this.circles.end(); this.discs.end(); this.markers.end(); this.poles.end(); this.segs.end();
     void pl;
   }
@@ -245,9 +249,7 @@ export class Overlay {
   }
   /** A pole with a pennant at (x, z) on the ground, in `colour`, `size` times the marker's height. */
   private flag(x: number, z: number, colour: number, size: number): void {
-    const pg = this.poles.take();
-    pg.position.set(x, groundHeight(x, z), z); pg.scale.setScalar(size);
-    ((pg.children[1] as THREE.Mesh).material as THREE.MeshBasicMaterial).color.setHex(colour);
+    this.flagBatch.flag(x, groundHeight(x, z), z, colour, size);
   }
   /** The rotated box round a block's slots: four ground lines along and across its facing. */
   private outline(slots: { x: number; y: number }[], fx: number, fy: number, colour: number, alpha: number): void {
@@ -261,14 +263,11 @@ export class Overlay {
     for (let i = 0; i < 4; i++) { const p0 = c[i], p1 = c[(i + 1) % 4]; this.seg(p0[0], p0[1], p0[2], p1[0], p1[1], p1[2], colour, i === 2 ? alpha : alpha * 0.6); }
   }
   /** a flat bar floating at (x, y, z), filled to frac */
+  /** every bar the overlay shows this frame, and every banner: instanced, two draws apiece however many there are */
+  private barBatch = new Bars(11);
+  private flagBatch = new Flags(pole, pennant);
   private bar(x: number, y: number, z: number, w: number, frac: number, colour: number, back = 0x000000, h = 0.12): void {
-    const bg = this.bars.take(); bg.center.set(0, 0.5);
-    bg.position.set(x - w / 2 - 0.03, y, z); bg.scale.set(w + 0.06, h + 0.05, 1);
-    const bm = bg.material as THREE.SpriteMaterial; bm.color.setHex(back); bm.opacity = 0.7; bm.rotation = 0;
-    if (frac <= 0) return;
-    const fg = this.bars.take(); fg.center.set(0, 0.5);
-    fg.position.set(x - w / 2, y, z); fg.scale.set(Math.max(0.02, w * frac), h, 1);
-    const fm = fg.material as THREE.SpriteMaterial; fm.color.setHex(colour); fm.opacity = 1; fm.rotation = 0;
+    this.barBatch.bar(x, y, z, w, frac, colour, back, h);
   }
 
   /** Hurt buildings show what is left of them; a ruin a red cross; every barracks its arrow stock; hurt walls their hp. */

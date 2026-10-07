@@ -19,6 +19,19 @@ export const BANNER_COLOURS = ['#c83c3c', '#3c78c8', '#3ca85a', '#d4a42c', '#9a4
 /** the enemy's banners: bone, ash and old blood */
 export const WARBAND_COLOURS = ['#e8e0c8', '#3a3430', '#7a1a14', '#b0a890', '#5a1010'];
 
+/** Footing per tile (0 not yet looked at, 1 good, 2 a wall, a tree, a building or thorns), kept until the world changes. */
+let footMemo = new Uint8Array(0), footRev = -1, footWorld: World | null = null;
+function badFooting(world: World, tx: number, ty: number): boolean {
+  if (!world.inBounds(tx, ty)) return true;
+  if (footWorld !== world || footRev !== world.revision || footMemo.length !== world.cols * world.rows) {
+    footWorld = world; footRev = world.revision;
+    if (footMemo.length !== world.cols * world.rows) footMemo = new Uint8Array(world.cols * world.rows); else footMemo.fill(0);
+  }
+  const i = ty * world.cols + tx;
+  if (!footMemo[i]) footMemo[i] = world.isBlocked(tx, ty) || world.get(tx, ty)?.kind === 'thicket' ? 2 : 1;
+  return footMemo[i] === 2;
+}
+
 /**
  * Slot offsets for n bodies, in units of the block's gap: `ox` to the right of the facing, `oy` back from it.
  * Front row first, each row centred, the block centred on its anchor. `cols` widens a line.
@@ -173,22 +186,27 @@ export abstract class Block<M extends Mover = Mover> {
    * finds open ground: the block squeezes round what is in its way rather than marching into it.
    */
   private footing(world: World, q: { x: number; y: number }): { x: number; y: number } {
-    const bad = (x: number, y: number) => { const t = World.toTile(x, y); return world.isBlocked(t.tx, t.ty) || world.thicketAt(x, y); };
+    const bad = (x: number, y: number) => badFooting(world, Math.floor(x / TILE), Math.floor(y / TILE));
     if (!bad(q.x, q.y)) return q;
     const dx = this.x - q.x, dy = this.y - q.y, d = Math.hypot(dx, dy), step = this.gap / 2;
     for (let k = step; k < d; k += step) { const x = q.x + (dx / d) * k, y = q.y + (dy / d) * k; if (!bad(x, y)) return { x, y }; }
     return q;
   }
 
+  /** whether the way to `dest` was clear when last looked at, and seconds until it is looked at again */
+  protected straight = true;
+  protected lookT = 0;
   /** Walk the banner toward `dest`: straight while the way is clear, along one planned path where it is not. */
   private march(dt: number, world: World, pace: number): void {
     const d = Math.hypot(this.dest.x - this.x, this.dest.y - this.y);
     if (d < 1) { this.x = this.dest.x; this.y = this.dest.y; this.path = []; return; }
     let to = this.dest;
-    this.routeT -= dt;
+    this.routeT -= dt; this.lookT -= dt;
     const goal = World.toTile(this.dest.x, this.dest.y);
-    // a banner bound for ground nobody can stand on just walks at it: the members find their own way round
-    if (!world.isBlocked(goal.tx, goal.ty) && !world.lineClear(this, this.dest)) {
+    // a banner bound for ground nobody can stand on just walks at it: the members find their own way round.
+    // (Whether the way is clear is looked at twice a second, not every tick: the line can be long.)
+    if (this.lookT <= 0) { this.lookT = 0.5; this.straight = world.isBlocked(goal.tx, goal.ty) || world.lineClear(this, this.dest); }
+    if (!this.straight) {
       if (this.routeT <= 0 && (!this.pathTo || this.pathTo.tx !== goal.tx || this.pathTo.ty !== goal.ty || !this.path.length)) {
         this.routeT = 1;
         const path = world.route(World.toTile(this.x, this.y), goal, false, false);
@@ -221,7 +239,7 @@ export class Regiment extends Block<Villager> {
   /** Put the banner down at (x, y) facing (fx, fy): the block marches there and holds. */
   place(x: number, y: number, fx: number, fy: number, cols = 0): void {
     this.dest = { x, y }; this.face(fx, fy); this.stance = 'hold'; this.quarry = null; this.cols = cols; this.dirty = true;
-    this.path = []; this.pathTo = null;
+    this.path = []; this.pathTo = null; this.lookT = 0;
   }
 
   /**

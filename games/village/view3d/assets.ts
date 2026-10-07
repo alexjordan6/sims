@@ -57,11 +57,11 @@ const srgb = new THREE.Color();
  * Merge a scene (or a posed character rig) into one geometry with baked vertex colours. A skinned mesh is
  * baked in whatever pose its skeleton holds right now, so stepping a mixer and baking again gives a frame.
  */
-export function bake(scene: THREE.Object3D): THREE.BufferGeometry {
+export function bake(scene: THREE.Object3D, only?: (m: THREE.Mesh) => boolean): THREE.BufferGeometry {
   scene.updateMatrixWorld(true);
   const parts: THREE.BufferGeometry[] = [];
   scene.traverse((o) => {
-    if (!(o instanceof THREE.Mesh) || !o.visible) return;
+    if (!(o instanceof THREE.Mesh) || !o.visible || (only && !only(o))) return;
     const mats = Array.isArray(o.material) ? o.material : [o.material];
     let src = o.geometry as THREE.BufferGeometry;
     if (o instanceof THREE.SkinnedMesh) {
@@ -90,8 +90,10 @@ export function bake(scene: THREE.Object3D): THREE.BufferGeometry {
       const base = m.color ?? new THREE.Color(1, 1, 1);
       const img = m.map?.image as (CanvasImageSource & { width: number; height: number }) | undefined;
       const px = img && uv ? pixels(img) : null;
+      const vc = m.vertexColors ? g.getAttribute('color') as THREE.BufferAttribute | undefined : undefined; // a prop already baked: its own colours, tinted
       for (let i = 0; i < n; i++) {
         let r = base.r, gg = base.g, b = base.b;
+        if (vc) { r *= vc.getX(i); gg *= vc.getY(i); b *= vc.getZ(i); }
         if (px && uv) {
           const u = ((uv.getX(i) % 1) + 1) % 1, v = ((uv.getY(i) % 1) + 1) % 1;
           // glTF uvs run top-down

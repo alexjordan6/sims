@@ -2011,6 +2011,16 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       const ld = seen.get(lone)!, nd = seen.get(near)!;
       assert(nd.length === 8 && ld.length === 2 && ld.every((d) => Math.abs(d - 4 / 60) < 1e-9), `a raider by the head thinks every tick (${nd.length}/8); one alone in the far wild every fourth, with four ticks' time (${ld.length}/8)`);
       lone.dead = near.dead = true; s.removeDead();
+      // the game loop ticks 120 times a second, sharing the heavy work out: the head moves every tick,
+      // everyone else on alternate ticks with twice the time — the same ground covered, half the work a frame
+      s = fresh(); s.agents = [s.player]; Object.assign(s.player, World.center(120, 80));
+      const walker = s.spawn(new Villager(s.player.x + 20, s.player.y, s.world.houses[0], 'farmer', 20, 'Walker', s.mods));
+      const steps: number[] = [], headSteps: number[] = [], headUpdate = s.player.update.bind(s.player);
+      walker.update = (dt: number) => { steps.push(dt); };
+      s.player.update = (dt: number, sc: typeof s) => { headSteps.push(dt); headUpdate(dt, sc); };
+      for (let i = 0; i < 8; i++) { s.grid.rebuild(s.agents); s.tick(1 / 120); }
+      assert(headSteps.length === 8 && steps.length === 4 && steps.every((d) => Math.abs(d - 1 / 60) < 1e-9), `at 120 ticks a second the head moves every tick (${headSteps.length}/8) and a villager every other with twice the time (${steps.length}/8)`);
+      walker.dead = true; s.removeDead(); delete (s.player as { update?: unknown }).update; // back to its own
     }
 
     // ---- MOBA commands: the head walks where it is sent, hunts what it is told to, uses what it is pointed at ----
