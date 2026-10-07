@@ -506,9 +506,13 @@ export class Brute extends Raider {
     this.task = 'lumbering in';
   }
 
+  protected override rankReach(): number { return 30; }
+  protected override rankStrike(_dt: number, s: VillageScene, foe: Mover): boolean { return this.startAttack(s, foe, this.dmg, 30, 0.2, 0.4); }
+
   update(dt: number, s: VillageScene): void {
     this.tickTimers(dt);
     if (this.frozen(dt)) return;
+    if (this.rankTick(dt, s)) return;
     if (this.siege && this.breach(dt, s)) return;
     if (this.attackTick(dt, s)) return;
     this.retarget -= dt;
@@ -551,9 +555,21 @@ export class Shaman extends Raider {
     this.task = 'muttering';
   }
 
+  protected override rankReach(): number { return 140; }
+  /** From the ranks a shaman never closes: it casts at whatever is in range and keeps its place. */
+  protected override rankStrike(dt: number, s: VillageScene, foe: Mover): boolean {
+    this.cast -= dt;
+    const d = this.dist(foe);
+    if (d > 140 || !s.world.lineClear(this, foe, false)) return false;
+    this.vx = this.vy = 0; this.dir = foe.x < this.x ? -1 : 1; this.task = 'casting from the ranks';
+    if (this.cast <= 0) { this.cast = 2; s.spawn(new Bolt(this.x, this.y - 4, (foe.x - this.x) / (d || 1), (foe.y - this.y) / (d || 1), this.dmg)); s.fx.push({ kind: 'cast', who: this }); }
+    return true;
+  }
+
   update(dt: number, s: VillageScene): void {
     this.tickTimers(dt);
     if (this.frozen(dt)) return;
+    if (this.rankTick(dt, s)) return;
     this.retarget -= dt;
     if (this.retarget <= 0 || !this.target || this.target.dead || this.target.hidden) {
       this.retarget = 0.5;

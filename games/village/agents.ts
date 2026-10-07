@@ -8,7 +8,7 @@ import type { Item } from './items';
 import { Pack, IMPLEMENTS } from './pack';
 import { WorkerSafety, WORKER_DANGER, WORKER_CLEAR } from './worker-safety';
 import type { BulkKind } from './config';
-import type { Regiment } from './regiment';
+import type { Block, Regiment, Warband } from './regiment';
 
 // All distances are in world pixels: 16 px per tile.
 
@@ -108,6 +108,56 @@ export abstract class Mover implements Agent {
   /** seconds spent walking without getting closer to the next waypoint (a body in the way pushes back as fast as we walk), and how close we got */
   private stallT = 0;
   private lastGap = Infinity;
+
+  /** the banner this body stands under (a regiment of yours or an enemy warband), and its spot in the block */
+  block: Block | null = null;
+  slot: { x: number; y: number } | null = null;
+  /** walking to the slot: seconds without getting closer, and how close it was */
+  private slotStall = 0;
+  private slotGap = Infinity;
+
+  /** Walk straight toward (x, y) this tick; a blocked tile stops the step. Returns the distance moved. */
+  protected stepToward(dt: number, s: VillageScene, x: number, y: number): number {
+    const dx = x - this.x, dy = y - this.y, d = Math.hypot(dx, dy);
+    if (d < 1e-6) { this.vx = this.vy = 0; return 0; }
+    const pace = this.speed * s.world.slowAt(this.x, this.y), step = Math.min(d, pace * dt);
+    const nx = this.x + (dx / d) * step, ny = this.y + (dy / d) * step, t = World.toTile(nx, ny);
+    if (Math.abs(dx) > 0.5) this.dir = dx < 0 ? -1 : 1;
+    // never into a wall, and never into thorns from clear ground (one already caught in them walks out)
+    if (s.world.isBlocked(t.tx, t.ty, this.hostile, this.elevated) || (s.world.thicketAt(nx, ny) && !s.world.thicketAt(this.x, this.y))) { this.vx = this.vy = 0; return 0; }
+    this.x = nx; this.y = ny; this.vx = (dx / d) * pace; this.vy = (dy / d) * pace;
+    return step;
+  }
+
+  /**
+   * Walk to this body's slot in its block: straight there, and along a path only after 1.5 s without
+   * getting closer. In the slot it stands facing the block's way (`fx`) and is about `settled`.
+   */
+  protected toSlot(dt: number, s: VillageScene, fx: number, settled: string): void {
+    const slot = this.slot;
+    if (!slot) { this.vx = this.vy = 0; this.task = 'falling in'; return; }
+    const dx = slot.x - this.x, dy = slot.y - this.y, d = Math.hypot(dx, dy);
+    // the path fallback: walk it until the slot is near again
+    if (this.goal) {
+      if (d < TILE * 0.75 || this.followPath(dt)) this.clearGoal();
+      this.task = 'finding a way back to the ranks'; return;
+    }
+    if (d < 0.75) {
+      this.vx = this.vy = 0; this.slotStall = 0; this.slotGap = Infinity;
+      if (Math.abs(fx) > 0.2) this.dir = fx < 0 ? -1 : 1;
+      this.task = settled;
+      return;
+    }
+    const step = this.stepToward(dt, s, slot.x, slot.y);
+    this.slotStall = d < this.slotGap - step * 0.25 ? Math.max(0, this.slotStall - dt) : this.slotStall + dt;
+    this.slotGap = d;
+    if (this.slotStall > 1.5) {
+      this.slotStall = 0; this.slotGap = Infinity;
+      const q = World.toTile(slot.x, slot.y);
+      if (d > TILE * 0.75 && !s.world.isBlocked(q.tx, q.ty, this.hostile) && !s.world.thicketAt(slot.x, slot.y)) this.setGoal(s, q.tx, q.ty, true);
+    }
+    this.task = 'taking its place in the ranks';
+  }
 
   /** Advance along the path. Returns true when there is nowhere left to go. */
   followPath(dt: number): boolean {
@@ -277,12 +327,8 @@ export class Villager extends Mover {
   private thrust: { t: number; ux: number; uy: number; dmg: number; struck: boolean } | null = null;
   post: TilePos | null = null;
   order: Order | null = null;
-  /** the banner this soldier fights under (gnome soldiers only), and the spot in its block it keeps */
-  regiment: Regiment | null = null;
-  slot: { x: number; y: number } | null = null;
-  /** walking to the slot: seconds without getting closer, and how close it was */
-  private slotStall = 0;
-  private slotGap = Infinity;
+  /** the regiment this soldier fights under (gnome soldiers only) */
+  get regiment(): Regiment | null { return this.block?.side === 'ours' ? this.block as Regiment : null; }
   private stairsGoal: TilePos | null = null;
   indoors: House | null = null;
   role: Role;
@@ -1084,40 +1130,7 @@ export class Villager extends Mover {
     } else this.target = null;
     const regen = s.world.barracks.some((b) => b.warm) ? s.mods.soldierRegen + (s.world.barracksLevel >= 3 ? 1 : 0) : 0;
     if (regen && this.hp < this.maxHp && !foe) this.hp = Math.min(this.maxHp, this.hp + regen * dt);
-    if (!slot) { this.vx = this.vy = 0; this.task = 'falling in'; return; }
-    const dx = slot.x - this.x, dy = slot.y - this.y, d = Math.hypot(dx, dy);
-    // the path fallback: walk it until the slot is near again
-    if (this.goal) {
-      if (d < TILE * 0.75 || this.followPath(dt)) this.clearGoal();
-      this.task = 'finding a way back to the ranks'; return;
-    }
-    if (d < 0.75) {
-      this.vx = this.vy = 0; this.slotStall = 0; this.slotGap = Infinity;
-      if (Math.abs(reg.fx) > 0.2) this.dir = reg.fx < 0 ? -1 : 1;
-      this.task = reg.stance === 'hold' ? 'holding the line' : reg.stance === 'advance' ? 'advancing in the ranks' : 'marching behind you';
-      return;
-    }
-    const step = this.stepToward(dt, s, slot.x, slot.y);
-    this.slotStall = d < this.slotGap - step * 0.25 ? Math.max(0, this.slotStall - dt) : this.slotStall + dt;
-    this.slotGap = d;
-    if (this.slotStall > 1.5) {
-      this.slotStall = 0; this.slotGap = Infinity;
-      const q = World.toTile(slot.x, slot.y);
-      if (d > TILE * 0.75 && !s.world.isBlocked(q.tx, q.ty) && !s.world.thicketAt(slot.x, slot.y)) this.setGoal(s, q.tx, q.ty, true);
-    }
-    this.task = 'taking its place in the ranks';
-  }
-  /** Walk straight toward (x, y) this tick, easing in on the last few pixels; a blocked tile stops the step. Returns the distance moved. */
-  private stepToward(dt: number, s: VillageScene, x: number, y: number): number {
-    const dx = x - this.x, dy = y - this.y, d = Math.hypot(dx, dy);
-    if (d < 1e-6) { this.vx = this.vy = 0; return 0; }
-    const pace = this.speed * s.world.slowAt(this.x, this.y), step = Math.min(d, pace * dt);
-    const nx = this.x + (dx / d) * step, ny = this.y + (dy / d) * step, t = World.toTile(nx, ny);
-    if (Math.abs(dx) > 0.5) this.dir = dx < 0 ? -1 : 1;
-    // never into a wall, and never into thorns from clear ground (one already caught in them walks out)
-    if (s.world.isBlocked(t.tx, t.ty, false, this.elevated) || (s.world.thicketAt(nx, ny) && !s.world.thicketAt(this.x, this.y))) { this.vx = this.vy = 0; return 0; }
-    this.x = nx; this.y = ny; this.vx = (dx / d) * pace; this.vy = (dy / d) * pace;
-    return step;
+    this.toSlot(dt, s, reg.fx, reg.stance === 'hold' ? 'holding the line' : reg.stance === 'advance' ? 'advancing in the ranks' : 'marching behind you');
   }
 
   /**
@@ -1347,9 +1360,43 @@ export class Raider extends Mover {
     this.task = this.boss ? 'leading the raid' : 'raiding';
   }
 
+  /** the enemy warband this raider marches in, if any */
+  get warband(): Warband | null { return this.block?.side === 'theirs' ? this.block as Warband : null; }
+  /** How far this raider strikes from its place in the ranks. */
+  protected rankReach(): number { return this.boss ? 16 : 13; }
+  /** Strike `foe` from the ranks if it can: true when the blow has begun. */
+  protected rankStrike(_dt: number, s: VillageScene, foe: Mover): boolean {
+    return this.startAttack(s, foe, this.dmg, this.rankReach(), this.boss ? 0.35 : 0.25, this.boss ? 0.7 : 0.55);
+  }
+  /**
+   * A raider in a warband: like a soldier in a regiment it does not hunt. It strikes the nearest of
+   * your people within its reach (a short lunge out of the rank when the warband charges), and
+   * otherwise keeps its slot. True when the ranks had it this tick.
+   */
+  protected rankTick(dt: number, s: VillageScene): boolean {
+    const wb = this.warband;
+    if (!wb) return false;
+    if (this.attackTick(dt, s)) return true;
+    const reach = this.rankReach(), lunge = wb.state === 'charge' ? TILE * 1.5 : 4, slot = this.slot;
+    this.retarget -= dt;
+    if (this.retarget <= 0 || (this.target && (this.target.dead || this.target.hidden))) {
+      this.retarget = 0.25;
+      this.target = s.nearestPerson(this.x, this.y, reach + lunge + 12);
+    }
+    const foe = this.target;
+    if (foe && !foe.dead && (!slot || Math.hypot(this.x - slot.x, this.y - slot.y) < 2 * TILE)) {
+      this.task = 'fighting in the warband';
+      if (this.rankStrike(dt, s, foe)) return true;
+      if (this.dist(foe) <= reach + foe.radius + lunge) { this.stepToward(dt, s, foe.x, foe.y); return true; }
+    } else this.target = null;
+    this.toSlot(dt, s, wb.fx, wb.state === 'charge' ? 'charging in the ranks' : wb.state === 'column' ? 'marching in the host' : 'camped with the host');
+    return true;
+  }
+
   update(dt: number, s: VillageScene): void {
     this.tickTimers(dt);
     if (this.frozen(dt)) return;
+    if (this.rankTick(dt, s)) return;
     if (this.siege && this.breach(dt, s)) return;
     if (this.attackTick(dt, s)) return;
     this.retarget -= dt;

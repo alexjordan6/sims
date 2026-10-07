@@ -8,7 +8,7 @@ import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, Wrecker, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm } from './wildlife';
-import { SLOT_GAP } from './regiment';
+import { SLOT_GAP, Warband } from './regiment';
 import { WARREN, SOLDIER_CAP_PER_LEVEL, PLAINS } from './config';
 import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, GNOME_PACK, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS, YARD, CALLINGS, TREE_RESERVE, MOODS, SERVE_RANGE, POT_INGREDIENTS, BODY } from './config';
 
@@ -1841,6 +1841,41 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(s.regimentKey('H') && (reg.stance as string) === 'follow' && s.regimentKey('G') && (reg.stance as string) === 'hold', 'H sets it following, G holding');
       s.clearSquad(); s.player.tool = 'sword';
       assert(!s.regimentKey('F'), 'with nothing picked (or the wand away) the keys keep their old jobs');
+    }
+
+    // ---- warbands: the enemy's blocks, built on the same code as your regiments ------------------------
+    {
+      const run = (secs: number) => { for (let i = 0; i < Math.ceil(secs * 60); i++) { s.grid.rebuild(s.agents); s.tick(1 / 60); } };
+      s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(104, 100)); s.world.items.length = 0;
+      const wb = new Warband(1, '#e8e0c8', World.center(132, 100).x, World.center(132, 100).y);
+      wb.face(-1, 0); s.warbands.push(wb);
+      const band: Raider[] = [];
+      for (let i = 0; i < 30; i++) {
+        const at = World.center(128 + (i % 6), 96 + Math.floor(i / 6));
+        const r = s.spawn(i % 6 === 0 ? new Brute(at.x, at.y) : new Raider(at.x, at.y)); r.lairBound = true; wb.add(r); band.push(r);
+      }
+      run(10);
+      const off = () => Math.max(...wb.active().map((r) => Math.hypot(r.x - r.slot!.x, r.y - r.slot!.y)));
+      assert(wb.state === 'camp' && off() < TILE / 2 && band.every((r) => r.warband === wb && r.block?.side === 'theirs'), `a warband of 30 stands in camp in its block, every raider within half a tile of its slot (worst ${off().toFixed(1)} px)`);
+      const lead = band.slice(0, 6); for (const r of lead) r.dead = true; s.removeDead(); run(6);
+      assert(wb.members.length === 24 && off() < TILE / 2, `six fall and its ranks close, as a regiment's do (${wb.members.length} left, worst ${off().toFixed(1)} px)`);
+      // one of yours comes within its sight: it charges, and the front rank strikes
+      const bait = s.spawn(new Villager(World.center(120, 100).x, World.center(120, 100).y, s.world.houses[0], 'farmer', 20, 'Bait', s.mods)); bait.update = () => {}; bait.hp = bait.maxHp = 500;
+      run(6);
+      assert(wb.state === 'charge' && wb.quarry === bait && bait.hp < 500, `a villager ${12} tiles off is charged and struck (${bait.hp.toFixed(0)}/500 hp left)`);
+      bait.dead = true; s.removeDead(); Object.assign(s.player, World.center(40, 60)); run(1); // (the head, too, out of its sight)
+      assert(wb.state === 'camp', 'with nobody left in sight it stands down');
+      // released, its raiders are ordinary raiders again
+      wb.release(); run(1 / 60);
+      assert(band.filter((r) => !r.dead).every((r) => !r.block && !r.slot) && s.warbands.length === 0, 'released, its raiders leave the block and the banner is struck');
+      for (const r of band) r.dead = true; s.removeDead();
+      // the grid search for victims finds who a scan of everyone would
+      const folk = [0, 1, 2, 3].map((i) => s.spawn(new Villager(World.center(110 + i * 9, 92 + i * 4).x, World.center(110 + i * 9, 92 + i * 4).y, s.world.houses[0], 'farmer', 20, `Folk${i}`, s.mods)));
+      s.grid.rebuild(s.agents);
+      const scan = (x: number, y: number) => [s.player as Villager | typeof s.player, ...folk].filter((m) => !m.dead && !m.hidden).sort((a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y))[0];
+      const spots = [[100, 100], [125, 96], [140, 110], [10, 10], [200, 140]].map(([tx, ty]) => World.center(tx, ty));
+      assert(spots.every((q) => s.nearestVictim(q.x, q.y) === scan(q.x, q.y)), 'the nearest victim by grid rings is the nearest by a scan of everyone, near or far');
+      for (const f of folk) f.dead = true; s.removeDead();
     }
 
     // ---- the warren and the army economy: quick births, a granary-fed nursery, bigger barracks, gnome rations ----

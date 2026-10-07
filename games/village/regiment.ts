@@ -1,6 +1,6 @@
 import { World, type TilePos } from './world';
 import { TILE, BODY } from './config';
-import type { Mover, Villager } from './agents';
+import type { Mover, Villager, Raider } from './agents';
 
 export type Shape = 'square' | 'line' | 'wedge';
 export type Stance = 'hold' | 'advance' | 'follow';
@@ -9,14 +9,18 @@ export const STANCES: Stance[] = ['follow', 'hold', 'advance'];
 
 /** how many gnomes one banner carries before a new regiment is raised */
 export const REGIMENT_SIZE = 50;
-/** the room between neighbouring slots, in sim pixels */
+/** the room between neighbouring slots in a regiment, in sim pixels */
 export const SLOT_GAP = BODY.gnome * 2.2;
+/** the room between raiders in a warband: they are bigger bodies */
+export const WARBAND_GAP = 3 * BODY.humanoidMul * 2.2;
 /** how far an advancing block looks for a quarry, in pixels */
 export const ADVANCE_SIGHT = 20 * TILE;
 export const BANNER_COLOURS = ['#c83c3c', '#3c78c8', '#3ca85a', '#d4a42c', '#9a4cc0', '#2cb0b0', '#e0702c', '#d8d8d8'];
+/** the enemy's banners: bone, ash and old blood */
+export const WARBAND_COLOURS = ['#e8e0c8', '#3a3430', '#7a1a14', '#b0a890', '#5a1010'];
 
 /**
- * Slot offsets for n bodies, in units of SLOT_GAP: `ox` to the right of the facing, `oy` back from it.
+ * Slot offsets for n bodies, in units of the block's gap: `ox` to the right of the facing, `oy` back from it.
  * Front row first, each row centred, the block centred on its anchor. `cols` widens a line.
  */
 export function layout(shape: Shape, n: number, cols = 0): { ox: number; oy: number }[] {
@@ -34,17 +38,18 @@ export function layout(shape: Shape, n: number, cols = 0): { ox: number; oy: num
 }
 
 /**
- * A block of gnome soldiers under one banner. The block thinks for its members: it picks where the
- * banner goes (behind the head, a placed spot, or onto the nearest raider), marches the banner there
- * along one path, and lays out a slot for each member, rotated to the block's facing. Members walk to
- * their slots and fight whatever comes within their own reach. When one falls the ranks close: the
- * slots are handed out again front rank first, each to the nearest body, so the front stays full and
- * nobody crosses the whole block to get there.
+ * A block of bodies under one banner — yours (a Regiment) or the enemy's (a Warband). The block thinks
+ * for its members: the side decides where the banner should go, the block marches it there along one
+ * path and lays out a slot for each member, rotated to its facing. Members walk to their slots and
+ * fight whatever comes within their own reach (Mover.toSlot and each side's rankTick). When one falls
+ * the ranks close: the slots are handed out again front rank first, each to the nearest body, so the
+ * front stays full and nobody crosses the whole block to get there.
  */
-export class Regiment {
-  members: Villager[] = [];
+export abstract class Block<M extends Mover = Mover> {
+  /** which side the banner is on */
+  abstract readonly side: 'ours' | 'theirs';
+  members: M[] = [];
   shape: Shape = 'square';
-  stance: Stance = 'follow';
   /** the banner: the centre of the block, in sim pixels */
   x: number;
   y: number;
@@ -55,19 +60,19 @@ export class Regiment {
   dest: { x: number; y: number };
   /** a line's width in slots (0 = two deep) */
   cols = 0;
-  /** what an advancing block is going for: the raider right-clicked, or the nearest it finds */
+  /** what the block is going for, when it is going for something */
   quarry: Mover | null = null;
-  /** following: where the block keeps station, in pixels to the right of the head and back from it (the scene ranks the followers) */
-  trail = { side: 0, back: 2 * TILE };
   /** the most it has had under the banner, for the strength bar */
   peak = 0;
+  /** room between slots, in pixels */
+  gap = SLOT_GAP;
   /** slot positions, one per active member (same order), in sim pixels */
   slots: { x: number; y: number }[] = [];
-  private path: TilePos[] = [];
-  private pathTo: TilePos | null = null;
-  private think = 0;
+  protected path: TilePos[] = [];
+  protected pathTo: TilePos | null = null;
+  protected think = 0;
   /** seconds until the banner may plan another path (a path a second is plenty for a block) */
-  private routeT = 0;
+  protected routeT = 0;
   private lastActive = -1;
   /** the slots must be handed out again: someone fell, or the block turned or changed shape */
   dirty = true;
@@ -76,25 +81,27 @@ export class Regiment {
     this.x = x; this.y = y; this.dest = { x, y };
   }
 
-  /** Members the block is laying out: on their feet, without a wand order or a wall post of their own. */
-  active(): Villager[] { return this.members.filter((v) => !v.order && !v.post && !v.hidden && !v.carriedBy); }
+  /** Members the block is laying out right now (on their feet, and the block's to place). */
+  abstract active(): M[];
 
-  /** Drop the fallen (the ranks close on the next tick). */
-  prune(keep: (v: Villager) => boolean): void {
+  /** Drop those who are no longer the block's (the ranks close on the next tick). */
+  prune(keep: (m: M) => boolean): void {
     const before = this.members.length;
-    this.members = this.members.filter((v) => { if (keep(v)) return true; v.regiment = null; return false; });
+    this.members = this.members.filter((m) => { if (keep(m)) return true; if (m.block === this) { m.block = null; m.slot = null; } return false; });
     if (this.members.length !== before) this.dirty = true;
   }
+
+  add(m: M): void { this.members.push(m); this.dirty = true; m.block = this; this.peak = Math.max(this.peak, this.members.length); }
 
   /**
    * Hand the slots out again: front rank first, each slot to the nearest member not yet placed. A gap
    * in the front is filled from right behind it (or beside it), and that gap from behind again, so
    * the block closes up with each body moving about one place. Members without a slot keep their order at the end.
    */
-  private closeRanks(who: Villager[], slots: { x: number; y: number }[]): void {
-    const left = new Set(who), order: Villager[] = [];
+  private closeRanks(who: M[], slots: { x: number; y: number }[]): void {
+    const left = new Set(who), order: M[] = [];
     for (const q of slots) {
-      let best: Villager | null = null, bd = Infinity;
+      let best: M | null = null, bd = Infinity;
       for (const v of left) { const d = (v.x - q.x) ** 2 + (v.y - q.y) ** 2; if (d < bd) { bd = d; best = v; } }
       if (!best) break;
       left.delete(best); order.push(best);
@@ -103,25 +110,23 @@ export class Regiment {
     this.members = [...order, ...this.members.filter((v) => !placed.has(v))];
   }
 
-  add(v: Villager): void { this.members.push(v); this.dirty = true; v.regiment = this; this.peak = Math.max(this.peak, this.members.length); }
-
   /** The slots for `n` bodies about (x, y) facing (fx, fy): the block's layout, or a ghost of a placement. */
   slotsAt(x: number, y: number, fx: number, fy: number, n: number, shape = this.shape, cols = this.cols): { x: number; y: number }[] {
-    const rx = -fy, ry = fx;
-    return layout(shape, n, cols).map(({ ox, oy }) => ({ x: x + (rx * ox - fx * oy) * SLOT_GAP, y: y + (ry * ox - fy * oy) * SLOT_GAP }));
+    const rx = -fy, ry = fx, g = this.gap;
+    return layout(shape, n, cols).map(({ ox, oy }) => ({ x: x + (rx * ox - fx * oy) * g, y: y + (ry * ox - fy * oy) * g }));
   }
 
   /** How deep the block is front to back, in pixels. */
   depth(): number {
     const l = layout(this.shape, Math.max(1, this.active().length), this.cols);
-    return (l[l.length - 1].oy - l[0].oy + 1) * SLOT_GAP;
+    return (l[l.length - 1].oy - l[0].oy + 1) * this.gap;
   }
 
   /** How wide the block is across its facing, in pixels. */
   width(): number {
     let lo = Infinity, hi = -Infinity;
     for (const o of layout(this.shape, Math.max(1, this.active().length), this.cols)) { lo = Math.min(lo, o.ox); hi = Math.max(hi, o.ox); }
-    return (hi - lo + 1) * SLOT_GAP;
+    return (hi - lo + 1) * this.gap;
   }
 
   /** Face (dx, dy) — ignored when it has no length. */
@@ -130,40 +135,20 @@ export class Regiment {
     if (d > 1e-6) { this.fx = dx / d; this.fy = dy / d; }
   }
 
-  /** Put the banner down at (x, y) facing (fx, fy): the block marches there and holds. */
-  place(x: number, y: number, fx: number, fy: number, cols = 0): void {
-    this.dest = { x, y }; this.face(fx, fy); this.stance = 'hold'; this.quarry = null; this.cols = cols; this.dirty = true;
-    this.path = []; this.pathTo = null;
+  /** Go for `q`: face it and set the banner half a block short of it, so the front rank meets it. */
+  protected closeOn(q: Mover): void {
+    const dx = q.x - this.x, dy = q.y - this.y, d = Math.hypot(dx, dy);
+    this.face(dx, dy);
+    const short = Math.min(d, this.depth() / 2);
+    this.dest = { x: q.x - (dx / (d || 1)) * short, y: q.y - (dy / (d || 1)) * short };
   }
 
   /**
-   * One tick of the block's thinking: where the banner should be, march it there, lay the slots out.
-   * `head` is the head (followed), `pick` finds the nearest raider to (x, y) within r.
+   * March the banner toward `dest` at the pace of the slowest (so nobody is left behind), lay the slots
+   * out, hand them out again when the block changed, and give every member its slot.
    */
-  tick(dt: number, world: World, head: { x: number; y: number; vx: number; vy: number; dead?: boolean }, pick: (x: number, y: number, r: number) => Mover | null): void {
+  protected marchAndLayOut(dt: number, world: World): void {
     const who = this.active();
-    this.think -= dt;
-    if (this.stance === 'follow' && !head.dead) {
-      if (Math.hypot(head.vx, head.vy) > 8) {
-        // turn with the head, but smoothly: a block wheels, it does not spin on the spot
-        const d = Math.hypot(head.vx, head.vy), k = Math.min(1, dt * 3);
-        this.face(this.fx + (head.vx / d - this.fx) * k, this.fy + (head.vy / d - this.fy) * k);
-      }
-      const { side, back } = this.trail;
-      this.dest = { x: head.x - this.fx * back - this.fy * side, y: head.y - this.fy * back + this.fx * side };
-    } else if (this.stance === 'advance') {
-      if (this.quarry && (this.quarry.dead || this.quarry.hidden)) this.quarry = null;
-      if (!this.quarry && this.think <= 0) { this.think = 0.5; this.quarry = pick(this.x, this.y, ADVANCE_SIGHT); }
-      const q = this.quarry;
-      if (q) {
-        // the front rank meets it: the banner stops half a block short
-        const dx = q.x - this.x, dy = q.y - this.y, d = Math.hypot(dx, dy);
-        this.face(dx, dy);
-        const short = Math.min(d, this.depth() / 2);
-        this.dest = { x: q.x - (dx / (d || 1)) * short, y: q.y - (dy / (d || 1)) * short };
-      } else this.dest = { x: this.x, y: this.y };
-    }
-    // march the banner, at the pace of the slowest so nobody is left behind
     let pace = Infinity;
     for (const v of who) pace = Math.min(pace, v.speed);
     if (!Number.isFinite(pace)) pace = 30;
@@ -174,6 +159,9 @@ export class Regiment {
       this.closeRanks(who, this.slotsAt(this.dest.x, this.dest.y, this.fx, this.fy, who.length));
       this.dirty = false; this.lastActive = who.length;
     }
+    const placed = new Set(who);
+    let i = 0;
+    for (const m of this.members) m.slot = placed.has(m) ? this.slots[i++] ?? null : null;
   }
 
   /**
@@ -183,7 +171,7 @@ export class Regiment {
   private footing(world: World, q: { x: number; y: number }): { x: number; y: number } {
     const bad = (x: number, y: number) => { const t = World.toTile(x, y); return world.isBlocked(t.tx, t.ty) || world.thicketAt(x, y); };
     if (!bad(q.x, q.y)) return q;
-    const dx = this.x - q.x, dy = this.y - q.y, d = Math.hypot(dx, dy), step = SLOT_GAP / 2;
+    const dx = this.x - q.x, dy = this.y - q.y, d = Math.hypot(dx, dy), step = this.gap / 2;
     for (let k = step; k < d; k += step) { const x = q.x + (dx / d) * k, y = q.y + (dy / d) * k; if (!bad(x, y)) return { x, y }; }
     return q;
   }
@@ -210,5 +198,93 @@ export class Regiment {
     } else this.path = [];
     const dx = to.x - this.x, dy = to.y - this.y, g = Math.hypot(dx, dy), step = Math.min(g, pace * dt);
     if (g > 1e-6) { this.x += (dx / g) * step; this.y += (dy / g) * step; }
+  }
+}
+
+/**
+ * A block of your gnome soldiers. It follows the head (the default: blocks march in ranks behind it),
+ * holds where it was placed, or advances on the nearest raider.
+ */
+export class Regiment extends Block<Villager> {
+  readonly side = 'ours' as const;
+  stance: Stance = 'follow';
+  /** following: where the block keeps station, in pixels to the right of the head and back from it (the scene ranks the followers) */
+  trail = { side: 0, back: 2 * TILE };
+
+  /** Members the block is laying out: on their feet, without a wand order or a wall post of their own. */
+  active(): Villager[] { return this.members.filter((v) => !v.order && !v.post && !v.hidden && !v.carriedBy); }
+
+  /** Put the banner down at (x, y) facing (fx, fy): the block marches there and holds. */
+  place(x: number, y: number, fx: number, fy: number, cols = 0): void {
+    this.dest = { x, y }; this.face(fx, fy); this.stance = 'hold'; this.quarry = null; this.cols = cols; this.dirty = true;
+    this.path = []; this.pathTo = null;
+  }
+
+  /**
+   * One tick of the block's thinking: where the banner should be, then march it there and lay the slots out.
+   * `head` is the head (followed), `pick` finds the nearest raider to (x, y) within r.
+   */
+  tick(dt: number, world: World, head: { x: number; y: number; vx: number; vy: number; dead?: boolean }, pick: (x: number, y: number, r: number) => Mover | null): void {
+    this.think -= dt;
+    if (this.stance === 'follow' && !head.dead) {
+      if (Math.hypot(head.vx, head.vy) > 8) {
+        // turn with the head, but smoothly: a block wheels, it does not spin on the spot
+        const d = Math.hypot(head.vx, head.vy), k = Math.min(1, dt * 3);
+        this.face(this.fx + (head.vx / d - this.fx) * k, this.fy + (head.vy / d - this.fy) * k);
+      }
+      const { side, back } = this.trail;
+      this.dest = { x: head.x - this.fx * back - this.fy * side, y: head.y - this.fy * back + this.fx * side };
+    } else if (this.stance === 'advance') {
+      if (this.quarry && (this.quarry.dead || this.quarry.hidden)) this.quarry = null;
+      if (!this.quarry && this.think <= 0) { this.think = 0.5; this.quarry = pick(this.x, this.y, ADVANCE_SIGHT); }
+      if (this.quarry) this.closeOn(this.quarry); else this.dest = { x: this.x, y: this.y };
+    }
+    this.marchAndLayOut(dt, world);
+  }
+}
+
+export type WarbandState = 'camp' | 'column' | 'charge';
+
+/**
+ * A block of the enemy's. It stands in camp, marches where its host sends it (the column), and when
+ * anything of yours comes near it charges: it faces the nearest of your people and closes on them, the
+ * front rank striking as it meets them. A host releases a warband at the walls, and then its raiders
+ * are ordinary raiders again.
+ */
+export class Warband extends Block<Raider> {
+  readonly side = 'theirs' as const;
+  state: WarbandState = 'camp';
+  /** where the column is sending the banner while it marches */
+  goal: { x: number; y: number } | null = null;
+  /** how close one of yours must come before it charges, in pixels */
+  sight = 14 * TILE;
+  gap = WARBAND_GAP;
+
+  /** Members the block is laying out: everyone still under the banner and on their feet. */
+  active(): Raider[] { return this.members.filter((r) => !r.dead && !r.hidden && r.block === this); }
+
+  /**
+   * One tick: in camp the banner stands; in column it walks toward `goal`; anything of yours within sight
+   * turns it to a charge (`pick` finds the nearest of your people to (x, y) within r).
+   */
+  tick(dt: number, world: World, pick: (x: number, y: number, r: number) => Mover | null): void {
+    this.think -= dt;
+    if (this.quarry && (this.quarry.dead || this.quarry.hidden)) this.quarry = null;
+    if (this.think <= 0) {
+      this.think = 0.5;
+      const near = pick(this.x, this.y, this.state === 'charge' ? this.sight * 1.5 : this.sight);
+      if (near) { this.quarry = near; this.state = 'charge'; }
+      else if (this.state === 'charge') { this.quarry = null; this.state = this.goal ? 'column' : 'camp'; }
+    }
+    if (this.state === 'charge' && this.quarry) this.closeOn(this.quarry);
+    else if (this.state === 'column' && this.goal) { this.face(this.goal.x - this.x, this.goal.y - this.y); this.dest = { ...this.goal }; }
+    else this.dest = { x: this.x, y: this.y };
+    this.marchAndLayOut(dt, world);
+  }
+
+  /** Break ranks: every member becomes an ordinary raider again. */
+  release(): void {
+    for (const r of this.members) if (r.block === this) { r.block = null; r.slot = null; }
+    this.members = [];
   }
 }

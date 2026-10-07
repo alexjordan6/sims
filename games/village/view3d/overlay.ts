@@ -190,6 +190,13 @@ export class Overlay {
       }
       for (const m of hunted) this.moverRing(m, 0xff4040, pulse);
     }
+    // the enemy's banners too, once your people can see them
+    for (const w of s.warbands) {
+      if (s.fog && s.fog.enabled && s.fog.visibleAt(w.x, w.y) <= 0.35) continue;
+      const x = w.x * U, z = w.y * U, colour = parseInt(w.colour.slice(1), 16);
+      this.flag(x, z, colour, 2.4);
+      this.bar(x, groundHeight(x, z) + 2.25, z, 1.1, w.members.length / Math.max(1, w.peak), 0xc83030, 0x000000, 0.1);
+    }
     // every regiment's banner: a pole in its colour at the block's centre, its strength above
     for (const r of s.regiments) {
       const x = r.x * U, z = r.y * U, colour = parseInt(r.colour.slice(1), 16);

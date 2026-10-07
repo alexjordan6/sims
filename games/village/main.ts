@@ -18,7 +18,7 @@ import { View } from './view3d/view';
 import { UI } from './ui/ui';
 import { weaponMul } from './characters';
 import { AdaptiveSpawner } from './adaptive-spawn';
-import { Regiment, REGIMENT_SIZE, BANNER_COLOURS, SHAPES, SLOT_GAP, layout, type Shape, type Stance } from './regiment';
+import { Regiment, Warband, REGIMENT_SIZE, BANNER_COLOURS, SHAPES, SLOT_GAP, layout, type Shape, type Stance } from './regiment';
 
 const NAMES = ['Ada', 'Bram', 'Cass', 'Dov', 'Eli', 'Fen', 'Gil', 'Hana', 'Ivo', 'Juno', 'Kai', 'Lior', 'Mara', 'Nils', 'Orla', 'Pim', 'Quin', 'Rue', 'Sol', 'Tova', 'Uli', 'Vera', 'Wren', 'Xan', 'Yael', 'Zed'];
 
@@ -272,7 +272,7 @@ export class VillageScene extends SimScene {
     this.interior.leave();
     this.posting = null;
     this.squad = []; this.drag = null;
-    this.regiments = []; this.regimentSeq = 0; this.placing = null; this.enlistT = 0; this.warrenBorn = this.warrenToddled = 0;
+    this.regiments = []; this.warbands = []; this.regimentSeq = 0; this.placing = null; this.enlistT = 0; this.warrenBorn = this.warrenToddled = 0;
     this.arrows = 30; this.feverWas = null;
     this.scrap = 0;
     this.armoryFor = null;
@@ -2207,7 +2207,7 @@ export class VillageScene extends SimScene {
         // each pair once, from the bigger body's side (its search reaches every body that can touch it)
         if (b === a || b.elevated !== a.elevated) return;
         // two of one block: their slots keep them apart; one walking to its place slips between its mates instead of shouldering them out of theirs
-        if (a instanceof Villager && b instanceof Villager && a.regiment && a.regiment === b.regiment && a.slot && b.slot && (a.vx || a.vy || b.vx || b.vy)) return;
+        if (a.block && a.block === b.block && a.slot && b.slot && (a.vx || a.vy || b.vx || b.vy)) return;
         const bs = b.space;
         if (bs > as || (bs === as && b.id < a.id)) return;
         const minD = a.space + b.space;
@@ -2472,7 +2472,23 @@ export class VillageScene extends SimScene {
     return best;
   }
 
+  /** The nearest of your people (the head, a villager on its feet and not carried off) within r of (x, y). */
+  nearestPerson(x: number, y: number, r: number): Mover | null {
+    let best: Mover | null = null, bd = r * r;
+    this.grid.forEachInRadius(x, y, r, (o, d2) => {
+      if (d2 >= bd || !(o instanceof Villager || o instanceof Player)) return;
+      if (o.dead || o.hidden || (o instanceof Villager && o.carriedBy)) return;
+      bd = d2; best = o;
+    });
+    return best;
+  }
+  /**
+   * The nearest of your people to (x, y), anywhere: rings of the grid outward first (with an army of
+   * hundreds and a host of hundreds, a scan of everyone for every raider is the whole frame), and only
+   * when nobody is within 400 px a scan of the lot.
+   */
   nearestVictim(x: number, y: number): Mover | null {
+    for (const r of [64, 160, 400]) { const m = this.nearestPerson(x, y, r); if (m) return m; }
     let best: Mover | null = null, bd = Infinity;
     for (const a of this.agents) {
       if (!(a instanceof Villager) && a !== this.player) continue;
@@ -3177,6 +3193,8 @@ export class VillageScene extends SimScene {
   // ---- regiments: the gnome army in blocks under banners ---------------------------------------
 
   regiments: Regiment[] = [];
+  /** the enemy's blocks in the field (see Warband; hosts raise them) */
+  warbands: Warband[] = [];
   private regimentSeq = 0;
   private enlistT = 0;
   /** the wand's right button held on open ground: press = the centre, drag = the facing (and a line's width) */
@@ -3228,11 +3246,12 @@ export class VillageScene extends SimScene {
       back += depth + TILE;
     }
     const pick = (x: number, y: number, r: number): Mover | null => this.bestTarget(x, y, r);
-    for (const r of this.regiments) {
-      r.tick(dt, this.world, this.player, pick);
-      let i = 0;
-      for (const v of r.members) v.slot = !v.order && !v.post && !v.hidden && !v.carriedBy ? r.slots[i++] ?? null : null;
-    }
+    for (const r of this.regiments) r.tick(dt, this.world, this.player, pick);
+    // the enemy's blocks: the dead leave the ranks, an empty banner is struck, and the rest look for a fight
+    for (const w of this.warbands) w.prune((r) => !r.dead && r.block === w);
+    this.warbands = this.warbands.filter((w) => w.members.length > 0);
+    const prey = (x: number, y: number, r: number): Mover | null => this.nearestPerson(x, y, r);
+    for (const w of this.warbands) w.tick(dt, this.world, prey);
   }
   /**
    * Where a wand placement puts each ordered regiment: side by side across the drag's facing, centred on
