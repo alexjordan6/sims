@@ -656,11 +656,18 @@ export const ARMOR: Record<ArmorSlot, { name: string; tiers: readonly ArmorTier[
     { name: 'Wooden buckler', wood: 10, scrap: 0, hp: 0, reduce: 0, speed: 0, block: 0.15 },
     { name: 'Iron-rimmed shield', wood: 12, scrap: 3, hp: 0, reduce: 0, speed: 0, block: 0.25 },
     { name: 'Steel kite shield', wood: 16, scrap: 8, hp: 0, reduce: 0, speed: 0, block: 0.35 },
+    { name: 'Tower shield', wood: 22, scrap: 12, hp: 0, reduce: 0, speed: -0.06, block: 0.45 }, // found, never forged: heavy
   ] },
 };
 export const ARMOR_SLOTS: readonly ArmorSlot[] = ['helmet', 'chest', 'legs', 'shield'];
 /** barracks level needed to forge each tier (armor and weapons alike) */
 export const ARMOR_BARRACKS_LEVEL = [0, 1, 2, 3] as const;
+/** the loot-only tier: the tower shield, the warhammer and the crossbow are found, never forged */
+export const FOUND_TIER = 4;
+/** what the warhammer's blow does to a shove, and how much longer a crossbow takes to span than a bow */
+export const FOUND_WEAPON = { knock: 2.5, reload: 1.4 } as const;
+/** a bandage: HP it gives back over `secs`; a gnome warrior binds its own wounds below `selfAt` of its HP */
+export const BANDAGE = { heal: 30, secs: 3, selfAt: 0.4 } as const;
 
 // ---- weapons --------------------------------------------------------------------------------
 /** Everyone starts with a crude weapon (tier 0) and forges better ones at the barracks chest; tier 2 is the old baseline. */
@@ -672,12 +679,14 @@ export const WEAPONS: Record<WeaponSlot, { name: string; tiers: readonly WeaponT
     { name: 'Bronze sword', wood: 8, scrap: 0, mul: 0.75 },
     { name: 'Iron sword', wood: 10, scrap: 3, mul: 1 },
     { name: 'Steel sword', wood: 14, scrap: 8, mul: 1.3 },
+    { name: 'Warhammer', wood: 22, scrap: 12, mul: 1.6 }, // found, never forged: its blows throw them back
   ] },
   bow: { name: 'Bow', tiers: [
     { name: 'Hunting bow', wood: 0, scrap: 0, mul: 0.5 },
     { name: 'Yew bow', wood: 8, scrap: 0, mul: 0.75 },
     { name: 'Composite bow', wood: 10, scrap: 3, mul: 1 },
     { name: 'War bow', wood: 14, scrap: 8, mul: 1.3 },
+    { name: 'Crossbow', wood: 22, scrap: 12, mul: 1.6 }, // found, never forged: slow to span
   ] },
 };
 export const WEAPON_SLOTS: readonly WeaponSlot[] = ['melee', 'bow'];

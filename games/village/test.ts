@@ -12,8 +12,9 @@ import { Boar, Swarm } from './wildlife';
 import { SLOT_GAP, Warband } from './regiment';
 import { hostSize, hostCounts } from './host';
 import { rollLoot, lootTier, danger, enemyDrop } from './loot';
+import { armorStats, knockMul, reloadMul } from './characters';
 const BATTLE_BIG_TEST = 20;
-import { WARREN, SOLDIER_CAP_PER_LEVEL, PLAINS } from './config';
+import { WARREN, SOLDIER_CAP_PER_LEVEL, PLAINS, BANDAGE } from './config';
 import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, GNOME_PACK, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS, YARD, CALLINGS, TREE_RESERVE, MOODS, SERVE_RANGE, POT_INGREDIENTS, BODY } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
@@ -1973,6 +1974,33 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       s.player.armor.helmet = 2; // a found iron helm
       assert(s.craftArmor(s.player, 'helmet') && s.player.armor.helmet === 3 && s.isReforge(3), 'a found iron helm reforges to steel at a Lv3 barracks');
       p.forgeMaxTier = 3;
+      // the found-only kinds: the tower shield, the warhammer, the crossbow — and rolls of bandages
+      const r4 = new Rng(11);
+      const lowRolls = Array.from({ length: 60 }, () => rollLoot(r4, 0.3, 10)).flat(), highRolls = Array.from({ length: 60 }, () => rollLoot(r4, 1, 10, 1)).flat();
+      const t4 = (xs: typeof lowRolls) => xs.filter((q) => (q.kind === 'weapon' || q.kind === 'armor') && q.tier === 4);
+      assert(t4(lowRolls).length === 0 && t4(highRolls).length > 0 && t4(highRolls).every((q) => (q.kind === 'weapon' || q.kind === 'armor') && (q.slot === 'shield' || q.slot === 'melee' || q.slot === 'bow')) && lowRolls.some((q) => q.kind === 'kit'),
+        `tower shields, warhammers and crossbows turn up only where it is dangerous (${t4(lowRolls).length} low, ${t4(highRolls).length} high); bandages anywhere`);
+      s.player.weapons.melee = 3; s.player.armor.shield = 3;
+      assert(!s.craftWeapon(s.player, 'melee') && /only ever found/.test(s.weaponProblem(s.player, 'melee') ?? '') && /only ever found/.test(s.craftProblem(s.player, 'shield') ?? ''), 'nothing past steel is forged: the found kinds are only ever found');
+      const tower = armorStats({ helmet: 0, chest: 0, legs: 0, shield: 4 });
+      assert(tower.block === 0.45 && tower.speedMul < 1 && knockMul({ melee: 4, bow: 0 }) > 1 && knockMul({ melee: 3, bow: 0 }) === 1, `a tower shield blocks ${tower.block} and slows you (×${tower.speedMul}); a warhammer throws them back`);
+      s.player.weapons.bow = 4; s.arrows = 10; s.player.attackCd = 0;
+      s.shoot(s.player, 1, 0, 5);
+      const crossCd = s.player.attackCd; s.player.weapons.bow = 3; s.player.attackCd = 0; s.shoot(s.player, 1, 0, 5);
+      assert(crossCd > s.player.attackCd * 1.3 && reloadMul({ melee: 0, bow: 4 }) > 1, `a crossbow takes longer to span than a war bow (${crossCd.toFixed(2)} s against ${s.player.attackCd.toFixed(2)} s)`);
+      // a bandage: U binds a wound, over a few seconds
+      const mend = (secs: number) => { for (let i = 0; i < Math.ceil(secs * 60); i++) (s as unknown as { tickMending(dt: number): void }).tickMending(1 / 60); };
+      s.player.pack.put({ kind: 'kit', kit: 'bandage' }); s.player.hp = 10;
+      const used = s.useBandage(); mend(1);
+      const midway = s.player.hp; mend(3);
+      assert(used && s.player.pack.findSlot((g) => g.kind === 'kit') < 0 && midway > 10 && midway < 40 && Math.abs(s.player.hp - Math.min(s.player.maxHp, 40)) < 0.5, `a bandage gives back 30 HP over 3 s (10 → ${midway.toFixed(0)} → ${s.player.hp.toFixed(0)})`);
+      assert(!s.useBandage(), 'and with none left, U says so');
+      // a gnome warrior binds its own wounds from its pouch
+      const g = s.spawn(new Villager(s.player.x + 20, s.player.y, s.world.houses[0], 'soldier', 20, 'Burr', s.mods)); g.gnome = true; g.applyRole(s.mods);
+      g.pouch!.put({ kind: 'kit', kit: 'bandage' }); g.hp = 2;
+      mend(4);
+      assert(g.pouch!.findSlot((q) => q.kind === 'kit') < 0 && g.hp >= Math.min(g.maxHp, 2 + BANDAGE.heal) - 0.5, `a hurt gnome warrior uses the bandage in its pouch (${g.hp.toFixed(0)}/${g.maxHp})`);
+      g.dead = true; s.removeDead();
     }
 
     // ---- chests: a camp guards one, the Ogre sleeps on his hoard; opened, they spill for the taking ----

@@ -1,5 +1,5 @@
 import type { Rng } from '@shared/index';
-import { ARMOR_SLOTS, COLS, ROWS, STACK, WEAPON_SLOTS, p, type ArmorSlot, type FoodKind, type WeaponSlot } from './config';
+import { ARMOR_SLOTS, COLS, ROWS, STACK, WEAPON_SLOTS, FOUND_TIER, p, type ArmorSlot, type FoodKind, type WeaponSlot } from './config';
 import type { Gear, Slot } from './pack';
 
 /**
@@ -26,13 +26,17 @@ export function lootTier(rng: Rng, d: number): number {
 
 export type GearSlot = WeaponSlot | ArmorSlot;
 /** weapons and armor: gear that has a slot and a tier (not an implement) */
-export type Piece = Exclude<Gear, { kind: 'tool' }>;
+export type Piece = Exclude<Gear, { kind: 'tool' } | { kind: 'kit' }>;
 /** A piece of gear for `slot` at `tier`. */
 export function piece(slot: GearSlot, tier: number): Piece {
   return (WEAPON_SLOTS as readonly string[]).includes(slot) ? { kind: 'weapon', slot: slot as WeaponSlot, tier } : { kind: 'armor', slot: slot as ArmorSlot, tier };
 }
 const GEAR_SLOTS: readonly GearSlot[] = [...WEAPON_SLOTS, ...ARMOR_SLOTS];
 
+/** the slots with a found-only piece: the tower shield, the warhammer, the crossbow */
+const FOUND_SLOTS: readonly GearSlot[] = ['shield', 'melee', 'bow'];
+/** The chance a piece rolls as one of the found-only kinds: none below danger 0.6, a fifth of them at the very top. */
+export function foundChance(d: number): number { return d < 0.6 ? 0 : (d - 0.5) * 0.4; }
 /** what a cache of supplies holds: hard tack and whatever was being carried */
 const SUPPLY_FOOD: readonly FoodKind[] = ['meat', 'meat', 'wheat', 'hazelnut', 'honey', 'carrot'];
 
@@ -45,8 +49,9 @@ export function rollLoot(rng: Rng, d: number, size: number, gear = 0.5): Slot[] 
   const out: Slot[] = [];
   const more = 0.6 + d;
   for (let i = 0; i < n; i++) {
-    if (rng.chance(gear)) { out.push(piece(rng.pick(GEAR_SLOTS), lootTier(rng, d))); continue; }
+    if (rng.chance(gear)) { const slot = rng.pick(GEAR_SLOTS); out.push(piece(slot, FOUND_SLOTS.includes(slot) && rng.chance(foundChance(d)) ? FOUND_TIER : lootTier(rng, d))); continue; }
     const r = rng.next();
+    if (r > 0.9) { out.push({ kind: 'kit', kit: 'bandage' }); continue; } // a roll of bandages
     if (r < 0.45) out.push({ kind: 'food', food: rng.pick(SUPPLY_FOOD), n: Math.min(STACK.food, Math.max(2, Math.round(rng.range(4, 9) * more))) });
     else if (r < 0.75) out.push({ kind: 'wood', n: Math.min(STACK.wood, Math.max(3, Math.round(rng.range(6, 12) * more))) });
     else out.push({ kind: 'scrap', n: Math.min(STACK.scrap, Math.max(1, Math.round(rng.range(2, 5) * more))) });

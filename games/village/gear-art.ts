@@ -8,10 +8,10 @@ function canvas(g: Gear): HTMLCanvasElement {
   const key = slotKey(g), cached = icons.get(key); if (cached) return cached;
   const el = document.createElement('canvas'); el.width = el.height = 16;
   const c = el.getContext('2d')!;
-  const tier = g.kind === 'tool' ? 0 : g.tier;
-  const metal = ['#b58a54', '#ca9b56', '#a7b8be', '#e0e8ee'][tier] ?? '#e0e8ee';
+  const tier = g.kind === 'tool' || g.kind === 'kit' ? 0 : g.tier;
+  const metal = ['#b58a54', '#ca9b56', '#a7b8be', '#e0e8ee', '#e8c860'][tier] ?? '#e0e8ee';
   const r = (x:number,y:number,w:number,h:number,color=metal) => { c.fillStyle=color;c.fillRect(x,y,w,h); };
-  const shape = g.kind === 'tool' ? g.tool : g.kind === 'weapon' ? (g.slot==='bow'?'bow':tier===0?'club':'sword') : g.slot;
+  const shape = g.kind === 'tool' ? g.tool : g.kind === 'kit' ? g.kit : g.kind === 'weapon' ? (g.slot==='bow'?(tier>=4?'crossbow':'bow'):tier===0?'club':tier>=4?'warhammer':'sword') : g.slot==='shield'&&tier>=4?'tower':g.slot;
   switch(shape) {
     case 'axe': r(7,3,2,12,'#805532');r(3,3,5,5,'#b6c4cb');r(2,4,2,3,'#e0e8ee');break;
     case 'hoe': r(7,3,2,12,'#805532');r(3,3,8,2,'#b6c4cb');r(3,4,2,3,'#b6c4cb');break;
@@ -25,6 +25,10 @@ function canvas(g: Gear): HTMLCanvasElement {
     case 'chest': r(4,4,8,9);r(2,4,3,4);r(11,4,3,4);r(6,3,4,2,'#383b42');r(7,6,2,6,'#f1d5a0');break;
     case 'legs': r(4,3,8,4);r(4,7,3,7);r(9,7,3,7);r(4,13,3,2,'#664631');r(9,13,3,2,'#664631');break;
     case 'shield': r(3,3,10,7);r(4,10,8,2);r(6,12,4,2);r(7,5,2,7,'#e9d6a4');break;
+    case 'tower': r(3,1,10,13);r(4,14,8,1);r(7,3,2,10,'#e9d6a4');r(4,7,8,2,'#e9d6a4');break;
+    case 'warhammer': r(7,5,2,10,'#805532');r(3,2,10,4);r(2,3,1,2);r(13,3,1,2);break;
+    case 'crossbow': r(7,4,2,11,'#805532');r(2,4,12,2);r(2,4,1,4,'#e0dac3');r(13,4,1,4,'#e0dac3');r(6,6,4,1,'#383b42');break;
+    case 'bandage': r(3,5,10,6,'#ece6d8');r(3,9,10,1,'#c9c1b0');r(7,5,2,6,'#c0392b');r(5,7,6,2,'#c0392b');break;
   }
   icons.set(key,el);return el;
 }

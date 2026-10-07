@@ -2,7 +2,7 @@ import type { Agent } from '@shared/index';
 import { World, WILD_FOOD, doorstep, buildingCenter, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
 import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, GNOME_CALLING, MOODS, type Mood, type DishKind, ORDER, YARD, GNOME_PACK, ITEM, MASS, BODY, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, zeroFood, BOAR, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
 import type { Mods } from './meta';
-import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle } from './characters';
+import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle, knockMul, reloadMul } from './characters';
 import type { VillageScene } from './main';
 import type { Item } from './items';
 import { Pack, START_TOOLS } from './pack';
@@ -229,7 +229,7 @@ export abstract class Mover implements Agent {
   }
 
   /** How hard this body's blows throw what they land on. An ordinary swing is 3. */
-  protected get blowPush(): number { return 3; }
+  protected get blowPush(): number { return 3 * knockMul(this.weapons); }
   /** Shove this body: the impulse plays out over the next few ticks (see tickTimers). */
   shove(ux: number, uy: number, px: number): void {
     this.pushX += ux * px * this.pushScale * 6;
@@ -459,7 +459,7 @@ export class Villager extends Mover {
   /** A swollen gnome shoulders bodies aside instead of giving way. */
   override get mass(): number { return (this.isChild ? MASS.kid : MASS.villager) * (this.moodNow?.bulk ? 3 : 1); }
   /** Emboldened, its swings throw a raider off its feet. */
-  protected override get blowPush(): number { return this.moodNow?.knockback ?? 3; }
+  protected override get blowPush(): number { return this.moodNow?.knockback ?? 3 * knockMul(this.weapons); }
   /**
    * Take a blow with whatever the pot left in you: a giddy gnome is too quick to be caught, a swollen
    * one shrugs half of it off, and a sporeburst answers it (the burst itself fires from `tickMood`,
@@ -1048,7 +1048,7 @@ export class Villager extends Mover {
         const range = this.elevated ? 210 : 160;
         if (this.dist(this.target) <= range && s.world.lineClear(this, this.target, this.elevated)) {
           this.vx = this.vy = 0; this.task = this.post ? 'archer holding the wall' : 'firing arrows';
-          if (this.attackCd <= 0) { s.shoot(this, this.target.x - this.x, this.target.y - this.y, Math.round(dmg)); this.attackCd = 0.9; }
+          if (this.attackCd <= 0) { s.shoot(this, this.target.x - this.x, this.target.y - this.y, Math.round(dmg)); this.attackCd = 0.9 * reloadMul(this.weapons); }
           return;
         }
       }
@@ -1119,7 +1119,7 @@ export class Villager extends Mover {
       if (bow) {
         if (d <= reach && s.world.lineClear(this, foe, this.elevated)) {
           this.vx = this.vy = 0;
-          if (this.attackCd <= 0) { s.shoot(this, foe.x - this.x, foe.y - this.y, Math.round(dmg)); this.attackCd = 0.9; }
+          if (this.attackCd <= 0) { s.shoot(this, foe.x - this.x, foe.y - this.y, Math.round(dmg)); this.attackCd = 0.9 * reloadMul(this.weapons); }
           return;
         }
       } else if (pike) {
@@ -1682,7 +1682,7 @@ export class Player extends Mover {
         if (!c.spin && d > 6 && ux * sw.dx + uy * sw.dy < SWING.halfAngleCos) return; // outside the arc
         sw.hit.add(o.id);
         o.hit(dmg, true, this);
-        o.shove(ux, uy, c.push);
+        o.shove(ux, uy, c.push * knockMul(this.weapons));
         const crit = c.spin;
         const stop = o.dead ? 0.1 : crit ? 0.12 : 0.06;
         o.freeze = Math.max(o.freeze, stop);

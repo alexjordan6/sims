@@ -1,4 +1,7 @@
 import { PackUI } from './pack-ui';
+
+/** An armory tier as pips: three for the forged tiers, and a gold star for a found piece. */
+const pips = (tier: number) => `${'●'.repeat(Math.min(3, Math.max(0, tier)))}${'○'.repeat(Math.max(0, 3 - Math.max(0, tier)))}${tier >= 4 ? '<b class="found" title="found, never forged">★</b>' : ''}`;
 import { slotName } from '../pack';
 import { gearUrl } from '../gear-art';
 import { STACK, WARREN, SOLDIER_CAP_PER_LEVEL } from '../config';
@@ -254,6 +257,7 @@ export class UI {
       ['Space · Y', 'camera back to you · lock it on you'],
       ['wheel · Z', 'camera distance'],
       ['H', 'call the gnomes to your heels / send them foraging'],
+      ['U', 'bind a wound with a bandage from your pack'],
       ['Esc', 'menu'],
       ['- · =', 'game speed'],
       ['K', 'this panel'],
@@ -808,7 +812,7 @@ export class UI {
       const tier = who.armor[slot], cur = ARMOR[slot].tiers[tier], next = ARMOR[slot].tiers[tier + 1];
       const why = s.craftProblem(who, slot);
       const stat = (t: typeof cur) => [t.hp ? `+${t.hp} HP` : '', t.reduce ? `-${Math.round(t.reduce * 100)}% damage` : '', t.speed ? `+${Math.round(t.speed * 100)}% speed` : '', t.block ? `${Math.round(t.block * 100)}% block` : ''].filter(Boolean).join(' · ') || '—';
-      return `<div class="aslot"><div class="aname">${ARMOR[slot].name} <span class="tier">${'●'.repeat(Math.max(0,tier))}${'○'.repeat(3 - Math.max(0,tier))}</span></div>
+      return `<div class="aslot"><div class="aname">${ARMOR[slot].name} <span class="tier">${pips(tier)}</span></div>
         <div class="acur">${cur.name} <small>${stat(cur)}</small></div>
         ${next ? `<button class="btn small ${why ? '' : 'ok'} forge" data-slot="${slot}" ${why ? 'disabled' : ''}>${s.isReforge(tier + 1) ? 'REFORGE TO' : 'FORGE'} ${next.name.toUpperCase()} · ${s.forgeCost(next).wood} wood${s.forgeCost(next).scrap ? ` + ${s.forgeCost(next).scrap} scrap` : ''}</button><div class="d">${why ? `<em class="warn">${esc(why)}</em>` : stat(next)}</div>` : '<div class="d">the best there is</div>'}</div>`;
     }).join('');
@@ -816,7 +820,7 @@ export class UI {
     const weapons = WEAPON_SLOTS.map((slot) => {
       const tier = who.weapons[slot], cur = WEAPONS[slot].tiers[tier], next = WEAPONS[slot].tiers[tier + 1];
       const why = s.weaponProblem(who, slot);
-      return `<div class="aslot"><div class="aname">${WEAPONS[slot].name} <span class="tier">${'●'.repeat(Math.max(0,tier))}${'○'.repeat(3 - Math.max(0,tier))}</span></div>
+      return `<div class="aslot"><div class="aname">${WEAPONS[slot].name} <span class="tier">${pips(tier)}</span></div>
         <div class="acur">${cur?.name ?? 'Empty'} <small>×${cur?.mul ?? 0} damage</small></div>
         ${next ? `<button class="btn small ${why ? '' : 'ok'} forge" data-weapon-slot="${slot}" ${why ? 'disabled' : ''}>${s.isReforge(tier + 1) ? 'REFORGE TO' : 'FORGE'} ${next.name.toUpperCase()} · ${s.forgeCost(next).wood} wood${s.forgeCost(next).scrap ? ` + ${s.forgeCost(next).scrap} scrap` : ''}</button><div class="d">${why ? `<em class="warn">${esc(why)}</em>` : `×${next.mul} damage`}</div>` : '<div class="d">the best there is</div>'}</div>`;
     }).join('');

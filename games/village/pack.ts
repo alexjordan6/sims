@@ -7,7 +7,9 @@ export const START_TOOLS: readonly Implement[] = ['basket', 'wand'];
 /** the lost tools, and where each was left */
 export const LOST_TOOLS = { axe: 'by an old stump', hammer: 'in a ruined hut', hoe: 'in an overgrown field' } as const;
 export type Bulk = { kind: 'wood'; n: number } | { kind: 'food'; food: FoodKind; n: number } | { kind: 'scrap'; n: number };
-export type Gear = { kind: 'weapon'; slot: WeaponSlot; tier: number } | { kind: 'armor'; slot: ArmorSlot; tier: number } | { kind: 'tool'; tool: Implement };
+/** a kit: something used up rather than worn (a bandage binds a wound) */
+export type KitKind = 'bandage';
+export type Gear = { kind: 'weapon'; slot: WeaponSlot; tier: number } | { kind: 'armor'; slot: ArmorSlot; tier: number } | { kind: 'tool'; tool: Implement } | { kind: 'kit'; kit: KitKind };
 export type Slot = Bulk | Gear;
 export type EquipmentSlot = WeaponSlot | ArmorSlot;
 export const EQUIPMENT: readonly EquipmentSlot[] = ['melee', 'bow', 'helmet', 'chest', 'legs', 'shield'];
@@ -23,6 +25,7 @@ export function slotName(s: Slot): string {
     case 'weapon': return WEAPONS[s.slot].tiers[s.tier].name;
     case 'armor': return ARMOR[s.slot].tiers[s.tier].name;
     case 'tool': return TOOL_NAME[s.tool];
+    case 'kit': return 'Bandage';
     default: return unhandled(s);
   }
 }
@@ -32,6 +35,7 @@ export function slotKey(s: Slot | null): string {
     case 'wood': case 'scrap': return `${s.kind}:${s.n}`;
     case 'food': return `food:${s.food}:${s.n}`;
     case 'tool': return `tool:${s.tool}`;
+    case 'kit': return `kit:${s.kit}`;
     case 'weapon': case 'armor': return `${s.kind}:${s.slot}:${s.tier}`;
     default: return unhandled(s);
   }

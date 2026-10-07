@@ -657,3 +657,6 @@ body::after {
 #overlay .buildrow .slot .cost { display: block; position: absolute; right: 0; bottom: -2px; font-size: 9px; }
 #overlay .buildrow .slot .cost .spr { display: none; }
 #overlay .slot[hidden] { display: none; }
+
+/* a found piece in the armory: a gold star after the pips */
+#overlay .tier .found { color: #e8c860; font-weight: normal; margin-left: 2px; }

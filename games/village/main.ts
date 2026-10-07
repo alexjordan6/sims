@@ -1,4 +1,4 @@
-import { STACK, SKULK, STASH_SLOTS, type BulkKind } from './config';
+import { STACK, SKULK, STASH_SLOTS, FOUND_TIER, BANDAGE, type BulkKind } from './config';
 import { enemyDrop, rollLoot, danger } from './loot';
 import { isImplement, IMPLEMENTS, START_TOOLS, LOST_TOOLS, type Implement, TOOL_NAME, Pack, type Gear, type EquipmentSlot, isBulk, slotName } from './pack';
 import Phaser from 'phaser';
@@ -17,7 +17,7 @@ import { preloadArt } from './look';
 import { ensureFlora, ensureBuildingArt } from './pixelart';
 import { View } from './view3d/view';
 import { UI } from './ui/ui';
-import { weaponMul } from './characters';
+import { weaponMul, reloadMul } from './characters';
 import { AdaptiveSpawner } from './adaptive-spawn';
 /** seconds of nobody falling before a fight is told; and how many fallen make it worth an alert */
 const BATTLE_QUIET = 6;
@@ -568,8 +568,8 @@ export class VillageScene extends SimScene {
     return (this.ruinGuards.get(r) ?? []).filter((g) => !g.dead && Math.hypot(g.x - c.x, g.y - c.y) < 14 * TILE).length;
   }
   /** Keepers round (x, y), leashed to it like a camp's: they stay by their ruin and fight off whoever comes near. */
-  private keepers(r: Ruin, n: number, make: (x: number, y: number, roll: number) => Raider): void {
-    const rng = this.lootRng, c = World.center(r.tx, r.ty), out: Raider[] = [];
+  private keepers(r: Ruin, rng: Rng, n: number, make: (x: number, y: number, roll: number) => Raider): void {
+    const c = World.center(r.tx, r.ty), out: Raider[] = [];
     for (let i = 0; i < n; i++) {
       const a = rng.range(0, Math.PI * 2), d = rng.range(TILE, 2.5 * TILE);
       let x = c.x + Math.cos(a) * d, y = c.y + Math.sin(a) * d;
@@ -591,11 +591,13 @@ export class VillageScene extends SimScene {
   private rouseRuin(r: Ruin): void {
     if (r.roused || r.chest.opened) return;
     r.roused = true;
+    // each ruin's own numbers, from where it stands: what a chest held never changes who keeps a ruin
+    const rng = new Rng(this.seed ^ Math.imul(r.tx + 1, 73856093) ^ Math.imul(r.ty + 1, 19349663));
     if (r.kind === 'tower') {
       const opts = { hpMul: this.mods.raiderHpMul, speedMul: this.mods.raiderSpeedMul };
-      this.keepers(r, 3 + this.lootRng.int(0, 2), (x, y, roll) => roll < 0.25 ? new Brute(x, y, opts) : roll < 0.45 ? new Shaman(x, y, opts) : new Raider(x, y, opts));
+      this.keepers(r, rng, 3 + rng.int(0, 2), (x, y, roll) => roll < 0.25 ? new Brute(x, y, opts) : roll < 0.45 ? new Shaman(x, y, opts) : new Raider(x, y, opts));
     } else if (r.kind === 'barrow') {
-      this.keepers(r, 2 + this.lootRng.int(0, 1), (x, y) => new Skulk(x, y));
+      this.keepers(r, rng, 2 + rng.int(0, 1), (x, y) => new Skulk(x, y));
       this.event('raid', 'Skulks boil out of the barrow!', true);
     }
   }
@@ -908,6 +910,7 @@ export class VillageScene extends SimScene {
     kb.removeAllListeners('keydown-SPACE'); // Esc handles pause; Space brings the camera back to the head
     kb.on('keydown-SPACE', () => this.view?.recentre());
     kb.on('keydown-Y', () => this.view?.toggleLock());
+    kb.on('keydown-U', (e: KeyboardEvent) => { if (!e.repeat && this.screen === 'playing') this.useBandage(); });
     kb.on('keydown-G', () => { if (!this.regimentKey('G')) this.tossLoad(); });
     kb.on('keydown-T', () => { if (this.regimentKey('T')) return; if (this.screen === 'playing' && !this.paused) this.eat(); });
     // number keys pick tools; game speed moves to - / =
@@ -1318,7 +1321,7 @@ export class VillageScene extends SimScene {
   swapEquipment(index: number, slot: EquipmentSlot): boolean {
     if(index<0||index>=this.player.pack.slots.length)return false;
     const item=this.player.pack.at(index), old=this.equipped(slot);
-    if(item && (isBulk(item)||item.kind==='tool'||item.slot!==slot))return false;
+    if(item && (isBulk(item)||item.kind==='tool'||item.kind==='kit'||item.slot!==slot))return false;
     this.player.pack.slots[index]=old; this.wear(slot,item as Gear|null); return true;
   }
   stowGear(gear: Gear): void {
@@ -1345,6 +1348,42 @@ export class VillageScene extends SimScene {
     if(!isBulk(slot))it.gear={...slot};it.playerDropPending=true;
     throwItem(it,this.player,this.clampThrow(aim),this.rng);this.validateTool();return true;
   }
+  // ---- bandages: found in chests, they bind a wound over a few seconds ----------------------------
+
+  /** who is being mended, and the HP still to come back to them */
+  mending = new Map<Mover, number>();
+  private mendCheckT = 0;
+  /** U: bind a wound with a bandage from your pack (heals BANDAGE.heal over BANDAGE.secs). */
+  useBandage(): boolean {
+    const pl = this.player, i = pl.pack.findSlot((g) => g.kind === 'kit' && g.kit === 'bandage');
+    if (i < 0) { this.event('info', 'No bandages in your pack — they turn up in chests', true); return false; }
+    if (pl.hp >= pl.maxHp) { this.event('info', 'You are not hurt', true); return false; }
+    pl.pack.removeAt(i);
+    this.mending.set(pl, (this.mending.get(pl) ?? 0) + BANDAGE.heal);
+    this.event('info', `You bind your wounds (+${BANDAGE.heal} HP over ${BANDAGE.secs} s)`);
+    return true;
+  }
+  /** The mending comes back a little each tick; twice a second a hurt gnome warrior with a bandage in its pouch uses it. */
+  private tickMending(dt: number): void {
+    this.mendCheckT -= dt;
+    if (this.mendCheckT <= 0) {
+      this.mendCheckT = 0.5;
+      for (const v of this.villagers()) {
+        if (v.dead || !v.pouch || v.hp >= v.maxHp * BANDAGE.selfAt || this.mending.has(v)) continue;
+        const i = v.pouch.findSlot((g) => g.kind === 'kit' && g.kit === 'bandage');
+        if (i < 0) continue;
+        v.pouch.removeAt(i);
+        this.mending.set(v, BANDAGE.heal);
+      }
+    }
+    for (const [m, left] of this.mending) {
+      if (m.dead) { this.mending.delete(m); continue; }
+      const step = Math.min(left, BANDAGE.heal / BANDAGE.secs * dt);
+      m.hp = Math.min(m.maxHp, m.hp + step);
+      if (left - step <= 1e-6 || m.hp >= m.maxHp) this.mending.delete(m); else this.mending.set(m, left - step);
+    }
+  }
+
   /** Is the hammer (or something it builds) in hand? Then the build row shows and 1-8 pick a build. */
   hammerOut(): boolean { return this.player.tool === 'hammer' || BUILDS.includes(this.player.tool); }
   setTool(tool: Tool): void {
@@ -1476,6 +1515,7 @@ export class VillageScene extends SimScene {
    * looted — though a found piece (tier 2 or better) can be reforged one tier up. Null when allowed.
    */
   forgeRare(next: number): string | null {
+    if (next >= FOUND_TIER) return 'nothing better is forged: the tower shield, the warhammer and the crossbow are only ever found';
     if (next <= p.forgeMaxTier || next - 1 >= 2) return null;
     return 'iron and better are looted, not forged: clear camps, ruins and the fallen';
   }
@@ -2027,6 +2067,7 @@ export class VillageScene extends SimScene {
     this.tickThorns(dt);
     this.validateTool();
     this.pickUpItems(dt);
+    this.tickMending(dt);
     this.tidySelection();
     this.tickHives(dt);
     this.tickSkulks(dt);
@@ -3018,7 +3059,7 @@ export class VillageScene extends SimScene {
     if (this.arrows <= 0) { who.task = 'out of arrows'; if (who === this.player) this.event('info', 'Out of arrows. Craft a bundle at the barracks.'); return false; }
     const len = Math.hypot(dx, dy) || 1;
     who.aim = { x: dx / len, y: dy / len }; who.dir = dx < 0 ? -1 : 1;
-    this.arrows--; who.attackCd = 0.65;
+    this.arrows--; who.attackCd = 0.65 * reloadMul(who.weapons);
     this.spawn(new Arrow(who.x, who.y, dx / len, dy / len, dmg, who, len > 2 ? len : who.elevated ? 220 : 170));
     this.fx.push({ kind: 'arrow', who });
     return true;
@@ -3111,7 +3152,7 @@ export class VillageScene extends SimScene {
    * one mistake the village cannot recover from on its own.
    */
   salvageYield(g: Gear): { wood: number; scrap: number } | null {
-    if (g.kind === 'tool') return null;
+    if (g.kind === 'tool' || g.kind === 'kit') return null;
     if (g.tier <= 0) return { wood: SKULK.clubWood, scrap: 0 };
     const tier = g.kind === 'weapon' ? WEAPONS[g.slot].tiers[g.tier] : ARMOR[g.slot].tiers[g.tier];
     if (!tier) return null;

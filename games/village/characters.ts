@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { ARMOR, DYES, PLUMES, WEAPONS, p, type ArmorSlot, type WeaponSlot } from './config';
+import { ARMOR, DYES, PLUMES, WEAPONS, p, type ArmorSlot, type WeaponSlot, FOUND_TIER, FOUND_WEAPON } from './config';
 
 // Modular pixel people: every villager, the head and every raider is drawn from layers (body,
 // hair, outfit, then armor pieces) into a cached 16x20 texture, so what someone wears shows.
@@ -14,6 +14,10 @@ export const NO_ARMOR: Armor = { helmet: 0, chest: 0, legs: 0, shield: 0 };
 /** forged weapon tier per slot (index into WEAPONS[slot].tiers); everyone starts crude */
 export interface Weapons { melee: number; bow: number }
 export const NO_WEAPONS: Weapons = { melee: 0, bow: 0 };
+/** How far a melee blow throws its target: the warhammer's further. */
+export function knockMul(w: Weapons): number { return w.melee >= FOUND_TIER ? FOUND_WEAPON.knock : 1; }
+/** How long a shot takes to come round again: the crossbow's longer. */
+export function reloadMul(w: Weapons): number { return w.bow >= FOUND_TIER ? FOUND_WEAPON.reload : 1; }
 export function weaponMul(w: Weapons, slot: WeaponSlot): number { return w[slot] < 0 ? 0 : w[slot] === 0 ? p.weaponTier0Mul : WEAPONS[slot].tiers[w[slot]]?.mul ?? 1; }
 
 export interface Look {
@@ -334,7 +338,7 @@ export function armorStats(a: Armor): { hp: number; dmgMul: number; speedMul: nu
   return {
     hp: t('helmet').hp + t('chest').hp + t('legs').hp + t('shield').hp,
     dmgMul: 1 - t('chest').reduce,
-    speedMul: 1 + t('legs').speed,
+    speedMul: 1 + t('legs').speed + t('shield').speed, // a tower shield weighs you down
     block: t('shield').block,
   };
 }
