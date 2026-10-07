@@ -23,7 +23,7 @@ import { AdaptiveSpawner } from './adaptive-spawn';
 const BATTLE_QUIET = 6;
 const BATTLE_BIG = 20;
 import { Host, hostSize, hostCounts, ASSAULT_RANGE, ROUT_SHARE, WARBAND_SIZE } from './host';
-import { Regiment, Warband, WARBAND_COLOURS, REGIMENT_SIZE, BANNER_COLOURS, SHAPES, SLOT_GAP, layout, type Shape, type Stance } from './regiment';
+import { Regiment, Warband, WARBAND_COLOURS, REGIMENT_SIZE, BANNER_COLOURS, SHAPES, layout, type Shape, type Stance } from './regiment';
 
 const NAMES = ['Ada', 'Bram', 'Cass', 'Dov', 'Eli', 'Fen', 'Gil', 'Hana', 'Ivo', 'Juno', 'Kai', 'Lior', 'Mara', 'Nils', 'Orla', 'Pim', 'Quin', 'Rue', 'Sol', 'Tova', 'Uli', 'Vera', 'Wren', 'Xan', 'Yael', 'Zed'];
 
@@ -3860,10 +3860,11 @@ export class VillageScene extends SimScene {
     }
     const sized = regs.map((reg) => {
       const n = Math.max(1, reg.active().length);
-      const cols = reg.shape === 'line' && len > TILE / 2 ? Math.max(Math.ceil(n / 2), Math.min(n, Math.round(len / regs.length / SLOT_GAP))) : reg.shape === 'line' ? reg.cols : 0;
+      const wide = reg.shape === 'line' || reg.shape === 'shieldwall', gap = reg.spacing();
+      const cols = wide && len > TILE / 2 ? Math.max(Math.ceil(n / 2), Math.min(n, Math.round(len / regs.length / gap))) : wide ? reg.cols : 0;
       let lo = Infinity, hi = -Infinity;
       for (const o of layout(reg.shape, n, cols)) { lo = Math.min(lo, o.ox); hi = Math.max(hi, o.ox); }
-      return { reg, cols, n, width: (hi - lo + 1) * SLOT_GAP };
+      return { reg, cols, n, width: (hi - lo + 1) * gap };
     });
     const gap = TILE, total = sized.reduce((a, z) => a + z.width, 0) + gap * (sized.length - 1);
     const rx = -fy, ry = fx;
@@ -3886,7 +3887,7 @@ export class VillageScene extends SimScene {
   cycleShape(regs: Regiment[]): void {
     if (!regs.length) return;
     const next: Shape = SHAPES[(SHAPES.indexOf(regs[0].shape) + 1) % SHAPES.length];
-    for (const r of regs) { r.shape = next; r.cols = 0; r.dirty = true; }
+    for (const r of regs) r.setShape(next);
     this.wandFx(regs[0].x, regs[0].y - 12, next.toUpperCase());
   }
   /** F, G, T and H while the wand is out and a regiment is picked: shape, hold, advance, follow. True when taken. */

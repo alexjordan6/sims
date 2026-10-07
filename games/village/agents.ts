@@ -2,6 +2,7 @@ import type { Agent } from '@shared/index';
 import { World, WILD_FOOD, doorstep, buildingCenter, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
 import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, GNOME_CALLING, MOODS, type Mood, type DishKind, ORDER, YARD, GNOME_PACK, ITEM, MASS, BODY, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, zeroFood, BOAR, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
 import type { Mods } from './meta';
+import { SHIELD_WALL } from './regiment';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle, knockMul, reloadMul } from './characters';
 import type { VillageScene } from './main';
 import type { Item } from './items';
@@ -111,7 +112,7 @@ export abstract class Mover implements Agent {
 
   /** the banner this body stands under (a regiment of yours or an enemy warband), and its spot in the block */
   block: Block | null = null;
-  slot: { x: number; y: number } | null = null;
+  slot: { x: number; y: number; fx?: number; fy?: number } | null = null;
   /** walking to the slot: seconds without getting closer, and how close it was */
   private slotStall = 0;
   private slotGap = Infinity;
@@ -145,7 +146,8 @@ export abstract class Mover implements Agent {
     }
     if (d < 0.75) {
       this.vx = this.vy = 0; this.slotStall = 0; this.slotGap = Infinity;
-      if (Math.abs(fx) > 0.2) this.dir = fx < 0 ? -1 : 1;
+      const face = slot.fx ?? fx; // a circle's slot faces out
+      if (Math.abs(face) > 0.2) this.dir = face < 0 ? -1 : 1;
       this.task = settled;
       return;
     }
@@ -222,12 +224,24 @@ export abstract class Mover implements Agent {
     void by;
     const st = armorStats(this.armor);
     this.blocked = false;
-    if (melee && st.block > 0 && Math.random() < st.block) { this.blocked = true; this.hurtT = 0.2; return; }
+    const block = st.block > 0 && by && this.inShieldWall(by) ? Math.min(SHIELD_WALL.cap, st.block * SHIELD_WALL.mul) : st.block;
+    if (melee && block > 0 && Math.random() < block) { this.blocked = true; this.hurtT = 0.2; return; }
     this.hp -= Math.max(1, Math.round(dmg * st.dmgMul));
     this.hurtT = 0;
     if (this.hp <= 0) this.dead = true;
   }
 
+  /**
+   * Standing in the front rank of a shield wall, in its slot, with `by` in front of it: the shields overlap,
+   * and a shield there turns more blows (SHIELD_WALL).
+   */
+  inShieldWall(by: { x: number; y: number }): boolean {
+    const b = this.block, slot = this.slot;
+    if (!b || b.shape !== 'shieldwall' || !slot || Math.hypot(this.x - slot.x, this.y - slot.y) > 2) return false;
+    if ((slot.x - b.x) * b.fx + (slot.y - b.y) * b.fy < 0) return false; // the rear rank holds the front up, it does not take the blows
+    const dx = by.x - this.x, dy = by.y - this.y, d = Math.hypot(dx, dy) || 1;
+    return (dx * b.fx + dy * b.fy) / d >= SHIELD_WALL.front;
+  }
   /** How hard this body's blows throw what they land on. An ordinary swing is 3. */
   protected get blowPush(): number { return 3 * knockMul(this.weapons); }
   /** Shove this body: the impulse plays out over the next few ticks (see tickTimers). */

@@ -2,9 +2,17 @@ import { World, type TilePos } from './world';
 import { TILE, BODY } from './config';
 import type { Mover, Villager, Raider } from './agents';
 
-export type Shape = 'square' | 'line' | 'wedge';
+export type Shape = 'line' | 'shieldwall' | 'loose' | 'circle' | 'square' | 'wedge' | 'column';
 export type Stance = 'hold' | 'advance' | 'follow';
-export const SHAPES: Shape[] = ['square', 'line', 'wedge'];
+/** the formations, in the order the Form menu lists them (F1-F7) */
+export const SHAPES: Shape[] = ['line', 'shieldwall', 'loose', 'circle', 'square', 'wedge', 'column'];
+export const SHAPE_NAME: Record<Shape, string> = { line: 'Line', shieldwall: 'Shield wall', loose: 'Loose', circle: 'Circle', square: 'Square', wedge: 'Wedge', column: 'Column' };
+/** room between bodies, as a multiple of the block's gap: a shield wall closes up, loose order spreads out */
+export const SHAPE_GAP: Record<Shape, number> = { line: 1, shieldwall: 0.75, loose: 1.8, circle: 1, square: 1, wedge: 1, column: 1 };
+/** the banner's marching pace, as a share of the slowest member's: a shield wall shuffles, a column strides */
+export const SHAPE_PACE: Record<Shape, number> = { line: 0.85, shieldwall: 0.6, loose: 0.85, circle: 0.85, square: 0.85, wedge: 0.85, column: 1 };
+/** the shield wall: a front-rank shield blocks this much more often against blows from the front (up to `cap`); `front` is the cosine of the arc it covers */
+export const SHIELD_WALL = { mul: 1.5, cap: 0.6, front: 0.5 } as const;
 export const STANCES: Stance[] = ['follow', 'hold', 'advance'];
 
 /** how many gnomes one banner carries before a new regiment is raised */
@@ -15,6 +23,8 @@ export const SLOT_GAP = BODY.gnome * 2.2;
 export const WARBAND_GAP = 3 * BODY.humanoidMul * 2.2;
 /** how far an advancing block looks for a quarry, in pixels */
 export const ADVANCE_SIGHT = 20 * TILE;
+/** a place in a block: where to stand, and (for a circle) which way to face */
+export interface Slot { x: number; y: number; fx?: number; fy?: number }
 export const BANNER_COLOURS = ['#c83c3c', '#3c78c8', '#3ca85a', '#d4a42c', '#9a4cc0', '#2cb0b0', '#e0702c', '#d8d8d8'];
 /** the enemy's banners: bone, ash and old blood */
 export const WARBAND_COLOURS = ['#e8e0c8', '#3a3430', '#7a1a14', '#b0a890', '#5a1010'];
@@ -36,17 +46,37 @@ function badFooting(world: World, tx: number, ty: number): boolean {
  * Slot offsets for n bodies, in units of the block's gap: `ox` to the right of the facing, `oy` back from it.
  * Front row first, each row centred, the block centred on its anchor. `cols` widens a line.
  */
-export function layout(shape: Shape, n: number, cols = 0): { ox: number; oy: number }[] {
+export function layout(shape: Shape, n: number, cols = 0): { ox: number; oy: number; out?: boolean }[] {
   if (n <= 0) return [];
+  if (shape === 'circle') return ringLayout(n);
   const rows: number[] = [];
-  if (shape === 'wedge') {
+  if (shape === 'column') {
+    for (let left = n; left > 0; left -= 3) rows.push(Math.min(left, 3));
+  } else if (shape === 'wedge') {
     for (let k = 0, left = n; left > 0; k++) { const c = Math.min(left, 2 * k + 1); rows.push(c); left -= c; }
   } else {
-    const w = shape === 'line' ? Math.max(1, Math.min(n, cols || Math.ceil(n / 2))) : Math.ceil(Math.sqrt(n));
+    const w = shape === 'line' || shape === 'shieldwall' ? Math.max(1, Math.min(n, cols || Math.ceil(n / 2))) : Math.ceil(Math.sqrt(n));
     for (let left = n; left > 0; left -= w) rows.push(Math.min(left, w));
   }
   const out: { ox: number; oy: number }[] = [];
   rows.forEach((c, r) => { for (let i = 0; i < c; i++) out.push({ ox: i - (c - 1) / 2, oy: r - (rows.length - 1) / 2 }); });
+  return out;
+}
+
+/**
+ * The circle: rings about the banner, the outer ring filled first, every slot facing out (`out`). As few
+ * rings as hold everyone two deep at most, so the middle stays open for the banner.
+ */
+function ringLayout(n: number): { ox: number; oy: number; out: boolean }[] {
+  const cap = (r: number) => Math.max(1, Math.floor(2 * Math.PI * r));
+  let R = 1;
+  while (cap(R) + (R > 1 ? cap(R - 1) : 0) < n) R++;
+  const out: { ox: number; oy: number; out: boolean }[] = [];
+  for (let r = R, left = n; left > 0 && r >= 1; r--) {
+    const k = r === R - 1 || r === 1 ? left : Math.min(left, cap(r));
+    for (let i = 0; i < k; i++) { const a = (i / k) * Math.PI * 2 - Math.PI / 2; out.push({ ox: Math.cos(a) * r, oy: Math.sin(a) * r, out: true }); }
+    left -= k;
+  }
   return out;
 }
 
@@ -79,8 +109,10 @@ export abstract class Block<M extends Mover = Mover> {
   peak = 0;
   /** room between slots, in pixels */
   gap = SLOT_GAP;
-  /** slot positions, one per active member (same order), in sim pixels */
-  slots: { x: number; y: number }[] = [];
+  /** slot positions, one per active member (same order), in sim pixels; a slot may face its own way (the circle faces out) */
+  slots: Slot[] = [];
+  /** a column remembers the shape it marched out of, and takes it again once it arrives */
+  afterColumn: Shape | null = null;
   protected path: TilePos[] = [];
   protected pathTo: TilePos | null = null;
   protected think = 0;
@@ -123,23 +155,38 @@ export abstract class Block<M extends Mover = Mover> {
     this.members = [...order, ...this.members.filter((v) => !placed.has(v))];
   }
 
+  /** The room between bodies in `shape`, in pixels. */
+  spacing(shape = this.shape): number { return this.gap * SHAPE_GAP[shape]; }
+  /** Take a new formation; a column remembers what it was, to form it again on arrival. */
+  setShape(next: Shape): void {
+    if (next === this.shape) return;
+    this.afterColumn = next === 'column' ? (this.shape === 'column' ? this.afterColumn : this.shape) : null;
+    this.shape = next; this.cols = 0; this.dirty = true;
+  }
   /** The slots for `n` bodies about (x, y) facing (fx, fy): the block's layout, or a ghost of a placement. */
-  slotsAt(x: number, y: number, fx: number, fy: number, n: number, shape = this.shape, cols = this.cols): { x: number; y: number }[] {
-    const rx = -fy, ry = fx, g = this.gap;
-    return layout(shape, n, cols).map(({ ox, oy }) => ({ x: x + (rx * ox - fx * oy) * g, y: y + (ry * ox - fy * oy) * g }));
+  slotsAt(x: number, y: number, fx: number, fy: number, n: number, shape = this.shape, cols = this.cols): Slot[] {
+    const rx = -fy, ry = fx, g = this.spacing(shape);
+    return layout(shape, n, cols).map(({ ox, oy, out }) => {
+      const x0 = rx * ox - fx * oy, y0 = ry * ox - fy * oy;
+      if (!out) return { x: x + x0 * g, y: y + y0 * g };
+      const d = Math.hypot(x0, y0) || 1;
+      return { x: x + x0 * g, y: y + y0 * g, fx: x0 / d, fy: y0 / d };
+    });
   }
 
   /** How deep the block is front to back, in pixels. */
   depth(): number {
     const l = layout(this.shape, Math.max(1, this.active().length), this.cols);
-    return (l[l.length - 1].oy - l[0].oy + 1) * this.gap;
+    let lo = Infinity, hi = -Infinity;
+    for (const o of l) { lo = Math.min(lo, o.oy); hi = Math.max(hi, o.oy); }
+    return (hi - lo + 1) * this.spacing();
   }
 
   /** How wide the block is across its facing, in pixels. */
   width(): number {
     let lo = Infinity, hi = -Infinity;
     for (const o of layout(this.shape, Math.max(1, this.active().length), this.cols)) { lo = Math.min(lo, o.ox); hi = Math.max(hi, o.ox); }
-    return (hi - lo + 1) * this.gap;
+    return (hi - lo + 1) * this.spacing();
   }
 
   /** Face (dx, dy) — ignored when it has no length. */
@@ -169,7 +216,9 @@ export abstract class Block<M extends Mover = Mover> {
     let lag = 0;
     for (const v of who) if (v.slot) lag += Math.hypot(v.x - v.slot.x, v.y - v.slot.y);
     lag = who.length ? lag / who.length : 0;
-    this.march(dt, world, pace * 0.85 * Math.min(1, Math.max(0.1, 1 - (lag - TILE) / (3 * TILE))));
+    // (a column keeps its own loose order on the march: it dresses its ranks only when they trail far behind)
+    const column = this.shape === 'column', slack = column ? 2 * TILE : TILE, give = column ? 4 * TILE : 3 * TILE;
+    this.march(dt, world, pace * SHAPE_PACE[this.shape] * Math.min(1, Math.max(0.1, 1 - (lag - slack) / give)));
     this.slots = this.slotsAt(this.x, this.y, this.fx, this.fy, who.length).map((q) => this.footing(world, q));
     if (this.dirty || who.length !== this.lastActive) {
       // where the block is going to stand decides who goes where, not where it stands now
@@ -185,11 +234,11 @@ export abstract class Block<M extends Mover = Mover> {
    * A slot that falls on a wall, a tree, a building or thorns slides in toward the banner until it
    * finds open ground: the block squeezes round what is in its way rather than marching into it.
    */
-  private footing(world: World, q: { x: number; y: number }): { x: number; y: number } {
+  private footing(world: World, q: Slot): Slot {
     const bad = (x: number, y: number) => badFooting(world, Math.floor(x / TILE), Math.floor(y / TILE));
     if (!bad(q.x, q.y)) return q;
     const dx = this.x - q.x, dy = this.y - q.y, d = Math.hypot(dx, dy), step = this.gap / 2;
-    for (let k = step; k < d; k += step) { const x = q.x + (dx / d) * k, y = q.y + (dy / d) * k; if (!bad(x, y)) return { x, y }; }
+    for (let k = step; k < d; k += step) { const x = q.x + (dx / d) * k, y = q.y + (dy / d) * k; if (!bad(x, y)) return { ...q, x, y }; }
     return q;
   }
 
@@ -261,6 +310,7 @@ export class Regiment extends Block<Villager> {
       if (!this.quarry && this.think <= 0) { this.think = 0.5; this.quarry = pick(this.x, this.y, ADVANCE_SIGHT); }
       if (this.quarry) this.closeOn(this.quarry); else this.dest = { x: this.x, y: this.y };
     }
+    if (this.shape === 'column' && this.afterColumn && this.stance === 'hold' && Math.hypot(this.dest.x - this.x, this.dest.y - this.y) < TILE) this.setShape(this.afterColumn);
     this.marchAndLayOut(dt, world);
   }
 }

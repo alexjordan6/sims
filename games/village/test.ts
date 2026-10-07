@@ -9,7 +9,7 @@ import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider, BELT, BUILDS } from './agents';
 import { Brute, Rat, Ogre, Wrecker, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm } from './wildlife';
-import { SLOT_GAP, Warband } from './regiment';
+import { SLOT_GAP, Warband, Regiment, SHAPES, SHAPE_GAP, SHAPE_PACE, layout } from './regiment';
 import { hostSize, hostCounts } from './host';
 import { rollLoot, lootTier, danger, enemyDrop } from './loot';
 import { armorStats, knockMul, reloadMul } from './characters';
@@ -1846,7 +1846,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       prey.dead = true; s.removeDead();
       // the wand keys: F changes the shape, G holds, H follows
       s.selectRegiment(reg);
-      assert(s.regimentKey('F') && reg.shape === 'line', 'with a regiment picked, F turns the square into a line');
+      assert(s.regimentKey('F') && reg.shape === SHAPES[(SHAPES.indexOf('square') + 1) % SHAPES.length], `with a regiment picked, F turns the square into the next formation (${reg.shape})`);
       assert(s.regimentKey('H') && (reg.stance as string) === 'follow' && s.regimentKey('G') && (reg.stance as string) === 'hold', 'H sets it following, G holding');
       s.clearSquad(); s.player.tool = 'sword';
       assert(!s.regimentKey('F'), 'with nothing picked (or the wand away) the keys keep their old jobs');
@@ -2123,6 +2123,42 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       run(40);
       assert(spoils().length >= 1 && !keeper.dead, `gnomes leave a spill alone while a raider stands over it (${spoils().length} still lying)`);
       keeper.dead = true; s.removeDead();
+    }
+
+    // ---- formations: line, shield wall, loose, circle, square, wedge, column ------------------------
+    {
+      const n = 40, key = (o: { ox: number; oy: number }) => `${o.ox.toFixed(2)},${o.oy.toFixed(2)}`;
+      const counts = SHAPES.map((sh) => { const l = layout(sh, n); return l.length === n && new Set(l.map(key)).size === n; });
+      assert(counts.every(Boolean), `every formation lays out forty distinct places (${SHAPES.map((sh, i) => `${sh} ${counts[i]}`).join(', ')})`);
+      const colWidth = Math.max(...[0, 1, 2, 3, 4, 5].map((row) => layout('column', n).filter((_, i) => Math.floor(i / 3) === row).length));
+      const r = new Regiment(99, '#fff', 400, 400);
+      assert(colWidth === 3 && r.spacing('shieldwall') < r.spacing('line') && r.spacing('line') < r.spacing('loose') && SHAPE_GAP.loose > 1.5,
+        `a column is three wide; a shield wall closes up (${r.spacing('shieldwall').toFixed(1)} px) and loose order spreads out (${r.spacing('loose').toFixed(1)} px) against a line's ${r.spacing('line').toFixed(1)}`);
+      const ring = r.slotsAt(400, 400, 0, 1, n, 'circle');
+      assert(ring.length === n && ring.every((q) => q.fx !== undefined && ((q.x - 400) * q.fx! + (q.y - 400) * q.fy!) > 0 && Math.hypot(q.x - 400, q.y - 400) >= r.spacing() * 0.9),
+        'a circle rings its banner, every place facing out');
+      assert(SHAPE_PACE.shieldwall < SHAPE_PACE.line && SHAPE_PACE.column > SHAPE_PACE.square, 'a shield wall shuffles; a column strides');
+      // a column forms what it was again once it gets there
+      s = fresh();
+      const head = { x: 0, y: 0, vx: 0, vy: 0, dead: true }, none = () => null;
+      r.setShape('line'); r.setShape('column');
+      r.place(400 + 6 * TILE, 400, 1, 0);
+      const marching = r.shape === 'column' && r.afterColumn === 'line';
+      for (let i = 0; i < 600 && r.shape === 'column'; i++) r.tick(1 / 60, s.world, head, none);
+      assert(marching && r.shape === 'line' && Math.hypot(r.x - (400 + 6 * TILE), r.y - 400) < TILE, `a column marches in its narrow order and forms its line again on arrival (${r.shape})`);
+      // the shield wall: a front-rank shield turns more blows from the front, none more from behind
+      const v = s.spawn(new Villager(s.player.x + 40, s.player.y, s.world.houses[0], 'soldier', 20, 'Holly', s.mods)); v.gnome = true; v.applyRole(s.mods);
+      v.armor = { ...v.armor, shield: 2 }; v.update = () => {};
+      const wall = new Regiment(98, '#fff', v.x, v.y - 5); wall.add(v); wall.fx = 0; wall.fy = 1; v.slot = { x: v.x, y: v.y };
+      const rate = (shape: 'shieldwall' | 'line', from: number) => {
+        wall.shape = shape; let blocked = 0;
+        for (let i = 0; i < 3000; i++) { v.hp = v.maxHp = 1e9; v.hit(5, true, { x: v.x, y: v.y + from } as unknown as Raider); if (v.blocked) blocked++; }
+        return blocked / 3000;
+      };
+      const lineFront = rate('line', 10), wallFront = rate('shieldwall', 10), wallBack = rate('shieldwall', -10);
+      assert(Math.abs(wallFront - 0.375) < 0.04 && Math.abs(lineFront - 0.25) < 0.04 && Math.abs(wallBack - 0.25) < 0.04,
+        `an iron-rimmed shield blocks ${(lineFront * 100).toFixed(0)}% in a line, ${(wallFront * 100).toFixed(0)}% in the front of a shield wall, ${(wallBack * 100).toFixed(0)}% from behind`);
+      wall.members = []; v.block = null; v.dead = true; s.removeDead();
     }
 
     // ---- the opening: gnomes by default, no farm, wild food by the door ------------------------------
