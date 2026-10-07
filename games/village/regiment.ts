@@ -17,6 +17,13 @@ export const STANCES: Stance[] = ['follow', 'hold', 'advance', 'charge', 'retrea
 /** the formation groups, Bannerlord's way: I-III fill by weapon, IV-VIII are yours to transfer banners into */
 export const GROUP_NAME = ['All', 'Infantry', 'Pikes', 'Archers', 'IV', 'V', 'VI', 'VII', 'VIII'];
 export const GROUPS = 8;
+/** Bannerlord's order menus: F1-F4 open one, F1-F7 pick its item */
+export const ORDER_MENUS: { name: string; items: string[] }[] = [
+  { name: 'Movement', items: ['Move to position', 'Follow me', 'Charge', 'Advance', 'Hold', 'Retreat'] },
+  { name: 'Facing', items: ['Face the enemy', 'Face this direction'] },
+  { name: 'Form', items: ['Line', 'Shield wall', 'Loose', 'Circle', 'Square', 'Wedge', 'Column'] },
+  { name: 'Fire', items: ['Fire at will', 'Hold fire'] },
+];
 /** The group a gnome with this weapon falls in under. */
 export function weaponGroup(weapon: 'sword' | 'pike' | 'bow'): number { return weapon === 'pike' ? 2 : weapon === 'bow' ? 3 : 1; }
 

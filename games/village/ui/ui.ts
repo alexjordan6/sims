@@ -5,7 +5,7 @@ const pips = (tier: number) => `${'●'.repeat(Math.min(3, Math.max(0, tier)))}$
 import { slotName, type Gear, type EquipmentSlot } from '../pack';
 import { gearUrl } from '../gear-art';
 import { STACK, WARREN, SOLDIER_CAP_PER_LEVEL } from '../config';
-import { REGIMENT_SIZE } from '../regiment';
+import { REGIMENT_SIZE, GROUPS, GROUP_NAME, ORDER_MENUS, SHAPE_NAME } from '../regiment';
 import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, BUILDS, type Tool } from '../agents';
 import { Boar } from '../wildlife';
@@ -152,6 +152,7 @@ export class UI {
         <div class="abilities">${(["Q", "W", "E", "R"] as const).map((k) => `<div class="ability" data-ab="${k}"><kbd>${k}</kbd><span class="ab-name"></span><span class="ab-cd"></span><span class="ab-count"></span></div>`).join("")}</div>
         <div class="t-buff" hidden title="The dish you last ate, and how long it keeps working"><span class="buff"></span></div>
       </div>
+      <div class="orders" data-panel="orders" hidden></div>
       <div class="buildrow" hidden>
         ${slot('house', 'town', TOWN.wallWoodDoor, 'HOUSE', 'A family of 4 lives here and has children', COST.house)}
         ${slot('barracks', 'town', TOWN.wallStoneDoor, 'BARRACKS', `Room for ${p.soldierCap} more warriors, and what drills them: a child promised a sword needs a warm barracks standing. Its tower shoots arrows at raiders in range; restock the chest inside with wood`, COST.barracks)}
@@ -177,6 +178,16 @@ export class UI {
     </div>`);
     // only the tool slots pick a tool: the BAG shares the slot look but opens the backpack
     this.hotbar.querySelectorAll<HTMLElement>('.slot[data-tool]').forEach((el) => el.addEventListener('click', () => { const t = el.dataset.tool as Tool; s.setTool(s.player.tool === t && BUILDS.includes(t) ? 'hammer' : t); }));
+    // the command bar: a formation card picks its group (Shift adds), a menu button opens it, an item gives the order
+    this.hotbar.querySelector<HTMLElement>('.orders')!.addEventListener('click', (e) => {
+      const t = (e.target as HTMLElement).closest<HTMLElement>('[data-group],[data-menu],[data-item],[data-back]');
+      if (!t) return;
+      if (t.dataset.group) s.selectGroup(Number(t.dataset.group), (e as MouseEvent).shiftKey);
+      else if (t.dataset.menu) s.openCommand(Number(t.dataset.menu));
+      else if (t.dataset.item) s.commandItem(s.commandMenu(), Number(t.dataset.item));
+      else s.commandBack();
+      this.lastOrders = '';
+    });
 
     this.bag = h(`<div class="bagpanel panel" hidden>
       <div class="ph"><h2>Backpack</h2><span class="cap">B or ESC to shut it</span><button class="btn small close">CLOSE</button></div>
@@ -257,6 +268,7 @@ export class UI {
       ['Space · Y', 'camera back to you · lock it on you'],
       ['wheel · Z', 'camera distance'],
       ['H', 'call the gnomes to your heels / send them foraging'],
+      ['F1-F4', 'command your formations: Movement, Facing, Form, Fire (then F1-F7 the order); 1-8 pick a group, Alt+1-8 move banners into it'],
       ['U', 'bind a wound with a bandage from your pack'],
       ['Esc', 'menu'],
       ['- · =', 'game speed'],
@@ -401,6 +413,7 @@ export class UI {
     });
     const row = this.hotbar.querySelector<HTMLElement>('.buildrow')!;
     if (row.hidden === s.hammerOut()) row.hidden = !s.hammerOut();
+    this.renderOrders();
     // the ability bar: a dark sweep over each key while it cools down, greyed when it cannot fire at all
     for (const a of s.abilityState()) {
       const el = this.hotbar.querySelector<HTMLElement>(`.ability[data-ab="${a.key}"]`);
@@ -674,12 +687,12 @@ export class UI {
     // the army: one row a banner — strength, shape, stance — rather than a row a gnome
     if (s.regiments.length) {
       const picked = new Set(s.pickedRegiments()), n = s.regiments.reduce((a, r) => a + r.members.length, 0);
-      html += `<div class="grp soldier">Regiments <b>${n}</b><span class="grp-note">click: pick · F shape · G hold · T advance · H follow</span></div>`;
-      for (const r of s.regiments) {
+      html += `<div class="grp soldier">Regiments <b>${n}</b><span class="grp-note">click: pick · F1-F4 order menus · 1-8 pick a group</span></div>`;
+      for (const r of [...s.regiments].sort((a, b) => a.group - b.group || a.id - b.id)) {
         const pct = Math.round(r.members.length / Math.max(1, r.peak) * 100);
         const st = (k: string, label: string) => `<button class="btn tiny${r.stance === k ? ' on' : ''}" data-act="${k}">${label}</button>`;
-        html += `<div class="reg-row${picked.has(r) ? ' sel' : ''}" data-reg="${r.id}"><i class="swatch" style="background:${r.colour}"></i><span class="n">Banner ${r.id}</span><span class="a">${r.members.length}/${r.peak}</span>`
-          + `<button class="btn tiny" data-act="shape" title="cycle the formation">${r.shape}</button>${st('follow', 'FOLLOW')}${st('hold', 'HOLD')}${st('advance', 'ADVANCE')}`
+        html += `<div class="reg-row${picked.has(r) ? ' sel' : ''}" data-reg="${r.id}"><i class="swatch" style="background:${r.colour}"></i><span class="n">${GROUP_NAME[r.group]} · Banner ${r.id}</span><span class="a">${r.members.length}/${r.peak}</span>`
+          + `<button class="btn tiny" data-act="shape" title="cycle the formation">${SHAPE_NAME[r.shape].toUpperCase()}</button>${st('follow', 'FOLLOW')}${st('hold', 'HOLD')}${st('advance', 'ADVANCE')}`
           + `<div class="bar hp ${pct < 40 ? 'low' : ''}"><i style="width:${pct}%"></i></div></div>`;
       }
     }
@@ -892,6 +905,32 @@ export class UI {
     el.querySelectorAll<HTMLElement>('[data-dye]').forEach((b) => b.addEventListener('click', () => { s.setDye(who, Number(b.dataset.dye)); this.renderArmory(); }));
     el.querySelectorAll<HTMLElement>('[data-helm]').forEach((b) => b.addEventListener('click', () => { s.setHelmetStyle(who, Number(b.dataset.helm)); this.renderArmory(); }));
     el.querySelectorAll<HTMLElement>('[data-plume]').forEach((b) => b.addEventListener('click', () => { s.setPlume(who, Number(b.dataset.plume)); this.renderArmory(); }));
+  }
+
+  private lastOrders = '';
+  /**
+   * The command bar (F1-F4, or the wand in hand): a card a formation group — its number, name, banners,
+   * strength and what it is doing, lit when picked — and the open menu's items with their F-keys.
+   */
+  private renderOrders(): void {
+    const s = this.scene, el = this.hotbar.querySelector<HTMLElement>('.orders')!, open = s.commandOpen();
+    if (el.hidden === open) el.hidden = !open;
+    if (!open) { this.lastOrders = ''; return; }
+    const picked = new Set(s.pickedRegiments()), menu = s.commandMenu();
+    let cards = '';
+    for (let g = 1; g <= GROUPS; g++) {
+      const regs = s.regiments.filter((r) => r.group === g);
+      if (!regs.length) continue;
+      const n = regs.reduce((a, r) => a + r.members.length, 0), sel = regs.some((r) => picked.has(r)), r0 = regs[0];
+      cards += `<button class="fcard${sel ? ' sel' : ''}" data-group="${g}" title="${g}: pick · Shift+${g}: add · Alt+${g}: move the picked banners here"><b>${g}</b><span class="gname">${GROUP_NAME[g]}</span>${regs.map((r) => `<i class="sw" style="background:${r.colour}"></i>`).join('')}<span class="gn">${n}</span><small>${SHAPE_NAME[r0.shape]} · ${r0.stance}${r0.holdFire ? ' · hold fire' : ''}</small></button>`;
+    }
+    const items = menu === 0
+      ? ORDER_MENUS.map((m, i) => `<button class="oitem" data-menu="${i + 1}"><kbd>F${i + 1}</kbd>${m.name}</button>`).join('') + `<span class="ohint">${picked.size ? '' : 'all formations · '}1-8 pick · 0 all · right-drag places</span>`
+      : `<span class="otitle">${ORDER_MENUS[menu - 1].name}</span>` + ORDER_MENUS[menu - 1].items.map((it, i) => `<button class="oitem" data-item="${i + 1}"><kbd>F${i + 1}</kbd>${it}</button>`).join('') + '<button class="oitem back" data-back="1"><kbd>Esc</kbd>back</button>';
+    const html = `<div class="fcards">${cards}</div><div class="omenu">${items}</div>`;
+    if (html === this.lastOrders) return;
+    this.lastOrders = html;
+    el.innerHTML = html;
   }
 
   private pouchEl: HTMLElement | null = null;

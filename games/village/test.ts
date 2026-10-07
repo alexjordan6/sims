@@ -2215,6 +2215,31 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       s.faceOrder([pk], 'point', pk.x, pk.y + 50);
       assert(!pk.faceEnemy && pk.fy > 0.9, 'face this direction turns them where you point');
       east.dead = true; s.removeDead();
+      // the command bar: F1-F4 open the menus, F-keys pick the items, the numbers pick the groups
+      const key = (k: string, code = k, mod: KeyboardEventInit = {}) => { const ev = new KeyboardEvent('keydown', { key: k, code, cancelable: true, bubbles: true, ...mod }); window.dispatchEvent(ev); return ev; };
+      s.player.tool = 'sword'; s.clearSquad(); s.cmdMenu = null;
+      for (const r of s.regiments) r.setShape('square');
+      const opened = key('F3');
+      assert(s.commandOpen() && s.commandMenu() === 3 && opened.defaultPrevented, 'F3 opens the Form menu (and the browser keeps its hands off the key)');
+      key('Escape');
+      key('5', 'Digit5');
+      assert(s.commandMenu() === 0 && s.pickedRegiments().length === 1 && s.pickedRegiments()[0] === inf && s.player.tool === 'sword', 'Esc backs out to the top; 5 picks group V, and the belt keeps the sword');
+      key('F3'); key('F2');
+      assert(inf.shape === 'shieldwall' && pk.shape === 'square' && arch.shape === 'square' && !s.commandOpen(), 'F3 then F2: the picked formation forms a shield wall, the rest stand as they were, and the bar shuts');
+      key('F1'); key('2', 'Digit2'); key('F3');
+      assert(pk.stance === 'charge' && arch.stance !== 'charge' && inf.stance !== 'charge', '2, F1, F3: only the pikes charge');
+      key('F1'); key('3', 'Digit3'); key('7', 'Digit7', { altKey: true });
+      assert(arch.group === 7 && s.commandOpen(), 'Alt+7 moves the picked archers into group VII');
+      key('Escape'); key('Escape');
+      assert(!s.commandOpen() && !key('2', 'Digit2').defaultPrevented, 'and Esc shuts the bar: the numbers are the belt\'s again');
+      // the wand in hand shows the bar; it lists a card a group
+      const ui = (s as unknown as { ui: { render(dt: number): void } }).ui;
+      s.player.tool = 'wand'; ui.render(0.2);
+      const bar = document.querySelector<HTMLElement>('#overlay .orders')!, cards = bar.querySelectorAll('.fcard').length;
+      const groups = new Set(s.regiments.map((r) => r.group)).size;
+      assert(s.commandOpen() && !bar.hidden && cards === groups && bar.querySelectorAll('.omenu [data-menu]').length === 4, `with the wand out the command bar shows a card a group (${cards}) and the four menus`);
+      s.player.tool = 'sword'; ui.render(0.2);
+      assert(bar.hidden, 'and puts it away with the wand');
     }
 
     // ---- the opening: gnomes by default, no farm, wild food by the door ------------------------------

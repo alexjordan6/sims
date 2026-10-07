@@ -23,7 +23,7 @@ import { AdaptiveSpawner } from './adaptive-spawn';
 const BATTLE_QUIET = 6;
 const BATTLE_BIG = 20;
 import { Host, hostSize, hostCounts, ASSAULT_RANGE, ROUT_SHARE, WARBAND_SIZE } from './host';
-import { Regiment, Warband, WARBAND_COLOURS, REGIMENT_SIZE, BANNER_COLOURS, SHAPES, SHAPE_NAME, GROUP_NAME, weaponGroup, layout, type Shape, type Stance } from './regiment';
+import { Regiment, Warband, WARBAND_COLOURS, REGIMENT_SIZE, BANNER_COLOURS, SHAPES, SHAPE_NAME, GROUP_NAME, ORDER_MENUS, weaponGroup, layout, type Shape, type Stance } from './regiment';
 
 const NAMES = ['Ada', 'Bram', 'Cass', 'Dov', 'Eli', 'Fen', 'Gil', 'Hana', 'Ivo', 'Juno', 'Kai', 'Lior', 'Mara', 'Nils', 'Orla', 'Pim', 'Quin', 'Rue', 'Sol', 'Tova', 'Uli', 'Vera', 'Wren', 'Xan', 'Yael', 'Zed'];
 
@@ -887,6 +887,7 @@ export class VillageScene extends SimScene {
       if (b) this.selectBuilding(b); else this.select(null);
     });
     const closePanel = (): void => {
+      if (this.commandBack()) return; // a command menu backs out first
       if (this.mealAim) this.mealAim = false; // Esc lets go of an aimed meal first
       else if (BUILDS.includes(this.player.tool)) this.player.tool = 'hammer'; // a build put down: the hammer again
       else if (this.ui?.bagShowing) this.ui.toggleBag(false);
@@ -918,8 +919,10 @@ export class VillageScene extends SimScene {
     kb.removeAllListeners('keydown-ONE'); kb.removeAllListeners('keydown-TWO'); kb.removeAllListeners('keydown-THREE');
     kb.on('keydown-MINUS', () => (this.speed = this.speed > 4 ? 4 : 1));
     kb.on('keydown-PLUS', () => (this.speed = this.speed < 4 ? 4 : 16));
-    ['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT'].forEach((k, i) => kb.on(`keydown-${k}`, () => this.setTool(this.hammerOut() ? BUILDS[i] : BELT[i])));
-    kb.on('keydown-ZERO', () => { if (this.hammerOut()) this.setTool('hammer'); });
+    ['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT'].forEach((k, i) => kb.on(`keydown-${k}`, () => { if (!this.commandOpen()) this.setTool(this.hammerOut() ? BUILDS[i] : BELT[i]); }));
+    kb.on('keydown-ZERO', () => { if (this.hammerOut() && !this.commandOpen()) this.setTool('hammer'); });
+    // the command bar's keys (F1-F7, the numbers, Alt+numbers) are read straight off the window, so the browser's own F-keys can be stopped
+    window.addEventListener('keydown', (e) => this.commandKey(e), true);
     // the kernel's R (restart) / N (new seed) are far too easy to hit mid-run: restart lives in the pause menu,
     // and R only works on the end screens where it means "new run"
     kb.removeAllListeners('keydown-R');
@@ -945,6 +948,8 @@ export class VillageScene extends SimScene {
       if (this.player.tool === 'wand' && this.screen === 'playing' && !this.interior.active) { this.wandDown(ptr); return; }
       // aiming a meal: the right button lets go of the aim, the left throws it
       if (this.mealAim) { if (ptr.rightButtonDown()) this.mealAim = false; else this.releaseMeal(); return; }
+      // with the command bar open the right button places the picked formations, whatever is in hand
+      if (ptr.rightButtonDown() && this.commandOpen() && this.screen === 'playing') { this.wandDown(ptr); return; }
       // the right button is the command: walk, hunt, or go and use whatever is there
       if (ptr.rightButtonDown()) { this.rightCommand(ptr); return; }
       if (this.screen !== 'playing') return;
@@ -3888,6 +3893,66 @@ export class VillageScene extends SimScene {
     }
     if (regs.length) this.wandFx(regs[0].x, regs[0].y - 12, stance === 'hold' ? 'HOLD' : stance === 'advance' ? 'ADVANCE' : 'FOLLOW');
   }
+  // ---- the command bar: Bannerlord's order menus ----------------------------------------------------
+
+  /** the open order menu: 0 the top (pick formations, then F1-F4), 1-4 a menu (F1-F7 an item); null when the bar is shut */
+  cmdMenu: number | null = null;
+  /** the bar was opened by an F-key (it shuts after an order) rather than by holding the wand (it stays) */
+  private cmdByKey = false;
+  /** Is the command bar showing? An F-key opened it, or the wand is in hand with banners to command. */
+  commandOpen(): boolean { return this.screen === 'playing' && this.regiments.length > 0 && (this.cmdMenu !== null || this.player.tool === 'wand'); }
+  /** The menu showing: what an F-key opened, or the top when the wand is held. */
+  commandMenu(): number { return this.cmdMenu ?? 0; }
+  /** Open the bar on menu `m` (0 the top). */
+  openCommand(m: number): boolean {
+    if (this.screen !== 'playing' || this.interior.active) return false;
+    if (!this.regiments.length) { this.event('info', 'No formations to command yet: gnome soldiers fall in under banners', true); return false; }
+    if (this.cmdMenu === null) this.cmdByKey = this.player.tool !== 'wand';
+    this.cmdMenu = m;
+    return true;
+  }
+  /** Esc: back to the top, then shut. True when it did something. */
+  commandBack(): boolean {
+    if (!this.commandOpen()) return false;
+    if (this.commandMenu() > 0) { this.cmdMenu = 0; return true; }
+    if (this.cmdMenu !== null) { this.cmdMenu = null; return true; }
+    return false; // the wand's bar stays while the wand is in hand
+  }
+  /** An item of a menu: the order goes to the picked formations (all of them when none are picked). */
+  commandItem(menu: number, item: number): boolean {
+    const regs = this.orderedRegiments(), aim = this.aimAt();
+    if (!regs.length) return false;
+    const def = ORDER_MENUS[menu - 1];
+    if (!def || item < 1 || item > def.items.length) return false;
+    if (menu === 1) [() => this.moveTo(regs, aim.x, aim.y), () => this.setStance(regs, 'follow'), () => this.charge(regs), () => this.setStance(regs, 'advance'), () => this.setStance(regs, 'hold'), () => this.retreat(regs)][item - 1]();
+    else if (menu === 2) this.faceOrder(regs, item === 1 ? 'enemy' : 'point', aim.x, aim.y);
+    else if (menu === 3) this.formOrder(regs, SHAPES[item - 1]);
+    else if (menu === 4) this.fireOrder(regs, item === 2);
+    // an order given: back to the top, and shut altogether when an F-key opened the bar
+    this.cmdMenu = this.cmdByKey ? null : 0;
+    return true;
+  }
+  /** The window's keys while there are formations: F1-F4 open a menu (and pick its items, up to F7); 1-8 pick a group (Shift adds), 0 all; Alt+1-8 transfers. */
+  commandKey(e: KeyboardEvent): void {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.repeat) return;
+    // Esc backs out of a menu at once (not on the next frame, as the game's own keys go), so it never lands after the F-key that follows it
+    if (e.key === 'Escape' && this.commandBack()) { e.preventDefault(); e.stopPropagation(); return; }
+    const f = /^F([1-7])$/.exec(e.key);
+    if (f) {
+      const n = Number(f[1]);
+      if (n <= 4 && this.commandMenu() === 0 && this.openCommand(n)) { e.preventDefault(); e.stopPropagation(); return; }
+      if (this.commandOpen() && this.commandMenu() > 0) { e.preventDefault(); e.stopPropagation(); this.commandItem(this.commandMenu(), n); }
+      return;
+    }
+    if (!this.commandOpen()) return;
+    const d = /^Digit([0-8])$/.exec(e.code);
+    if (!d) return;
+    const n = Number(d[1]);
+    e.preventDefault();
+    if (e.altKey) { if (n >= 1) this.transferGroup(this.pickedRegiments(), n); return; }
+    this.selectGroup(n, e.shiftKey);
+  }
+
   // ---- formation orders: what the F-key menus send (see the command bar) -------------------------
 
   /** Pick a formation group (1-8), or all of them (0); `add` keeps what was picked. */

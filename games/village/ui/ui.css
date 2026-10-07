@@ -663,3 +663,20 @@ body::after {
 
 /* a soldier's FETCH buttons under a slot in the armory */
 #overlay .aslot .fetches, .armory .aslot .fetches { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
+
+/* the command bar: formation cards over the open order menu */
+#overlay .orders { display: flex; flex-direction: column; gap: 3px; padding: 4px; background: var(--glass); border: 1px solid var(--glass-edge); border-radius: 3px; max-width: 100%; }
+#overlay .orders[hidden] { display: none; }
+#overlay .orders .fcards { display: flex; flex-wrap: wrap; gap: 3px; justify-content: center; }
+#overlay .orders .fcard { display: grid; grid-template-columns: auto auto 1fr; align-items: center; gap: 1px 4px; min-width: 96px; padding: 2px 5px; font: inherit; font-size: 10px; color: inherit; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.12); border-radius: 2px; cursor: pointer; text-align: left; }
+#overlay .orders .fcard.sel { border-color: #e8c860; background: rgba(232,200,96,0.16); }
+#overlay .orders .fcard b { font-size: 13px; color: #e8c860; }
+#overlay .orders .fcard .sw { display: inline-block; width: 6px; height: 9px; margin-right: 1px; }
+#overlay .orders .fcard .gn { justify-self: end; }
+#overlay .orders .fcard small { grid-column: 1 / -1; opacity: 0.7; white-space: nowrap; }
+#overlay .orders .omenu { display: flex; flex-wrap: wrap; gap: 3px; justify-content: center; align-items: center; }
+#overlay .orders .oitem { font: inherit; font-size: 10px; color: inherit; padding: 2px 6px; background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.12); border-radius: 2px; cursor: pointer; }
+#overlay .orders .oitem:hover, #overlay .orders .fcard:hover { border-color: rgba(255,255,255,0.4); }
+#overlay .orders .oitem kbd { margin-right: 4px; color: #e8c860; }
+#overlay .orders .otitle { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; opacity: 0.8; margin-right: 4px; }
+#overlay .orders .ohint { font-size: 9px; opacity: 0.55; margin-left: 4px; }
