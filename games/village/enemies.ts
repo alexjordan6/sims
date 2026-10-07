@@ -11,6 +11,9 @@ export class Rat extends Raider {
   private gnaw = 0;
   private flee = 0;
   private crop: TilePos | null = null;
+  /** the armed body it last saw, and seconds until it looks again */
+  private threat: Mover | null = null;
+  private lookT = 0;
 
   constructor(x: number, y: number, opts: RaiderOpts = {}) {
     super(x, y, opts);
@@ -29,13 +32,17 @@ export class Rat extends Raider {
   update(dt: number, s: VillageScene): void {
     this.tickTimers(dt);
     if (this.frozen(dt)) return;
-    // anyone armed nearby: scatter
-    const threat = this.nearestArmed(s, 40);
+    // anyone armed nearby: scatter (looked for five times a second: a rat in the middle of an army would
+    // otherwise sift hundreds of bodies every tick)
+    this.lookT -= dt;
+    if (this.lookT <= 0) { this.lookT = 0.2; this.threat = this.nearestArmed(s, 40) ?? (this.flee > 0 ? this.nearestArmed(s, 80) : null); }
+    if (this.threat?.dead) this.threat = null;
+    const threat = this.threat && this.dist(this.threat) <= 40 ? this.threat : null;
     if (threat) this.flee = 1;
     if (this.flee > 0) {
       this.flee -= dt;
       this.task = 'scurrying away';
-      const from = threat ?? this.nearestArmed(s, 80) ?? { x: this.x - 1, y: this.y };
+      const from = this.threat ?? { x: this.x - 1, y: this.y };
       const dx = this.x - from.x, dy = this.y - from.y, d = Math.hypot(dx, dy) || 1;
       const nx = this.x + (dx / d) * this.speed * dt, ny = this.y + (dy / d) * this.speed * dt;
       const t = World.toTile(nx, ny);
@@ -51,7 +58,7 @@ export class Rat extends Raider {
       this.retarget = 1;
       const w = s.world;
       // Spread a swarm across the field instead of sending every rat to the same plant.
-      const crops = [...w.find(t => t.kind === 'crop')].sort((a, b) => this.dist(World.center(a.tx, a.ty)) - this.dist(World.center(b.tx, b.ty)));
+      const crops = [...s.cropTiles()].filter((q) => w.get(q.tx, q.ty)?.kind === 'crop').sort((a, b) => this.dist(World.center(a.tx, a.ty)) - this.dist(World.center(b.tx, b.ty)));
       this.crop = crops.length ? crops[this.id % Math.min(crops.length, 20)] : null;
       if (this.crop) {
         this.setGoal(s, this.crop.tx, this.crop.ty);
@@ -693,10 +700,11 @@ export class Wrecker extends Raider {
     if (this.attackTick(dt, s)) return;
     this.retarget -= dt;
     if (this.prey?.ruined) { this.prey = null; this.swing = null; }
-    if (this.retarget <= 0 || !this.prey) {
-      this.retarget = 1;
+    // a new mark every few seconds at most: each look is a search across the map for a way in
+    if (this.retarget <= 0 || (!this.prey && this.retarget <= 4)) {
+      this.retarget = 5;
       const from = this.tile;
-      this.prey = s.reachableBuildings(from, ['house'])[0] ?? s.reachableBuildings(from)[0] ?? null;
+      this.prey = s.nearestReachableBuilding(from, ['house']) ?? s.nearestReachableBuilding(from);
       if (this.prey) this.clearGoal();
     }
     const t = this.tile;

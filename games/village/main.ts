@@ -469,7 +469,7 @@ export class VillageScene extends SimScene {
    * Stress bench: `gnomes` pike gnomes in a block round the head (following it) and `raiders` raiders in a ring
    * 20-30 tiles out, coming in. ?bench=1000 runs it at load; the debug panel has a button.
    */
-  bench(gnomes: number, raiders: number): void {
+  bench(gnomes: number, raiders: number, host = 0): void {
     const pl = this.player, home = this.world.gnomeHouses[0] ?? this.world.houses[0], rng = new Rng(7);
     // fill open tiles outward from the head, four gnomes to a tile, until all are placed
     const here = pl.tile, spots: { x: number; y: number }[] = [];
@@ -490,7 +490,18 @@ export class VillageScene extends SimScene {
       if (!this.world.inBounds(t.tx, t.ty) || this.world.isBlocked(t.tx, t.ty, true)) continue;
       this.spawn(new Raider(x, y, { hpMul: this.mods.raiderHpMul }));
     }
-    this.event('info', `Bench: ${gnomes} gnomes and ${raiders} raiders.`, true);
+    // a host to fight: mustered on open ground 45 tiles from the head, marching at once
+    if (host > 0) {
+      let spot: TilePos | null = null;
+      for (let k = 0; k < 16 && !spot; k++) {
+        const a = (k / 16) * Math.PI * 2, t = { tx: Math.round(here.tx + Math.cos(a) * 45), ty: Math.round(here.ty + Math.sin(a) * 45) };
+        if (this.world.inBounds(t.tx, t.ty) && !this.world.isBlocked(t.tx, t.ty, true) && this.world.bfs(t, here, true).length) spot = t;
+      }
+      for (const h of this.hosts) if (h.state === 'mustering') for (const r of h.bodies()) r.dead = true;
+      this.hosts = this.hosts.filter((h) => h.state !== 'mustering');
+      if (spot && this.musterHost(false, this.day, host, spot)) this.spawnRaid();
+    }
+    this.event('info', `Bench: ${gnomes} gnomes and ${raiders} raiders${host ? ` against a host of ${host}` : ''}.`, true);
   }
 
   private spawnTrolls(): void {
@@ -697,6 +708,7 @@ export class VillageScene extends SimScene {
       button('copy settings', () => this.copySettings(), 'Copies every slider as JSON — paste it into games/village/defaults.json to make it the new default.');
       button('+20 scrap', () => { this.scrap += 20; }, 'Scrap iron for iron and steel forging.');
       button('bench: 1000 gnomes', () => this.bench(1000, 150), 'Stress test: a thousand gnome pikemen at your heels and 150 raiders closing in. Watch the frame time.');
+      button('bench: 1000 v 1000', () => this.bench(1000, 0, 1000), 'Stress test: a thousand gnome pikemen against a host of a thousand marching from 45 tiles off.');
     }
     // Stardew-style: C / left click = use tool, X / right click = check, E / Esc = menu, 1-8 or Tab / wheel = tools
     kb.on('keydown-C', () => { if (this.hoverTile) this.useAt(this.hoverTile); else this.interact(); });
@@ -2680,6 +2692,18 @@ export class VillageScene extends SimScene {
     return true;
   }
   /** Standing buildings (never the lair) an enemy at `from` can walk to, nearest first; `kinds` narrows it. */
+  /** The nearest building of `kinds` (any breakable one by default) a walker from `from` can reach: nearest first, one search at a time, stopping at the first that answers. */
+  nearestReachableBuilding(from: TilePos, kinds?: readonly BuildingKind[]): Building | null {
+    const fx = (from.tx + 0.5) * TILE, fy = (from.ty + 0.5) * TILE;
+    const near = this.world.buildings.filter((b) => !(b.kind === 'lair' || b.wild || b.ruined || !b.maxHp || (kinds && !kinds.includes(b.kind))))
+      .map((b) => { const c = buildingCenter(b); return { b, d: (c.tx * TILE - fx) ** 2 + (c.ty * TILE - fy) ** 2 }; }).sort((a, z) => a.d - z.d);
+    for (const { b } of near) {
+      const f = BUILDINGS[b.kind];
+      if (from.tx >= b.tx - 1 && from.tx <= b.tx + f.w && from.ty >= b.ty - 1 && from.ty <= b.ty + f.h) return b;
+      if (this.world.bfs(from, doorstep(b), true).length) return b;
+    }
+    return null;
+  }
   reachableBuildings(from: TilePos, kinds?: readonly BuildingKind[]): Building[] {
     const fx = (from.tx + 0.5) * TILE, fy = (from.ty + 0.5) * TILE;
     const out: { b: Building; d: number }[] = [];
@@ -3127,6 +3151,17 @@ export class VillageScene extends SimScene {
     if (spot) this.orderHold(spot.tx, spot.ty);
   }
 
+  /**
+   * Every crop tile on the map, gathered at most once a frame (once a grid rebuild), and only when asked.
+   * A swarm of rats each sweeping the whole map for the field was the frame's worst spike on the large map.
+   */
+  cropTiles(): TilePos[] {
+    this.memoFresh();
+    if (!this.cropCache || this.cropCache.at !== this.gridStamp) this.cropCache = { at: this.gridStamp, tiles: [...this.world.find((t) => t.kind === 'crop')] };
+    return this.cropCache.tiles;
+  }
+  private cropCache: { at: number; tiles: TilePos[] } | null = null;
+
   // ---- hosts: the enemy's armies ------------------------------------------------------------------
 
   hosts: Host[] = [];
@@ -3159,11 +3194,11 @@ export class VillageScene extends SimScene {
    * at the head of the first. Its rats, snatchers and wreckers join when it marches. Nothing is raised
    * while another host is still mustering.
    */
-  musterHost(boss: boolean, day: number): Host | null {
+  musterHost(boss: boolean, day: number, sizeOverride?: number, spot?: TilePos): Host | null {
     if (this.hosts.some((h) => h.state === 'mustering')) return null;
     // Scouts thin every host by a tenth a point; Hearsay shrinks the Warlord's
-    const size = Math.max(1, Math.round((boss ? p.hostMax * Math.min(1, this.mods.bossEscortMul) : hostSize(day)) * Math.max(0.3, 1 - 0.1 * this.mods.waveShrink))), n = hostCounts(size), q = this.hostSpot(), at = World.center(q.tx, q.ty);
-    const host = new Host(at, this.bearing(at.x, at.y), size, day);
+    const size = Math.max(1, Math.round((boss ? p.hostMax * Math.min(1, this.mods.bossEscortMul) : hostSize(day)) * Math.max(0.3, 1 - 0.1 * this.mods.waveShrink))), n = hostCounts(sizeOverride ?? size), q = spot ?? this.hostSpot(), at = World.center(q.tx, q.ty);
+    const host = new Host(at, this.bearing(at.x, at.y), sizeOverride ?? size, day);
     const wave = Math.max(1, 1 + Math.floor((day - p.firstRaidDay) / this.raidEvery));
     const opts = { hpMul: (1 + p.waveHpGrowth * wave) * this.mods.raiderHpMul, speedMul: this.mods.raiderSpeedMul, snatchDelayMul: this.mods.snatchDelayMul, noSnatch: this.mods.noSnatch, harmlessRats: this.mods.ratsHarmless };
     // the ranks: butchers spread through the shield lines, shamans in their own knots at the back
@@ -3849,7 +3884,17 @@ if (query.get('start') === 'gnome') p.gnomeStart = true;
 if (query.has('peaceful')) p.peaceful = true;
 if (query.has('nohunger')) p.hunger = false;
 // ?bench=1000: a stress test once the first village is up (see VillageScene.bench)
-if (query.has('bench')) window.setTimeout(() => { const s = (window as unknown as { game?: { scene: { scenes: VillageScene[] } } }).game?.scene.scenes[0]; if (s) { if (s.screen !== 'playing') s.startGame(); s.bench(Number(query.get('bench')) || 1000, 150); } }, 2500);
+// ?bench=1000&host=1000: against a marching host instead of a ring of raiders
+if (query.has('bench')) {
+  const go = () => {
+    const s = (window as unknown as { game?: { scene: { scenes: unknown[] } } }).game?.scene.scenes.find((q): q is VillageScene => q instanceof VillageScene);
+    if (!s) { window.setTimeout(go, 500); return; }
+    if (s.screen !== 'playing') s.startGame();
+    const host = Number(query.get('host')) || 0;
+    s.bench(Number(query.get('bench')) || 1000, host ? 0 : 150, host);
+  };
+  window.setTimeout(go, 2500);
+}
 // lil-gui caches its controllers' values at module load, so the panel needs telling the flag moved.
 if (p.gnomeStart || p.peaceful || query.has('nohunger')) getGui().controllersRecursive().forEach((c) => c.updateDisplay());
 
