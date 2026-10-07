@@ -1,4 +1,4 @@
-import { Pack, IMPLEMENTS, isBulk, slotKey } from './pack';
+import { Pack, IMPLEMENTS, START_TOOLS, isBulk, slotKey } from './pack';
 import { STACK, p, TILE, ITEM, YARD, ARMOR } from './config';
 import { Villager } from './agents';
 import { World, buildingCenter } from './world';
@@ -23,10 +23,12 @@ export function runPackChecks(s: VillageScene, assert: (ok:unknown,msg:string)=>
     s.reset(42);s.screen='playing';s.paused=true;s.agents=[s.player];s.world.items.length=0;s.meatClaims.clear();
     for(let y=90;y<110;y++)for(let x=115;x<140;x++)s.world.set(x,y,'grass');
     Object.assign(s.player,World.center(124,100));s.hoverPoint=null;s.hoverTile=null;
+    for(const tool of IMPLEMENTS){if(!s.player.pack.hasTool(tool))s.player.pack.put({kind:'tool',tool});s.foundTools.add(tool);} // the checks below work with the whole kit
   };
   try {
     p.packSlots=12;p.gnomeStart=false;fresh();
-    assert(s.player.pack.emptySlots===7 && IMPLEMENTS.every(t=>s.player.pack.hasTool(t)),'starting pack has five implements and seven free slots');
+    assert(s.player.pack.emptySlots===7 && IMPLEMENTS.every(t=>s.player.pack.hasTool(t)),'with the whole kit the pack holds five implements and seven free slots');
+    s.reset(42);assert(s.player.pack.emptySlots===10 && START_TOOLS.every(t=>s.player.pack.hasTool(t)) && !s.player.pack.hasTool('axe') && !s.player.pack.hasTool('hoe') && !s.player.pack.hasTool('hammer'),'a new village starts with the basket and wand, ten free slots, and none of the lost tools');fresh();
     assert(s.player.weapons.melee===0&&s.player.weapons.bow===0&&s.player.load===null,'club and bow start equipped outside pack; player load stays null');
     p.packSlots=5;assert(s.player.pack.slots.length===12,'pack size changes apply only on a new run');p.packSlots=12;
     s.player.pickUp('wood',20);s.player.pickUp('food',12,'berry');s.player.pickUp('scrap',9);
@@ -90,6 +92,6 @@ export function runPackChecks(s: VillageScene, assert: (ok:unknown,msg:string)=>
     s.player.x+=p.pickupRange*TILE+ITEM.reach+1;s.pickUpItems(0);assert(!it.playerDropPending,'leaving pickup radius clears protection');
     Object.assign(s.player,{x:it.x,y:it.y});s.pickUpItems(0);assert(!s.world.items.includes(it),'returning collects deliberate drop normally');
     const tools=s.player.pack.slots.filter(g=>g&&!isBulk(g)).length;assert(tools===5&&s.player.load===null,'pack operations never use player armful');
-    for(const start of [false,true]){p.gnomeStart=start;fresh();assert(s.player.pack.emptySlots===7&&s.player.weapons.melee===0,'starting kit works for '+(start?'gnome':'normal')+' start');}
+    for(const start of [false,true]){p.gnomeStart=start;s.reset(42);assert(s.player.pack.emptySlots===10&&s.player.weapons.melee===0,'starting kit works for '+(start?'gnome':'normal')+' start');}
   } finally {p.pickupRange=saved.range;p.pickupPull=saved.pull;p.packSlots=saved.slots;p.gnomeStart=saved.start;s.reset(42);}
 }

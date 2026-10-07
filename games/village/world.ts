@@ -137,6 +137,8 @@ export class World {
   lair: Building | null = null;
   /** the open plains carved on a large map: battlefields, each with a war band camped on it (centre and half-axes in tiles) */
   plains: { tx: number; ty: number; rx: number; ry: number }[] = [];
+  /** where the lost tools lie: the axe by a stump, the hammer in a ruined hut, the hoe in an overgrown field */
+  toolCaches: { tool: 'axe' | 'hammer' | 'hoe'; site: 'stump' | 'hut' | 'field'; tx: number; ty: number }[] = [];
   /** the gnome start's cottage in the clearing (see generate), so the scene needn't go looking for it */
   gnomeStart: Building | null = null;
   denseForests = false;
@@ -795,6 +797,49 @@ export class World {
     this.growThickets(hx, hy);
     if (big > 1) this.carvePlains(hx, hy);
     this.scatterHomeForage(hx, hy);
+    this.placeToolCaches(hx, hy);
+  }
+
+  /**
+   * The tools lost in the flight, each left lying where it fell: the axe by an old stump just beyond the
+   * thorns (22-32 tiles out), the hammer in a ruined hut (40-60), the hoe in an overgrown field (50-75;
+   * the far two up to half as far again on the large map). Each on a small clearing a walk from the
+   * square, clear of the lair and the gnomes' glade. Its own bag of numbers, so nothing else moves.
+   */
+  private placeToolCaches(hx: number, hy: number): void {
+    const rng = new Rng(this.seed ^ 0x700150), far = (this.cols * this.rows) / (240 * 160) > 1 ? 1.5 : 1;
+    const from = this.nearest((hx + 0.5) * TILE, (hy + 0.5) * TILE, (_t, tx, ty) => !this.isBlocked(tx, ty)) ?? { tx: hx, ty: hy };
+    const plan = [
+      { tool: 'axe' as const, site: 'stump' as const, r: [22, 32], clear: 1 },
+      { tool: 'hammer' as const, site: 'hut' as const, r: [40, 60 * far], clear: 2 },
+      { tool: 'hoe' as const, site: 'field' as const, r: [50, 75 * far], clear: 3 },
+    ];
+    const den = this.buildings.find((b) => b.kind === 'gnomehouse' && b.wild);
+    for (const c of plan) {
+      for (let tries = 0; tries < 300; tries++) {
+        const a = rng.range(0, Math.PI * 2), r = rng.range(c.r[0], c.r[1]);
+        const tx = Math.round(hx + Math.cos(a) * r), ty = Math.round(hy + Math.sin(a) * r * 0.75);
+        if (tx < 8 || ty < 8 || tx > this.cols - 9 || ty > this.rows - 9) continue;
+        if (this.lair && Math.hypot(this.lair.tx - tx, this.lair.ty - ty) < 14) continue;
+        if (den && Math.hypot(den.tx - tx, den.ty - ty) < 12) continue;
+        if (this.toolCaches.some((q) => Math.hypot(q.tx - tx, q.ty - ty) < 12)) continue;
+        let clash = false;
+        for (let dy = -c.clear; dy <= c.clear && !clash; dy++) for (let dx = -c.clear; dx <= c.clear; dx++) { const t = this.get(tx + dx, ty + dy); if (!t || t.building || t.defense) { clash = true; break; } }
+        if (clash) continue;
+        // a little clearing; an old field keeps its long grass, a hut and a stump are trodden down
+        for (let dy = -c.clear; dy <= c.clear; dy++) for (let dx = -c.clear; dx <= c.clear; dx++) {
+          const t = this.get(tx + dx, ty + dy)!;
+          if (t.kind !== 'grass' && !t.trail) this.set(tx + dx, ty + dy, 'grass');
+          const g = this.get(tx + dx, ty + dy)!;
+          if (c.site !== 'field' && g.tall) { g.tall = undefined; this.tallCount--; this.dirty.add((ty + dy) * this.cols + tx + dx); }
+        }
+        if (!this.bfs(from, { tx, ty }).length) continue; // somewhere a walk from the square reaches
+        const at = World.center(tx, ty), it = this.dropItem('gear', 1, at.x, at.y);
+        it.gear = { kind: 'tool', tool: c.tool };
+        this.toolCaches.push({ tool: c.tool, site: c.site, tx, ty });
+        break;
+      }
+    }
   }
 
   /**

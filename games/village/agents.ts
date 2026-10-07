@@ -5,7 +5,7 @@ import type { Mods } from './meta';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle } from './characters';
 import type { VillageScene } from './main';
 import type { Item } from './items';
-import { Pack, IMPLEMENTS } from './pack';
+import { Pack, START_TOOLS } from './pack';
 import { WorkerSafety, WORKER_DANGER, WORKER_CLEAR } from './worker-safety';
 import type { BulkKind } from './config';
 import type { Block, Regiment, Warband } from './regiment';
@@ -1530,7 +1530,7 @@ export class Player extends Mover {
     this.radius = 3.5;
     this.color = 0xffe066;
     this.task = 'you';
-    for (const tool of IMPLEMENTS) this.pack.put({ kind: 'tool', tool });
+    for (const tool of START_TOOLS) this.pack.put({ kind: 'tool', tool });
   }
 
   /** The building the tool would place, if it's a building tool. */

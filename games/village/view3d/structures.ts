@@ -166,6 +166,8 @@ export class Structures {
   readonly group = new THREE.Group();
   private built = new Map<Building, Built>();
   private forts = new Map<number, { group: THREE.Group; key: string }>();
+  /** the lost tools' sites: a stump, a ruined hut, an old field's fence */
+  private sites = new Map<object, THREE.Group>();
   /** a fire at each raider camp in the wild */
   private campfires = new Map<object, THREE.Object3D>();
   /** the meshes a pointer can land on: wall tops, gates, stairs */
@@ -233,6 +235,27 @@ export class Structures {
       f.group.traverse((o) => { if (o instanceof THREE.Mesh) o.material = tint === null ? (o as THREE.Mesh & { _base: THREE.Material })._base : mat(tint); });
     }
     for (const [id, f] of this.forts) if (!seen.has(id)) { this.group.remove(f.group); this.forts.delete(id); pickDirty = true; }
+    // where the lost tools lie: a stump, a ruined hut, the posts of an old field's fence
+    for (const c of w.toolCaches) {
+      if (this.sites.has(c)) continue;
+      const g = new THREE.Group(), x = c.tx + 0.5, z = c.ty + 0.5;
+      if (c.site === 'stump') {
+        g.add(part(cyl, 0x5a3e26, 0.7, 0.35, 0.7, 0, 0, 0));
+        g.add(part(cyl, 0x8a6a44, 0.55, 0.02, 0.55, 0, 0.35, 0));
+      } else if (c.site === 'hut') {
+        // three broken walls and a fallen roof beam
+        g.add(part(box, 0x4a3a2c, 2.4, 0.9, 0.2, 0, 0, -1.2));
+        g.add(part(box, 0x4a3a2c, 0.2, 0.6, 2.0, -1.2, 0, -0.2));
+        g.add(part(box, 0x4a3a2c, 0.2, 1.1, 1.2, 1.2, 0, -0.6));
+        const beam = part(box, 0x3a2a1c, 2.6, 0.18, 0.18, 0.1, 0.25, 0.4); beam.rotation.z = 0.35; g.add(beam);
+      } else {
+        for (let k = 0; k < 10; k++) { const a = (k / 10) * Math.PI * 2; g.add(part(box, 0x6a5038, 0.14, 0.7, 0.14, Math.cos(a) * 3, 0, Math.sin(a) * 3)); }
+      }
+      g.traverse((o) => { o.castShadow = true; o.receiveShadow = true; });
+      g.position.set(x, groundHeight(x, z), z);
+      this.group.add(g); this.sites.set(c, g);
+    }
+    for (const [c, g] of this.sites) if (!w.toolCaches.includes(c as typeof w.toolCaches[number])) { this.group.remove(g); this.sites.delete(c); }
     // the camps' fires: a ring of logs and a flame that dances; a cleared camp's fire is cold
     for (const camp of s.camps) {
       let fire = this.campfires.get(camp);

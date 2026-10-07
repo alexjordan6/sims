@@ -2,6 +2,10 @@ import { STACK, FOODS, WEAPONS, ARMOR, type BulkKind, type FoodKind, type Weapon
 
 export const IMPLEMENTS = ['axe', 'hoe', 'hammer', 'basket', 'wand'] as const;
 export type Implement = typeof IMPLEMENTS[number];
+/** what the head carries at the start: the axe, the hoe and the hammer were lost in the flight, and lie out in the wild (World.toolCaches) */
+export const START_TOOLS: readonly Implement[] = ['basket', 'wand'];
+/** the lost tools, and where each was left */
+export const LOST_TOOLS = { axe: 'by an old stump', hammer: 'in a ruined hut', hoe: 'in an overgrown field' } as const;
 export type Bulk = { kind: 'wood'; n: number } | { kind: 'food'; food: FoodKind; n: number } | { kind: 'scrap'; n: number };
 export type Gear = { kind: 'weapon'; slot: WeaponSlot; tier: number } | { kind: 'armor'; slot: ArmorSlot; tier: number } | { kind: 'tool'; tool: Implement };
 export type Slot = Bulk | Gear;

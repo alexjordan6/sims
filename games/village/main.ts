@@ -1,5 +1,5 @@
 import { STACK, SKULK, STASH_SLOTS, type BulkKind } from './config';
-import { isImplement, IMPLEMENTS, TOOL_NAME, Pack, type Gear, type EquipmentSlot, isBulk, slotName } from './pack';
+import { isImplement, IMPLEMENTS, START_TOOLS, LOST_TOOLS, type Implement, TOOL_NAME, Pack, type Gear, type EquipmentSlot, isBulk, slotName } from './pack';
 import Phaser from 'phaser';
 import { SimScene, launch, button, getGui, Rng } from '@shared/index';
 import { launch as throwItem, type Item } from './items';
@@ -314,6 +314,7 @@ export class VillageScene extends SimScene {
     this.spawnHives();
     this.lairFound = false;
     this.gnomesFound = p.gnomeStart; // you already keep a toadstool cottage: the craft needs no finding
+    this.foundTools = new Set(START_TOOLS);
     this.gnomesFollow = true; // every run starts with them at your heels (reset() does not re-run the field initialiser)
     this.fog?.reset();
     this.chartHome();
@@ -352,6 +353,8 @@ export class VillageScene extends SimScene {
     this.event('info', p.gnomeStart
       ? `A gnome band keeps house in ${where}, ten of them under pikes. Nobody comes this far out without a reason. Set the pikes where a raid will run onto them, forage what grows wild, and cook it in the great pot in the square.`
       : `A new village in ${where}. The last one here is gone, and nobody says how. Follow the trails to explore. Build walls and stairs, then station archers.`);
+    const lost = this.world.toolCaches.map((c) => `the ${c.tool} ${LOST_TOOLS[c.tool]} to the ${this.bearing(World.center(c.tx, c.ty).x, World.center(c.tx, c.ty).y)}`);
+    if (lost.length) this.event('info', `In the flight you lost your tools: ${lost.join(', ')}. Go and fetch them — the hammer builds, the axe fells, the hoe tills.`, true);
     if (p.thicketRing > 0 && this.world.thicketCount) this.event('info', 'A ring of thorns hems the village in. It was not here last spring. The trails still run through it, but it creeps closer every night — cut it back with the axe, or it will close the trails and take the fields.');
   }
 
@@ -421,6 +424,7 @@ export class VillageScene extends SimScene {
       if (!t || t.trail || t.building || t.kind === 'thicket' || this.world.isBlocked(tx, ty, true)) continue;
       if (this.world.lair && Math.hypot(this.world.lair.tx - tx, this.world.lair.ty - ty) < 12) continue;
       if (den && Math.hypot(den.tx - tx, den.ty - ty) < 12) continue;
+      if (this.world.toolCaches.some((q) => Math.hypot(q.tx - tx, q.ty - ty) < 10)) continue; // nobody camps on your lost tools
       if (this.camps.some((c) => Math.hypot(c.x / TILE - tx, c.y / TILE - ty) < 14)) continue;
       if (this.fog && this.fog.enabled && this.fog.visibleAt(tx * TILE, ty * TILE) > 0) continue; // a camp grows where nobody is looking
       if (!this.world.bfs({ tx, ty }, { tx: hx, ty: hy }, true).length) continue; // somewhere you can walk to
@@ -1123,7 +1127,12 @@ export class VillageScene extends SimScene {
   private locked = (t: Tool) => !!this.toolLocked(t);
   /** Why a tool can't be picked up yet, or null. The gnomes' craft is learned by finding them. */
   toolLocked(tool: Tool): string | null {
-    if (isImplement(tool) && !this.player.pack.hasTool(tool)) { const name = TOOL_NAME[tool].toLowerCase(); return `Recover or pick up ${/^[aeiou]/.test(name) ? 'an' : 'a'} ${name}`; }
+    if (isImplement(tool) && !this.player.pack.hasTool(tool)) {
+      const name = TOOL_NAME[tool].toLowerCase();
+      if (this.foundTools.has(tool)) return `Recover your ${name} at the granary or woodyard, or pick it up`;
+      const c = this.world.toolCaches.find((q) => q.tool === tool), at = c ? World.center(c.tx, c.ty) : null;
+      return c && at ? `Find your ${name} — ${LOST_TOOLS[c.tool]} to the ${this.bearing(at.x, at.y)}` : `Find ${/^[aeiou]/.test(name) ? 'an' : 'a'} ${name}`;
+    }
     if ((tool === 'sword' && this.player.weapons.melee < 0) || (tool === 'bow' && this.player.weapons.bow < 0)) return 'Equip a weapon first';
     if (tool === 'warren' && !this.gnomesFound) return 'Find the gnomes first: they dig the warrens';
     return tool === 'gnomehouse' && !this.gnomesFound ? 'You have never seen how a toadstool cottage is built' : null;
@@ -1151,7 +1160,7 @@ export class VillageScene extends SimScene {
     this.event('info',slotName(gear)+' placed at your feet — pack full',true);
   }
   recoverBasicKit(): boolean {
-    const pack=this.player.pack, missing: Gear[]=IMPLEMENTS.filter(t=>!pack.hasTool(t)).map(tool=>({kind:'tool',tool}));
+    const pack=this.player.pack, missing: Gear[]=IMPLEMENTS.filter(t=>this.foundTools.has(t)&&!pack.hasTool(t)).map(tool=>({kind:'tool',tool})); // lost tools must be found first
     for(const slot of ['melee','bow'] as const) if(this.player.weapons[slot]<0 && pack.findSlot(g=>g.kind==='weapon'&&g.slot===slot)<0) missing.push({kind:'weapon',slot,tier:0});
     if(missing.length>pack.emptySlots){this.event('info','Recovery needs '+(missing.length-pack.emptySlots)+' more empty pack slots',true);return false;}
     for(const gear of missing)pack.put(gear);
@@ -2211,7 +2220,13 @@ export class VillageScene extends SimScene {
         }
       }
       if (d > ITEM.reach + 0.001) continue;
-      if (it.kind === 'gear') { if (it.gear && pl.pack.put(it.gear)>=0) this.world.removeItem(it); }
+      if (it.kind === 'gear') {
+        if (it.gear && pl.pack.put(it.gear) >= 0) {
+          this.world.removeItem(it);
+          const g = it.gear;
+          if (g.kind === 'tool' && !this.foundTools.has(g.tool)) { this.foundTools.add(g.tool); this.event('build', `You found your old ${TOOL_NAME[g.tool].toLowerCase()}! ${g.tool === 'hammer' ? 'Hold it to build.' : g.tool === 'axe' ? 'It fells trees and cuts thorns.' : 'It tills soil for seeds.'}`, true); }
+        }
+      }
       else { const take = pl.pickUp(it.kind,it.n,it.food); it.n-=take; if(it.n<1e-9)this.world.removeItem(it); }
     }
   }
@@ -3567,6 +3582,9 @@ export class VillageScene extends SimScene {
     else this.setStance(regs, k === 'G' ? 'hold' : k === 'T' ? 'advance' : 'follow');
     return true;
   }
+
+  /** the tools the head has found (or started with): Recover basic kit gives back only these */
+  foundTools = new Set<Implement>(START_TOOLS);
 
   rescueFallenGuards(): void {
     for (const m of this.agents as Mover[]) if (m.elevated && !this.world.get(m.tile.tx, m.tile.ty)?.defense) {

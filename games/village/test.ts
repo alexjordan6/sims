@@ -1,5 +1,6 @@
 import './main';
 import { runPackChecks } from './pack-test';
+import { IMPLEMENTS } from './pack';
 import { STACK } from './config';
 const clearBulk = (s: VillageScene) => s.player.pack.slots.forEach((b,i)=>{if(b && ['wood','food','scrap'].includes(b.kind))s.player.pack.removeAt(i);});
 import type { VillageScene } from './main';
@@ -20,6 +21,7 @@ const assert = (ok: unknown, message: string) => { if (!ok) throw new Error(mess
 /** `wild` keeps the boars, `trolls` keeps the trolls, `hives` keeps the beehives — both wander into timed checks otherwise, and a troll fights back. */
 function fresh(wild = false, trolls = false, hives = false, skulks = false, thickets = false): VillageScene {
   const s = scene(); s.reset(42); s.screen = 'playing'; s.paused = true; s.wood = 150; s.food = 150; s.fx.length = 0;
+  for (const tool of IMPLEMENTS) { if (!s.player.pack.hasTool(tool)) s.player.pack.put({ kind: 'tool', tool }); s.foundTools.add(tool); } // the checks work with the whole kit
   s.world.mowAll(); // mown: the checks below time walks; the long grass checks raise it where they need it (mowAll keeps world.tallCount honest)
   if (!wild) { for (const a of s.agents) if (a instanceof Boar) a.dead = true; s.sounders = []; } // no stray sounder wanders into a check
   if (!trolls) for (const a of s.agents) if (a instanceof Troll) a.dead = true; // nor a troll, which would fight back
@@ -1619,7 +1621,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
         p.skulkClub = 1;
         const a = new Skulk(here.x, here.y); s.spawn(a); a.hp = 0; a.dead = true;
         s.tick(1 / 60);
-        const club = s.world.items.find(it => it.kind === 'gear');
+        const club = s.world.items.find(it => it.kind === 'gear' && it.gear?.kind === 'weapon'); // (not one of the lost tools lying out in the wild)
         assert(!!club && club.gear?.kind === 'weapon' && club.gear.slot === 'melee' && club.gear.tier === 0, 'a slain skulk leaves the club it swung');
         assert(!s.world.items.some(it => it.food === 'meat'), 'and never any meat');
         s.world.items.length = 0;
@@ -1916,8 +1918,9 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       const reg = guard[0].regiment!; reg.place(ahead.x, ahead.y, lead.x - ahead.x, lead.y - ahead.y);
       const hostHp = () => host.bodies().reduce((a, r) => a + (r.dead ? 0 : r.hp), 0), guardHp = () => guard.reduce((a, g) => a + (g.dead ? 0 : g.hp), 0);
       const h0 = hostHp(), g0 = guardHp();
-      run(12);
-      assert(host.warbands.some((w) => w.state === 'charge' || !w.members.length) && hostHp() < h0 && guardHp() < g0, `a gnome regiment across the road is charged, and both sides bleed (host ${Math.round(h0)} → ${Math.round(hostHp())} hp, guard ${Math.round(g0)} → ${Math.round(guardHp())})`);
+      let charged = false;
+      for (let k = 0; k < 24; k++) { run(0.5); if (host.warbands.some((w) => w.state === 'charge')) charged = true; }
+      assert(charged && hostHp() < h0 && guardHp() < g0, `a gnome regiment across the road is charged, and both sides bleed (host ${Math.round(h0)} → ${Math.round(hostHp())} hp, guard ${Math.round(g0)} → ${Math.round(guardHp())})`);
       for (const g of guard) g.dead = true; s.removeDead();
       // assault: a warband that reaches the walls breaks ranks and storms in as raiders
       const stormer = host.warbands.find((w) => w.members.length)!, its = [...stormer.members];
@@ -1946,6 +1949,23 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
           `a new ${gnomes ? 'gnome' : 'village'} start has no field (${field}) and ${near.length} ripe wild plants by the door — ${n('mushroom')} mushroom, ${n('burdock')} burdock, ${n('garlic')} garlic, ${n('bush')} berry, all a walk from the square`);
       }
       p.gnomeStart = false;
+      // the lost tools: none in the pack, each lying where it fell, found by walking onto it
+      s.reset(42); s.screen = 'playing'; s.paused = true;
+      const sq = { tx: COLS / 2, ty: ROWS / 2 }, from = s.world.nearest((sq.tx + 0.5) * TILE, (sq.ty + 0.5) * TILE, (_t, tx, ty) => !s.world.isBlocked(tx, ty))!;
+      const caches = s.world.toolCaches, band = { axe: [22, 32], hammer: [40, 60], hoe: [50, 75] } as const;
+      const out = (c: { tx: number; ty: number }) => Math.hypot(c.tx - sq.tx, (c.ty - sq.ty) / 0.75);
+      assert(!s.player.pack.hasTool('axe') && !s.player.pack.hasTool('hoe') && !s.player.pack.hasTool('hammer') && /Find your axe/.test(s.toolLocked('axe') ?? '') && !!s.toolLocked('hoe') && !!s.toolLocked('hammer'), `a new village has no axe, hoe or hammer, and says where to find them (${s.toolLocked('axe')})`);
+      assert(caches.length === 3 && caches.every((c) => out(c) >= band[c.tool][0] - 1 && out(c) <= band[c.tool][1] + 1 && s.world.bfs(from, c).length > 0 && s.world.items.some((it) => it.gear?.kind === 'tool' && it.gear.tool === c.tool && Math.hypot(it.x - World.center(c.tx, c.ty).x, it.y - World.center(c.tx, c.ty).y) < 2)),
+        `the axe, hammer and hoe lie a walk away, in their bands (${caches.map((c) => `${c.tool} ${Math.round(out(c))}`).join(', ')})`);
+      assert(s.journal.some((j) => /lost your tools/.test(j.text) && j.toast), 'and the opening says where they went');
+      const walkTo = (tool: string) => { const c = caches.find((q) => q.tool === tool)!; Object.assign(s.player, World.center(c.tx, c.ty)); s.pickUpItems(0); };
+      s.recoverBasicKit();
+      assert(!s.player.pack.hasTool('hammer'), 'recovering the basic kit does not conjure a hammer you have never found');
+      walkTo('axe');
+      assert(s.player.pack.hasTool('axe') && !s.toolLocked('axe') && s.journal.some((j) => /found your old axe/.test(j.text)), 'walking onto the axe takes it, frees it, and says so');
+      walkTo('hammer'); s.player.pack.removeAt(s.player.pack.findSlot((g) => g.kind === 'tool' && g.tool === 'hammer'));
+      s.recoverBasicKit();
+      assert(s.player.pack.hasTool('hammer'), 'but a found hammer, lost again, is recovered');
     }
 
     // ---- the news: a fight is told once it is over, not body by body; the night's hunger in one line ----

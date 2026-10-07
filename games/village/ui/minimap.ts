@@ -80,6 +80,13 @@ export class Minimap {
       c.fillStyle = colour;
       c.fillRect(Math.floor(a.x / TILE) - (size >> 1), Math.floor(a.y / TILE) - (size >> 1), size, size);
     }
+    // the lost tools: a gold mark once you have seen the ground they lie on, gone once picked up
+    for (const cache of s.world.toolCaches) {
+      if (s.fog && s.fog.enabled && !s.fog.isExplored(cache.tx, cache.ty)) continue;
+      if (!s.world.items.some((it) => it.kind === 'gear' && it.gear?.kind === 'tool' && it.gear.tool === cache.tool)) continue;
+      c.fillStyle = '#1a1206'; c.fillRect(cache.tx - 2, cache.ty - 2, 5, 5);
+      c.fillStyle = '#ffcf5a'; c.fillRect(cache.tx - 1, cache.ty - 1, 3, 3);
+    }
     // the hosts: your scouts follow every warband, seen or not — a red pennant on a black field
     for (const w of s.warbands) {
       const x = Math.floor(w.x / TILE), y = Math.floor(w.y / TILE);
