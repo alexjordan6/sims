@@ -1456,6 +1456,10 @@ export class Arrow extends Mover {
 /** What the player holds. The equipped tool decides what E does. */
 export type Tool = 'hoe' | 'seeds' | 'axe' | 'sword' | 'house' | 'barracks' | 'hammer' | 'bow' | 'tavern' | 'wall' | 'gate' | 'stairs' | 'basket' | 'gnomehouse' | 'warren' | 'wand';
 export const TOOLS: Tool[] = ['hoe', 'seeds', 'axe', 'sword', 'house', 'barracks', 'hammer', 'bow', 'tavern', 'wall', 'gate', 'stairs', 'basket', 'gnomehouse', 'warren', 'wand'];
+/** the tool belt, in order (1-8 and Tab): what you hold in your hands */
+export const BELT: Tool[] = ['sword', 'bow', 'hoe', 'seeds', 'axe', 'hammer', 'basket', 'wand'];
+/** what the hammer builds: a row over the belt while the hammer is out (1-8 then; 0 or Esc back to the hammer) */
+export const BUILDS: Tool[] = ['house', 'barracks', 'tavern', 'gnomehouse', 'warren', 'wall', 'gate', 'stairs'];
 
 /** A sword swing in progress: an arc in front of the player that connects during its active window. */
 /** A sword swing in progress: an arc in front of the player that connects during its active window. */
@@ -1739,10 +1743,11 @@ export class Player extends Mover {
 
   /** Next tool along the belt, skipping any the head has not learned yet (see VillageScene.toolLocked). */
   cycleTool(dir = 1, locked: (t: Tool) => boolean = () => false): void {
-    let i = TOOLS.indexOf(this.tool);
-    for (let n = 0; n < TOOLS.length; n++) {
-      i = (i + dir + TOOLS.length) % TOOLS.length;
-      if (!locked(TOOLS[i])) { this.tool = TOOLS[i]; return; }
+    // the belt only: a build counts as the hammer it is made with
+    let i = BELT.indexOf(BUILDS.includes(this.tool) ? 'hammer' : this.tool);
+    for (let n = 0; n < BELT.length; n++) {
+      i = (i + dir + BELT.length) % BELT.length;
+      if (!locked(BELT[i])) { this.tool = BELT[i]; return; }
     }
   }
 }

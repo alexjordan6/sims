@@ -4,7 +4,7 @@ import Phaser from 'phaser';
 import { SimScene, launch, button, getGui, Rng } from '@shared/index';
 import { launch as throwItem, type Item } from './items';
 import { World, WILD_FOOD, doorstep, buildingCenter, buildingMaxHp, hasHearth, hearthCost, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos, type Hive } from './world';
-import { Villager, Raider, Player, Mover, Arrow, TOOLS, SWING, type Role, type Tool, type Order } from './agents';
+import { Villager, Raider, Player, Mover, Arrow, TOOLS, BELT, BUILDS, SWING, type Role, type Tool, type Order } from './agents';
 import { DEFENSE_COST, WALL_HEIGHT, WARREN, SOLDIER_CAP_PER_LEVEL, MAP_AREA, PLAINS } from './config';
 import { Interior } from './interior';
 import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, Bolt, Troll, Skulk } from './enemies';
@@ -730,6 +730,7 @@ export class VillageScene extends SimScene {
     });
     const closePanel = (): void => {
       if (this.mealAim) this.mealAim = false; // Esc lets go of an aimed meal first
+      else if (BUILDS.includes(this.player.tool)) this.player.tool = 'hammer'; // a build put down: the hammer again
       else if (this.ui?.bagShowing) this.ui.toggleBag(false);
       else if (this.cookingAt) this.openCooking(null);
       else if (this.pouchOf) this.openPouch(null);
@@ -758,7 +759,8 @@ export class VillageScene extends SimScene {
     kb.removeAllListeners('keydown-ONE'); kb.removeAllListeners('keydown-TWO'); kb.removeAllListeners('keydown-THREE');
     kb.on('keydown-MINUS', () => (this.speed = this.speed > 4 ? 4 : 1));
     kb.on('keydown-PLUS', () => (this.speed = this.speed < 4 ? 4 : 16));
-    ['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT', 'NINE'].forEach((k, i) => kb.on(`keydown-${k}`, () => this.setTool(TOOLS[i])));
+    ['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX', 'SEVEN', 'EIGHT'].forEach((k, i) => kb.on(`keydown-${k}`, () => this.setTool(this.hammerOut() ? BUILDS[i] : BELT[i])));
+    kb.on('keydown-ZERO', () => { if (this.hammerOut()) this.setTool('hammer'); });
     // the kernel's R (restart) / N (new seed) are far too easy to hit mid-run: restart lives in the pause menu,
     // and R only works on the end screens where it means "new run"
     kb.removeAllListeners('keydown-R');
@@ -1134,6 +1136,8 @@ export class VillageScene extends SimScene {
       return c && at ? `Find your ${name} — ${LOST_TOOLS[c.tool]} to the ${this.bearing(at.x, at.y)}` : `Find ${/^[aeiou]/.test(name) ? 'an' : 'a'} ${name}`;
     }
     if ((tool === 'sword' && this.player.weapons.melee < 0) || (tool === 'bow' && this.player.weapons.bow < 0)) return 'Equip a weapon first';
+    if (BUILDS.includes(tool) && !this.player.pack.hasTool('hammer')) return this.toolLocked('hammer') ?? 'Find your hammer first';
+    if (tool === 'seeds' && !this.player.pack.hasTool('hoe')) return `Seeds need a hoe: ${(this.toolLocked('hoe') ?? '').toLowerCase()}`;
     if (tool === 'warren' && !this.gnomesFound) return 'Find the gnomes first: they dig the warrens';
     return tool === 'gnomehouse' && !this.gnomesFound ? 'You have never seen how a toadstool cottage is built' : null;
   }
@@ -1178,6 +1182,8 @@ export class VillageScene extends SimScene {
     if(!isBulk(slot))it.gear={...slot};it.playerDropPending=true;
     throwItem(it,this.player,this.clampThrow(aim),this.rng);this.validateTool();return true;
   }
+  /** Is the hammer (or something it builds) in hand? Then the build row shows and 1-8 pick a build. */
+  hammerOut(): boolean { return this.player.tool === 'hammer' || BUILDS.includes(this.player.tool); }
   setTool(tool: Tool): void {
     if (!TOOLS.includes(tool)) return; // nothing but a tool goes in the head's hand
     const why = this.toolLocked(tool);

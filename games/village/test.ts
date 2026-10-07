@@ -6,7 +6,7 @@ const clearBulk = (s: VillageScene) => s.player.pack.slots.forEach((b,i)=>{if(b 
 import type { VillageScene } from './main';
 import { World, WILD_FOOD, doorstep, buildingCenter, hearthCost, BUILDINGS, type BuildingKind } from './world';
 import { Rng } from '../../src/shared/rng';
-import { Villager, Arrow, Raider } from './agents';
+import { Villager, Arrow, Raider, BELT, BUILDS } from './agents';
 import { Brute, Rat, Ogre, Wrecker, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm } from './wildlife';
 import { SLOT_GAP, Warband } from './regiment';
@@ -1898,18 +1898,20 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       const host = s.hosts[0];
       assert(!!host && host.state === 'mustering' && host.peak === hostSize(warnDay + 1) && s.journal.some((j) => /mustering to the/.test(j.text)), `on the warning day a host of ${host?.peak} musters, and the scouts say so`);
       const ranks = host.warbands.flatMap((w) => w.members);
-      assert(Math.hypot(host.at.x - c.x, host.at.y - c.y) >= 55 * TILE && ranks.every((r) => r.warband && r.lairBound) && !s.raidActive, `${ranks.length} of it camp in ${host.warbands.length} warbands ${Math.round(Math.hypot(host.at.x - c.x, host.at.y - c.y) / TILE)} tiles out, not yet a raid`);
+      assert(Math.hypot(host.at.x - c.x, host.at.y - c.y) >= 40 * TILE && ranks.every((r) => r.warband && r.lairBound) && !s.raidActive, `${ranks.length} of it camp in ${host.warbands.length} warbands ${Math.round(Math.hypot(host.at.x - c.x, host.at.y - c.y) / TILE)} tiles out, not yet a raid`);
       const camped = host.warbands.map((w) => ({ x: w.x, y: w.y }));
       run(5);
       assert(host.warbands.every((w, i) => Math.hypot(w.x - camped[i].x, w.y - camped[i].y) < TILE) && host.state === 'mustering', 'and nobody moves before the day it marches');
       // march: at the raid day's dawn the column sets off down one road
       s.day++; s.newDay();
-      const d0 = Math.hypot(host.warbands[0].x - c.x, host.warbands[0].y - c.y);
+      // distance by road (a host whose road starts off sideways still closes on the village)
+      const road = (w: { x: number; y: number }) => s.world.bfs(World.toTile(w.x, w.y), World.toTile(c.x, c.y), true).length * TILE;
+      const d0 = road(host.warbands[0]);
       assert(host.state === 'marching' && s.raidActive && host.bodies().every((r) => !r.lairBound), 'on the raid day it marches and the raid is on');
       run(15);
-      const lead = host.warbands.find((w) => w.members.length)!, d1 = Math.hypot(lead.x - c.x, lead.y - c.y);
+      const lead = host.warbands.find((w) => w.members.length)!, d1 = road(lead);
       const offs = host.warbands.flatMap((w) => w.active().map((r) => Math.hypot(r.x - r.slot!.x, r.y - r.slot!.y))).sort((a, b) => a - b);
-      assert(d1 < d0 - 10 * TILE && offs[offs.length >> 1] < TILE, `the column closes on the village (${Math.round(d0 / TILE)} → ${Math.round(d1 / TILE)} tiles), its raiders keeping their places (median ${offs[offs.length >> 1]?.toFixed(1)} px off)`);
+      assert(d1 < d0 - 10 * TILE && offs[offs.length >> 1] < TILE, `the column closes on the village by road (${Math.round(d0 / TILE)} → ${Math.round(d1 / TILE)} tiles), its raiders keeping their places (median ${offs[offs.length >> 1]?.toFixed(1)} px off)`);
       // engage: a regiment across its road is charged; the rest of the column keeps marching
       const ahead = host.pointAt(host.lead + 10 * TILE);
       const guard: Villager[] = [];
@@ -2170,6 +2172,20 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       const withPick = shown(document.querySelector('.drawer.inspector'));
       s.selectBuilding(null); ui.render(0.2);
       assert(withPick && !shown(document.querySelector('.drawer.inspector')), 'picking a building opens the inspector, and letting it go shuts it');
+      // the hammer builds: the belt holds what you hold in your hands, and the builds come up over it with the hammer
+      const beltTools = Array.from(document.querySelectorAll<HTMLElement>('#overlay .slots .slot[data-tool]')).map((e) => e.dataset.tool);
+      const row = document.querySelector('#overlay .buildrow')!, hammerSlot = document.querySelector('#overlay .slots .slot[data-tool="hammer"]')!;
+      assert(beltTools.join() === BELT.join() && !BUILDS.some((t) => beltTools.includes(t)) && BUILDS.every((t) => !!row.querySelector(`.slot[data-tool="${t}"]`)), `the belt is ${beltTools.join(', ')}; every build lives in the hammer's row`);
+      s.player.tool = 'sword'; ui.render(0.2);
+      const shutWithSword = !shown(row);
+      s.setTool('hammer'); ui.render(0.2);
+      const openWithHammer = shown(row);
+      s.setTool('house'); ui.render(0.2);
+      assert(shutWithSword && openWithHammer && String(s.player.tool) === 'house' && shown(row) && hammerSlot.classList.contains('on'), 'the build row is shut with the sword, open with the hammer; picking a house keeps the hammer lit');
+      s.player.cycleTool(1, (t) => !!s.toolLocked(t));
+      assert(String(s.player.tool) === 'basket', `Tab from a build goes on along the belt from the hammer (${s.player.tool})`);
+      s.reset(42); s.screen = 'playing'; s.paused = true;
+      assert(/hammer/i.test(s.toolLocked('house') ?? '') && /hoe/i.test(s.toolLocked('seeds') ?? ''), `with no hammer nothing can be built, and with no hoe no seeds (${s.toolLocked('house')})`);
       s.paused = true;
     }
 

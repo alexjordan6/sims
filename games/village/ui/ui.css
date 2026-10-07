@@ -630,7 +630,7 @@ body::after {
 .hud-map { position: absolute; right: 8px; bottom: 8px; padding: 3px; line-height: 0; }
 .hud-map .minimap { width: 170px; height: auto; max-width: 170px; border: 0; }
 /* 5. the alert line, top centre: two at most */
-#overlay .toasts { top: 8px; gap: 4px; }
+#overlay .toasts { top: 44px; gap: 4px; padding: 0 16px; } /* under the status strip, never over it */
 #overlay .toast { font-family: var(--font); font-size: 14px; padding: 4px 12px; border-image: none; color: var(--ink); }
 #overlay .toast.raid { border-color: #ff5a5a88; color: #ffd0d0; }
 /* on demand: drawers */
@@ -650,3 +650,10 @@ body::after {
 .ctrl-tab { display: none; }
 .ctrl-card { border: 1px solid var(--glass-edge) !important; border-image: none !important; background: var(--glass); border-radius: 3px; padding: 8px 10px; }
 .bagpanel { bottom: 120px; }
+
+/* the hammer's build row: over the belt while the hammer is out */
+#overlay .buildrow { display: flex; gap: 2px; padding: 3px; background: var(--glass); border: 1px solid var(--glass-edge); border-radius: 3px; }
+#overlay .buildrow[hidden] { display: none; }
+#overlay .buildrow .slot .cost { display: block; position: absolute; right: 0; bottom: -2px; font-size: 9px; }
+#overlay .buildrow .slot .cost .spr { display: none; }
+#overlay .slot[hidden] { display: none; }

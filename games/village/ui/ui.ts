@@ -4,7 +4,7 @@ import { gearUrl } from '../gear-art';
 import { STACK, WARREN, SOLDIER_CAP_PER_LEVEL } from '../config';
 import { REGIMENT_SIZE } from '../regiment';
 import { getGui } from '@shared/index';
-import { Villager, Raider, Player, Mover, type Tool } from '../agents';
+import { Villager, Raider, Player, Mover, BUILDS, type Tool } from '../agents';
 import { Boar } from '../wildlife';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
 import { OGRE, BOAR, HAUL, TILE, COST, ORDER, YARD, GNOME_PACK, p, TOWER, HEARTH_WOOD, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, TRAITS, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type ArmorSlot, UPGRADE_COST, SERVE_RANGE, MOODS, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, isDish, foodCount, hasInterior, type DishKind, CROP_KINDS, DISMANTLE, DIET_CAP, DIET_STAT_NAME, type FoodKind, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS } from '../config';
@@ -149,29 +149,31 @@ export class UI {
         <div class="abilities">${(["Q", "W", "E", "R"] as const).map((k) => `<div class="ability" data-ab="${k}"><kbd>${k}</kbd><span class="ab-name"></span><span class="ab-cd"></span><span class="ab-count"></span></div>`).join("")}</div>
         <div class="t-buff" hidden title="The dish you last ate, and how long it keeps working"><span class="buff"></span></div>
       </div>
-      <div class="slots" data-hud="belt">
-        <span class="cap slots-cap">TOOLS <kbd>1-9</kbd></span>
-        ${slot('hoe', 'town', TOWN.iconHoe, 'HOE', 'Till grass into soil; clears stumps; three hits on soil flatten it back to grass')}
-        ${slot('seeds', 'farm', FARM.grassTuft, 'SEEDS', 'Sow the chosen crop on tilled soil (F cycles wheat / carrots / tomatoes), trees on grass. What a child eats decides the adult')}
-        ${slot('axe', 'town', TOWN.iconAxe, 'AXE', 'Chop trees for wood (3 hits); clears stumps and saplings')}
-        ${slot('sword', 'dungeon', DUNGEON.sword, 'SWORD', 'Swing at raiders in front of you. You start with a club — forge a real blade at the barracks chest')}
+      <div class="buildrow" hidden>
         ${slot('house', 'town', TOWN.wallWoodDoor, 'HOUSE', 'A family of 4 lives here and has children', COST.house)}
         ${slot('barracks', 'town', TOWN.wallStoneDoor, 'BARRACKS', `Room for ${p.soldierCap} more warriors, and what drills them: a child promised a sword needs a warm barracks standing. Its tower shoots arrows at raiders in range; restock the chest inside with wood`, COST.barracks)}
-        ${slot('hammer', 'town', TOWN.iconHammer, 'HAMMER', 'Upgrade the building in front of you (3 hits)')}
-        ${slot('bow', 'dungeon', DUNGEON.sword, 'BOW', 'Fire physical arrows. Shared ammunition is made at the barracks; a better bow is forged at its chest')}
-        ${slot('wall', 'town', TOWN.wallStoneDoor, 'WALL', 'Build a connected stone perimeter. 4 wood per segment', 4)}
-        ${slot('gate', 'town', TOWN.wallWoodDoor, 'GATE', 'Friendly villagers pass; X toggles opening to everyone', 12)}
-        ${slot('stairs', 'town', TOWN.iconHammer, 'STAIRS', 'Connect stairs to your walls. Right click or X to climb and descend', 10)}
         ${slot('tavern', 'town', TOWN.wallWoodDoor, 'TAVERN', 'A cozy place to eat, rest and gather', COST.tavern)}
         ${slot('gnomehouse', 'town', TOWN.wallWoodDoor, 'GNOME HOUSE', GNOME_TITLE, COST.gnomehouse)}
         ${slot('warren', 'town', TOWN.wallWoodDoor, 'WARREN', WARREN_TITLE(), COST.warren)}
-        ${slot('wand', 'dungeon', DUNGEON.wizard, 'WAND', 'Shaman wand: left click or drag a box to pick soldiers, right click to send them — open ground = go there and hold, a raider = attack it, a wall top = take that archer post. F = follow me (again to stop). With no one picked, orders go to everyone')}
+        ${slot('wall', 'town', TOWN.wallStoneDoor, 'WALL', 'Build a connected stone perimeter. 4 wood per segment', 4)}
+        ${slot('gate', 'town', TOWN.wallWoodDoor, 'GATE', 'Friendly villagers pass; X toggles opening to everyone', 12)}
+        ${slot('stairs', 'town', TOWN.iconHammer, 'STAIRS', 'Connect stairs to your walls. Right click or X to climb and descend', 10)}
+      </div>
+      <div class="slots" data-hud="belt">
+        <span class="cap slots-cap">TOOLS <kbd>1-9</kbd></span>
+        ${slot('sword', 'dungeon', DUNGEON.sword, 'SWORD', 'Swing at raiders in front of you. You start with a club — forge a real blade at the barracks chest')}
+        ${slot('bow', 'dungeon', DUNGEON.sword, 'BOW', 'Fire physical arrows. Shared ammunition is made at the barracks; a better bow is forged at its chest')}
+        ${slot('hoe', 'town', TOWN.iconHoe, 'HOE', 'Till grass into soil; clears stumps; three hits on soil flatten it back to grass')}
+        ${slot('seeds', 'farm', FARM.grassTuft, 'SEEDS', 'Sow the chosen crop on tilled soil (F cycles wheat / carrots / tomatoes), trees on grass. What a child eats decides the adult')}
+        ${slot('axe', 'town', TOWN.iconAxe, 'AXE', 'Chop trees for wood (3 hits); clears stumps and saplings')}
+        ${slot('hammer', 'town', TOWN.iconHammer, 'HAMMER', 'Upgrade the building in front of you (3 hits)')}
         ${slot('basket', 'farm', FARM.crate, 'BASKET', 'F picks a kind of food; walk up to the granary to fill the basket with it, then throw it into a home yard. It flies where you point, bounces and rolls; children only eat what lies in the yard of the home they live in, and what they eat is who they become')}
+        ${slot('wand', 'dungeon', DUNGEON.wizard, 'WAND', 'Shaman wand: left click or drag a box to pick soldiers, right click to send them — open ground = go there and hold, a raider = attack it, a wall top = take that archer post. F = follow me (again to stop). With no one picked, orders go to everyone')}
         <div class="slot bag" data-bag="1" title="Your backpack: what you are carrying, and what you are wearing. B opens it">${spr('farm', FARM.crate, 32)}<span class="lbl">BAG</span><span class="cost bagfull"></span></div>
       </div>
     </div>`);
     // only the tool slots pick a tool: the BAG shares the slot look but opens the backpack
-    this.hotbar.querySelectorAll<HTMLElement>('.slot[data-tool]').forEach((el) => el.addEventListener('click', () => s.setTool(el.dataset.tool as Tool)));
+    this.hotbar.querySelectorAll<HTMLElement>('.slot[data-tool]').forEach((el) => el.addEventListener('click', () => { const t = el.dataset.tool as Tool; s.setTool(s.player.tool === t && BUILDS.includes(t) ? 'hammer' : t); }));
 
     this.bag = h(`<div class="bagpanel panel" hidden>
       <div class="ph"><h2>Backpack</h2><span class="cap">B or ESC to shut it</span><button class="btn small close">CLOSE</button></div>
@@ -257,7 +259,8 @@ export class UI {
       ['K', 'this panel'],
       ['M', 'sound on / off'],
       ['J · L · I', 'journal · army and villagers · inspector'],
-      ['1 · 2 · 3', 'game speed 1x · 4x · 16x'],
+      ['- · =', 'game speed'],
+      ['1-8', 'pick a tool — with the hammer out, pick what to build (0 or Esc: the hammer again)'],
       ['?', 'how to play'],
     ];
     const panel = h(`<div class="ctrl-panel">
@@ -384,13 +387,16 @@ export class UI {
     const s = this.scene;
     this.hotbar.querySelectorAll<HTMLElement>('.slot[data-tool]').forEach((el) => {
       const tool = el.dataset.tool as Tool;
-      el.classList.toggle('on', s.player.tool === tool);
+      el.classList.toggle('on', s.player.tool === tool || (tool === 'hammer' && BUILDS.includes(s.player.tool)));
+      if (tool === 'seeds') el.hidden = !s.player.pack.hasTool('hoe');
       el.classList.toggle('off', !!s.toolLocked(tool) || ((tool === 'house' || tool === 'barracks') && s.wood < COST[tool]));
       if (tool === 'warren') { const want = s.toolLocked(tool) ? 'Find the gnomes first: they dig the warrens.' : WARREN_TITLE(); if (el.title !== want) el.title = want; }
       if (tool === 'gnomehouse') { const want = s.toolLocked(tool) ? 'Somewhere in these woods a gnome family keeps house. Warm motes drift over their glade — walk into it and they will teach you the craft.' : GNOME_TITLE; if (el.title !== want) el.title = want; }
       if (tool === 'basket') { const lbl = el.querySelector('.lbl')!, want = `BASKET · ${s.player.carriedOf('food',s.player.basketKind)} ${FOODS[s.player.basketKind].name.toUpperCase()}`; if (lbl.textContent !== want) lbl.textContent = want; }
       if (tool === 'seeds') { const lbl = el.querySelector('.lbl')!, want = FOODS[s.player.cropKind].name.toUpperCase(); if (lbl.textContent !== want) lbl.textContent = want; }
     });
+    const row = this.hotbar.querySelector<HTMLElement>('.buildrow')!;
+    if (row.hidden === s.hammerOut()) row.hidden = !s.hammerOut();
     // the ability bar: a dark sweep over each key while it cools down, greyed when it cannot fire at all
     for (const a of s.abilityState()) {
       const el = this.hotbar.querySelector<HTMLElement>(`.ability[data-ab="${a.key}"]`);

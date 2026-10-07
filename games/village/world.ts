@@ -826,6 +826,9 @@ export class World {
         let clash = false;
         for (let dy = -c.clear; dy <= c.clear && !clash; dy++) for (let dx = -c.clear; dx <= c.clear; dx++) { const t = this.get(tx + dx, ty + dy); if (!t || t.building || t.defense) { clash = true; break; } }
         if (clash) continue;
+        // a walk from the square first (to the spot or beside it), before the ground is touched: the world's
+        // walkability stays the same between tries, so a failed search's flood is remembered and the next is free
+        if (!this.bfs(from, { tx, ty }).length) continue;
         // a little clearing; an old field keeps its long grass, a hut and a stump are trodden down
         for (let dy = -c.clear; dy <= c.clear; dy++) for (let dx = -c.clear; dx <= c.clear; dx++) {
           const t = this.get(tx + dx, ty + dy)!;
@@ -833,7 +836,6 @@ export class World {
           const g = this.get(tx + dx, ty + dy)!;
           if (c.site !== 'field' && g.tall) { g.tall = undefined; this.tallCount--; this.dirty.add((ty + dy) * this.cols + tx + dx); }
         }
-        if (!this.bfs(from, { tx, ty }).length) continue; // somewhere a walk from the square reaches
         const at = World.center(tx, ty), it = this.dropItem('gear', 1, at.x, at.y);
         it.gear = { kind: 'tool', tool: c.tool };
         this.toolCaches.push({ tool: c.tool, site: c.site, tx, ty });
