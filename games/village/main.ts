@@ -4,7 +4,7 @@ import { isImplement, IMPLEMENTS, START_TOOLS, LOST_TOOLS, type Implement, TOOL_
 import Phaser from 'phaser';
 import { SimScene, launch, button, getGui, Rng } from '@shared/index';
 import { launch as throwItem, type Item } from './items';
-import { World, WILD_FOOD, doorstep, buildingCenter, buildingMaxHp, hasHearth, hearthCost, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos, type Hive, type Chest } from './world';
+import { World, WILD_FOOD, doorstep, buildingCenter, buildingMaxHp, hasHearth, hearthCost, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos, type Hive, type Chest, type Ruin } from './world';
 import { Villager, Raider, Player, Mover, Arrow, TOOLS, BELT, BUILDS, SWING, type Role, type Tool, type Order } from './agents';
 import { DEFENSE_COST, WALL_HEIGHT, WARREN, SOLDIER_CAP_PER_LEVEL, MAP_AREA, PLAINS } from './config';
 import { Interior } from './interior';
@@ -314,6 +314,7 @@ export class VillageScene extends SimScene {
     this.spawnTrolls();
     this.spawnCamps();
     this.placeHoard();
+    this.ruinGuards.clear();
     this.spawnHives();
     this.lairFound = false;
     this.gnomesFound = p.gnomeStart; // you already keep a toadstool cottage: the craft needs no finding
@@ -513,6 +514,8 @@ export class VillageScene extends SimScene {
       if (left) return `Guarded — ${left} still hold${left === 1 ? 's' : ''} the camp`;
     }
     if (ch.source === 'lair' && this.ogre && !this.ogre.dead && this.ogre.state !== 'sleeping') return 'The Ogre is up and about — come back while he sleeps, or kill him';
+    const ruin = this.world.ruins.find((r) => r.chest === ch), keep = ruin ? this.ruinKeepers(ruin) : 0;
+    if (keep) return `Guarded — ${keep} still ${ruin!.kind === 'barrow' ? 'nest in the barrow' : 'hold the tower'}`;
     return null;
   }
   /** The nearest shut chest within `reach` pixels of (x, y). */
@@ -530,8 +533,11 @@ export class VillageScene extends SimScene {
    * can't carry waits for a second trip). Opening the hoard while the Ogre sleeps wakes him.
    */
   openChest(ch: Chest): boolean {
+    const ruin = this.world.ruins.find((r) => r.chest === ch);
+    if (ruin && !ruin.roused) this.rouseRuin(ruin); // laying hands on a ruin wakes whoever keeps it
     const why = this.chestGuard(ch);
     if (why) { this.event('info', why, true); return false; }
+    if (ch.stock && !ch.loot.length) ch.loot = rollLoot(this.lootRng, danger(this.tilesOut(ch.tx, ch.ty), this.day, ch.stock.bonus), ch.stock.size, ch.stock.gear);
     const from = World.center(ch.tx, ch.ty);
     let gear = 0, sup = 0;
     for (const slot of ch.loot) {
@@ -549,6 +555,67 @@ export class VillageScene extends SimScene {
       this.event('raid', 'The Ogre wakes — and he is between you and the door!', true);
     }
     return true;
+  }
+
+  // ---- ruins and wrecks: found once, looted once ------------------------------------------------
+
+  /** who keeps each ruin: a watchtower's raiders, a barrow's skulks once roused */
+  ruinGuards = new Map<Ruin, Raider[]>();
+  private ruinWatchT = 0;
+  /** Keepers still standing near their ruin. */
+  ruinKeepers(r: Ruin): number {
+    const c = World.center(r.tx, r.ty);
+    return (this.ruinGuards.get(r) ?? []).filter((g) => !g.dead && Math.hypot(g.x - c.x, g.y - c.y) < 14 * TILE).length;
+  }
+  /** Keepers round (x, y), leashed to it like a camp's: they stay by their ruin and fight off whoever comes near. */
+  private keepers(r: Ruin, n: number, make: (x: number, y: number, roll: number) => Raider): void {
+    const rng = this.lootRng, c = World.center(r.tx, r.ty), out: Raider[] = [];
+    for (let i = 0; i < n; i++) {
+      const a = rng.range(0, Math.PI * 2), d = rng.range(TILE, 2.5 * TILE);
+      let x = c.x + Math.cos(a) * d, y = c.y + Math.sin(a) * d;
+      const t = World.toTile(x, y);
+      if (this.world.isBlocked(t.tx, t.ty, true)) { x = c.x; y = c.y; }
+      const g = make(x, y, rng.next());
+      g.camp = { x: c.x, y: c.y, aggro: p.campAggro * TILE, leash: p.campLeash * TILE };
+      g.lairBound = true; // never part of a raid
+      g.task = r.kind === 'tower' ? 'holding the old watchtower' : 'nesting in the barrow';
+      out.push(this.spawn(g));
+    }
+    this.ruinGuards.set(r, out);
+  }
+  /**
+   * A ruin's keepers come to it when you do: a watchtower is found held by three to five raiders (they were
+   * there all along — they are only raised once you are within 30 tiles, so a far tower costs nothing),
+   * and two or three skulks boil out of a barrow when you come close. A cart has nobody.
+   */
+  private rouseRuin(r: Ruin): void {
+    if (r.roused || r.chest.opened) return;
+    r.roused = true;
+    if (r.kind === 'tower') {
+      const opts = { hpMul: this.mods.raiderHpMul, speedMul: this.mods.raiderSpeedMul };
+      this.keepers(r, 3 + this.lootRng.int(0, 2), (x, y, roll) => roll < 0.25 ? new Brute(x, y, opts) : roll < 0.45 ? new Shaman(x, y, opts) : new Raider(x, y, opts));
+    } else if (r.kind === 'barrow') {
+      this.keepers(r, 2 + this.lootRng.int(0, 1), (x, y) => new Skulk(x, y));
+      this.event('raid', 'Skulks boil out of the barrow!', true);
+    }
+  }
+  /** Twice a second: a ruin first seen goes in the journal; a barrow you come near wakes. */
+  private watchRuins(dt: number): void {
+    this.ruinWatchT -= dt;
+    if (this.ruinWatchT > 0) return;
+    this.ruinWatchT = 0.5;
+    const pl = this.player;
+    for (const r of this.world.ruins) {
+      const c = World.center(r.tx, r.ty), near = Math.hypot(pl.x - c.x, pl.y - c.y);
+      if (!r.seen && (this.fog && this.fog.enabled ? this.fog.visibleAt(c.x, c.y) > 0.5 : near < 18 * TILE)) {
+        r.seen = true;
+        const b = this.bearing(c.x, c.y);
+        this.event('build', r.kind === 'cart' ? `A wrecked cart in the grass to the ${b} — somebody's supplies, never delivered.`
+          : r.kind === 'barrow' ? `An old barrow to the ${b} — something glints inside. Skulks nest in such places.`
+          : `A ruined watchtower to the ${b}, and raiders holding it. Whatever they keep there, they keep it well.`);
+      }
+      if (!r.roused && !r.chest.opened && !pl.dead && !pl.hidden && near < (r.kind === 'tower' ? 30 : 8) * TILE) this.rouseRuin(r);
+    }
   }
 
   /** Dawn: cleared camps are re-manned after a while, and now and then a new one grows out of sight. */
@@ -1968,6 +2035,7 @@ export class VillageScene extends SimScene {
     for (const a of this.agents) if (a.dead) this.onDeath(a as Mover);
     this.removeDead();
 
+    this.watchRuins(dt);
     // finding the lair: the first time it comes into sight
     if (!this.lairFound && this.world.lair && this.fog) {
       const c = buildingCenter(this.world.lair);

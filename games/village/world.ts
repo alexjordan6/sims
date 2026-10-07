@@ -7,7 +7,14 @@ import type { Gear, Slot } from './pack';
 /** where a chest stands: a raider camp's, the Ogre's hoard, or one of the wild's ruins and wrecks */
 export type ChestSource = 'camp' | 'lair' | 'cart' | 'barrow' | 'tower';
 /** A chest out in the world: shut on its loot until somebody opens it, then it spills and stands empty. */
-export interface Chest { tx: number; ty: number; source: ChestSource; loot: Slot[]; opened: boolean }
+export interface Chest {
+  tx: number; ty: number; source: ChestSource; loot: Slot[]; opened: boolean;
+  /** a ruin's chest is stocked when it is first opened, at that day's danger: how much, how much of it gear, and the danger on top */
+  stock?: { size: number; gear: number; bonus: number };
+}
+export type RuinKind = 'cart' | 'barrow' | 'tower';
+/** A ruin or wreck in the wild with a chest in it: found once, looted once. */
+export interface Ruin { kind: RuinKind; tx: number; ty: number; chest: Chest; seen: boolean; roused: boolean }
 
 export type DefenseKind = 'wall' | 'gate' | 'stairs';
 export interface Defense extends TilePos { kind: DefenseKind; hp: number; maxHp: number; open: boolean }
@@ -146,6 +153,8 @@ export class World {
   toolCaches: { tool: 'axe' | 'hammer' | 'hoe'; site: 'stump' | 'hut' | 'field'; tx: number; ty: number }[] = [];
   /** the loot chests standing in the world: camps', the lair's hoard, the ruins' (see Chest) */
   chests: Chest[] = [];
+  /** the wild's ruins and wrecks: carts, barrows and watchtowers, each with a chest (see placeRuins) */
+  ruins: Ruin[] = [];
   /** the gnome start's cottage in the clearing (see generate), so the scene needn't go looking for it */
   gnomeStart: Building | null = null;
   denseForests = false;
@@ -805,6 +814,7 @@ export class World {
     if (big > 1) this.carvePlains(hx, hy);
     this.scatterHomeForage(hx, hy);
     this.placeToolCaches(hx, hy);
+    this.placeRuins(hx, hy);
   }
 
   /**
@@ -846,6 +856,42 @@ export class World {
         const at = World.center(tx, ty), it = this.dropItem('gear', 1, at.x, at.y);
         it.gear = { kind: 'tool', tool: c.tool };
         this.toolCaches.push({ tool: c.tool, site: c.site, tx, ty });
+        break;
+      }
+    }
+  }
+
+  /**
+   * Ruins and wrecks: overturned carts near home (mostly supplies, unguarded), barrows further out (gear,
+   * and skulks nest in them), ruined watchtowers far off (the best of it, and raiders hold them). A third
+   * in each band of distance. Only on ground that is already open and reachable, so nothing is cleared and
+   * the walk searches stay cheap; out of their own stream of numbers, so nothing else moves.
+   */
+  private placeRuins(hx: number, hy: number): void {
+    const rng = new Rng(this.seed ^ 0x2b1a5), big = (this.cols * this.rows) / (240 * 160) > 1;
+    const n = big ? 16 : 6, reach = Math.min(this.cols / 2, this.rows / 2 / 0.75) - 10;
+    const from = this.nearest((hx + 0.5) * TILE, (hy + 0.5) * TILE, (_t, tx, ty) => !this.isBlocked(tx, ty)) ?? { tx: hx, ty: hy };
+    const bands: [number, number][] = [[25, 45], [45, 80], [80, Math.max(90, reach)]];
+    const den = this.buildings.find((b) => b.kind === 'gnomehouse' && b.wild);
+    for (let i = 0; i < n; i++) {
+      const band = i % 3, [r0, r1] = bands[band], roll = rng.next();
+      const kind: RuinKind = band === 0 ? (roll < 0.7 ? 'cart' : 'barrow') : band === 1 ? (roll < 0.25 ? 'cart' : roll < 0.75 ? 'barrow' : 'tower') : (roll < 0.6 ? 'tower' : 'barrow');
+      for (let tries = 0; tries < 200; tries++) {
+        const a = rng.range(0, Math.PI * 2), r = rng.range(r0, r1);
+        const tx = Math.round(hx + Math.cos(a) * r), ty = Math.round(hy + Math.sin(a) * r * 0.75);
+        if (tx < 8 || ty < 8 || tx > this.cols - 9 || ty > this.rows - 9) continue;
+        if (this.lair && Math.hypot(this.lair.tx - tx, this.lair.ty - ty) < 16) continue;
+        if (den && Math.hypot(den.tx - tx, den.ty - ty) < 12) continue;
+        if (this.toolCaches.some((q) => Math.hypot(q.tx - tx, q.ty - ty) < 10)) continue;
+        if (this.ruins.some((q) => Math.hypot(q.tx - tx, q.ty - ty) < 14)) continue;
+        if (this.plains.some((pl) => ((tx - pl.tx) / pl.rx) ** 2 + ((ty - pl.ty) / pl.ry) ** 2 < 1.2)) continue;
+        let open = true;
+        for (let dy = -1; dy <= 1 && open; dy++) for (let dx = -1; dx <= 1; dx++) { const t = this.get(tx + dx, ty + dy); if (!t || t.kind !== 'grass' || t.building || t.defense || t.trail) { open = false; break; } }
+        if (!open || !this.bfs(from, { tx, ty }).length) continue;
+        const stock = kind === 'cart' ? { size: 5, gear: 0.2, bonus: 0 } : kind === 'barrow' ? { size: 6, gear: 0.7, bonus: 0.1 } : { size: 8, gear: 0.6, bonus: 0.2 };
+        const chest: Chest = { tx, ty, source: kind, loot: [], opened: false, stock };
+        this.chests.push(chest);
+        this.ruins.push({ kind, tx, ty, chest, seen: false, roused: false });
         break;
       }
     }

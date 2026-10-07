@@ -259,7 +259,31 @@ export class Structures {
       g.position.set(x, groundHeight(x, z), z);
       this.group.add(g); this.sites.set(c, g);
     }
-    for (const [c, g] of this.sites) if (!w.toolCaches.includes(c as typeof w.toolCaches[number])) { this.group.remove(g); this.sites.delete(c); }
+    for (const [c, g] of this.sites) if (!w.toolCaches.includes(c as typeof w.toolCaches[number]) && !w.ruins.includes(c as typeof w.ruins[number])) { this.group.remove(g); this.sites.delete(c); }
+    // the ruins and wrecks round their chests: an overturned cart, a barrow mound, a broken stone tower
+    for (const r of w.ruins) {
+      if (this.sites.has(r)) continue;
+      const g = new THREE.Group(), x = r.tx + 0.5, z = r.ty + 0.5;
+      if (r.kind === 'cart') {
+        const bed = part(box, 0x6a4a2c, 1.6, 0.35, 0.9, 0.9, 0.15, -0.2); bed.rotation.z = 0.45; g.add(bed);
+        const wheel = part(cyl, 0x4a3420, 0.8, 0.12, 0.8, 1.2, 0, 0.55); g.add(wheel); // one lying in the grass
+        const up = part(cyl, 0x4a3420, 0.8, 0.12, 0.8, 0.4, 0.4, -0.75); up.rotation.x = Math.PI / 2; g.add(up);
+        g.add(part(box, 0x5a3e26, 0.12, 0.12, 1.6, -0.5, 0, 0.3)); // the shaft
+      } else if (r.kind === 'barrow') {
+        g.add(part(ico, 0x4e6a3a, 3.2, 1.6, 2.6, 0, -0.8, -1.6)); // the mound behind the chest
+        g.add(part(box, 0x7a7a72, 0.9, 0.9, 0.18, 0, 0, -0.45)); // its stone door
+        g.add(part(box, 0x8a8a80, 1.2, 0.16, 0.24, 0, 0.9, -0.45)); // the lintel
+      } else {
+        for (let k = 0; k < 9; k++) {
+          const a = (k / 9) * Math.PI * 2, h = [2.2, 1.4, 0.6, 0.3, 0.9, 1.8, 2.6, 1.1, 0.5][k];
+          const st = part(box, k % 2 ? 0x7a766c : 0x6a665e, 0.9, h, 0.5, Math.cos(a) * 1.5, 0, Math.sin(a) * 1.5); st.rotation.y = -a; g.add(st);
+        }
+        g.add(part(box, 0x6a665e, 0.6, 0.3, 0.6, 2.4, 0, 0.8)); // a fallen block
+      }
+      g.traverse((o) => { o.castShadow = true; o.receiveShadow = true; });
+      g.position.set(x, groundHeight(x, z), z);
+      this.group.add(g); this.sites.set(r, g);
+    }
     // the chests: a banded wooden box; the Ogre's hoard is bigger and iron-bound. Opened, the lid stands back
     for (const ch of w.chests) {
       const e = this.chests.get(ch);

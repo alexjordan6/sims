@@ -30,6 +30,7 @@ function fresh(wild = false, trolls = false, hives = false, skulks = false, thic
   if (!skulks) for (const a of s.agents) if (a instanceof Skulk) a.dead = true; // nor a skulk that crept out during an earlier check
   if (!thickets) for (const q of s.world.find((t) => t.kind === 'thicket')) s.world.set(q.tx, q.ty, 'grass'); // nor thorns under a walk
   for (const c of s.camps) for (const m of c.members) m.dead = true; // nor a raider camp out in the wild
+  for (const a of s.agents) if (a instanceof Raider && a.camp) a.dead = true; // nor a ruin's keepers
   s.camps = [];
   s.removeDead();
   (s as unknown as { ui: { showScreen(v: null): void } }).ui.showScreen(null);
@@ -2002,6 +2003,35 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(!s.openChest(hoard) && /Ogre/.test(s.chestGuard(hoard) ?? ''), 'the hoard stays shut while the Ogre is up');
       ogre.state = 'sleeping'; ogre.hidden = true;
       assert(s.openChest(hoard) && (ogre.state as string) === 'roaming' && ogre.aggroed && !ogre.hidden, 'opened while he sleeps, the hoard wakes him');
+
+      // ruins and wrecks: carts near, barrows further, watchtowers far; each found once and looted once
+      s = fresh();
+      const ruins = s.world.ruins, c0 = (s as unknown as { villageCentre(): { x: number; y: number } }).villageCentre(), from = s.player.tile;
+      const out = ruins.map((r) => Math.round(Math.hypot(r.tx - c0.x / TILE, r.ty - c0.y / TILE)));
+      assert(ruins.length === 6 && out.every((d) => d >= 22) && ruins.every((r) => s.world.chests.includes(r.chest) && r.chest.source === r.kind && !r.chest.loot.length && !!r.chest.stock && s.world.bfs(from, { tx: r.tx, ty: r.ty }).length > 0),
+        `six ruins out in the wild, every one with a chest and a way there (${ruins.map((r, i) => `${r.kind} ${out[i]}`).join(', ')})`);
+      const kinds = new Set(ruins.map((r) => r.kind));
+      assert(kinds.has('tower') && kinds.has('barrow'), `watchtowers and barrows among them (${[...kinds]})`);
+      const tower = ruins.find((r) => r.kind === 'tower')!;
+      assert(!s.ruinGuards.has(tower) && !s.openChest(tower.chest) && tower.roused, 'a far tower costs nothing till you come: laying hands on its chest finds it held');
+      assert(s.ruinKeepers(tower) >= 3 && !s.openChest(tower.chest) && /hold the tower/.test(s.chestGuard(tower.chest) ?? ''), `a watchtower is held by ${s.ruinKeepers(tower)} raiders, and its chest stays shut`);
+      for (const g of s.ruinGuards.get(tower)!) g.dead = true; s.removeDead();
+      const before = s.world.items.length;
+      assert(s.openChest(tower.chest) && s.world.items.length - before >= Math.round(8 * p.lootMul) - 1 && tower.chest.opened, `cleared, the tower's chest spills ${s.world.items.length - before} things, stocked as it opens`);
+      s.day++; s.newDay();
+      assert(tower.chest.opened && !tower.chest.loot.length && !s.openChest(tower.chest), 'a ruin is looted once: dawn does not fill it again');
+      const barrow = ruins.find((r) => r.kind === 'barrow')!;
+      Object.assign(s.player, World.center(barrow.tx - 5, barrow.ty));
+      const fogWas = s.fog?.enabled; if (s.fog) s.fog.enabled = false; // seen by being near: the fog only lifts on a frame
+      (s as unknown as { watchRuins(dt: number): void }).watchRuins(1);
+      if (s.fog) s.fog.enabled = !!fogWas;
+      assert(barrow.seen && barrow.roused && s.ruinKeepers(barrow) >= 2 && s.ruinGuards.get(barrow)!.every((g) => g instanceof Skulk) && s.journal.some((j) => /barrow/.test(j.text)),
+        `walk near a barrow and ${s.ruinKeepers(barrow)} skulks boil out of it (and the journal notes it)`);
+      assert(!s.openChest(barrow.chest), 'its chest stays shut while they live');
+      for (const g of s.ruinGuards.get(barrow)!) g.dead = true; s.removeDead();
+      assert(s.openChest(barrow.chest) && barrow.chest.opened, 'with the skulks dead the barrow gives up its chest');
+      const cart = ruins.find((r) => r.kind === 'cart');
+      if (cart) assert(s.chestGuard(cart.chest) === null, 'a wrecked cart is nobody\'s: open it any time');
     }
 
     // ---- the opening: gnomes by default, no farm, wild food by the door ------------------------------
