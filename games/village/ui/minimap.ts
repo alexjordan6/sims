@@ -105,7 +105,7 @@ export class Minimap {
     const fog = this.scene.fog;
     for (let i = 0; i < tiles.length; i++) {
       const o = i * 4;
-      if (fog && !fog.explored[i]) { d[o] = 6; d[o + 1] = 5; d[o + 2] = 10; d[o + 3] = 255; continue; } // unseen: black
+      if (fog && !fog.explored[i]) { d[o] = 6; d[o + 1] = 5; d[o + 2] = 10; d[o + 3] = 90; continue; } // unseen: a dark veil the world shows faintly through
       const t = tiles[i], [r, g, b] = t.kind === 'grass' && t.tall ? TALL_GRASS : TERRAIN[t.kind];
       d[o] = r; d[o + 1] = g; d[o + 2] = b; d[o + 3] = 255;
     }

@@ -2108,12 +2108,33 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       const count = () => document.querySelectorAll('.toast').length;
       for (const el of Array.from(document.querySelectorAll('.toast'))) el.remove();
       for (let i = 0; i < 30; i++) ui.toast(`Villager ${i} was killed`, 'death');
-      assert(count() <= 4, `thirty different warnings leave at most four toasts on screen (${count()})`);
+      assert(count() <= 2, `thirty different warnings leave at most two alerts on screen (${count()})`);
       for (const el of Array.from(document.querySelectorAll('.toast'))) el.remove();
       for (let i = 0; i < 30; i++) ui.toast('Hearths burned 0 wood', 'wood');
       assert(count() === 1, 'and the same warning thirty times is one toast, not thirty');
       assert((document.querySelector('.toast') as HTMLElement).textContent!.endsWith('30'), 'which counts itself up instead');
       for (const el of Array.from(document.querySelectorAll('.toast'))) el.remove();
+    }
+
+    // ---- the minimal HUD: five things on screen, everything else on demand -----------------------
+    {
+      s = fresh(); s.paused = false; s.screen = 'playing';
+      const ui = (s as unknown as { ui: { render(dt: number): void; togglePanel(n: string, open?: boolean): void; closeTop(): boolean } }).ui;
+      ui.render(0.2);
+      const shown = (el: Element | null) => !!el && (el as HTMLElement).offsetParent !== null && getComputedStyle(el).display !== 'none';
+      const hud = Array.from(document.querySelectorAll('#overlay [data-hud]'));
+      const drawers = Array.from(document.querySelectorAll('#overlay .drawer, #overlay .bagpanel, #overlay .ctrl-card'));
+      assert(hud.length === 5 && hud.filter((e) => e.getAttribute('data-hud') !== 'alerts').every(shown) && !drawers.some(shown) && !document.getElementById('side'),
+        `in play the screen holds the five — ${hud.map((e) => e.getAttribute('data-hud')).join(', ')} — and no drawer (${drawers.filter(shown).map((e) => e.className).join(', ') || 'none open'})`);
+      const keyed: [string, string][] = [['j', '.drawer.journal'], ['l', '.drawer.roster'], ['i', '.drawer.inspector']];
+      const opened = keyed.map(([k, sel]) => { window.dispatchEvent(new KeyboardEvent('keydown', { key: k })); ui.render(0.2); const o = shown(document.querySelector(sel)); return o; });
+      while (ui.closeTop()) ui.render(0.2);
+      assert(opened.every(Boolean) && !drawers.some(shown), `J, L and I open the journal, the army and the inspector (${opened.join(', ')}), and Esc shuts them again`);
+      s.selectBuilding(s.world.granary!); ui.render(0.2);
+      const withPick = shown(document.querySelector('.drawer.inspector'));
+      s.selectBuilding(null); ui.render(0.2);
+      assert(withPick && !shown(document.querySelector('.drawer.inspector')), 'picking a building opens the inspector, and letting it go shuts it');
+      s.paused = true;
     }
 
     const n = output.textContent!.split('\n').filter(Boolean).length;

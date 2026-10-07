@@ -1,17 +1,16 @@
 import { PackUI } from './pack-ui';
-import { slotName, slotKey } from '../pack';
+import { slotName } from '../pack';
 import { gearUrl } from '../gear-art';
-import { STACK, WARREN, SOLDIER_CAP_PER_LEVEL, type BulkKind } from '../config';
+import { STACK, WARREN, SOLDIER_CAP_PER_LEVEL } from '../config';
 import { REGIMENT_SIZE } from '../regiment';
 import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, type Tool } from '../agents';
 import { Boar } from '../wildlife';
 import { CHAR, TOWN, FARM, DUNGEON, framePos } from '../atlas';
-import { OGRE, BOAR, HAUL, TILE, COST, ORDER, YARD, GNOME_PACK, p, TOWER, HEARTH_WOOD, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, TRAITS, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type Calling, type ArmorSlot, UPGRADE_COST, SERVE_RANGE, MOODS, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, isDish, foodCount, hasInterior, type DishKind, CROP_KINDS, CALLINGS, DISMANTLE, DIET_CAP, DIET_STAT_NAME, type FoodKind, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS } from '../config';
+import { OGRE, BOAR, HAUL, TILE, COST, ORDER, YARD, GNOME_PACK, p, TOWER, HEARTH_WOOD, WEAPONS, WEAPON_SLOTS, type WeaponSlot, LEGACY_TEST_MODE, LEVEL_PERKS, TRAITS, ARMOR, ARMOR_SLOTS, DYES, DYE_NAMES, PLUMES, type ArmorSlot, UPGRADE_COST, SERVE_RANGE, MOODS, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, isDish, foodCount, hasInterior, type DishKind, CROP_KINDS, DISMANTLE, DIET_CAP, DIET_STAT_NAME, type FoodKind, LEVEL_LOOKS, SAPLING_DAYS, SHELTERED_SAPLING_DAYS, TREE_RESERVE, OLD_GROWTH_DAYS } from '../config';
 import { BRANCHES, nodeById, nodesOf, type Branch, type Node } from '../meta';
 import type { VillageScene, EventKind, GameEvent } from '../main';
 import { Minimap } from './minimap';
-import { skyAt } from '../view3d/sky';
 import { frameDataUrl, BUILDING_TEXTURE, FLORA } from '../pixelart';
 import { charImg, armorStats, weaponMul } from '../characters';
 import { lookFor, tileArt } from '../look';
@@ -66,7 +65,6 @@ function charOf(m: Mover): { key: string; frame: number } {
 
 export class UI {
   private overlay = document.getElementById('overlay')!;
-  private side = document.getElementById('side')!;
   private screens = document.getElementById('screens')!;
   private stage = document.getElementById('stage')!;
 
@@ -82,12 +80,35 @@ export class UI {
     this.hotbar.querySelector('.bag')!.classList.toggle('on', open);
   }
   get bagShowing(): boolean { return this.bagOpen; }
+  /** Open or shut one of the on-demand panels: the journal (J), the army (L), the inspector (I), the controls (K). */
+  togglePanel(name: 'journal' | 'army' | 'inspector' | 'controls', open?: boolean): void {
+    if (name === 'controls') { this.setControls(open ?? !this.controlsOpen()); return; }
+    if (name === 'inspector') { this.inspectPinned = open ?? !(this.inspectPinned || !this.inspector.hidden); if (!this.inspectPinned) this.scene.select(null); return; }
+    const el = name === 'journal' ? this.journalEl : this.roster;
+    el.hidden = !(open ?? el.hidden);
+    if (!el.hidden && name === 'army') { this.lastRoster = ''; this.renderRoster(); }
+  }
+  /** Esc: shut the uppermost open panel. True when there was one (the menu is next otherwise). */
+  closeTop(): boolean {
+    if (this.controlsOpen()) { this.setControls(false); return true; }
+    if (!this.journalEl.hidden) { this.journalEl.hidden = true; return true; }
+    if (!this.roster.hidden) { this.roster.hidden = true; return true; }
+    if (!this.inspector.hidden) { this.inspectPinned = false; const s = this.scene; s.select(null); s.selectBuilding(null); s.selectTile(null); s.selectItem(null); this.inspector.hidden = true; return true; }
+    return false;
+  }
   private feed!: HTMLElement;
   private toasts!: HTMLElement;
   private inspector!: HTMLElement;
   private roster!: HTMLElement;
   private minimap!: Minimap;
-  private exploredEl!: HTMLElement;
+  private journalEl!: HTMLElement;
+  /** the inspector held open with I, though nothing is picked */
+  private inspectPinned = false;
+  /** the controls card, open or shut (set from mountControls) */
+  private setControls: (open: boolean) => void = () => {};
+  private controlsOpen = (): boolean => false;
+  /** when the hint caption last changed (it fades once it has been read) */
+  private hintAt = 0;
   private tooltipEl!: HTMLElement;
 
   private lastTop = '';
@@ -107,37 +128,28 @@ export class UI {
   mount(): void {
     const s = this.scene;
 
-    // --- top bar: labelled stat tiles
-    const tile = (cls: string, cap: string, inner: string, title = '') => `<div class="stat ${cls}" title="${esc(title)}"><span class="cap">${cap}</span><span class="val">${inner}</span></div>`;
-    this.top = h(`<div class="topbar panel">
-      ${tile('t-day', 'DAY', `<span class="sun"></span><span class="day"></span><span class="hour"></span>`, 'Survive to day 21 and beat the Warlord')}
-      ${tile('t-wood', 'WOOD', `${spr('town', TOWN.iconWood, 24)}<span class="num wood"></span>`, 'Woodcutters bring it in (your own axe only clears ground). Houses cost 20, barracks 30, and every hearth burns wood each night. The woodyard sets the cap')}
-      ${tile('t-food', 'FOOD', `${spr('farm', FARM.iconTomato, 24)}<span class="num food"></span>`, 'Each villager eats 1 a day; the small number is how many days the larder would last. Harvest ripe crops. The granary sets the cap')}
-      <div class="stat t-scrap" title="Scrap iron — raiders drop it where they fall; walk over it. Forges iron and steel armor at the barracks"><span class="cap">SCRAP</span><span class="val"><span class="scrap-ico"></span><span class="num scrap"></span></span></div>
-      <div class="stat t-pop" title="Your villagers by role"><span class="cap">VILLAGERS</span><span class="val pop"></span></div>
-      <div class="spacer"></div>
-      <div class="stat t-raid" title="Raiders attack every few days; the Warlord comes on day 21"><span class="cap">NEXT RAID</span><span class="val raid"></span></div>
-      <div class="stat t-buff" title="The dish you last ate, and how long it keeps working"><span class="cap">MEAL</span><span class="val buff"></span></div>
-      <div class="stat t-hunger" title="Your own belly, in food units. It empties as the day passes; empty, you lose HP and stop mending. T eats one meal — out of your pack first, the granary second. Meat and honey fill double, a cooked dish three or four times. Click to eat"><span class="cap">BELLY</span><span class="val"><span class="belly-num"></span><span class="bar belly"><i></i></span></span></div>
-      ${tile('t-hp', 'YOUR HP', `<span class="hearts"></span>`, 'You heal overnight — but not on an empty belly. If you die the run ends')}
-      <div class="stat t-speed" title="Game speed"><span class="cap">SPEED</span><span class="val speed">
-        <button class="btn small" data-speed="1">1x</button><button class="btn small" data-speed="4">4x</button><button class="btn small" data-speed="16">16x</button>
-        <button class="btn small pause" title="Menu (E / Esc)">II</button>
-      </span></div>
-      <button class="btn small summon-gnomes" title="H: gnomes trail you by default — send them off foraging; press again to call the ones within 20 tiles back to your heels">SEND FORAGING</button>
-      <button class="btn small help" title="How to play">?</button>
+    // --- 1. the status strip: the day, the stores, the army, and what is coming (hover any figure for more)
+    this.top = h(`<div class="hud-status" data-hud="status">
+      <span class="st t-day" title="Survive to day ${p.bossDay} and beat the Warlord"><span class="sun"></span><span class="day"></span><span class="hour"></span></span>
+      <span class="st t-wood" title="Wood: woodcutters bring it in; the woodyard sets the cap">${spr('town', TOWN.iconWood, 16)}<span class="num wood"></span></span>
+      <span class="st t-food">${spr('farm', FARM.iconTomato, 16)}<span class="num food"></span></span>
+      <span class="st t-scrap" title="Scrap iron: raiders drop it where they fall. Forges iron and steel at the barracks"><span class="scrap-ico"></span><span class="num scrap"></span></span>
+      <span class="st t-army">${spr('dungeon', DUNGEON.knight, 16)}<span class="num army"></span></span>
+      <span class="st t-raid" title="Hosts muster in the wild and march on the village; the Warlord comes on day ${p.bossDay}"><span class="raid"></span></span>
     </div>`);
-    this.top.querySelectorAll<HTMLButtonElement>('[data-speed]').forEach((b) => b.addEventListener('click', () => (s.speed = Number(b.dataset.speed))));
-    this.top.querySelector('.pause')!.addEventListener('click', () => s.togglePause());
-    this.top.querySelector('.help')!.addEventListener('click', () => this.showHelp());
-    this.top.querySelector('.summon-gnomes')!.addEventListener('click', () => s.summonGnomes());
 
     // --- tool belt: the equipped tool decides what E does
     const slot = (tool: Tool, key: string, frame: number, label: string, title: string, cost?: number) =>
       `<div class="slot" data-tool="${tool}" title="${esc(title)}">${spr(key, frame, 32)}<span class="lbl">${label}</span>${cost ? `<span class="cost">${cost}${spr('town', TOWN.iconWood, 16)}</span>` : ''}</div>`;
     this.hotbar = h(`<div class="hotbar">
-      <div class="abilities">${(["Q", "W", "E", "R"] as const).map((k) => `<div class="ability" data-ab="${k}"><kbd>${k}</kbd><span class="ab-name"></span><span class="ab-cd"></span></div>`).join("")}</div>
-      <div class="slots panel">
+      <div class="hint"><span class="hint-text"></span></div>
+      <div class="vitals" data-hud="vitals">
+        <div class="t-hp" title="Your HP. You heal overnight — not on an empty belly. If you die the run ends"><span class="bar hp"><i></i></span></div>
+        <div class="t-hunger" title="Your belly. Empty, you lose HP and stop mending. T eats (your pack first, then the granary). Click to eat"><span class="bar belly"><i></i></span><span class="belly-num"></span></div>
+        <div class="abilities">${(["Q", "W", "E", "R"] as const).map((k) => `<div class="ability" data-ab="${k}"><kbd>${k}</kbd><span class="ab-name"></span><span class="ab-cd"></span><span class="ab-count"></span></div>`).join("")}</div>
+        <div class="t-buff" hidden title="The dish you last ate, and how long it keeps working"><span class="buff"></span></div>
+      </div>
+      <div class="slots" data-hud="belt">
         <span class="cap slots-cap">TOOLS <kbd>1-9</kbd></span>
         ${slot('hoe', 'town', TOWN.iconHoe, 'HOE', 'Till grass into soil; clears stumps; three hits on soil flatten it back to grass')}
         ${slot('seeds', 'farm', FARM.grassTuft, 'SEEDS', 'Sow the chosen crop on tilled soil (F cycles wheat / carrots / tomatoes), trees on grass. What a child eats decides the adult')}
@@ -157,7 +169,6 @@ export class UI {
         ${slot('basket', 'farm', FARM.crate, 'BASKET', 'F picks a kind of food; walk up to the granary to fill the basket with it, then throw it into a home yard. It flies where you point, bounces and rolls; children only eat what lies in the yard of the home they live in, and what they eat is who they become')}
         <div class="slot bag" data-bag="1" title="Your backpack: what you are carrying, and what you are wearing. B opens it">${spr('farm', FARM.crate, 32)}<span class="lbl">BAG</span><span class="cost bagfull"></span></div>
       </div>
-      <div class="hint"><kbd>click / C</kbd><span class="hint-text"></span></div>
     </div>`);
     // only the tool slots pick a tool: the BAG shares the slot look but opens the backpack
     this.hotbar.querySelectorAll<HTMLElement>('.slot[data-tool]').forEach((el) => el.addEventListener('click', () => s.setTool(el.dataset.tool as Tool)));
@@ -169,31 +180,23 @@ export class UI {
     this.hotbar.querySelector('.bag')!.addEventListener('click', () => this.toggleBag());
     this.hotbar.querySelector('.ability[data-ab="R"]')?.addEventListener('click', () => s.cycleMeal(1)); // which meal R throws
     this.bag.querySelector('.close')!.addEventListener('click', () => this.toggleBag(false));
-    this.feed = h('<div class="feed"></div>');
-    this.toasts = h('<div class="toasts"></div>');
-    this.overlay.append(this.top, this.bag, this.hotbar, this.feed, this.toasts);
+    // --- 5. the alert line: what is worth stopping for, two lines at most
+    this.toasts = h('<div class="toasts" data-hud="alerts"></div>');
+    // the journal: the whole log, opened with J
+    this.journalEl = h(`<div class="drawer journal" hidden><div class="ph"><h2>Journal</h2><span class="cap">J or Esc to close</span></div><div class="feed"></div></div>`);
+    this.feed = this.journalEl.querySelector('.feed')!;
+    this.overlay.append(this.top, this.bag, this.hotbar, this.toasts, this.journalEl);
     this.inventory.mount(this.bag.querySelector('.inventory-host')!);
-    this.top.querySelector('.t-hunger')!.addEventListener('click', () => this.scene.eat());
-    // the feed sits above the belt, whatever height the belt turns out to be (its hint line wraps)
-    const belt = () => this.overlay.style.setProperty('--hotbar-h', this.hotbar.offsetHeight + 'px');
-    new ResizeObserver(belt).observe(this.hotbar); belt();
+    this.hotbar.querySelector('.t-hunger')!.addEventListener('click', () => this.scene.eat());
 
-    // --- side
-    this.inspector = h('<div class="inspector panel"></div>');
-    this.roster = h(`<div class="roster panel"><div class="ph">${spr('dungeon', DUNGEON.villager, 24)}<h2>Villagers</h2><span class="cap">pick one to inspect</span></div><div class="legend-row">
-      <span class="rl farmer">${spr('farm', FARM.farmerHat, 16)} farmer</span><span class="rl woodcutter">${spr('dungeon', DUNGEON.man, 16)} cutter</span><span class="rl kid">${spr('dungeon', DUNGEON.villager, 16)} child</span><span class="rl soldier">${spr('dungeon', DUNGEON.knight, 16)} soldier</span>
-    </div><div class="list"></div></div>`);
-    // --- minimap: top of the side panel so it never covers the world
+    // --- on demand: the inspector (whatever is picked, or I), the army and villagers (L)
+    this.inspector = h('<div class="inspector drawer" hidden></div>');
+    this.roster = h(`<div class="roster drawer" hidden><div class="ph">${spr('dungeon', DUNGEON.villager, 24)}<h2>Army &amp; villagers</h2><span class="cap">L or Esc to close</span></div><div class="list"></div></div>`);
+    // --- 4. the minimap, in the corner
     this.minimap = new Minimap(s, 2);
-    const box = h('<div class="minimap-panel panel"><span class="cap">MAP</span><span class="cap explored" style="float:right"></span></div>');
+    const box = h('<div class="hud-map" data-hud="map"></div>');
     box.append(this.minimap.el);
-    this.exploredEl = box.querySelector('.explored')!;
-    this.side.append(box);
-    this.side.append(this.inspector, this.roster);
-    const supply = h('<div class="quiver panel"><span class="quiver-count"></span><span class="tower-count" title="Arrows in every barracks chest. Restock inside the barracks, or from its card."></span><span class="hearth-count" title="Hearths with wood for tonight. Woodcutters stock the piles; a cold building stalls births, drill, regen and meals."></span><button class="btn small fletch">+10 ARROWS · 2 WOOD</button><button class="btn small leave-room" hidden>EXIT BUILDING</button></div>');
-    supply.querySelector('.fletch')!.addEventListener('click', () => s.craftArrows());
-    supply.querySelector('.leave-room')!.addEventListener('click', () => s.interior.leave());
-    this.side.prepend(supply);
+    this.overlay.append(box, this.inspector, this.roster);
     this.roster.addEventListener('click', (e) => {
       // a regiment's row: its buttons set the stance or the shape; anywhere else on it picks the block for the wand
       const reg = (e.target as HTMLElement).closest<HTMLElement>('.reg-row');
@@ -253,6 +256,8 @@ export class UI {
       ['- · =', 'game speed'],
       ['K', 'this panel'],
       ['M', 'sound on / off'],
+      ['J · L · I', 'journal · army and villagers · inspector'],
+      ['1 · 2 · 3', 'game speed 1x · 4x · 16x'],
       ['?', 'how to play'],
     ];
     const panel = h(`<div class="ctrl-panel">
@@ -264,14 +269,14 @@ export class UI {
         <div class="ctrl-foot"><button class="btn small mute">SOUND</button></div>
       </div>
     </div>`);
-    let open = true;
-    try { open = localStorage.getItem('village.controls') !== 'closed'; } catch { /* ignore */ }
+    let open = false; // shut: K or the menu opens it
     const set = (v: boolean) => {
       open = v;
       panel.classList.toggle('open', open);
       try { localStorage.setItem('village.controls', open ? 'open' : 'closed'); } catch { /* ignore */ }
     };
     panel.querySelector('.ctrl-tab')!.addEventListener('click', () => set(!open));
+    this.setControls = set; this.controlsOpen = () => open;
     panel.querySelector('.ctrl-close')!.addEventListener('click', () => set(false));
     const muteBtn = panel.querySelector<HTMLElement>('.mute')!;
     const paintMute = () => { muteBtn.textContent = this.scene.muted ? 'SOUND: OFF' : 'SOUND: ON'; muteBtn.classList.toggle('on', !this.scene.muted); };
@@ -282,6 +287,11 @@ export class UI {
       const el = e.target as HTMLElement | null;
       if (el?.closest?.('input')) return; // typing a village name is not a shortcut
       if (e.key === 'k' || e.key === 'K') set(!open); // H is the gnome whistle (main.ts), and one key does one thing
+      if (this.scene.screen === 'playing' && !e.repeat) {
+        if (e.key === 'j' || e.key === 'J') this.togglePanel('journal');
+        if (e.key === 'l' || e.key === 'L') this.togglePanel('army');
+        if (e.key === 'i' || e.key === 'I') this.togglePanel('inspector');
+      }
       if (e.key === '?') this.showHelp(); // the row below has always advertised it
     });
     this.overlay.append(panel);
@@ -292,22 +302,21 @@ export class UI {
 
   render(dt: number): void {
     const s = this.scene;
-    const followers = s.villagers().filter(v => v.gnome && v.isAdult && !v.dead && (v.role === 'soldier' ? v.order?.kind === 'follow' : v.followingPlayer)).length;
-    const call = this.top.querySelector<HTMLButtonElement>('.summon-gnomes')!;
-    const label = followers ? `SEND FORAGING (${followers})` : 'CALL GNOMES';
-    if (call.textContent !== label) call.textContent = label;
     this.stage.classList.toggle('raid', s.raidActive);
     if (s.selectedBuilding !== this.lastBuilding) { this.lastBuilding = s.selectedBuilding; this.confirmDemolish = null; this.renderInspector(true); }
     const pickKey = s.selectedItem ? `item${s.selectedItem.id}` : s.selectedTile ? `tile${s.selectedTile.tx},${s.selectedTile.ty}` : '';
     if (pickKey !== this.lastPick) { this.lastPick = pickKey; this.renderInspector(true); }
     this.topT += dt; this.rosterT += dt;
     this.minimap.render(dt, s.tilesChanged);
+    // the inspector shows while something is picked (or I holds it open)
+    const picked = !!(s.selected || s.selectedBuilding || s.selectedTile || s.selectedItem);
+    const showInspector = picked || this.inspectPinned;
+    if (this.inspector.hidden === showInspector) { this.inspector.hidden = !showInspector; if (showInspector) this.renderInspector(true); }
     if (this.topT > 0.1) {
-      if (s.fog) { const pct = `${Math.round(s.fog.exploredShare * 100)}% explored`; if (this.exploredEl.textContent !== pct) this.exploredEl.textContent = pct; }
       this.topT = 0; this.renderTop(); this.renderHotbar();
-      this.inspT += 0.1; if (this.inspT >= 0.25) { this.inspT = 0; this.renderInspector(); } // cards rebuild their DOM: a few times a second is plenty
+      this.inspT += 0.1; if (this.inspT >= 0.25 && showInspector) { this.inspT = 0; this.renderInspector(); } // cards rebuild their DOM: a few times a second is plenty
     }
-    if (this.rosterT > 0.5) { this.rosterT = 0; this.renderRoster(); }
+    if (this.rosterT > 0.5 && !this.roster.hidden) { this.rosterT = 0; this.renderRoster(); }
     this.renderFeed();
     this.inventory.render();
     if(this.scene.armoryFor)this.renderArmory();
@@ -322,69 +331,43 @@ export class UI {
 
   private renderTop(): void {
     const s = this.scene;
-    const quiver = this.side.querySelector('.quiver-count'); if (quiver) quiver.textContent = `SHARED QUIVER · ${s.arrows} arrows`;
-    const hearths = this.side.querySelector<HTMLElement>('.hearth-count');
-    if (hearths) { const r = s.hearthReport(); const cold = r.total - r.stocked; hearths.textContent = r.total ? `HEARTHS · ${r.stocked} / ${r.total} stocked · ${r.nightly} wood a night${cold ? ` · ${cold} COLD TONIGHT` : ''}` : ''; hearths.classList.toggle('dry', cold > 0); }
-    const tower = this.side.querySelector<HTMLElement>('.tower-count');
-    if (tower) { const t = s.towerAmmo(); tower.textContent = s.world.barracks.length ? `TOWER CHESTS · ${t.ammo} / ${t.cap} arrows${t.ammo ? '' : ' · EMPTY'}` : ''; tower.classList.toggle('dry', !t.ammo); tower.classList.toggle('low', t.ammo > 0 && t.ammo / Math.max(1, t.cap) <= 0.25); }
-    const exit = this.side.querySelector<HTMLButtonElement>('.leave-room'); if (exit) exit.hidden = !s.interior.active;
-    const vs = s.villagers();
-    const count = (r: string) => r === 'elder' ? vs.filter((v) => v.elder).length
-      : r === 'gnome' ? vs.filter((v) => v.gnome && v.isAdult).length
-      : vs.filter((v) => v.role === r).length;
-    // a trade's chip counts the children already promised it too: what it shows is what the cap allows
-    const filled = (c: Calling) => s.callingFilled(c), cap = (c: Calling) => s.callingCap(c);
     const hour = Math.floor(s.dayTime * 24);
     const night = s.dayTime < 0.22 || s.dayTime > 0.8;
     const raidIn = s.nextRaidDay - s.day;
     const host = s.hostStatus();
     const hostKey = host ? `${host.marching}${host.alive}/${host.peak}@${host.tiles}` : '';
-    const held = s.player.pack.slots.map(slotKey).join('|');
-    const key = `${s.day}|${hour}|${held}|${s.food | 0}/${s.foodCap}|${s.surplusDays().toFixed(1)}|${s.feverActive()}|${s.wood | 0}/${s.woodCap}|${s.scrap}|${CALLINGS.map((c) => `${filled(c)}/${cap(c)}`).join('|')}|${count('infant')}|${count('kid')}|${count('gnome')}|${count('elder')}|${Math.round(s.player.hp / Math.max(1, s.player.maxHp) * 12)}|${p.hunger ? Math.ceil(s.player.hunger * 2) / 2 : 'off'}/${p.hungerMax}|${s.raidActive}|${s.boss?.hp ?? ''}|${raidIn}|${s.speed}|${s.paused}|${night}|${s.buff?.dish ?? ''}${Math.ceil(s.buffLeft())}|${hostKey}`;
+    const army = s.callingFilled('soldier'), armyCap = s.callingCap('soldier');
+    const key = `${s.day}|${hour}|${s.food | 0}/${s.foodCap}|${s.surplusDays().toFixed(1)}|${s.wood | 0}/${s.woodCap}|${s.scrap}|${army}/${armyCap}|${Math.round(s.player.hp / Math.max(1, s.player.maxHp) * 40)}|${p.hunger ? Math.ceil(s.player.hunger * 2) / 2 : 'off'}/${p.hungerMax}|${s.raidActive}|${s.boss?.hp ?? ''}|${raidIn}|${night}|${s.buff?.dish ?? ''}${Math.ceil(s.buffLeft())}|${hostKey}`;
     if (key === this.lastTop) return;
     this.lastTop = key;
-
-    const q = (sel: string) => this.top.querySelector<HTMLElement>(sel)!;
+    const q = (sel: string) => (this.top.querySelector<HTMLElement>(sel) ?? this.hotbar.querySelector<HTMLElement>(sel))!;
     q('.sun').classList.toggle('moon', night);
-    // the day chip takes on the sky's colour: peach at dawn, blue at night
-    const sky = skyAt(s.dayTime);
-    this.top.style.setProperty('--sky', `rgba(${(sky.sun >> 16) & 255}, ${(sky.sun >> 8) & 255}, ${sky.sun & 255}, ${(0.25 + 0.5 * sky.night).toFixed(2)})`);
     q('.day').textContent = p.peaceful ? `DAY ${s.day}` : `DAY ${s.day}/${p.bossDay}`;
     q('.hour').textContent = `${String(hour).padStart(2, '0')}:00`;
-    const inHand = (kind: BulkKind) => s.player.carriedOf(kind) ? `<em class="hand">+${Number(s.player.carriedOf(kind).toFixed(1))} in pack</em>` : ''; 
-    q('.wood').innerHTML = `${s.wood | 0}<small>/${s.woodCap}</small>${inHand('wood')}`;
-    const days = s.surplusDays(), fever = s.feverActive();
-    const feverBadge = s.mods.babyFever ? `<span class="badge fever ${fever ? 'on' : ''}" title="${fever ? `Baby fever: births ${Math.round(100 * p.feverBonus)}% more likely while the larder holds ${p.feverDays}+ days of food` : `Baby fever needs ${p.feverDays} days of food in store — ${Math.ceil(p.feverDays * s.dailyRation() - s.food)} more`}">FEVER</span>` : '';
-    q('.food').innerHTML = `${s.food | 0}<small>/${s.foodCap} · ${Number.isFinite(days) ? `${days.toFixed(days < 10 ? 1 : 0)} days` : '∞'}</small>${feverBadge}${inHand('food')}`;
-    q('.t-food').title = `${FOOD_KINDS.filter((k) => s.pantry[k] >= 1).map((k) => `${s.pantry[k] | 0} ${FOODS[k].one}`).join(' · ') || 'empty'} — each grown villager eats ${p.foodPerDay} a day${s.headRation() ? `, and you eat ${s.headRation()} on top when you eat from the granary` : ''}; the small number is how many days the larder would last for the villagers. Children eat only what the basket tosses into their home yard.`;
+    q('.wood').innerHTML = `${s.wood | 0}<small>/${s.woodCap}</small>`;
+    const days = s.surplusDays();
+    q('.food').innerHTML = `${s.food | 0}<small>${Number.isFinite(days) ? ` · ${days.toFixed(days < 10 ? 1 : 0)}d` : ''}</small>`;
+    q('.t-food').title = `Food: ${FOOD_KINDS.filter((k) => s.pantry[k] >= 1).map((k) => `${s.pantry[k] | 0} ${FOODS[k].one}`).join(' · ') || 'empty'} (cap ${s.foodCap}). The small number is how many days the larder would last.`;
     q('.scrap').textContent = String(s.scrap);
-    // the three trades read n/cap (a full one births nobody); the rest are plain counts
-    const trade = (c: Calling, art: { key: string; frame: number }, lbl: string) => {
-      const grown = vs.filter((v) => v.role === c && !v.dead).length, n = filled(c), max = cap(c);
-      const per = c === 'soldier' ? `${p.soldierCap} per barracks` : c === 'farmer' ? `${p.farmerCap} per granary` : `${p.woodcutterCap} per woodyard`;
-      const title = `${ROLE_LABEL[c]}s · ${grown} grown${n > grown ? `, ${n - grown} promised to children still growing` : ''} · ${max} places (${per})${n >= max ? ' · full: no child will be born for this trade' : ''} · ${vs.length} villagers in all`;
-      return `<span class="chip ${c}${n >= max ? ' full' : ''}" title="${title}">${spr(art.key, art.frame, 24)}<b>${n}<small>/${max}</small></b><i>${lbl}</i></span>`;
-    };
-    q('.pop').innerHTML = trade('farmer', CHAR.farmer, 'FARM') + trade('woodcutter', CHAR.woodcutter, 'WOOD') + trade('soldier', CHAR.soldier, 'ARMY')
-      + ([['infant', CHAR.kid, 'CRIBS'], ['kid', CHAR.kid, 'KIDS'], ['gnome', CHAR.gnome, 'GNOMES'], ['elder', CHAR.woodcutter, 'OLD']] as [string, { key: string; frame: number }, string][])
-        .map(([r, c, lbl]) => `<span class="chip ${r}" title="${r === 'elder' ? 'Elders' : ROLE_LABEL[r] + 's'} · ${vs.length} villagers in all">${spr(c.key, c.frame, 24)}<b>${count(r)}</b><i>${lbl}</i></span>`).join('');
-    const raid = q('.raid');
-    const bossNext = s.nextRaidDay === p.bossDay;
-    const orc = spr('dungeon', DUNGEON.orc, 24, 'flip');
-    if (s.raidActive && s.boss && !s.boss.dead) {
-      const pct = Math.max(0, (s.boss.hp / s.boss.maxHp) * 100);
-      raid.innerHTML = `${orc}<span>WARLORD</span><div class="bar boss"><i style="width:${pct}%"></i></div>`;
-      raid.className = 'val raid now';
-    } else if (host?.marching) { raid.innerHTML = `${orc}<span>HOST ${host.alive}/${host.peak} · ${host.tiles} tiles</span>`; raid.className = 'val raid now'; }
-    else if (s.raidActive) { raid.innerHTML = `${orc}<span>UNDER ATTACK!</span>`; raid.className = 'val raid now'; }
-    else if (host) { const d = Math.max(0, host.marchDay - s.day); raid.innerHTML = `${orc}<span>HOST OF ${host.peak} · ${d <= 1 ? (d ? 'TOMORROW' : 'TODAY') : 'in ' + d + ' days'}</span>`; raid.className = d <= 1 ? 'val raid soon' : 'val raid'; }
-    else if (!Number.isFinite(raidIn)) { raid.innerHTML = `${orc}<span>PEACE</span>`; raid.className = 'val raid'; } // p.peaceful: nobody is marching
-    else if (raidIn <= 1) { raid.innerHTML = `${orc}<span>${bossNext ? 'WARLORD TOMORROW' : 'TOMORROW'}</span>`; raid.className = 'val raid soon'; }
-    else { raid.innerHTML = `${orc}<span>${bossNext ? 'Warlord' : 'in'} ${raidIn} days</span>`; raid.className = bossNext ? 'val raid soon' : 'val raid'; }
-    const meal = this.top.querySelector<HTMLElement>('.t-buff')!;
+    q('.army').innerHTML = `${army}<small>/${armyCap}</small>`;
+    q('.t-army').title = `Warriors under arms (and children promised the sword) / places the barracks keep · ${s.regiments.length} regiment${s.regiments.length === 1 ? '' : 's'} · L for the army`;
+    const raid = q('.raid'), bossNext = s.nextRaidDay === p.bossDay;
+    if (s.raidActive && s.boss && !s.boss.dead) { raid.innerHTML = `WARLORD <span class="bar boss"><i style="width:${Math.max(0, (s.boss.hp / s.boss.maxHp) * 100)}%"></i></span>`; raid.className = 'raid now'; }
+    else if (host?.marching) { raid.textContent = `HOST ${host.alive}/${host.peak} · ${host.tiles} tiles`; raid.className = 'raid now'; }
+    else if (s.raidActive) { raid.textContent = 'UNDER ATTACK'; raid.className = 'raid now'; }
+    else if (host) { const d = Math.max(0, host.marchDay - s.day); raid.textContent = `HOST ${host.peak} · ${d <= 1 ? (d ? 'TOMORROW' : 'TODAY') : d + 'd'}`; raid.className = d <= 1 ? 'raid soon' : 'raid'; }
+    else if (!Number.isFinite(raidIn)) { raid.textContent = 'PEACE'; raid.className = 'raid'; }
+    else { raid.textContent = raidIn <= 1 ? (bossNext ? 'WARLORD TOMORROW' : 'RAID TOMORROW') : `${bossNext ? 'WARLORD' : 'RAID'} · ${raidIn}d`; raid.className = raidIn <= 1 || bossNext ? 'raid soon' : 'raid'; }
+    // the vitals: HP, the belly, the meal working in you
+    const hpShare = Math.max(0, s.player.hp / Math.max(1, s.player.maxHp));
+    const hp = q('.bar.hp');
+    hp.classList.toggle('low', hpShare <= 0.3);
+    (hp.firstElementChild as HTMLElement).style.width = `${Math.round(hpShare * 100)}%`;
+    q('.t-hp').title = `Your HP ${Math.ceil(s.player.hp)}/${s.player.maxHp}. You heal overnight — not on an empty belly. If you die the run ends`;
+    const meal = q('.t-buff');
     meal.hidden = !s.buff || s.buffLeft() <= 0;
-    if (!meal.hidden && s.buff) q('.buff').innerHTML = `<span style="color:${FOODS[s.buff.dish].colour}">+${Math.round((s.buff.mul - 1) * 100)}% ${DIET_STAT_NAME[s.buff.stat]}</span><small>${Math.ceil(s.buffLeft())}s</small>`;
-    const belly = this.top.querySelector<HTMLElement>('.t-hunger')!;
+    if (!meal.hidden && s.buff) q('.buff').innerHTML = `<span style="color:${FOODS[s.buff.dish].colour}">+${Math.round((s.buff.mul - 1) * 100)}% ${DIET_STAT_NAME[s.buff.stat]}</span> <small>${Math.ceil(s.buffLeft())}s</small>`;
+    const belly = q('.t-hunger');
     belly.hidden = !p.hunger;
     if (p.hunger) {
       const left = Math.max(0, Math.min(s.player.hunger, p.hungerMax)), share = left / Math.max(1e-6, p.hungerMax);
@@ -395,11 +378,6 @@ export class UI {
       (bar.firstElementChild as HTMLElement).style.width = `${Math.round(share * 100)}%`;
       belly.classList.toggle('empty', left <= 0);
     }
-    const hearts = q('.hearts');
-    const full = s.player.hp / s.player.maxHp * 6;
-    hearts.innerHTML = Array.from({ length: 6 }, (_, i) => `<span class="heart ${i + 1 <= full ? '' : i < full ? 'half' : 'off'}"></span>`).join('');
-    this.top.querySelectorAll<HTMLButtonElement>('[data-speed]').forEach((b) => b.classList.toggle('on', Number(b.dataset.speed) === s.speed && !s.paused));
-    q('.pause').classList.toggle('on', s.paused);
   }
 
   private renderHotbar(): void {
@@ -427,6 +405,8 @@ export class UI {
       el.classList.toggle('off', !a.usable);
       el.title = `${a.key} · ${a.name}: ${a.note}`;
     }
+    const quiver = this.hotbar.querySelector<HTMLElement>('.ability[data-ab="W"] .ab-count');
+    if (quiver && quiver.textContent !== String(s.arrows)) quiver.textContent = String(s.arrows);
     const hint = this.hotbar.querySelector('.hint-text')!;
     const carry = s.carryHint();
     const raw = s.hint();
@@ -434,7 +414,10 @@ export class UI {
     // and what your hands would do there, since the right button is always available whatever you hold
     const hands = s.handsHint();
     const full = hands ? `${text} · right click: ${hands}` : text;
-    if (hint.textContent !== full) hint.textContent = full;
+    // a faint caption: it shows when what a click would do changes, and fades once it has been read
+    const now = performance.now();
+    if (hint.textContent !== full) { hint.textContent = full; this.hintAt = now; }
+    this.hotbar.querySelector('.hint')!.classList.toggle('faded', !full || now - this.hintAt > 3000);
   }
 
   private lastPick = '';
@@ -582,7 +565,7 @@ export class UI {
         this.inspector.querySelector('.craft-arrows')?.addEventListener('click', () => s.craftArrows());
         this.inspector.querySelector('.restock')?.addEventListener('click', () => { s.restockTower(b); this.renderInspector(true); });
         this.inspector.querySelector('.stock-hearth')?.addEventListener('click', () => { s.stockHearth(b); this.renderInspector(true); });
-        this.inspector.querySelector('.open-armory')?.addEventListener('click', () => { s.openArmory(s.player, b); this.side.classList.remove('open'); });
+        this.inspector.querySelector('.open-armory')?.addEventListener('click', () => { s.openArmory(s.player, b); });
         this.inspector.querySelector('.demolish')?.addEventListener('click', () => {
           if (this.confirmDemolish !== b) { this.confirmDemolish = b; this.renderInspector(true); return; }
           this.confirmDemolish = null; if (s.demolish(b)) s.selectBuilding(null); else this.renderInspector(true);
@@ -658,10 +641,10 @@ export class UI {
       this.lastInspector = html;
       this.inspector.querySelector('.close')?.addEventListener('click', () => s.select(null));
       this.inspector.querySelector('.encourage')?.addEventListener('click', () => { if (m instanceof Villager) s.encourage(m); this.renderInspector(true); });
-      this.inspector.querySelector('.open-armory')?.addEventListener('click', () => { s.openArmory(m); this.side.classList.remove('open'); });
-      this.inspector.querySelector('.open-pouch')?.addEventListener('click', () => { if (m instanceof Villager) s.openPouch(m); this.side.classList.remove('open'); });
+      this.inspector.querySelector('.open-armory')?.addEventListener('click', () => { s.openArmory(m); });
+      this.inspector.querySelector('.open-pouch')?.addEventListener('click', () => { if (m instanceof Villager) s.openPouch(m); });
       this.inspector.querySelectorAll<HTMLElement>('[data-weapon]').forEach(el => el.addEventListener('click', () => { if (m instanceof Villager) s.equipSoldier(m, el.dataset.weapon as 'bow' | 'sword' | 'pike'); this.renderInspector(true); }));
-      this.inspector.querySelector('.post-soldier')?.addEventListener('click', () => { if (m instanceof Villager) s.posting = s.posting === m ? null : m; this.side.classList.remove('open'); this.renderInspector(true); });
+      this.inspector.querySelector('.post-soldier')?.addEventListener('click', () => { if (m instanceof Villager) s.posting = s.posting === m ? null : m; this.renderInspector(true); });
       this.inspector.querySelector('.recall-soldier')?.addEventListener('click', () => { if (m instanceof Villager) { m.post = null; m.order = null; m.clearGoal(); s.posting = null; } this.renderInspector(true); });
     }
   }
@@ -732,11 +715,10 @@ export class UI {
     while (this.feedSeen < evs.length) {
       const ev = evs[this.feedSeen++];
       const ic = EVENT_ICON[ev.kind];
-      this.feed.prepend(h(`<div class="ev ${ev.kind}">${spr(ic.key, ic.frame, 24)}<span>${esc(ev.text)}</span></div>`));
+      this.feed.prepend(h(`<div class="ev ${ev.kind}">${spr(ic.key, ic.frame, 24)}<span><small>day ${ev.day}</small> ${esc(ev.text)}</span></div>`));
       if (ev.toast) this.toast(ev.text, ev.kind);
     }
-    while (this.feed.children.length > 6) this.feed.lastElementChild!.remove();
-    Array.from(this.feed.children).forEach((el, i) => el.classList.toggle('old', i >= 4));
+    while (this.feed.children.length > 200) this.feed.lastElementChild!.remove();
   }
 
   /**
@@ -745,7 +727,7 @@ export class UI {
    * column tall enough to bury the screen. Nothing is lost by dropping one: every toast is already
    * in the journal beside it.
    */
-  private static readonly MAX_TOASTS = 4;
+  private static readonly MAX_TOASTS = 2;
   private toastTimers = new Map<HTMLElement, number>();
 
   toast(text: string, kind: EventKind): void {
@@ -758,7 +740,7 @@ export class UI {
       this.holdToast(same);
       return;
     }
-    const el = h(`<div class="toast panel ${kind === 'raid' ? 'red raid' : kind === 'soldier' ? 'grey' : 'tan'}">${esc(text)}</div>`);
+    const el = h(`<div class="toast ${kind === 'raid' || kind === 'death' ? 'raid' : ''}">${esc(text)}</div>`);
     el.dataset.toast = text;
     this.toasts.append(el);
     while (this.toasts.children.length > UI.MAX_TOASTS) this.dropToast(this.toasts.firstElementChild as HTMLElement);
@@ -1034,7 +1016,15 @@ export class UI {
         <p class="sub">Day ${s.day} of ${p.bossDay} · ${s.villagers().length} villagers · ${s.villagers().filter((v) => v.role === 'soldier').length} soldiers</p>
         ${this.loadoutLine()}
         <div class="row"><button class="btn ok resume">RESUME</button><button class="btn howto">HOW TO PLAY</button><button class="btn restart">RESTART</button><button class="btn title">TITLE</button></div>
+        <div class="row"><span class="sub">speed</span>${[1, 4, 16].map((v) => `<button class="btn small ${s.speed === v ? 'on' : ''}" data-speed="${v}">${v}x</button>`).join('')}<button class="btn small sound">${s.muted ? 'SOUND: OFF' : 'SOUND: ON'}</button></div>
+        <div class="row"><button class="btn small open-controls">CONTROLS (K)</button><button class="btn small open-journal">JOURNAL (J)</button><button class="btn small open-army">ARMY (L)</button></div>
       </div>`);
+      card.querySelectorAll<HTMLButtonElement>('[data-speed]').forEach((b) => b.addEventListener('click', () => { s.speed = Number(b.dataset.speed); card.querySelectorAll('[data-speed]').forEach((o) => o.classList.toggle('on', o === b)); }));
+      card.querySelector('.sound')!.addEventListener('click', (e) => { s.toggleMute(); (e.target as HTMLElement).textContent = s.muted ? 'SOUND: OFF' : 'SOUND: ON'; });
+      const openThen = (name: 'controls' | 'journal' | 'army') => () => { s.togglePause(); this.togglePanel(name, true); };
+      card.querySelector('.open-controls')!.addEventListener('click', openThen('controls'));
+      card.querySelector('.open-journal')!.addEventListener('click', openThen('journal'));
+      card.querySelector('.open-army')!.addEventListener('click', openThen('army'));
       card.querySelector('.resume')!.addEventListener('click', () => s.togglePause());
       card.querySelector('.howto')!.addEventListener('click', () => this.showHelp());
       card.querySelector('.restart')!.addEventListener('click', () => s.startGame(s.seed));

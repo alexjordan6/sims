@@ -730,6 +730,7 @@ export class VillageScene extends SimScene {
       else if (this.cookingAt) this.openCooking(null);
       else if (this.pouchOf) this.openPouch(null);
       else if (this.armoryFor) this.openArmory(null);
+      else if (this.ui?.closeTop()) { /* an open panel, or the inspector, shut */ }
       else this.togglePause();
     };
     kb.on('keydown-ESC', closePanel);
