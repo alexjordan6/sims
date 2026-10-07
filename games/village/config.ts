@@ -189,6 +189,12 @@ export const p = live(
     skulkClub: [D.skulkClub, 0, 1, 0.05, 'Chance a slain skulk leaves its club rather than a single scrap. Clubs break down for wood at a barracks chest.'],
   }, 'enemies'),
   params({
+    lootMul: [D.lootMul, 0, 4, 0.25, 'How much a chest, a ruin or a hoard holds. 1 = a camp chest of about six things.'],
+    lootTierBias: [D.lootTierBias, -2, 2, 0.1, 'Nudges every loot roll toward better (+) or worse (-) tiers. Danger (distance and day) does the rest.'],
+    dropChance: [D.dropChance, 0, 1, 0.05, 'Chance a slain raider, brute, shaman or wrecker leaves the gear it fought with (besides its scrap). The Warlord always leaves a steel piece.'],
+    forgeMaxTier: [D.forgeMaxTier, 0, 3, 1, 'Best tier the barracks forges from nothing (1 = leather, bronze, yew, buckler). Iron and better are looted; a found iron piece can still be reforged to steel. 3 = forge anything, as of old.'],
+  }, 'loot'),
+  params({
     fog: [D.fog, 'Fog of war. Off lifts it everywhere; on drops it back over the unexplored.'],
     hearths: [D.hearths, 'Off: hearths burn nothing and no building is ever cold.'],
     towerFires: [D.towerFires, 'Off: barracks towers hold their fire.'],

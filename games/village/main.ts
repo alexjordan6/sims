@@ -1,4 +1,5 @@
 import { STACK, SKULK, STASH_SLOTS, type BulkKind } from './config';
+import { enemyDrop } from './loot';
 import { isImplement, IMPLEMENTS, START_TOOLS, LOST_TOOLS, type Implement, TOOL_NAME, Pack, type Gear, type EquipmentSlot, isBulk, slotName } from './pack';
 import Phaser from 'phaser';
 import { SimScene, launch, button, getGui, Rng } from '@shared/index';
@@ -1284,6 +1285,7 @@ export class VillageScene extends SimScene {
     const next = who.armor[slot] + 1;
     const tier = ARMOR[slot].tiers[next];
     if (!tier) return 'already the best there is';
+    const rare = this.forgeRare(next); if (rare) return rare;
     if (slot === 'shield' && ((who instanceof Villager && who.weapon === 'bow') || (who instanceof Player && who.tool === 'bow'))) return 'a bow needs both hands';
     return this.forgeProblem(next, tier);
   }
@@ -1292,6 +1294,7 @@ export class VillageScene extends SimScene {
     const next = who.weapons[slot] + 1;
     const tier = WEAPONS[slot].tiers[next];
     if (!tier) return 'already the best there is';
+    const rare = this.forgeRare(next); if (rare) return rare;
     return this.forgeProblem(next, tier);
   }
   /** Forge a better weapon for a wearer; pays wood and scrap. */
@@ -1306,6 +1309,16 @@ export class VillageScene extends SimScene {
     this.event('build', `${who instanceof Player ? 'You' : (who as Villager).name} now carr${who instanceof Player ? 'y' : 'ies'} a ${tier.name.toLowerCase()}`);
     return true;
   }
+  /**
+   * Forge rare: the barracks makes the basics (up to forgeMaxTier) from nothing. Anything better is
+   * looted — though a found piece (tier 2 or better) can be reforged one tier up. Null when allowed.
+   */
+  forgeRare(next: number): string | null {
+    if (next <= p.forgeMaxTier || next - 1 >= 2) return null;
+    return 'iron and better are looted, not forged: clear camps, ruins and the fallen';
+  }
+  /** Is forging `next` a reforge of a found piece (past what the forge makes from nothing)? */
+  isReforge(next: number): boolean { return next > p.forgeMaxTier; }
   /** The forge rules armor and weapons share: a standing barracks of the tier's level, and the wood and scrap. */
   private forgeProblem(next: number, tier: { wood: number; scrap: number }): string | null {
     const need = ARMOR_BARRACKS_LEVEL[next];
@@ -2430,6 +2443,8 @@ export class VillageScene extends SimScene {
         this.stats.raidersKilled++;
         const scrap = (SCRAP_DROP as Record<string, number>)[a.kind] ?? 2;
         if (scrap > 0) this.world.dropItem('scrap', scrap, a.x, a.y, undefined, this.rng); // loot lies where the raider fell: walk over it
+        const gear = enemyDrop(this.rng, a.kind, !!a.boss, this.day); // and now and then the gear it fought with
+        if (gear) this.world.dropItem('gear', 1, a.x, a.y, undefined, this.rng).gear = gear;
         // Bounty: spoils and a second wind for the village head
         if (this.mods.killWood) this.addWood(this.mods.killWood);
         if (this.mods.killFood) this.addFood(this.mods.killFood);

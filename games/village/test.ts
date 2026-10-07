@@ -11,6 +11,7 @@ import { Brute, Rat, Ogre, Wrecker, Troll, Skulk, waveComposition } from './enem
 import { Boar, Swarm } from './wildlife';
 import { SLOT_GAP, Warband } from './regiment';
 import { hostSize, hostCounts } from './host';
+import { rollLoot, lootTier, danger, enemyDrop } from './loot';
 const BATTLE_BIG_TEST = 20;
 import { WARREN, SOLDIER_CAP_PER_LEVEL, PLAINS } from './config';
 import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, GNOME_PACK, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS, YARD, CALLINGS, TREE_RESERVE, MOODS, SERVE_RANGE, POT_INGREDIENTS, BODY } from './config';
@@ -71,7 +72,8 @@ function step(s: VillageScene, seconds: number) {
 }
 document.getElementById('run-checks')!.addEventListener('click', () => {
   output.textContent = ''; summary.textContent = 'Running';
-  const savedAdaptiveSpawns = p.adaptiveSpawns, savedGnomeStart = p.gnomeStart;
+  const savedAdaptiveSpawns = p.adaptiveSpawns, savedGnomeStart = p.gnomeStart, savedForge = p.forgeMaxTier, savedDrop = p.dropChance;
+  p.forgeMaxTier = 3; p.dropChance = 0; // the old forge checks forge every tier, and no stray gear drop lands in a counted pile
   p.gnomeStart = false; // the checks below are laid out on the village start (the game starts gnomes by default)
   try {
     p.adaptiveSpawns = false; // Legacy timed scenarios isolate their own enemies.
@@ -1938,6 +1940,40 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(!s.raidActive && s.hosts.length === 0, 'and when the last of it is gone the raid is over');
     }
 
+    // ---- loot: tables by danger, the gear the fallen fought with, and a forge that makes only the basics ----
+    {
+      const tiers = (d: number) => { const r = new Rng(7); return Array.from({ length: 400 }, () => lootTier(r, d)); };
+      const low = tiers(0), high = tiers(1);
+      assert(low.every((t) => t === 1) && high.some((t) => t === 3) && high.every((t) => t >= 2), `danger 0 rolls only leather and bronze (${[...new Set(low)]}), danger 1 iron and steel (${[...new Set(high)]})`);
+      const a = rollLoot(new Rng(99), 0.6, 8), b = rollLoot(new Rng(99), 0.6, 8);
+      assert(a.length === 8 && JSON.stringify(a) === JSON.stringify(b) && a.some((q) => q.kind === 'weapon' || q.kind === 'armor') && a.some((q) => q.kind === 'food' || q.kind === 'wood' || q.kind === 'scrap'), `a roll is the same from the same seed, gear and supplies both (${a.map((q) => q.kind).join(', ')})`);
+      assert(danger(0, 0) === 0 && danger(Math.hypot(COLS, ROWS), p.bossDay) === 1, 'danger runs from the doorstep on day 0 to the far corner on the day of the Warlord');
+      // drops: with dropChance 1 each kind leaves what it fought with; with 0, nothing
+      p.dropChance = 1;
+      const r = new Rng(3), slots = (k: string) => new Set(Array.from({ length: 60 }, () => enemyDrop(r, k, false, 5)).map((g) => g && g.slot));
+      const raider = slots('raider'), brute = slots('brute'), shaman = slots('shaman'), rat = slots('rat');
+      const warlord = enemyDrop(r, 'raider', true, 1);
+      assert([...raider].every((q) => q === 'melee' || q === 'shield') && [...brute].every((q) => q === 'chest' || q === 'legs') && [...shaman].every((q) => q === 'helmet') && [...rat].every((q) => q === null) && warlord?.tier === 3,
+        `raiders drop blades and bucklers, brutes chests and legs, shamans helms, rats nothing, the Warlord steel (${[...raider]} / ${[...brute]} / ${[...shaman]} / ${warlord?.tier})`);
+      s = fresh(); s.world.items.length = 0;
+      const die = (a: Raider) => (s as unknown as { onDeath(m: Raider): void }).onDeath(a);
+      const foe = s.spawn(new Raider(s.player.x + 60, s.player.y)); foe.hp = 0; foe.dead = true; die(foe); s.removeDead();
+      const fell = s.world.items.filter((it) => it.kind === 'gear' && it.gear && it.gear.kind !== 'tool');
+      p.dropChance = 0;
+      const foe2 = s.spawn(new Raider(s.player.x + 60, s.player.y)); foe2.hp = 0; foe2.dead = true; die(foe2); s.removeDead();
+      assert(fell.length === 1 && s.world.items.filter((it) => it.kind === 'gear' && it.gear && it.gear.kind !== 'tool').length === 1, 'a slain raider leaves its gear on the ground beside its scrap (and none when dropChance is 0)');
+      // forge rare: the barracks makes tier 1 only; iron is found; a found iron piece reforges to steel
+      p.forgeMaxTier = 1;
+      s = fresh(); s.wood = 999; s.scrap = 999;
+      s.world.barracks[0].level = 3; s.world.refresh(s.world.barracks[0]);
+      s.player.armor.helmet = 0; s.player.weapons.melee = 0;
+      const bronze = s.craftWeapon(s.player, 'melee'), iron = s.craftWeapon(s.player, 'melee');
+      assert(bronze && !iron && s.player.weapons.melee === 1 && /looted/.test(s.weaponProblem(s.player, 'melee') ?? ''), `with forgeMaxTier 1 a bronze sword forges and iron does not (${s.weaponProblem(s.player, 'melee')})`);
+      s.player.armor.helmet = 2; // a found iron helm
+      assert(s.craftArmor(s.player, 'helmet') && s.player.armor.helmet === 3 && s.isReforge(3), 'a found iron helm reforges to steel at a Lv3 barracks');
+      p.forgeMaxTier = 3;
+    }
+
     // ---- the opening: gnomes by default, no farm, wild food by the door ------------------------------
     {
       assert(savedGnomeStart === true && p.ps1Height === 1080, `the game starts as gnomes (${savedGnomeStart}) and draws 1080 rows (${p.ps1Height})`);
@@ -2191,7 +2227,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
 
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;
-  } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); } finally { p.adaptiveSpawns = savedAdaptiveSpawns; p.gnomeStart = savedGnomeStart; }
+  } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); } finally { p.adaptiveSpawns = savedAdaptiveSpawns; p.gnomeStart = savedGnomeStart; p.forgeMaxTier = savedForge; p.dropChance = savedDrop; }
 });
 document.querySelectorAll<HTMLButtonElement>('[data-preview]').forEach(btn => btn.addEventListener('click', () => {
   const s = fresh(), kind = btn.dataset.preview!;
