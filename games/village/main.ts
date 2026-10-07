@@ -7,7 +7,7 @@ import { World, WILD_FOOD, doorstep, buildingCenter, buildingMaxHp, hasHearth, h
 import { Villager, Raider, Player, Mover, Arrow, TOOLS, SWING, type Role, type Tool, type Order } from './agents';
 import { DEFENSE_COST, WALL_HEIGHT, WARREN, SOLDIER_CAP_PER_LEVEL, MAP_AREA, PLAINS } from './config';
 import { Interior } from './interior';
-import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, Bolt, Troll, Skulk, waveComposition } from './enemies';
+import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, Bolt, Troll, Skulk } from './enemies';
 import { Boar, Swarm, type Sounder } from './wildlife';
 import { Fog } from './fog';
 import { p, TILE, COLS, ROWS, ZOOM, COST, BOAR, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, GNOME_BEDS, YARD, ORDER, LEVEL_PERKS, CALLING_NAME, CALLINGS, MOODS, SERVE_RANGE, TROLL, HIVE, ITEM, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, zeroFood, isDish, foodCount, hasInterior, type Recipe, type DishKind, DIET_STAT_NAME, type DietStat, type FoodKind, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
@@ -18,7 +18,8 @@ import { View } from './view3d/view';
 import { UI } from './ui/ui';
 import { weaponMul } from './characters';
 import { AdaptiveSpawner } from './adaptive-spawn';
-import { Regiment, Warband, REGIMENT_SIZE, BANNER_COLOURS, SHAPES, SLOT_GAP, layout, type Shape, type Stance } from './regiment';
+import { Host, hostSize, hostCounts, ASSAULT_RANGE, ROUT_SHARE, WARBAND_SIZE } from './host';
+import { Regiment, Warband, WARBAND_COLOURS, REGIMENT_SIZE, BANNER_COLOURS, SHAPES, SLOT_GAP, layout, type Shape, type Stance } from './regiment';
 
 const NAMES = ['Ada', 'Bram', 'Cass', 'Dov', 'Eli', 'Fen', 'Gil', 'Hana', 'Ivo', 'Juno', 'Kai', 'Lior', 'Mara', 'Nils', 'Orla', 'Pim', 'Quin', 'Rue', 'Sol', 'Tova', 'Uli', 'Vera', 'Wren', 'Xan', 'Yael', 'Zed'];
 
@@ -272,7 +273,7 @@ export class VillageScene extends SimScene {
     this.interior.leave();
     this.posting = null;
     this.squad = []; this.drag = null;
-    this.regiments = []; this.warbands = []; this.regimentSeq = 0; this.placing = null; this.enlistT = 0; this.warrenBorn = this.warrenToddled = 0;
+    this.regiments = []; this.warbands = []; this.hosts = []; this.hostSeq = 0; this.regimentSeq = 0; this.placing = null; this.enlistT = 0; this.warrenBorn = this.warrenToddled = 0;
     this.arrows = 30; this.feverWas = null;
     this.scrap = 0;
     this.armoryFor = null;
@@ -1802,6 +1803,7 @@ export class VillageScene extends SimScene {
     this.mealCd = Math.max(0, this.mealCd - dt);
     this.tickLobs(dt);
     this.driveCommand(dt);
+    this.tickHosts(dt);
     this.tickRegiments(dt);
     this.updateAgents(dt);
     this.separate();
@@ -1961,11 +1963,17 @@ export class VillageScene extends SimScene {
       if (this.day >= p.bossDay) { this.event('raid', 'The Warlord never came. The village endures — for now.', true); this.endRun(true); }
       return;
     }
-    const warn = 1 + this.mods.warnDaysDelta;
+    const warn = Math.max(0, 1 + this.mods.warnDaysDelta);
     if (this.day === p.bossDay) this.spawnRaid(true);
     else if (this.isRaidDay(this.day)) this.spawnRaid();
-    else if (this.day === p.bossDay - RUN.warnDays) this.event('raid', `The Warlord marches. The birds have gone quiet — he arrives in ${RUN.warnDays} days`, true);
-    else if (this.isRaidDay(this.day + warn) || this.day + warn === p.bossDay) this.event('raid', warn > 1 ? `Scouts report torchlight in the trees — raiders arrive in ${warn} days` : 'Raiders sighted at the treeline — they arrive tomorrow. Bar the doors.', true);
+    // the next host musters where your scouts can see it gather, and says when it will march
+    if (this.day === p.bossDay - RUN.warnDays) {
+      const h = this.musterHost(true, p.bossDay);
+      if (h) this.event('raid', `The Warlord marches. His host of ${h.peak} gathers to the ${h.from} — he arrives in ${RUN.warnDays} days`, true);
+    } else if (warn > 0 && (this.isRaidDay(this.day + warn) || this.day + warn === p.bossDay)) {
+      const h = this.musterHost(false, this.day + warn);
+      if (h) this.event('raid', `Scouts report a host of ${h.peak} mustering to the ${h.from} — it marches ${warn > 1 ? `in ${warn} days` : 'tomorrow'}. Meet it in the open, or bar the doors.`, true);
+    }
   }
 
   // ---- the breeding program: nurseries, ages, pens ------------------------------------
@@ -2249,55 +2257,15 @@ export class VillageScene extends SimScene {
   /** Days between raids (Long Peace stretches it). */
   get raidEvery(): number { return p.raidEvery + this.mods.raidEveryDelta; }
 
+  /**
+   * A raid: the host that mustered for today marches (or, called with no warning, one musters and
+   * marches at once). Its size comes from hostSize; see musterHost and launchHost.
+   */
   spawnRaid(boss = false): void {
     const wave = Math.max(1, 1 + Math.floor((this.day - p.firstRaidDay) / this.raidEvery));
-    const mix = waveComposition(wave, boss);
-    // raids are big: every count grows by p.raidSizeMul (the enemies themselves are unchanged)
-    for (const k of Object.keys(mix) as (keyof typeof mix)[]) if (mix[k]) mix[k] = Math.max(1, Math.round(mix[k] * p.raidSizeMul));
-    // Scouts: every wave is a raider short (never below one); Hearsay: the Warlord's escort halves
-    mix.raider = Math.max(1, mix.raider - this.mods.waveShrink);
-    if (boss && this.mods.bossEscortMul < 1) for (const k of Object.keys(mix) as (keyof typeof mix)[]) mix[k] = Math.max(k === 'raider' ? 1 : 0, Math.floor(mix[k] * this.mods.bossEscortMul));
-    if (mix.rat > 0) mix.rat = Math.max(10, mix.rat);
     const opts = { hpMul: (1 + p.waveHpGrowth * wave) * this.mods.raiderHpMul, speedMul: this.mods.raiderSpeedMul, snatchDelayMul: this.mods.snatchDelayMul, noSnatch: this.mods.noSnatch, harmlessRats: this.mods.ratsHarmless };
-    const side = this.rng.int(0, 3);
-    const spawnAt = (): { x: number; y: number } => {
-      // Raids approach from the wilderness frontier, not a several-minute walk from the far map edge.
-      const hx = COLS / 2, hy = ROWS / 2;
-      for (let attempt = 0; attempt < 100; attempt++) {
-        const distance = this.rng.int(35, 48), along = this.rng.int(-22, 22);
-        const tx = hx + (side === 0 ? -distance : side === 1 ? distance : along);
-        const ty = hy + (side === 2 ? -distance : side === 3 ? distance : along);
-        if (!this.world.isBlocked(tx, ty, true) && this.world.bfs({ tx, ty }, { tx: hx, ty: hy }, true).length) return World.center(tx, ty);
-      }
-      return World.center(hx, side === 2 ? hy - 35 : hy + 35);
-    };
-    const make: Record<keyof typeof mix, (x: number, y: number) => Raider> = {
-      raider: (x, y) => new Raider(x, y, opts),
-      rat: (x, y) => new Rat(x, y, opts),
-      snatcher: (x, y) => new Snatcher(x, y, opts),
-      brute: (x, y) => new Brute(x, y, opts),
-      shaman: (x, y) => new Shaman(x, y, opts),
-      wrecker: (x, y) => new Wrecker(x, y, opts),
-    };
-    for (const b of this.world.buildings) b.alarmed = false;
-    const parts: string[] = [];
-    for (const kind of Object.keys(mix) as (keyof typeof mix)[]) {
-      const n = mix[kind];
-      if (!n) continue;
-      parts.push(`${n} ${kind}${n > 1 ? 's' : ''}`);
-      for (let i = 0; i < n; i++) { const c = spawnAt(); this.spawn(make[kind](c.x, c.y)); }
-    }
-    if (boss) {
-      const c = spawnAt();
-      const w = this.spawn(new Raider(c.x, c.y, { ...opts, boss: true }));
-      this.boss = w;
-      this.fx.push({ kind: 'boss', who: w });
-    }
-    this.raidActive = true;
-    this.cropsEatenThisRaid = false;
-    const from = ['west', 'east', 'north', 'south'][side];
-    if (boss) this.event('raid', `THE WARLORD ATTACKS from the ${from} with ${parts.join(', ')}!`, true);
-    else this.event('raid', `They come out of the dark from the ${from} — ${parts.join(', ')}!`, true);
+    const host = this.hosts.find((h) => h.state === 'mustering') ?? this.musterHost(boss, this.day);
+    if (host) this.launchHost(host, opts, boss);
   }
 
   // ---- hooks called by enemies ----------------------------------------------
@@ -3157,6 +3125,135 @@ export class VillageScene extends SimScene {
     const q = World.toTile(ptr.worldX, ptr.worldY);
     const spot = !this.world.isBlocked(q.tx, q.ty) ? q : this.world.nearest(ptr.worldX, ptr.worldY, (_t, tx, ty) => !this.world.isBlocked(tx, ty));
     if (spot) this.orderHold(spot.tx, spot.ty);
+  }
+
+  // ---- hosts: the enemy's armies ------------------------------------------------------------------
+
+  hosts: Host[] = [];
+  private hostSeq = 0;
+  /** Where the village stands, in sim pixels. */
+  private villageCentre(): { x: number; y: number } { return World.center(COLS / 2, ROWS / 2); }
+  /** Compass words for the direction from the village to (x, y). */
+  private bearing(x: number, y: number): string {
+    const c = this.villageCentre(), a = Math.atan2(y - c.y, x - c.x), k = Math.round(a / (Math.PI / 4));
+    return ['east', 'south-east', 'south', 'south-west', 'west', 'north-west', 'north', 'north-east'][(k + 8) % 8];
+  }
+  /** Muster ground for a host: a plain on the large map, or open, reachable ground 60-75 tiles out. */
+  private hostSpot(): TilePos {
+    if (this.world.plains.length) { const pl = this.rng.pick(this.world.plains); return { tx: pl.tx, ty: pl.ty }; }
+    const hx = COLS / 2, hy = ROWS / 2;
+    for (let tries = 0; tries < 200; tries++) {
+      const a = this.rng.range(0, Math.PI * 2), r = this.rng.range(60, 75);
+      const tx = Math.round(hx + Math.cos(a) * r), ty = Math.round(hy + Math.sin(a) * r * 0.7);
+      if (tx < 6 || ty < 6 || tx > COLS - 7 || ty > ROWS - 7) continue;
+      const t = this.world.get(tx, ty)!;
+      if (t.building || t.kind === 'thicket' || this.world.isBlocked(tx, ty, true)) continue;
+      if (!this.world.bfs({ tx, ty }, { tx: hx, ty: hy }, true).length) continue;
+      return { tx, ty };
+    }
+    return { tx: hx, ty: hy + Math.min(40, ROWS / 2 - 6) };
+  }
+  /**
+   * Raise a host for the raid on `day` out in the wild, its warbands camped in ranks facing the village.
+   * Shield lines and wedges of raiders and butchers, knots of shamans behind; the Warlord (on his day)
+   * at the head of the first. Its rats, snatchers and wreckers join when it marches. Nothing is raised
+   * while another host is still mustering.
+   */
+  musterHost(boss: boolean, day: number): Host | null {
+    if (this.hosts.some((h) => h.state === 'mustering')) return null;
+    // Scouts thin every host by a tenth a point; Hearsay shrinks the Warlord's
+    const size = Math.max(1, Math.round((boss ? p.hostMax * Math.min(1, this.mods.bossEscortMul) : hostSize(day)) * Math.max(0.3, 1 - 0.1 * this.mods.waveShrink))), n = hostCounts(size), q = this.hostSpot(), at = World.center(q.tx, q.ty);
+    const host = new Host(at, this.bearing(at.x, at.y), size, day);
+    const wave = Math.max(1, 1 + Math.floor((day - p.firstRaidDay) / this.raidEvery));
+    const opts = { hpMul: (1 + p.waveHpGrowth * wave) * this.mods.raiderHpMul, speedMul: this.mods.raiderSpeedMul, snatchDelayMul: this.mods.snatchDelayMul, noSnatch: this.mods.noSnatch, harmlessRats: this.mods.ratsHarmless };
+    // the ranks: butchers spread through the shield lines, shamans in their own knots at the back
+    const heavy: ('raider' | 'brute')[] = [];
+    for (let i = 0, b = 0; i < n.raider + n.brute; i++) heavy.push(b < n.brute && (i + 1) * n.brute >= (b + 1) * (n.raider + n.brute) ? (b++, 'brute') : 'raider');
+    const groups: { kinds: ('raider' | 'brute' | 'shaman')[]; shape: 'line' | 'wedge' | 'square' }[] = [];
+    for (let i = 0, k = 0; i < heavy.length; i += WARBAND_SIZE.line, k++) groups.push({ kinds: heavy.slice(i, i + WARBAND_SIZE.line), shape: k % 2 ? 'wedge' : 'line' });
+    for (let i = 0; i < n.shaman; i += WARBAND_SIZE.shaman) groups.push({ kinds: Array(Math.min(WARBAND_SIZE.shaman, n.shaman - i)).fill('shaman'), shape: 'square' });
+    // camp: warbands three abreast, rank behind rank, all facing the village
+    const c = this.villageCentre(), fd = Math.hypot(c.x - at.x, c.y - at.y) || 1, fx = (c.x - at.x) / fd, fy = (c.y - at.y) / fd;
+    groups.forEach((g, i) => {
+      const col = (i % 3) - 1, row = Math.floor(i / 3), spread = 9 * TILE;
+      let bx = at.x + -fy * col * spread - fx * row * spread, by = at.y + fx * col * spread - fy * row * spread;
+      const bt = World.toTile(bx, by);
+      if (!this.world.inBounds(bt.tx, bt.ty) || this.world.isBlocked(bt.tx, bt.ty, true)) { bx = at.x; by = at.y; }
+      const w = new Warband(++this.hostSeq, WARBAND_COLOURS[i % WARBAND_COLOURS.length], bx, by);
+      w.shape = g.shape; w.face(fx, fy);
+      const spots = w.slotsAt(bx, by, fx, fy, g.kinds.length);
+      g.kinds.forEach((k, j) => {
+        let { x, y } = spots[j];
+        const t = World.toTile(x, y);
+        if (!this.world.inBounds(t.tx, t.ty) || this.world.isBlocked(t.tx, t.ty, true)) { x = bx; y = by; }
+        const r = this.spawn(k === 'brute' ? new Brute(x, y, opts) : k === 'shaman' ? new Shaman(x, y, opts) : new Raider(x, y, opts));
+        r.lairBound = true; // camped: not yet a raid
+        w.add(r);
+      });
+      host.warbands.push(w); this.warbands.push(w);
+    });
+    if (boss && host.warbands.length) {
+      const w0 = host.warbands[0], wl = this.spawn(new Raider(w0.x, w0.y, { ...opts, boss: true }));
+      wl.lairBound = true; w0.add(wl); this.boss = wl;
+    }
+    host.peak = host.bodies().length + n.rat + n.snatcher + n.wrecker;
+    host.pending = n;
+    this.hosts.push(host);
+    return host;
+  }
+  /** The host marches: one route to the village, its loose rabble let go ahead of it, and the raid is on. */
+  private launchHost(host: Host, opts: ConstructorParameters<typeof Raider>[2], boss: boolean): void {
+    const c = this.villageCentre(), from = World.toTile(host.at.x, host.at.y), to = World.toTile(c.x, c.y);
+    const tiles = this.world.bfs(from, to, true);
+    const route = [host.at, ...tiles.filter((_, i) => i % 3 === 2 || i === tiles.length - 1).map((q) => World.center(q.tx, q.ty))];
+    for (const r of host.bodies()) r.lairBound = false;
+    const n = host.pending;
+    if (n) {
+      const at = () => ({ x: host.at.x + this.rng.range(-3, 3) * TILE, y: host.at.y + this.rng.range(-3, 3) * TILE });
+      for (let i = 0; i < n.rat; i++) { const q = at(); host.loose.push(this.spawn(new Rat(q.x, q.y, opts))); }
+      for (let i = 0; i < n.snatcher; i++) { const q = at(); host.loose.push(this.spawn(new Snatcher(q.x, q.y, opts))); }
+      for (let i = 0; i < n.wrecker; i++) { const q = at(); host.loose.push(this.spawn(new Wrecker(q.x, q.y, opts))); }
+    }
+    host.march(route);
+    for (const b of this.world.buildings) b.alarmed = false;
+    this.raidActive = true;
+    this.cropsEatenThisRaid = false;
+    if (boss && this.boss) this.fx.push({ kind: 'boss', who: this.boss });
+    this.event('raid', boss ? `THE WARLORD ATTACKS from the ${host.from} with a host of ${host.peak}!` : `The host marches from the ${host.from} — ${host.peak} of them, in ${host.warbands.length} warband${host.warbands.length === 1 ? '' : 's'}!`, true);
+  }
+  /**
+   * Each tick: hosts keep their columns in order; a warband at the walls breaks ranks and storms in; a
+   * host cut below ROUT_SHARE of its strength breaks and runs, and those who make it home are gone.
+   */
+  tickHosts(dt: number): void {
+    if (!this.hosts.length) return;
+    const c = this.villageCentre(), reach = ASSAULT_RANGE * TILE;
+    for (const h of this.hosts) {
+      h.tick(dt);
+      if (h.state === 'marching') {
+        for (const w of h.warbands) if (w.members.length && Math.hypot(w.x - c.x, w.y - c.y) < reach) {
+          if (!h.warbands.some((o) => o !== w && !o.members.length)) this.event('raid', `The host is at the walls — warband after warband breaks ranks and storms in!`, true);
+          h.loose.push(...w.members); // still the host's: they count for its strength and its rout
+          w.release();
+        }
+        if (h.peak >= 10 && h.alive() < h.peak * ROUT_SHARE) {
+          h.rout();
+          for (const w of h.warbands) for (const r of w.members) r.lairBound = true; // fleeing: no longer the raid
+          this.event('raid', `The host breaks! Its last ${h.alive()} turn and run for the ${h.from}.`, true);
+        }
+      } else if (h.state === 'routed') {
+        for (const w of h.warbands) if (w.members.length && Math.hypot(w.x - h.at.x, w.y - h.at.y) < 2 * TILE) for (const r of w.members) r.dead = true; // home and gone (no loot: nobody cut them down)
+      }
+    }
+    this.hosts = this.hosts.filter((h) => h.alive() > 0 || h.state === 'mustering' && h.warbands.some((w) => w.members.length));
+  }
+  /** The HUD's word on the hosts: the one marching (how many, how far), else the one mustering. */
+  hostStatus(): { marching: boolean; alive: number; peak: number; tiles: number; marchDay: number } | null {
+    const h = this.hosts.find((q) => q.state === 'marching') ?? this.hosts.find((q) => q.state === 'mustering');
+    if (!h) return null;
+    const c = this.villageCentre(), lead = h.warbands.find((w) => w.members.length);
+    const tiles = lead ? Math.round(Math.hypot(lead.x - c.x, lead.y - c.y) / TILE) : 0;
+    return { marching: h.state === 'marching', alive: h.alive(), peak: h.peak, tiles, marchDay: h.marchDay };
   }
 
   // ---- far from anyone: creatures nobody of yours is near think at a quarter of the rate ------------------

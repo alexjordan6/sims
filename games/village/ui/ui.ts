@@ -337,8 +337,10 @@ export class UI {
     const hour = Math.floor(s.dayTime * 24);
     const night = s.dayTime < 0.22 || s.dayTime > 0.8;
     const raidIn = s.nextRaidDay - s.day;
+    const host = s.hostStatus();
+    const hostKey = host ? `${host.marching}${host.alive}/${host.peak}@${host.tiles}` : '';
     const held = s.player.pack.slots.map(slotKey).join('|');
-    const key = `${s.day}|${hour}|${held}|${s.food | 0}/${s.foodCap}|${s.surplusDays().toFixed(1)}|${s.feverActive()}|${s.wood | 0}/${s.woodCap}|${s.scrap}|${CALLINGS.map((c) => `${filled(c)}/${cap(c)}`).join('|')}|${count('infant')}|${count('kid')}|${count('gnome')}|${count('elder')}|${Math.round(s.player.hp / Math.max(1, s.player.maxHp) * 12)}|${p.hunger ? Math.ceil(s.player.hunger * 2) / 2 : 'off'}/${p.hungerMax}|${s.raidActive}|${s.boss?.hp ?? ''}|${raidIn}|${s.speed}|${s.paused}|${night}|${s.buff?.dish ?? ''}${Math.ceil(s.buffLeft())}`;
+    const key = `${s.day}|${hour}|${held}|${s.food | 0}/${s.foodCap}|${s.surplusDays().toFixed(1)}|${s.feverActive()}|${s.wood | 0}/${s.woodCap}|${s.scrap}|${CALLINGS.map((c) => `${filled(c)}/${cap(c)}`).join('|')}|${count('infant')}|${count('kid')}|${count('gnome')}|${count('elder')}|${Math.round(s.player.hp / Math.max(1, s.player.maxHp) * 12)}|${p.hunger ? Math.ceil(s.player.hunger * 2) / 2 : 'off'}/${p.hungerMax}|${s.raidActive}|${s.boss?.hp ?? ''}|${raidIn}|${s.speed}|${s.paused}|${night}|${s.buff?.dish ?? ''}${Math.ceil(s.buffLeft())}|${hostKey}`;
     if (key === this.lastTop) return;
     this.lastTop = key;
 
@@ -373,7 +375,9 @@ export class UI {
       const pct = Math.max(0, (s.boss.hp / s.boss.maxHp) * 100);
       raid.innerHTML = `${orc}<span>WARLORD</span><div class="bar boss"><i style="width:${pct}%"></i></div>`;
       raid.className = 'val raid now';
-    } else if (s.raidActive) { raid.innerHTML = `${orc}<span>UNDER ATTACK!</span>`; raid.className = 'val raid now'; }
+    } else if (host?.marching) { raid.innerHTML = `${orc}<span>HOST ${host.alive}/${host.peak} · ${host.tiles} tiles</span>`; raid.className = 'val raid now'; }
+    else if (s.raidActive) { raid.innerHTML = `${orc}<span>UNDER ATTACK!</span>`; raid.className = 'val raid now'; }
+    else if (host) { const d = Math.max(0, host.marchDay - s.day); raid.innerHTML = `${orc}<span>HOST OF ${host.peak} · ${d <= 1 ? (d ? 'TOMORROW' : 'TODAY') : 'in ' + d + ' days'}</span>`; raid.className = d <= 1 ? 'val raid soon' : 'val raid'; }
     else if (!Number.isFinite(raidIn)) { raid.innerHTML = `${orc}<span>PEACE</span>`; raid.className = 'val raid'; } // p.peaceful: nobody is marching
     else if (raidIn <= 1) { raid.innerHTML = `${orc}<span>${bossNext ? 'WARLORD TOMORROW' : 'TOMORROW'}</span>`; raid.className = 'val raid soon'; }
     else { raid.innerHTML = `${orc}<span>${bossNext ? 'Warlord' : 'in'} ${raidIn} days</span>`; raid.className = bossNext ? 'val raid soon' : 'val raid'; }

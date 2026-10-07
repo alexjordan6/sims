@@ -80,6 +80,12 @@ export class Minimap {
       c.fillStyle = colour;
       c.fillRect(Math.floor(a.x / TILE) - (size >> 1), Math.floor(a.y / TILE) - (size >> 1), size, size);
     }
+    // the hosts: your scouts follow every warband, seen or not — a red pennant on a black field
+    for (const w of s.warbands) {
+      const x = Math.floor(w.x / TILE), y = Math.floor(w.y / TILE);
+      c.fillStyle = '#120808'; c.fillRect(x - 2, y - 2, 5, 5);
+      c.fillStyle = '#ff3a2a'; c.fillRect(x - 1, y - 1, 3, 3);
+    }
     // the camera window
     // the camera window: what the 3D view sees of the ground, a trapezoid that turns with the camera
     const foot = s.view?.groundFootprint();

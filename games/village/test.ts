@@ -9,6 +9,7 @@ import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, Wrecker, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm } from './wildlife';
 import { SLOT_GAP, Warband } from './regiment';
+import { hostSize, hostCounts } from './host';
 import { WARREN, SOLDIER_CAP_PER_LEVEL, PLAINS } from './config';
 import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, GNOME_PACK, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS, YARD, CALLINGS, TREE_RESERVE, MOODS, SERVE_RANGE, POT_INGREDIENTS, BODY } from './config';
 
@@ -242,13 +243,13 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     s.player.pressRoll(); step(s, p.rollTime + 0.02);
     ambush.attackTick(0.31, s);
     assert(s.player.hp === hpBeforeRoll && s.fx.some(e => e.kind === 'miss'), 'a roll out of the wind-up beats the brute\'s blow');
-    s = fresh(); s.agents = [s.player]; s.day = 3; s.spawnRaid();
+    s = fresh(); s.agents = [s.player]; s.day = p.firstRaidDay; s.spawnRaid();
     const wave1 = s.agents.filter(a => a instanceof Raider && !a.lairBound);
-    assert(wave1.length === Math.round(2 * p.raidSizeMul), `the first raid brings ${wave1.length} raiders`);
-    s = fresh(); s.agents = [s.player]; s.day = 6; s.spawnRaid();
+    assert(wave1.length === hostSize(p.firstRaidDay) && s.raidActive && s.hosts[0]?.state === 'marching', `the first raid is a host of ${wave1.length} (hostBase ${p.hostBase}), marching`);
+    s = fresh(); s.agents = [s.player]; s.day = p.firstRaidDay + 3; s.spawnRaid();
     const kinds = s.agents.filter((a): a is Raider => a instanceof Raider).map(a => a.kind);
-    const rats = kinds.filter(k => k === 'rat').length, wreckers = kinds.filter(k => k === 'wrecker').length;
-    assert(rats === Math.round(10 * p.raidSizeMul) && wreckers === Math.round(1 * p.raidSizeMul), `the second raid brings ${rats} rats and ${wreckers} wreckers`);
+    const want = hostCounts(hostSize(s.day)), count = (k: string) => kinds.filter((q) => q === k).length;
+    assert((['raider', 'brute', 'shaman', 'rat', 'wrecker', 'snatcher'] as const).every((k) => count(k) === want[k]), `a host is made by its mix (${(['raider', 'brute', 'shaman', 'rat', 'wrecker', 'snatcher'] as const).map((k) => `${count(k)} ${k}`).join(', ')})`);
     // the Ogre: asleep and hidden by day, out at night, home at dawn with a quarter of his health back; never counts as a raid
     s = fresh(); s.agents = [s.player, s.ogre!]; const ogre = s.ogre!;
     assert(ogre instanceof Ogre && ogre.hidden && ogre.state === 'sleeping' && ogre.lairBound && ogre.huge, 'the Ogre starts asleep and hidden in his lair');
@@ -1876,6 +1877,58 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       const spots = [[100, 100], [125, 96], [140, 110], [10, 10], [200, 140]].map(([tx, ty]) => World.center(tx, ty));
       assert(spots.every((q) => s.nearestVictim(q.x, q.y) === scan(q.x, q.y)), 'the nearest victim by grid rings is the nearest by a scan of everyone, near or far');
       for (const f of folk) f.dead = true; s.removeDead();
+    }
+
+    // ---- hosts: the enemy's armies muster in the wild, march in warbands, storm the walls, and break ------
+    {
+      const run = (secs: number) => { for (let i = 0; i < Math.ceil(secs * 60); i++) { s.grid.rebuild(s.agents); s.tick(1 / 60); } };
+      const days = [0, 3, 6, 9, 12, 15, 18].map((d) => hostSize(p.firstRaidDay + d));
+      assert(days.every((n, i) => n === Math.min(p.hostMax, Math.round(p.hostBase * 2 ** (i * 3 / p.hostDoubleDays)))) && hostSize(999) === p.hostMax,
+        `hosts double every ${p.hostDoubleDays} days from ${p.hostBase}, never past ${p.hostMax} (${days.join(', ')})`);
+      const mix = hostCounts(320);
+      assert(Object.values(mix).reduce((a, b) => a + b, 0) === 320 && mix.raider === 192 && hostCounts(1).raider === 1, `the mix adds up: ${JSON.stringify(mix)}`);
+      // muster: on the warning day a host gathers out in the wild, in warbands, and waits
+      s = fresh(); s.agents = [s.player]; s.world.items.length = 0;
+      const c = World.center(COLS / 2, ROWS / 2); Object.assign(s.player, c);
+      const warnDay = p.firstRaidDay + 3 - 1; s.day = warnDay; s.dayTime = 0; s.newDay();
+      const host = s.hosts[0];
+      assert(!!host && host.state === 'mustering' && host.peak === hostSize(warnDay + 1) && s.journal.some((j) => /mustering to the/.test(j.text)), `on the warning day a host of ${host?.peak} musters, and the scouts say so`);
+      const ranks = host.warbands.flatMap((w) => w.members);
+      assert(Math.hypot(host.at.x - c.x, host.at.y - c.y) >= 55 * TILE && ranks.every((r) => r.warband && r.lairBound) && !s.raidActive, `${ranks.length} of it camp in ${host.warbands.length} warbands ${Math.round(Math.hypot(host.at.x - c.x, host.at.y - c.y) / TILE)} tiles out, not yet a raid`);
+      const camped = host.warbands.map((w) => ({ x: w.x, y: w.y }));
+      run(5);
+      assert(host.warbands.every((w, i) => Math.hypot(w.x - camped[i].x, w.y - camped[i].y) < TILE) && host.state === 'mustering', 'and nobody moves before the day it marches');
+      // march: at the raid day's dawn the column sets off down one road
+      s.day++; s.newDay();
+      const d0 = Math.hypot(host.warbands[0].x - c.x, host.warbands[0].y - c.y);
+      assert(host.state === 'marching' && s.raidActive && host.bodies().every((r) => !r.lairBound), 'on the raid day it marches and the raid is on');
+      run(15);
+      const lead = host.warbands.find((w) => w.members.length)!, d1 = Math.hypot(lead.x - c.x, lead.y - c.y);
+      const offs = host.warbands.flatMap((w) => w.active().map((r) => Math.hypot(r.x - r.slot!.x, r.y - r.slot!.y))).sort((a, b) => a - b);
+      assert(d1 < d0 - 10 * TILE && offs[offs.length >> 1] < TILE, `the column closes on the village (${Math.round(d0 / TILE)} → ${Math.round(d1 / TILE)} tiles), its raiders keeping their places (median ${offs[offs.length >> 1]?.toFixed(1)} px off)`);
+      // engage: a regiment across its road is charged; the rest of the column keeps marching
+      const ahead = host.pointAt(host.lead + 10 * TILE);
+      const guard: Villager[] = [];
+      for (let i = 0; i < 30; i++) { const g = s.spawn(new Villager(ahead.x + (i % 6) * 8, ahead.y + Math.floor(i / 6) * 8, s.world.houses[0], 'soldier', 20, `Guard${i}`, s.mods)); g.gnome = true; g.applyRole(s.mods); g.weapon = 'pike'; guard.push(g); }
+      run(0.6);
+      const reg = guard[0].regiment!; reg.place(ahead.x, ahead.y, lead.x - ahead.x, lead.y - ahead.y);
+      const hostHp = () => host.bodies().reduce((a, r) => a + (r.dead ? 0 : r.hp), 0), guardHp = () => guard.reduce((a, g) => a + (g.dead ? 0 : g.hp), 0);
+      const h0 = hostHp(), g0 = guardHp();
+      run(12);
+      assert(host.warbands.some((w) => w.state === 'charge' || !w.members.length) && hostHp() < h0 && guardHp() < g0, `a gnome regiment across the road is charged, and both sides bleed (host ${Math.round(h0)} → ${Math.round(hostHp())} hp, guard ${Math.round(g0)} → ${Math.round(guardHp())})`);
+      for (const g of guard) g.dead = true; s.removeDead();
+      // assault: a warband that reaches the walls breaks ranks and storms in as raiders
+      const stormer = host.warbands.find((w) => w.members.length)!, its = [...stormer.members];
+      stormer.x = c.x + 10 * TILE; stormer.y = c.y; for (const r of its) Object.assign(r, { x: stormer.x, y: stormer.y });
+      run(1 / 60);
+      assert(its.every((r) => r.dead || (!r.block && !r.lairBound)) && s.raidActive, `a warband at the walls releases its ${its.length} as ordinary raiders`);
+      // rout: cut below a seventh of its strength, the rest turn for home
+      const standing = host.bodies().filter((r) => !r.dead);
+      for (const r of standing.slice(0, Math.max(0, standing.length - Math.floor(host.peak * 0.1)))) r.dead = true;
+      s.removeDead(); run(1 / 60);
+      assert(host.state === 'routed' && host.warbands.every((w) => !w.members.length || (w.goal && Math.hypot(w.goal.x - host.at.x, w.goal.y - host.at.y) < 1 && w.members.every((r) => r.lairBound))), `cut to ${host.alive()} of ${host.peak}, the host breaks and runs for its muster ground`);
+      for (const r of host.bodies()) r.dead = true; s.removeDead(); run(0.1);
+      assert(!s.raidActive && s.hosts.length === 0, 'and when the last of it is gone the raid is over');
     }
 
     // ---- the warren and the army economy: quick births, a granary-fed nursery, bigger barracks, gnome rations ----

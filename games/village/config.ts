@@ -44,7 +44,10 @@ export const p = live(
     bossDay: [D.bossDay, 5, 40, 1, 'The run\'s length: the Warlord arrives on this day. Beat him to win.'],
     raidEvery: [D.raidEvery, 1, 20, 1, 'Days between raids after the first (Long Peace adds one).'],
     firstRaidDay: [D.firstRaidDay, 1, 10, 1, 'The first raid comes on this day; the wave count starts from it.'],
-    raidSizeMul: [D.raidSizeMul, 0.5, 4, 0.05, 'Every count in a raid\'s mix is multiplied by this. Enemy stats are untouched.'],
+    hostBase: [D.hostBase, 5, 400, 5, 'Bodies in the first host (the first raid day). Hosts muster out in the wild and march on the village in warbands.'],
+    hostDoubleDays: [D.hostDoubleDays, 1, 15, 0.5, 'Days for the host to double in size.'],
+    hostMax: [D.hostMax, 20, 2000, 20, 'The biggest a host gets — and the size of the Warlord\'s host.'],
+    raidSizeMul: [D.raidSizeMul, 0.5, 4, 0.05, 'Retired: raids are hosts now (hostBase, hostDoubleDays, hostMax). Kept so saved settings still load.'],
     waveHpGrowth: [D.waveHpGrowth, 0, 0.3, 0.01, 'Raider HP multiplier grows this much per wave (0.08 = +8% each raid).'],
   }, 'pacing'),
   params({

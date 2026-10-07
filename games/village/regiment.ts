@@ -152,7 +152,11 @@ export abstract class Block<M extends Mover = Mover> {
     let pace = Infinity;
     for (const v of who) pace = Math.min(pace, v.speed);
     if (!Number.isFinite(pace)) pace = 30;
-    this.march(dt, world, pace * 0.85);
+    // dress the ranks: while the block trails its banner by more than a tile, the banner slows, down to a near halt
+    let lag = 0;
+    for (const v of who) if (v.slot) lag += Math.hypot(v.x - v.slot.x, v.y - v.slot.y);
+    lag = who.length ? lag / who.length : 0;
+    this.march(dt, world, pace * 0.85 * Math.min(1, Math.max(0.1, 1 - (lag - TILE) / (3 * TILE))));
     this.slots = this.slotsAt(this.x, this.y, this.fx, this.fy, who.length).map((q) => this.footing(world, q));
     if (this.dirty || who.length !== this.lastActive) {
       // where the block is going to stand decides who goes where, not where it stands now
