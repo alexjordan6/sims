@@ -1284,8 +1284,8 @@ export class Raider extends Mover {
       const d = (m.x - this.x) ** 2 + (m.y - this.y) ** 2;
       if (d < bd) { bd = d; best = m; }
     };
-    consider(s.player);
-    for (const v of s.villagers()) consider(v);
+    // a grid query round the raider: a scan of every villager per raider is ruinous with an army of hundreds
+    s.grid.forEachInRadius(this.x, this.y, c.aggro, (o) => { if (o instanceof Villager || o instanceof Player) consider(o); });
     return best;
   }
   /** A quarry that has run past the leash is let go. */

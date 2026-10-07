@@ -2,8 +2,20 @@ import { params } from '@shared/index';
 import D from './defaults.json';
 
 export const TILE = 16;
-export const COLS = 240;
-export const ROWS = 160;
+/**
+ * The map. Play runs on the large one: the old 240x160 country in the middle, and as much again on
+ * every side, opened up into broad plains where armies of hundreds can meet. The regression harness
+ * (test.html sets VILLAGE_MAP = 'classic') keeps the classic size its hand-placed checks are laid out on;
+ * `?map=classic` plays it too.
+ */
+const CLASSIC_MAP = (globalThis as { VILLAGE_MAP?: string }).VILLAGE_MAP === 'classic'
+  || (typeof location !== 'undefined' && new URLSearchParams(location.search).get('map') === 'classic');
+export const COLS = CLASSIC_MAP ? 240 : 480;
+export const ROWS = CLASSIC_MAP ? 160 : 320;
+/** how many classic maps this one is, by area: what is scattered once per map (camps, sounders, trolls, hives) comes this many times over */
+export const MAP_AREA = (COLS * ROWS) / (240 * 160);
+/** the open plains of the large map: how many, how big (tiles, half-axes), and how far out from the village */
+export const PLAINS = { count: 8, rx: [22, 40] as const, ry: [16, 28] as const, minDist: 75, warband: [12, 22] as const } as const;
 export const ZOOM = 2; // 16 px tiles shown at 32 px
 
 /** One run: survive escalating raids until the warlord arrives, then beat him. (`bossDay` is a slider: p.bossDay.) */

@@ -5,7 +5,7 @@ import { SimScene, launch, button, getGui, Rng, SpatialGrid } from '@shared/inde
 import { launch as throwItem, type Item } from './items';
 import { World, WILD_FOOD, doorstep, buildingCenter, buildingMaxHp, hasHearth, hearthCost, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos, type Hive } from './world';
 import { Villager, Raider, Player, Mover, Arrow, TOOLS, SWING, type Role, type Tool, type Order } from './agents';
-import { DEFENSE_COST, WALL_HEIGHT, WARREN, SOLDIER_CAP_PER_LEVEL } from './config';
+import { DEFENSE_COST, WALL_HEIGHT, WARREN, SOLDIER_CAP_PER_LEVEL, MAP_AREA, PLAINS } from './config';
 import { Interior } from './interior';
 import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, Bolt, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm, type Sounder } from './wildlife';
@@ -371,7 +371,7 @@ export class VillageScene extends SimScene {
   /** The map's sounders: BOAR.sounders families in the woods and meadows, well away from the village and each other. */
   private spawnSounders(): void {
     const hx = COLS / 2, hy = ROWS / 2;
-    for (let k = 0; k < BOAR.sounders; k++) {
+    for (let k = 0; k < Math.round(BOAR.sounders * MAP_AREA); k++) {
       for (let tries = 0; tries < 60; tries++) {
         const tx = this.rng.int(6, COLS - 7), ty = this.rng.int(6, ROWS - 7), t = this.world.get(tx, ty)!;
         if (t.kind !== 'grass' || t.trail || t.building || Math.hypot(tx - hx, ty - hy) < BOAR.minDist) continue;
@@ -388,7 +388,7 @@ export class VillageScene extends SimScene {
    * simply an agent standing where it was put, and from there it prowls wherever it likes.
    */
   /** the raider camps out in the wild, and the day each was last cleared (null while anyone holds it) */
-  camps: { x: number; y: number; members: Raider[]; cleared: number | null; born: number }[] = [];
+  camps: { x: number; y: number; members: Raider[]; cleared: number | null; born: number; war?: boolean }[] = [];
   private campRng = new Rng(1);
   /**
    * Camps: raiders who live out in the wild and guard their ground (Raider.camp). They are where the fighting
@@ -397,13 +397,20 @@ export class VillageScene extends SimScene {
   private spawnCamps(): void {
     this.camps = [];
     this.campRng = new Rng(this.seed ^ 0xca3b5);
-    for (let k = 0; k < p.campCount; k++) this.foundCamp();
+    for (let k = 0; k < Math.round(p.campCount * MAP_AREA); k++) this.foundCamp();
+    // a war band on every open plain: the large map's set-piece battles, a block of raiders on open ground
+    if (p.campCount > 0) for (const pl of this.world.plains) {
+      const c = World.center(pl.tx, pl.ty);
+      const camp = { x: c.x, y: c.y, members: [] as Raider[], cleared: null as number | null, born: this.day, war: true };
+      this.camps.push(camp);
+      this.manCamp(camp);
+    }
   }
   /** Pick open, reachable ground in the wild for a new camp — outside the thorn ring, off the trails, clear of the lair, the gnome glade and other camps, and out of everyone's sight. */
   private campSpot(): TilePos | null {
     const rng = this.campRng, hx = COLS / 2, hy = ROWS / 2, den = this.world.wildGnomeHouse;
     for (let tries = 0; tries < 80; tries++) {
-      const a = rng.range(0, Math.PI * 2), r = rng.range(32, 80);
+      const a = rng.range(0, Math.PI * 2), r = rng.range(32, 80 * Math.sqrt(MAP_AREA)); // the whole wild, however big the map
       const tx = Math.round(hx + Math.cos(a) * r), ty = Math.round(hy + Math.sin(a) * r * 0.7);
       const t = this.world.get(tx, ty);
       if (!t || t.trail || t.building || t.kind === 'thicket' || this.world.isBlocked(tx, ty, true)) continue;
@@ -425,18 +432,22 @@ export class VillageScene extends SimScene {
     this.camps.push(camp);
     this.manCamp(camp);
   }
-  /** Fill a camp: two to four raiders (more as the days go on), some of them butchers or bone shamans. */
-  private manCamp(camp: { x: number; y: number; members: Raider[]; cleared: number | null }): void {
-    const rng = this.campRng, n = Math.min(5, 2 + rng.int(0, 2) + Math.floor(this.day / 7));
+  /**
+   * Fill a camp: two to four raiders (more as the days go on), some of them butchers or bone shamans. A war
+   * band on a plain is a dozen or more, spread wider and guarding more ground — a battle, not a skirmish.
+   */
+  private manCamp(camp: { x: number; y: number; members: Raider[]; cleared: number | null; war?: boolean }): void {
+    const rng = this.campRng, war = !!camp.war;
+    const n = war ? Math.min(PLAINS.warband[1], PLAINS.warband[0] + rng.int(0, 3) + Math.floor(this.day / 3)) : Math.min(5, 2 + rng.int(0, 2) + Math.floor(this.day / 7));
     camp.members = [];
     for (let i = 0; i < n; i++) {
       const roll = rng.next(), opts = { hpMul: this.mods.raiderHpMul, speedMul: this.mods.raiderSpeedMul };
-      const a = rng.range(0, Math.PI * 2), d = rng.range(4, 20);
+      const a = rng.range(0, Math.PI * 2), d = rng.range(4, war ? 6 * TILE : 20);
       let x = camp.x + Math.cos(a) * d, y = camp.y + Math.sin(a) * d;
       const t = World.toTile(x, y);
       if (this.world.isBlocked(t.tx, t.ty, true)) { x = camp.x; y = camp.y; }
       const r = roll < 0.2 ? new Brute(x, y, opts) : roll < 0.38 ? new Shaman(x, y, opts) : new Raider(x, y, opts);
-      r.camp = { x: camp.x, y: camp.y, aggro: p.campAggro * TILE, leash: p.campLeash * TILE };
+      r.camp = { x: camp.x, y: camp.y, aggro: p.campAggro * TILE * (war ? 1.5 : 1), leash: p.campLeash * TILE * (war ? 2 : 1) };
       r.lairBound = true; // camps never start, hold open or count toward a raid
       r.task = 'keeping watch over its camp';
       camp.members.push(this.spawn(r));
@@ -450,7 +461,7 @@ export class VillageScene extends SimScene {
       if (camp.cleared === null) { camp.cleared = this.day; continue; }
       if (this.day - camp.cleared >= p.campRespawnDays && !(this.fog && this.fog.visibleAt(camp.x, camp.y) > 0)) this.manCamp(camp);
     }
-    if (p.campCount > 0 && this.day % 3 === 0 && this.camps.length < p.campCount * 2) this.foundCamp();
+    if (p.campCount > 0 && this.day % 3 === 0 && this.camps.length < p.campCount * MAP_AREA * 2 + this.world.plains.length) this.foundCamp();
   }
 
   /**
@@ -485,7 +496,7 @@ export class VillageScene extends SimScene {
     const hx = COLS / 2, hy = ROWS / 2;
     const rng = new Rng(this.seed ^ 0x7201);
     const placed: TilePos[] = [];
-    for (let k = 0; k < p.trolls; k++) {
+    for (let k = 0; k < Math.round(p.trolls * MAP_AREA); k++) {
       for (let tries = 0; tries < 40; tries++) {
         const tx = rng.int(4, COLS - 5), ty = rng.int(4, ROWS - 5), t = this.world.get(tx, ty)!;
         if (t.building || this.world.isBlocked(tx, ty, true) || Math.hypot(tx - hx, ty - hy) < TROLL.minDist) continue;
@@ -507,7 +518,7 @@ export class VillageScene extends SimScene {
     const hx = COLS / 2, hy = ROWS / 2;
     const rng = new Rng(this.seed ^ 0x81ee);
     const placed: TilePos[] = [];
-    for (let k = 0; k < p.hives; k++) {
+    for (let k = 0; k < Math.round(p.hives * MAP_AREA); k++) {
       for (let tries = 0; tries < 40; tries++) {
         const tx = rng.int(3, COLS - 4), ty = rng.int(3, ROWS - 4), t = this.world.get(tx, ty)!;
         if (!this.isOldGrowth(t)) continue; // only a full canopy can hide a hive
@@ -1792,7 +1803,7 @@ export class VillageScene extends SimScene {
     this.tickLobs(dt);
     this.driveCommand(dt);
     this.tickRegiments(dt);
-    for (const a of this.agents) a.update(dt, this);
+    this.updateAgents(dt);
     this.separate();
     this.tickAges(dt);
     this.tickHunger(dt);
@@ -3130,6 +3141,37 @@ export class VillageScene extends SimScene {
     const q = World.toTile(ptr.worldX, ptr.worldY);
     const spot = !this.world.isBlocked(q.tx, q.ty) ? q : this.world.nearest(ptr.worldX, ptr.worldY, (_t, tx, ty) => !this.world.isBlocked(tx, ty));
     if (spot) this.orderHold(spot.tx, spot.ty);
+  }
+
+  // ---- far from anyone: creatures nobody of yours is near think at a quarter of the rate ------------------
+
+  /** the map in 16-tile buckets: 1 where one of yours (the head, a villager) is within about three buckets */
+  private awake = new Uint8Array(0);
+  private lodTick = 0;
+  /**
+   * Update everyone. Your own people, the head, arrows and anything near them update every tick; a
+   * troll, a boar or a camp raider out where nobody of yours is (more than about 48 tiles from all of
+   * them) updates every fourth tick with four ticks' time, so it keeps its pace at a quarter of the cost.
+   * On the large map most of the wild is like that most of the time.
+   */
+  private updateAgents(dt: number): void {
+    const B = 16 * TILE, cols = Math.ceil(this.W / B), rows = Math.ceil(this.H / B), R = 3;
+    if (this.awake.length !== cols * rows) this.awake = new Uint8Array(cols * rows);
+    const seed = new Uint8Array(cols * rows), aw = this.awake;
+    const mark = (x: number, y: number) => { const bx = Math.floor(x / B), by = Math.floor(y / B); if (bx >= 0 && by >= 0 && bx < cols && by < rows) seed[by * cols + bx] = 1; };
+    mark(this.player.x, this.player.y);
+    for (const a of this.agents) if (a instanceof Villager && !a.dead) mark(a.x, a.y);
+    aw.fill(0);
+    for (let by = 0; by < rows; by++) for (let bx = 0; bx < cols; bx++) {
+      if (!seed[by * cols + bx]) continue;
+      for (let y = Math.max(0, by - R); y <= Math.min(rows - 1, by + R); y++) for (let x = Math.max(0, bx - R); x <= Math.min(cols - 1, bx + R); x++) aw[y * cols + x] = 1;
+    }
+    const k = this.lodTick++ & 3;
+    for (const a of this.agents) {
+      const m = a as Mover;
+      if (m instanceof Villager || m instanceof Player || m instanceof Arrow || m instanceof Bolt || m === this.boss || aw[Math.floor(m.y / B) * cols + Math.floor(m.x / B)]) { a.update(dt, this); continue; }
+      if (((m.id + k) & 3) === 0) a.update(dt * 4, this);
+    }
   }
 
   // ---- regiments: the gnome army in blocks under banners ---------------------------------------

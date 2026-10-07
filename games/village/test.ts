@@ -9,7 +9,7 @@ import { Villager, Arrow, Raider } from './agents';
 import { Brute, Rat, Ogre, Wrecker, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm } from './wildlife';
 import { SLOT_GAP } from './regiment';
-import { WARREN, SOLDIER_CAP_PER_LEVEL } from './config';
+import { WARREN, SOLDIER_CAP_PER_LEVEL, PLAINS } from './config';
 import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, GNOME_PACK, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS, YARD, CALLINGS, TREE_RESERVE, MOODS, SERVE_RANGE, POT_INGREDIENTS, BODY } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
@@ -1888,6 +1888,41 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(p.soldierCap === 40 && one === 40 * s.world.barracks.length && three === one + 2 * SOLDIER_CAP_PER_LEVEL, `a barracks keeps 40 under arms, ${SOLDIER_CAP_PER_LEVEL} more a level (${one} at Lv1, ${three} at Lv3)`);
       s.view?.snapCamera(); s.draw();
       assert(true, 'the warren mound draws');
+    }
+
+    // ---- the large map: open plains for battles, searches that cost what they touch, a quiet far wild ----
+    {
+      // (the harness plays the classic map; the large one is generated here on its own)
+      const big = new World(480, 320);
+      big.generate(new Rng(7), 3, 'gnome', 7);
+      const hx = 240, hy = 160;
+      const inner = (q: { tx: number; ty: number; rx: number; ry: number }) => { let open = 0, all = 0; for (let y = q.ty - q.ry; y <= q.ty + q.ry; y++) for (let x = q.tx - q.rx; x <= q.tx + q.rx; x++) { if (((x - q.tx) / q.rx) ** 2 + ((y - q.ty) / q.ry) ** 2 > 0.6) continue; all++; const t = big.get(x, y)!; if (!big.isBlocked(x, y) && t.kind !== 'thicket' && !t.tall) open++; } return open / all; };
+      assert(big.plains.length >= 6 && big.plains.every((q) => inner(q) > 0.97 && Math.hypot(q.tx - hx, (q.ty - hy) * 1.3) >= PLAINS.minDist),
+        `the large map opens ${big.plains.length} plains out beyond the old country, each clear of wood, thorn and long grass (${big.plains.map((q) => inner(q).toFixed(2)).join(', ')})`);
+      assert(big.plains.every((q) => big.bfs({ tx: q.tx, ty: q.ty }, { tx: hx, ty: hy }).length > 0), 'and every one can be marched to from the village');
+      assert(big.get(hx, hy - 3)?.building?.kind === 'cookpot' && !!big.lair, 'with the village in the middle as before');
+      // a walker's search for an unreachable spot gives up instead of flooding the map
+      for (let y = 20; y <= 30; y++) for (let x = 20; x <= 30; x++) if (x === 20 || x === 30 || y === 20 || y === 30) { big.set(x, y, 'grass'); big.placeDefense('wall', x, y); }
+      big.set(25, 25, 'grass');
+      let t0 = performance.now();
+      const none = big.route({ tx: hx, ty: hy + 6 }, { tx: 25, ty: 25 });
+      const ms = performance.now() - t0;
+      assert(Array.isArray(none) && none.length === 0 && ms < 15, `a walker asking for a walled-in spot on the large map is told no way in ${ms.toFixed(1)} ms`);
+      t0 = performance.now();
+      const far = big.bfs({ tx: hx, ty: hy + 6 }, { tx: 25, ty: 25 });
+      assert(far.length === 0, `while a reachability check searches to the end (${(performance.now() - t0).toFixed(1)} ms)`);
+      // the reused search arrays give the same answer twice running
+      const goal = { tx: big.plains[0].tx, ty: big.plains[0].ty }, a1 = big.bfs({ tx: hx, ty: hy + 6 }, goal), a2 = big.bfs({ tx: hx, ty: hy + 6 }, goal);
+      assert(a1.length > 0 && a1.length === a2.length && a1.every((q, i) => q.tx === a2[i].tx && q.ty === a2[i].ty), `searches share their working arrays and still agree (${a1.length} steps)`);
+      // out where nobody of yours is, a creature thinks every fourth tick with four ticks' time
+      s = fresh(); s.agents = [s.player]; Object.assign(s.player, World.center(120, 80));
+      const lone = s.spawn(new Raider(World.center(10, 10).x, World.center(10, 10).y)), near = s.spawn(new Raider(s.player.x + 40, s.player.y));
+      const seen = new Map<Raider, number[]>([[lone, []], [near, []]]);
+      for (const r of [lone, near]) r.update = (dt: number) => { seen.get(r)!.push(dt); };
+      for (let i = 0; i < 8; i++) { s.grid.rebuild(s.agents); s.tick(1 / 60); }
+      const ld = seen.get(lone)!, nd = seen.get(near)!;
+      assert(nd.length === 8 && ld.length === 2 && ld.every((d) => Math.abs(d - 4 / 60) < 1e-9), `a raider by the head thinks every tick (${nd.length}/8); one alone in the far wild every fourth, with four ticks' time (${ld.length}/8)`);
+      lone.dead = near.dead = true; s.removeDead();
     }
 
     // ---- MOBA commands: the head walks where it is sent, hunts what it is told to, uses what it is pointed at ----

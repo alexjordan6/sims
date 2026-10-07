@@ -229,6 +229,12 @@ export class Actors {
     return new THREE.Vector3(m.x * U, groundHeight(m.x * U, m.y * U) + standHeight(m) + 1.15 * s, m.y * U);
   }
 
+  /** what the camera can see: actors further than this from its focus are not drawn or animated (the big map holds hundreds of them) */
+  private cullX = 0;
+  private cullZ = 0;
+  private cullR2 = Infinity;
+  cull(x: number, z: number, r: number): void { this.cullX = x; this.cullZ = z; this.cullR2 = r * r; }
+
   sync(dt: number): void {
     this.t += dt;
     const s = this.scene, fog = s.fog;
@@ -244,6 +250,13 @@ export class Actors {
         if (old) { this.group.remove(old.group); this.actors.delete(m.id); pickDirty = true; }
         const seenHere = !m.hidden && !(m.hostile && fog && fog.visibleAt(m.x, m.y) <= 0.35);
         this.bar(m, seenHere && m.hp < m.maxHp && (m.hostile || s.selected === m));
+        continue;
+      }
+      // out of the camera's reach, hidden indoors, or a raider in the dark: nothing to draw, so nothing to pose
+      if (!(m instanceof Player) && (m.hidden || (m.x * U - this.cullX) ** 2 + (m.y * U - this.cullZ) ** 2 > this.cullR2 || (m.hostile && fog && fog.visibleAt(m.x, m.y) <= 0.35))) {
+        const idle = this.actors.get(m.id);
+        if (idle) idle.group.visible = false;
+        this.bar(m, false);
         continue;
       }
       let a = this.actors.get(m.id);

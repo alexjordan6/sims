@@ -27,7 +27,7 @@ import { U, WALL_UNITS } from './models';
 // it there, the wheel to zoom.
 
 /** camera distances the Z key / zoom button steps through (in tiles) */
-const DISTANCES = [8, 11, 14, 18, 23] as const;
+const DISTANCES = [8, 11, 14, 18, 23, 30, 38] as const; // the far two take in a battle on the open plains
 /** how close to a screen edge the mouse pans the camera, px */
 const EDGE = 14;
 
@@ -338,6 +338,7 @@ export class View {
     this.tilesChanged = this.terrain.sync();
     this.structures.sync(sky.night, this.t);
     this.crowd.sync(dt);
+    this.actors.cull(this.focus.x, this.focus.z, this.dist * 2.5 + 30);
     this.actors.sync(dt);
     for (const ev of s.fx) this.fx.handle(ev);
     s.fx.length = 0;

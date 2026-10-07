@@ -1,5 +1,5 @@
 import { Rng } from '@shared/index';
-import { TILE, COLS, ROWS, BUILDING_HP, HEARTH_WOOD, ITEM, GNOME_HOME, YARD, p, CROP_KINDS, type DishKind, type FoodKind, type BuildingKind, type StartKind } from './config';
+import { TILE, COLS, ROWS, PLAINS, BUILDING_HP, HEARTH_WOOD, ITEM, GNOME_HOME, YARD, p, CROP_KINDS, type DishKind, type FoodKind, type BuildingKind, type StartKind } from './config';
 export type { BuildingKind } from './config';
 import { tickItem, hop, type Item, type ItemKind } from './items';
 import type { Gear } from './pack';
@@ -107,7 +107,7 @@ export interface Tile {
   /** for buildings: which footprint cell this tile is (col + row * w), for rendering */
   part?: number;
   defense?: Defense;
-  biome?: 'meadow' | 'woodland' | 'deepwood';
+  biome?: 'meadow' | 'woodland' | 'deepwood' | 'plain';
   trail?: boolean;
   /** long grass: slows anyone wading through it (see p.grassSlow) until the sword mows it; never grows back */
   tall?: boolean;
@@ -135,6 +135,8 @@ export class World {
   hives = new Map<number, Hive>();
   /** the Ogre's home, far out in the woods; found through the fog */
   lair: Building | null = null;
+  /** the open plains carved on a large map: battlefields, each with a war band camped on it (centre and half-axes in tiles) */
+  plains: { tx: number; ty: number; rx: number; ry: number }[] = [];
   /** the gnome start's cottage in the clearing (see generate), so the scene needn't go looking for it */
   gnomeStart: Building | null = null;
   denseForests = false;
@@ -495,7 +497,7 @@ export class World {
     if (this.pathBudget <= 0 && performance.now() - this.budgetAt > 20) this.beginTick();
     if (this.pathBudget <= 0) return null;
     this.pathBudget--;
-    return this.bfs(from, to, enemy, elevated);
+    return this.bfs(from, to, enemy, elevated, true);
   }
   /** Distance (in steps, thorns costing extra) from every tile within 40 of `to` back to it. */
   private buildField(to: TilePos, enemy: boolean, elevated: boolean): { revision: number; dist: Float32Array; x0: number; y0: number; w: number; h: number } {
@@ -538,7 +540,7 @@ export class World {
     return path;
   }
 
-  bfs(from: TilePos, to: TilePos, enemy = false, elevated = false): TilePos[] {
+  bfs(from: TilePos, to: TilePos, enemy = false, elevated = false, capped = false): TilePos[] {
     if (!this.inBounds(from.tx, from.ty) || !this.inBounds(to.tx, to.ty)) return [];
     const n = this.cols * this.rows;
     const start = from.ty * this.cols + from.tx;
@@ -551,10 +553,14 @@ export class World {
       const reachable = near(goal) || (goalBlocked && (near(goal - 1) || near(goal + 1) || near(goal - this.cols) || near(goal + this.cols)));
       if (!reachable) return [];
     }
-    const prev = new Int32Array(n).fill(-1);
-    prev[start] = start;
+    // Scratch arrays the size of the map, reused from search to search: a tile counts as visited only when
+    // its stamp is this search's, so a search costs the tiles it touches, not the whole map (on the large
+    // map, allocating and filling two fresh arrays each search cost more than most searches themselves).
+    const sc = this.scratch?.stamp.length === n ? this.scratch : (this.scratch = { stamp: new Uint32Array(n), prev: new Int32Array(n), costs: new Float64Array(n), gen: 0 });
+    if (++sc.gen >= 0xffffffff) { sc.stamp.fill(0); sc.gen = 1; }
+    const gen = sc.gen, stamp = sc.stamp, prev = sc.prev, costs = sc.costs;
+    stamp[start] = gen; prev[start] = start;
     // A* keeps long journeys cheap: only expand promising tiles, using a binary heap.
-    const costs = new Float64Array(n).fill(Infinity);
     costs[start] = 0;
     const queue: { i: number; score: number }[] = [];
     const push = (i: number, score: number) => {
@@ -578,7 +584,12 @@ export class World {
     };
     push(start, 0);
     const dirs = [1, -1, this.cols, -this.cols];
+    // a walker's search for somewhere unreachable would flood the whole map (thirty milliseconds on the large
+    // one): capped, it gives up after forty tiles of searching per tile of distance and calls it no way.
+    // (Reachability checks — generation, spawning — search to the end.)
+    let expand = capped ? Math.min(30000, Math.max(6000, 40 * (Math.abs(to.tx - from.tx) + Math.abs(to.ty - from.ty)))) : Infinity;
     while (queue.length) {
+      if (--expand < 0) return [];
       const cur = pop();
       const cx = cur % this.cols, cy = (cur / this.cols) | 0;
       if (cur === goal) return this.unwind(prev, start, cur);
@@ -590,15 +601,22 @@ export class World {
         const ni = cur + dirs[d];
         if (this.isBlocked(nx, ny, enemy, elevated)) continue;
         const cost = costs[cur] + (this.tiles[ni].kind === 'thicket' ? THICKET_PATH_COST : 1); // thorns: worth a long way round
-        if (cost >= costs[ni]) continue;
+        if (stamp[ni] === gen && cost >= costs[ni]) continue;
+        stamp[ni] = gen;
         costs[ni] = cost;
         prev[ni] = cur;
         push(ni, cost + Math.abs(nx - to.tx) + Math.abs(ny - to.ty));
       }
     }
-    this.lastFlood = { revision: this.revision, enemy, elevated, reached: prev };
+    // a search that found no way flooded everything it could reach: remember that region
+    const reached = new Int32Array(n).fill(-1);
+    for (let i = 0; i < n; i++) if (stamp[i] === gen) reached[i] = prev[i];
+    this.lastFlood = { revision: this.revision, enemy, elevated, reached };
     return [];
   }
+
+  /** A*'s working arrays, kept between searches (see bfs) */
+  private scratch: { stamp: Uint32Array; prev: Int32Array; costs: Float64Array; gen: number } | null = null;
 
   private unwind(prev: Int32Array, start: number, end: number): TilePos[] {
     const out: TilePos[] = [];
@@ -657,7 +675,8 @@ export class World {
     this.seed = seed;
     this.denseForests = rng.chance(0.65);
     // Broad overlapping forest regions leave meadows between them; some seeds have only open groves.
-    const groves = Array.from({ length: this.denseForests ? 22 : 12 }, () => ({
+    const big = (this.cols * this.rows) / (240 * 160); // 1 on the classic map: its seeds keep their layouts
+    const groves = Array.from({ length: Math.round((this.denseForests ? 22 : 12) * (big > 1 ? big * 0.7 : 1)) }, () => ({
       x: rng.int(8, this.cols - 9), y: rng.int(8, this.rows - 9), rx: rng.int(14, 34), ry: rng.int(12, 25),
     }));
     for (let ty = 0; ty < this.rows; ty++) for (let tx = 0; tx < this.cols; tx++) {
@@ -675,9 +694,9 @@ export class World {
     };
     for (let y = 0; y < this.rows; y++) {
       clearTrail(hx, y);
-      for (const base of [32, this.cols - 33]) clearTrail(base + Math.round(Math.sin(y / 13) * 4), y);
+      for (const base of big > 1 ? [32, Math.round(this.cols / 4), Math.round(this.cols * 3 / 4), this.cols - 33] : [32, this.cols - 33]) clearTrail(base + Math.round(Math.sin(y / 13) * 4), y);
     }
-    for (const base of [hy, 24, this.rows - 25]) for (let x = 0; x < this.cols; x++) {
+    for (const base of big > 1 ? [hy, 24, Math.round(this.rows / 4), Math.round(this.rows * 3 / 4), this.rows - 25] : [hy, 24, this.rows - 25]) for (let x = 0; x < this.cols; x++) {
       const y = base === hy ? hy : base + Math.round(Math.sin(x / 17) * 4);
       for (let d = -1; d <= 1; d++) if (this.inBounds(x, y + d)) { const t = this.set(x, y + d, 'grass'); t.trail = true; }
     }
@@ -774,6 +793,55 @@ export class World {
       t.tall = true; this.tallCount++; this.dirty.add(ty * this.cols + tx);
     }
     this.growThickets(hx, hy);
+    if (big > 1) this.carvePlains(hx, hy);
+  }
+
+  /**
+   * The large map's battlefields: broad open plains out beyond the old country, cleared of wood, thorn
+   * and long grass so blocks of hundreds can wheel and charge on them. Short turf, a lone tree here and
+   * there, and a trail to each one. Last, and from its own bag of numbers, so nothing else moves.
+   */
+  private carvePlains(hx: number, hy: number): void {
+    const rng = new Rng(this.seed ^ 0x9a1a5);
+    for (let tries = 0; this.plains.length < PLAINS.count && tries < 400; tries++) {
+      const tx = rng.int(30, this.cols - 31), ty = rng.int(26, this.rows - 27);
+      const rx = rng.int(PLAINS.rx[0], PLAINS.rx[1]), ry = rng.int(PLAINS.ry[0], PLAINS.ry[1]);
+      if (Math.hypot(tx - hx, (ty - hy) * 1.3) < PLAINS.minDist) continue; // out beyond the old country
+      if (tx - rx < 2 || ty - ry < 2 || tx + rx > this.cols - 3 || ty + ry > this.rows - 3) continue;
+      if (this.plains.some((q) => Math.hypot((q.tx - tx) / (q.rx + rx), (q.ty - ty) / (q.ry + ry)) < 0.9)) continue; // overlapping a little is fine
+      const l = this.lair;
+      if (l && Math.hypot((l.tx - tx) / (rx + 6), (l.ty - ty) / (ry + 6)) < 1) continue;
+      if (this.buildings.some((b) => b.kind === 'gnomehouse' && Math.hypot((b.tx - tx) / (rx + 6), (b.ty - ty) / (ry + 6)) < 1)) continue;
+      this.plains.push({ tx, ty, rx, ry });
+      // a ragged edge: the wood thins out over the last fifth rather than stopping at a line
+      for (let y = ty - ry; y <= ty + ry; y++) for (let x = tx - rx; x <= tx + rx; x++) {
+        const t = this.get(x, y);
+        if (!t || t.building || t.defense) continue;
+        const e = ((x - tx) / rx) ** 2 + ((y - ty) / ry) ** 2;
+        if (e > 1 || (e > 0.64 && rng.chance((e - 0.64) / 0.36))) continue;
+        if (t.kind === 'tree' || t.kind === 'thicket' || t.kind === 'sapling' || t.kind === 'hazel' || t.kind === 'bush' || t.kind === 'mushroom') {
+          if (t.kind === 'tree' && rng.chance(0.004)) continue; // a lone tree standing out on the plain
+          this.set(x, y, 'grass');
+        }
+        const g = this.get(x, y)!;
+        g.biome = 'plain';
+        if (g.tall) { g.tall = undefined; this.tallCount--; this.dirty.add(y * this.cols + x); }
+      }
+      // a road in from the nearest trail, so each plain can be marched to
+      const toward = { tx: hx, ty: hy };
+      for (let k = 0, x = tx, y = ty; k < 400; k++) {
+        const t = this.get(x, y);
+        if (!t || (t.trail && ((x - tx) / rx) ** 2 + ((y - ty) / ry) ** 2 > 1)) break;
+        for (let d = -1; d <= 1; d++) for (const [ax, ay] of [[x + d, y], [x, y + d]]) {
+          const q = this.get(ax, ay);
+          if (!q || q.building || q.defense) continue;
+          if (q.kind !== 'grass') this.set(ax, ay, 'grass');
+          const g = this.get(ax, ay)!; g.trail = true;
+          if (g.tall) { g.tall = undefined; this.tallCount--; this.dirty.add(ay * this.cols + ax); }
+        }
+        if (Math.abs(toward.tx - x) > Math.abs(toward.ty - y)) x += Math.sign(toward.tx - x); else y += Math.sign(toward.ty - y);
+      }
+    }
   }
 
   /**
