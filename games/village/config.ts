@@ -72,12 +72,9 @@ export const p = live(
     oldYield: [D.oldYield, 1, 40, 1, 'Wood a woodcutter gets from old growth (trees older than 6 days).'],
     playerTreeYield: [D.playerTreeYield, 0, 12, 1, 'What the head\'s own axe brings in per tree. 0 = the axe only clears ground.'],
     cutterWork: [D.cutterWork, 0.5, 8, 0.1, 'Seconds a woodcutter spends per chop.'],
-    farmerWork: [D.farmerWork, 0.3, 5, 0.1, 'Seconds a farmer spends per field action (till, plant, harvest).'],
     forageWork: [D.forageWork, 0.3, 8, 0.1, 'Seconds a gnome spends picking one unit from a wild plant.'],
     grassSlow: [D.grassSlow, 0.1, 1, 0.05, 'Speed multiplier for anyone wading through long grass — the head, villagers and raiders alike (1 = no slowdown). The sword mows it; it never grows back.'],
     haulMul: [D.haulMul, 0.25, 3, 0.25, 'Villagers\' armfuls (16 wood / 12 food) scale by this. Bigger arms = fewer trips.'],
-    cropYield: [D.cropYield, 1, 20, 1, 'Food per harvested crop before boons. Applies at NEW VILLAGE.'],
-    cropDays: [D.cropDays, 1, 10, 1, 'Days from seed to harvest.'],
     foodPerDay: [D.foodPerDay, 0, 3, 'Ration each grown villager eats at dawn (children eat only what lands in their home yard).'],
     hungerMax: [D.hungerMax, 1, 30, 1, 'Food units the head\'s belly holds. It empties as the day passes; empty, you lose HP.'],
     hungerPerDay: [D.hungerPerDay, 0, 12, 0.5, 'Food units the head burns a day (a grown villager eats foodPerDay). 0 = the belly never empties.'],
@@ -116,13 +113,13 @@ export const p = live(
     itemBounce: [D.itemBounce, 0, 0.9, 0.05, 'How much of its fall a thrown item bounces back up. 0 = it sticks where it lands.'],
     itemFriction: [D.itemFriction, 1, 20, 0.5, 'How fast a rolling item slows on the ground (higher = shorter rolls).'],
     kidPace: [D.kidPace, 0.5, 2, 0.05, 'How fast children scamper about the yard, as a multiple of their walking speed.'],
-    dietFull: [D.dietFull, 1, 30, 1, 'Units of one food a child must eat for its full stat bonus (about three days of a single crop).'],
+    dietFull: [D.dietFull, 1, 30, 1, 'Units of one food a child must eat for its full stat bonus (about three days of a single food).'],
     dietMul: [D.dietMul, 0, 3, 0.25, 'Scales every diet bonus (wheat +25% HP, carrots +15% speed, tomatoes +25% work, berries +25% damage at ×1).'],
     wildRegrowMul: [D.wildRegrowMul, 0.25, 4, 0.25, 'Scales how long picked bushes and mushrooms take to regrow (3 / 4 days at ×1).'],
     wildSprout: [D.wildSprout, 0, 0.1, 0.005, 'Daily chance each old-growth tree sprouts a berry bush or mushrooms on a grass tile beside it.'],
     thicketSlow: [D.thicketSlow, 0.05, 1, 0.05, 'Speed multiplier for anyone forcing through thicket — you, villagers and raiders alike.'],
     thicketDps: [D.thicketDps, 0, 20, 0.5, 'HP a second the thorns take from anyone standing in thicket. Villagers and raiders path round it when they can.'],
-    thicketSpread: [D.thicketSpread, 0, 0.5, 0.01, 'Daily chance each thicket tile creeps onto a neighbouring patch of grass, field or forage. Cut it back or it takes the village.'],
+    thicketSpread: [D.thicketSpread, 0, 0.5, 0.01, 'Daily chance each thicket tile creeps onto a neighbouring patch of grass or forage. Cut it back or it takes the village.'],
     thicketRing: [D.thicketRing, 0, 12, 1, 'Tiles thick the thorn ring round the village grows at worldgen (0 for none). The trails run through it in open lanes. Takes at NEW VILLAGE.'],
     thicketPatches: [D.thicketPatches, 0, 60, 1, 'Thicket patches seeded at worldgen (a few of them close enough to reach the village). Takes at NEW VILLAGE.'],
     thicketWood: [D.thicketWood, 0, 5, 1, 'Wood the axe gets for clearing one tile of thicket.'],
@@ -306,12 +303,11 @@ export const GNOME_CALLING: Record<Calling, string> = { farmer: 'gnome forager',
 /** elders work and walk at this share of their adult pace */
 export const ELDER_MUL = 0.75;
 /** gifted traits: a five-star child gets one for life */
-export type Trait = 'hardy' | 'quick' | 'brave' | 'greenthumb' | 'tireless';
+export type Trait = 'hardy' | 'quick' | 'brave' | 'tireless';
 export const TRAITS: Record<Trait, { name: string; blurb: string }> = {
   hardy: { name: 'Hardy', blurb: '+25% HP' },
   quick: { name: 'Quick', blurb: 'moves 20% faster' },
   brave: { name: 'Brave', blurb: 'soldiers deal +20%' },
-  greenthumb: { name: 'Green Thumb', blurb: 'a quarter of harvests yield double' },
   tireless: { name: 'Tireless', blurb: 'works 25% faster' },
 };
 /** beds per house level (index = level); overridden upward by the Big Families boon */
@@ -327,20 +323,20 @@ export const GNOME_PACK = { slots: 4, leash: 7 } as const;
 /** What the gnomes' pot makes out of raw food: dishes are food like any other, only richer (see RECIPES and Food.power). */
 export type DishKind = 'stew' | 'roast' | 'tart' | 'soup' | 'cake';
 export const DISHES: readonly DishKind[] = ['stew', 'roast', 'tart', 'soup', 'cake'];
-/** Every kind of food. Crops are sown on soil; wild food grows in the woods and is picked by hand; dishes are cooked. What a child eats decides the adult. */
+/** Every kind of food. Grain, carrots and tomatoes come by trade; wild food grows in the woods and is picked by hand; dishes are cooked. What a child eats decides the adult. */
 export type FoodKind = 'wheat' | 'carrot' | 'tomato' | 'berry' | 'mushroom' | 'hazelnut' | 'garlic' | 'burdock' | 'meat' | 'honey' | DishKind;
 export const RAW_KINDS: readonly FoodKind[] = ['wheat', 'carrot', 'tomato', 'berry', 'mushroom', 'hazelnut', 'garlic', 'burdock', 'meat', 'honey'];
 export const FOOD_KINDS: readonly FoodKind[] = [...RAW_KINDS, ...DISHES];
-export const CROP_KINDS: readonly FoodKind[] = ['wheat', 'carrot', 'tomato'];
 export type DietStat = 'hp' | 'speed' | 'work' | 'dmg' | 'care';
 export interface Food {
   name: string; one: string;
   /** plural of `one`, when it isn't just `one` + s ('berries', 'bowls of stew', and the mass nouns that never take one) */
   many?: string;
-  source: 'crop' | 'wild' | 'hunt' | 'hive' | 'cooked';
-  /** crops: days to ripen on top of p.cropDays; wild: days to regrow after picking (× p.wildRegrowMul) */
+  /** where it comes from: grain, roots and tomatoes only by the caravans and in chests now (nothing is farmed) */
+  source: 'trade' | 'wild' | 'hunt' | 'hive' | 'cooked';
+  /** wild: days to regrow after picking (× p.wildRegrowMul); nothing for trade goods */
   days: number;
-  /** crops: yield on top of the cropYield slider; wild: what one picking gives */
+  /** wild: what one picking gives; nothing for trade goods */
   yield: number;
   stat: DietStat;
   /** how much of the stat's DIET_CAP a full diet of this gives (1 unless set; meat gives double) */
@@ -350,9 +346,9 @@ export interface Food {
   colour: string;
 }
 export const FOODS: Record<FoodKind, Food> = {
-  wheat: { name: 'Wheat', one: 'wheat', many: 'wheat', source: 'crop', days: 0, yield: 0, stat: 'hp', blurb: 'hearty: +HP for life', colour: '#e0b04a' },
-  carrot: { name: 'Carrots', one: 'carrot', source: 'crop', days: 0, yield: -1, stat: 'speed', blurb: 'quick on their feet', colour: '#e8772c' },
-  tomato: { name: 'Tomatoes', one: 'tomato', many: 'tomatoes', source: 'crop', days: 1, yield: 1, stat: 'work', blurb: 'tireless workers', colour: '#c9564a' },
+  wheat: { name: 'Wheat', one: 'wheat', many: 'wheat', source: 'trade', days: 0, yield: 0, stat: 'hp', blurb: 'hearty: +HP for life', colour: '#e0b04a' },
+  carrot: { name: 'Carrots', one: 'carrot', source: 'trade', days: 0, yield: -1, stat: 'speed', blurb: 'quick on their feet', colour: '#e8772c' },
+  tomato: { name: 'Tomatoes', one: 'tomato', many: 'tomatoes', source: 'trade', days: 1, yield: 1, stat: 'work', blurb: 'tireless workers', colour: '#c9564a' },
   berry: { name: 'Berries', one: 'berry', many: 'berries', source: 'wild', days: 3, yield: 3, stat: 'dmg', blurb: 'fierce: soldiers hit harder', colour: '#8c4ab0' },
   mushroom: { name: 'Mushrooms', one: 'mushroom', source: 'wild', days: 4, yield: 2, stat: 'care', blurb: 'a care point with every meal', colour: '#a8765a' },
   // what the gnomes forage: hazel at the wood's edge, garlic in the meadow, burdock along the trails
@@ -370,7 +366,7 @@ export const FOODS: Record<FoodKind, Food> = {
   soup: { name: 'Garden soup', one: 'bowl of soup', many: 'bowls of soup', source: 'cooked', days: 0, yield: 0, stat: 'speed', power: 3, blurb: 'cooked: quick on their feet', colour: '#e8772c' },
   cake: { name: 'Honey cake', one: 'cake', source: 'cooked', days: 0, yield: 0, stat: 'hp', power: 4, blurb: 'cooked: the heartiest there is', colour: '#e8a52c' },
 };
-/** Cooked, rather than sown or foraged: dishes never appear on a tile and can't be planted or picked. */
+/** Cooked, rather than traded or foraged: dishes never appear on a tile and can't be picked. */
 /** `n` of a food, in words: 1 carrot, 3 carrots, 2 bowls of stew. */
 export function foodCount(n: number, k: FoodKind): string {
   const f = FOODS[k];

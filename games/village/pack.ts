@@ -1,11 +1,11 @@
 import { STACK, FOODS, WEAPONS, ARMOR, type BulkKind, type FoodKind, type WeaponSlot, type ArmorSlot } from './config';
 
-export const IMPLEMENTS = ['axe', 'hoe', 'hammer', 'basket', 'wand'] as const;
+export const IMPLEMENTS = ['axe', 'hammer', 'basket', 'wand'] as const;
 export type Implement = typeof IMPLEMENTS[number];
-/** what the head carries at the start: the axe, the hoe and the hammer were lost in the flight, and lie out in the wild (World.toolCaches) */
+/** what the head carries at the start: the axe and the hammer were lost in the flight, and lie out in the wild (World.toolCaches) */
 export const START_TOOLS: readonly Implement[] = ['basket', 'wand'];
 /** the lost tools, and where each was left */
-export const LOST_TOOLS = { axe: 'by an old stump', hammer: 'in a ruined hut', hoe: 'in an overgrown field' } as const;
+export const LOST_TOOLS = { axe: 'by an old stump', hammer: 'in a ruined hut' } as const;
 export type Bulk = { kind: 'wood'; n: number } | { kind: 'food'; food: FoodKind; n: number } | { kind: 'scrap'; n: number };
 /** a kit: something used up rather than worn (a bandage binds a wound) */
 export type KitKind = 'bandage';
@@ -13,7 +13,7 @@ export type Gear = { kind: 'weapon'; slot: WeaponSlot; tier: number } | { kind: 
 export type Slot = Bulk | Gear;
 export type EquipmentSlot = WeaponSlot | ArmorSlot;
 export const EQUIPMENT: readonly EquipmentSlot[] = ['melee', 'bow', 'helmet', 'chest', 'legs', 'shield'];
-export const TOOL_NAME: Record<Implement, string> = { axe: 'Axe', hoe: 'Hoe', hammer: 'Hammer', basket: 'Basket', wand: 'Wand' };
+export const TOOL_NAME: Record<Implement, string> = { axe: 'Axe', hammer: 'Hammer', basket: 'Basket', wand: 'Wand' };
 export function isImplement(tool: string): tool is Implement { return (IMPLEMENTS as readonly string[]).includes(tool); }
 export function isBulk(s: Slot): s is Bulk { return s.kind === 'wood' || s.kind === 'food' || s.kind === 'scrap'; }
 function unhandled(s: never): never { throw new Error(`Unknown pack item: ${JSON.stringify(s)}`); }

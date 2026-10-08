@@ -616,12 +616,12 @@ export function frameDataUrl(scene: Phaser.Scene, key: string, frame: number): s
   return url;
 }
 
-// ---- flora: trees, saplings and crops, one 16x16 tilesheet ------------------------------------
+// ---- flora: trees, saplings and wild food, one 16x16 tilesheet ------------------------------------
 
 const LEAF_DARK = '#2f6b2e', LEAF = '#4f9a3c', LEAF_LIGHT = '#7cc65a', LEAF_HI = '#a8e07a';
 const PINE_DARK = '#1f5a3a', PINE = '#2f7d4e', PINE_LIGHT = '#57a56a';
 const TRUNK = '#6b4226', TRUNK_DARK = '#3b2314', TRUNK_LIGHT = '#8f5c34';
-const SOIL = '#7a4d2b', SOIL_DARK = '#5a3619', SOIL_LIGHT = '#9a6a3e';
+const SOIL = '#7a4d2b', SOIL_DARK = '#5a3619';
 const CARROT = '#e8772c', CARROT_HI = '#f7a25a';
 const BERRY = '#8c4ab0', BERRY_HI = '#c98fe0';
 const NUT = '#8a5a2a', NUT_HI = '#c48a4c', GARLIC = '#e8e0d0', BURR = '#7a4a9a', BURR_HI = '#b08ad0';
@@ -633,7 +633,6 @@ const BROTH = '#c98a3a', BROTH_HI = '#e8b567';
 const CRUST = '#e8c07a', CRUST_DARK = '#b8894c';
 const GLAZE = '#8a3a22', GLAZE_DARK = '#5e2415';
 const HONEY = '#e8a52c', HONEY_DARK = '#b87a18', HONEY_HI = '#f7d070';
-const TOMATO = '#d9382f', TOMATO_HI = '#f06a5a', FRUIT_GREEN = '#8bc34a', FLOWER = '#ffe27a', STAKE = '#a67b4a';
 
 /** Frame indices into the `flora` tileset (a single row of 16x16 tiles). */
 export const FLORA = {
@@ -642,16 +641,11 @@ export const FLORA = {
   pineTop: 5, pineTrunk: 6,
   youngChopped: 7, oakChopped: 8, bare: 9,
   stump: 10, sprout: 11, sapling: 12, saplingBig: 13,
-  crop: [14, 15, 16, 17, 18] as const,
-  crop2: [19, 20, 21, 22, 23] as const,
-  tilled: 24,
   /** a few motes drifting off a ripe plant the great pot has a use for (three phases, so neighbours shimmer out of step) */
   motes: [25, 26, 27] as const,
   /** food piles lying on the ground (small / medium / heap) */
   feed: [28, 29, 30] as const,
-  /** the other crops, five growth phases each; wild food, picked / ripe; and piles of each kind (small / medium / heap) */
-  wheat: [31, 32, 33, 34, 35] as const,
-  carrot: [36, 37, 38, 39, 40] as const,
+  /** wild food, picked / ripe; and piles of each kind (small / medium / heap) */
   bush: [41, 42] as const,
   mushroom: [43, 44] as const,
   pile: {
@@ -737,27 +731,6 @@ function drawSprout(ctx: Ctx, ox: number, big: boolean): void {
   blob(ctx, ox + 10.5, big ? 6.5 : 9, 2.5, 1.5, LEAF_DARK); blob(ctx, ox + 10.5, big ? 6.5 : 9, 1.5, 1, LEAF_LIGHT);
   if (big) { blob(ctx, ox + 8, 5, 2.5, 2, LEAF_DARK); blob(ctx, ox + 8, 5, 1.5, 1, LEAF); }
 }
-function drawTilled(ctx: Ctx, ox: number): void {
-  px(ctx, ox, 0, SOIL, 16, 16);
-  for (let y = 2; y < 16; y += 4) { px(ctx, ox, y, SOIL_DARK, 16, 1); px(ctx, ox, y + 1, SOIL_LIGHT, 16, 1); }
-  for (let i = 0; i < 6; i++) px(ctx, ox + ((i * 5 + 3) % 16), (i * 7 + 1) % 16, SOIL_DARK);
-}
-/** Tomato plant, five phases: mound, sprout, leafy, flowering on a stake, ripe. */
-function drawCrop(ctx: Ctx, ox: number, phase: number, mirror: boolean): void {
-  const m = (x: number) => (mirror ? ox + 15 - x : ox + x);
-  if (phase === 0) { px(ctx, m(6), 11, SOIL_DARK, 4, 3); px(ctx, m(7), 10, SOIL_LIGHT, 2, 1); px(ctx, m(8), 9, LEAF_LIGHT, 1, 1); return; }
-  if (phase === 1) { px(ctx, m(8), 9, LEAF_DARK, 1, 5); px(ctx, m(6), 9, LEAF, 2, 1); px(ctx, m(9), 8, LEAF, 2, 1); px(ctx, m(6), 8, LEAF_LIGHT, 1, 1); px(ctx, m(10), 7, LEAF_LIGHT, 1, 1); return; }
-  // stake and stem
-  if (phase >= 3) { px(ctx, m(8), 2, STAKE, 1, 12); px(ctx, m(8), 2, TRUNK_DARK, 1, 1); }
-  px(ctx, m(7), 6, LEAF_DARK, 1, 8);
-  blob(ctx, m(5) + 0.5, 9, 2.5, 1.5, LEAF_DARK); blob(ctx, m(5) + 0.5, 9, 1.5, 1, LEAF);
-  blob(ctx, m(10) + 0.5, 7, 2.5, 1.5, LEAF_DARK); blob(ctx, m(10) + 0.5, 7, 1.5, 1, LEAF);
-  blob(ctx, m(5) + 0.5, 12, 2.5, 1.5, LEAF_DARK); blob(ctx, m(5) + 0.5, 12, 1.5, 1, LEAF_LIGHT);
-  if (phase === 2) return;
-  if (phase === 3) { px(ctx, m(4), 5, FLOWER); px(ctx, m(11), 10, FLOWER); px(ctx, m(9), 5, FRUIT_GREEN, 2, 2); px(ctx, m(5), 7, FRUIT_GREEN, 2, 2); return; }
-  // ripe: fat red tomatoes with a highlight
-  for (const [x, y] of [[4, 6], [10, 4], [5, 11], [11, 9]] as const) { px(ctx, m(x), y, TOMATO_HI, 3, 3); px(ctx, m(x) + 1, y + 1, TOMATO, 2, 2); px(ctx, m(x) + 1, y - 1, LEAF_DARK, 1, 1); }
-}
 
 /** Build the `flora` tileset (must exist before the tilemap is created). */
 export function ensureFlora(scene: Phaser.Scene): void {
@@ -781,10 +754,7 @@ export function ensureFlora(scene: Phaser.Scene): void {
   drawSprout(ctx, at(FLORA.sprout), false);
   drawSprout(ctx, at(FLORA.sapling), true);
   drawYoung(ctx, at(FLORA.saplingBig), 2); // a sheltered sapling is already a small tree
-  for (let i = 0; i < 5; i++) { drawCrop(ctx, at(FLORA.crop[i]), i, false); drawCrop(ctx, at(FLORA.crop2[i]), i, true); }
-  drawTilled(ctx, at(FLORA.tilled));
   for (let i = 0; i < 3; i++) drawFeed(ctx, at(FLORA.feed[i]), i);
-  for (let i = 0; i < 5; i++) { drawWheat(ctx, at(FLORA.wheat[i]), i); drawCarrot(ctx, at(FLORA.carrot[i]), i); }
   drawBush(ctx, at(FLORA.bush[0]), false); drawBush(ctx, at(FLORA.bush[1]), true);
   drawMushroom(ctx, at(FLORA.mushroom[0]), false); drawMushroom(ctx, at(FLORA.mushroom[1]), true);
   drawHazel(ctx, at(FLORA.hazel[0]), false); drawHazel(ctx, at(FLORA.hazel[1]), true);
@@ -857,25 +827,7 @@ function drawTallGrass(ctx: Ctx, ox: number, v: number): void {
   px(ctx, ox, 15, LEAF_DARK, 16, 1);
 }
 /** Wheat: a sprout, blades, a tall green stand, heading out, golden ears. */
-function drawWheat(ctx: Ctx, ox: number, phase: number): void {
-  if (phase === 0) { px(ctx, ox + 6, 11, SOIL_DARK, 4, 3); px(ctx, ox + 7, 10, SOIL_LIGHT, 2, 1); px(ctx, ox + 8, 9, LEAF_LIGHT, 1, 1); return; }
-  const stalks = phase === 1 ? [5, 8, 11] : [3, 5, 7, 9, 11, 13];
-  const top = phase === 1 ? 10 : phase === 2 ? 6 : 3;
-  const stem = phase >= 4 ? HAY_DARK : LEAF_DARK, blade = phase >= 4 ? HAY : phase === 3 ? LEAF : LEAF_LIGHT;
-  for (const x of stalks) { px(ctx, ox + x, top, stem, 1, 15 - top); px(ctx, ox + x - 1, top + 3, blade, 1, 2); px(ctx, ox + x + 1, top + 5, blade, 1, 2); }
-  if (phase >= 3) for (const x of stalks) { px(ctx, ox + x - 1, top - 1, phase === 4 ? HAY : LEAF_LIGHT, 3, 3); px(ctx, ox + x, top - 2, phase === 4 ? HAY_DARK : LEAF, 1, 1); if (phase === 4) px(ctx, ox + x - 1, top, HAY_DARK, 1, 1); }
-}
 /** Carrots: a sprout, feathery tops, a full green top, the shoulder of the root showing, ripe orange roots. */
-function drawCarrot(ctx: Ctx, ox: number, phase: number): void {
-  if (phase === 0) { px(ctx, ox + 6, 11, SOIL_DARK, 4, 3); px(ctx, ox + 7, 10, SOIL_LIGHT, 2, 1); px(ctx, ox + 8, 9, LEAF_LIGHT, 1, 1); return; }
-  const plants = phase === 1 ? [[5, 11], [10, 9]] : [[3, 11], [8, 8], [12, 12]];
-  for (const [x, y] of plants) {
-    const h = phase === 1 ? 3 : phase === 2 ? 5 : 6;
-    px(ctx, ox + x, y - h, LEAF_DARK, 1, h);
-    for (let i = 0; i < h; i += 2) { px(ctx, ox + x - 1, y - h + i, LEAF_LIGHT, 1, 1); px(ctx, ox + x + 1, y - h + i + 1, LEAF, 1, 1); }
-    if (phase >= 3) { px(ctx, ox + x - 1, y, CARROT, 3, phase === 4 ? 3 : 1); px(ctx, ox + x, y, CARROT_HI, 1, 1); if (phase === 4) px(ctx, ox + x, y + 3, CARROT, 1, 1); }
-  }
-}
 /** A berry bush: a round dark-green shrub, dotted with berries when ripe. */
 function drawBush(ctx: Ctx, ox: number, ripe: boolean): void {
   blob(ctx, ox + 8, 10, 6, 4.5, LEAF_DARK); blob(ctx, ox + 8, 9.5, 5, 3.5, LEAF); blob(ctx, ox + 6.5, 8.5, 2.5, 1.5, LEAF_LIGHT);

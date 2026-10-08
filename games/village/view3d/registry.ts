@@ -1,4 +1,3 @@
-import type { FoodKind } from '../config';
 import type { EnemyKind } from '../agents';
 
 // Which model draws what. One line to swap a model; scales bring each pack's units to ours (one tile is
@@ -27,22 +26,10 @@ export function pickModel(kind: keyof typeof FLORA_MODEL, r: number): Pick | und
   return list[Math.floor(r * list.length) % list.length];
 }
 
-/** a crop's model by what it is and how far along: growing leaves, then the ripe plant */
-export function cropModel(food: FoodKind, grown: number, ripe: boolean): (Pick & { tint: number }) | undefined {
-  switch (food) {
-    case 'wheat': return { key: grown < 0.5 ? 'nature/crops_wheatStageA' : 'nature/crops_wheatStageB', scale: 1.9, tint: ripe ? 0xffffff : 0xb8c890 };
-    case 'carrot': return ripe ? { key: 'nature/crop_carrot', scale: 1.8, tint: 0xffffff } : { key: 'nature/crops_leafsStageA', scale: 1.8, tint: 0xffffff };
-    case 'tomato': return { key: ripe ? 'nature/crops_cornStageD' : grown < 0.5 ? 'nature/crops_cornStageA' : 'nature/crops_cornStageB', scale: 1.4, tint: ripe ? 0xffb8a0 : 0xffffff };
-    default: return undefined;
-  }
-}
-
 /** every prop model the world uses (centred single props), for the loader */
 export function propKeys(): string[] {
   const keys = new Set<string>();
   for (const list of Object.values(FLORA_MODEL)) for (const p of list as Pick[]) keys.add(p.key);
-  for (const k of ['wheatStageA', 'wheatStageB', 'leafsStageA', 'cornStageA', 'cornStageB', 'cornStageD']) keys.add(`nature/crops_${k}`);
-  keys.add('nature/crop_carrot');
   return [...keys];
 }
 

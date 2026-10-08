@@ -21,11 +21,11 @@ export interface Ruin { kind: RuinKind; tx: number; ty: number; chest: Chest; se
 export type DefenseKind = 'wall' | 'gate' | 'stairs';
 export interface Defense extends TilePos { kind: DefenseKind; hp: number; maxHp: number; open: boolean }
 /** 'bush', 'mushroom', 'hazel', 'garlic' and 'burdock' are wild food: they stay put, get picked (by hand, or unit by unit by gnomes) and regrow (see Tile.stage / Tile.left) */
-export type TileKind = 'grass' | 'tree' | 'sapling' | 'tilled' | 'crop' | 'bush' | 'mushroom' | 'hazel' | 'garlic' | 'burdock' | 'thicket' | BuildingKind | DefenseKind;
+export type TileKind = 'grass' | 'tree' | 'sapling' | 'bush' | 'mushroom' | 'hazel' | 'garlic' | 'burdock' | 'thicket' | BuildingKind | DefenseKind;
 /** Thicket: walkable, but it slows and tears at whoever is in it, and costs this many steps to path through (see bfs). */
 export const THICKET_PATH_COST = 9;
 /** What thicket creeps over: open ground, fields and forage. Never trees, buildings or defenses. */
-export const THICKET_PREY: ReadonlySet<TileKind> = new Set<TileKind>(['grass', 'tilled', 'crop', 'sapling', 'bush', 'mushroom', 'hazel', 'garlic', 'burdock']);
+export const THICKET_PREY: ReadonlySet<TileKind> = new Set<TileKind>(['grass', 'sapling', 'bush', 'mushroom', 'hazel', 'garlic', 'burdock']);
 
 /** Footprint per building kind; (tx, ty) is the top-left, the door sits on the bottom row at `door`. */
 export const BUILDINGS: Record<BuildingKind, { w: number; h: number; door: number; name: string }> = {
@@ -41,9 +41,7 @@ export const BUILDINGS: Record<BuildingKind, { w: number; h: number; door: numbe
 };
 export const MAX_LEVEL = 3;
 /** ground a building can go on (flattened when it goes up) */
-export const BUILDABLE: ReadonlySet<TileKind> = new Set<TileKind>(['grass', 'sapling', 'tilled', 'bush', 'mushroom', 'hazel', 'garlic', 'burdock']);
-/** tile kinds that remember which crop they carry (sown, or the last thing harvested) */
-export const CROP_GROUND: ReadonlySet<TileKind> = new Set<TileKind>(['crop', 'tilled']);
+export const BUILDABLE: ReadonlySet<TileKind> = new Set<TileKind>(['grass', 'sapling', 'bush', 'mushroom', 'hazel', 'garlic', 'burdock']);
 /** what a wild tile yields, and the pile kind it makes */
 export const WILD_FOOD: Partial<Record<TileKind, FoodKind>> = { bush: 'berry', mushroom: 'mushroom', hazel: 'hazelnut', garlic: 'garlic', burdock: 'burdock' };
 
@@ -106,12 +104,10 @@ export function yardOf(b: Building): TilePos[] {
 
 export interface Tile {
   kind: TileKind;
-  /** crops: growth 0..cropDays (mature when >=); saplings: days toward a tree; trees: age in days (old growth at OLD_GROWTH_DAYS); wild food: days since picked bare */
+  /** saplings: days toward a tree; trees: age in days (old growth at OLD_GROWTH_DAYS); wild food: days since picked bare */
   stage: number;
   /** wild food: units still on a ripe plant after gnomes took some (unset = the full yield) */
   left?: number;
-  /** crops and tilled soil: the crop sown here (soil keeps the memory so farmers replant the same) */
-  food?: FoodKind;
   /** trees: chop progress accumulated by workers; buildings: upgrade hammering */
   work: number;
   /** visual variant (grass/tree frame choice), picked when the tile is set */
@@ -137,7 +133,7 @@ export interface Hive {
 }
 
 export const BLOCKING: Record<TileKind, boolean> = {
-  grass: false, tilled: false, crop: false, sapling: false, bush: false, mushroom: false, hazel: false, garlic: false, burdock: false, thicket: false, tree: true, house: true, barracks: true, granary: true, woodyard: true,
+  grass: false, sapling: false, bush: false, mushroom: false, hazel: false, garlic: false, burdock: false, thicket: false, tree: true, house: true, barracks: true, granary: true, woodyard: true,
   tavern: true, lair: true, gnomehouse: true, warren: true, cookpot: true, wall: true, gate: false, stairs: false,
 };
 
@@ -151,8 +147,8 @@ export class World {
   lair: Building | null = null;
   /** the open plains carved on a large map: battlefields, each with a war band camped on it (centre and half-axes in tiles) */
   plains: { tx: number; ty: number; rx: number; ry: number }[] = [];
-  /** where the lost tools lie: the axe by a stump, the hammer in a ruined hut, the hoe in an overgrown field */
-  toolCaches: { tool: 'axe' | 'hammer' | 'hoe'; site: 'stump' | 'hut' | 'field'; tx: number; ty: number }[] = [];
+  /** where the lost tools lie: the axe by a stump, the hammer in a ruined hut */
+  toolCaches: { tool: 'axe' | 'hammer'; site: 'stump' | 'hut'; tx: number; ty: number }[] = [];
   /** the loot chests standing in the world: camps', the lair's hoard, the ruins' (see Chest) */
   chests: Chest[] = [];
   /** the wild's ruins and wrecks: carts, barrows and watchtowers, each with a chest (see placeRuins) */
@@ -213,14 +209,13 @@ export class World {
     if (t.kind === 'tree') { this.treeCount--; this.hives.delete(i); } // a hive cannot outlive its tree
     if (t.tall) this.tallCount--;
     if (kind === 'tree') this.treeCount++;
-    // paths only go stale when walkability changes: tilling, planting and harvesting don't re-path anyone
+    // paths only go stale when walkability changes: picking and planting don't re-path anyone
     // (fortifications always count: a closed gate blocks enemies even though the tile kind doesn't)
     const fort = (k: TileKind) => k === 'wall' || k === 'gate' || k === 'stairs';
     if (BLOCKING[t.kind] !== BLOCKING[kind] || fort(t.kind) || fort(kind) || t.kind === 'thicket' || kind === 'thicket') this.revision++;
     if (t.kind === 'thicket') this.thicketCount--;
     if (kind === 'thicket') this.thicketCount++;
     t.kind = kind; t.stage = 0; t.work = 0; t.building = undefined; t.part = undefined; t.tall = undefined; t.v = (t.v + 31) % 97;
-    if (!CROP_GROUND.has(kind)) t.food = undefined;
     this.dirty.add(i);
     return t;
   }
@@ -335,8 +330,6 @@ export class World {
   itemsNear(x: number, y: number, r: number): Item[] { return this.items.filter((it) => it.rest && (it.x - x) ** 2 + (it.y - y) ** 2 <= r * r); }
   /** Items lying on a tile. */
   itemsOn(tx: number, ty: number): Item[] { return this.items.filter((it) => Math.floor(it.x / TILE) === tx && Math.floor(it.y / TILE) === ty); }
-  /** Sow a crop: the tile becomes a growing crop of that kind. */
-  sow(tx: number, ty: number, kind: FoodKind): Tile { const t = this.set(tx, ty, 'crop'); t.food = kind; return t; }
   private stamping = false;
   markDirty(tx: number, ty: number): void {
     this.dirty.add(ty * this.cols + tx);
@@ -392,7 +385,7 @@ export class World {
     return true;
   }
 
-  /** Can a building of `kind` go here? The footprint may cover grass, stumps/saplings and bare soil (they get cleared) — not trees, crops or buildings. */
+  /** Can a building of `kind` go here? The footprint may cover grass, stumps/saplings and bare soil (they get cleared) — not trees or buildings. */
   canBuild(kind: BuildingKind, tx: number, ty: number): boolean {
     const f = BUILDINGS[kind];
     if (ty < 1) return false;
@@ -657,8 +650,8 @@ export class World {
   }
 
   /**
-   * Starting map: tree clusters, a house, a barracks, the field, and the two supply buildings.
-   * In the 'gnome' start there is no house or field — a toadstool cottage stands in the
+   * Starting map: tree clusters, a house, a barracks, and the two supply buildings.
+   * In the 'gnome' start there is no house — a toadstool cottage stands in the
    * clearing instead, and the hidden one out in the woods is left ungenerated (there is nothing left
    * to discover). The supply buildings stand either way: hauling and storage work the same.
    */
@@ -740,11 +733,11 @@ export class World {
     if (start === 'village') this.placeHouse(hx - 9, hy - 5);
     this.placeBarracks(hx + 5, hy - 5);
     const half = Math.floor(fieldW / 2);
-    // the starting field: a row of each crop. The gnome start sows nothing, but still draws — this loop
-    // is the block's only rng consumer, so skipping the draws would shift the whole wilderness downstream.
+    // where the starting field once lay: nothing is sown (there is no farming), but the draws stay — this loop
+    // is the block's only rng consumer, so skipping them would shift the whole wilderness downstream.
     for (let ty = hy + 1; ty <= hy + 3; ty++)
       for (let tx = hx - half; tx <= hx + half; tx++) {
-        rng.int(0, 2); // nothing is sown at the start: the hoe and seeds come later (the draw stays, so the wilderness downstream does not move)
+        rng.int(0, 2);
       }
     // the great pot in the middle of the village, in both starts: older than the houses round it
     this.place('cookpot', hx - 1, hy - 3);
@@ -831,7 +824,7 @@ export class World {
 
   /**
    * The tools lost in the flight, each left lying where it fell: the axe by an old stump just beyond the
-   * thorns (22-32 tiles out), the hammer in a ruined hut (40-60), the hoe in an overgrown field (50-75;
+   * thorns (22-32 tiles out), the hammer in a ruined hut (40-60;
    * the far two up to half as far again on the large map). Each on a small clearing a walk from the
    * square, clear of the lair and the gnomes' glade. Its own bag of numbers, so nothing else moves.
    */
@@ -841,7 +834,6 @@ export class World {
     const plan = [
       { tool: 'axe' as const, site: 'stump' as const, r: [22, 32], clear: 1 },
       { tool: 'hammer' as const, site: 'hut' as const, r: [40, 60 * far], clear: 2 },
-      { tool: 'hoe' as const, site: 'field' as const, r: [50, 75 * far], clear: 3 },
     ];
     const den = this.buildings.find((b) => b.kind === 'gnomehouse' && b.wild);
     for (const c of plan) {
@@ -858,12 +850,12 @@ export class World {
         // a walk from the square first (to the spot or beside it), before the ground is touched: the world's
         // walkability stays the same between tries, so a failed search's flood is remembered and the next is free
         if (!this.bfs(from, { tx, ty }).length) continue;
-        // a little clearing; an old field keeps its long grass, a hut and a stump are trodden down
+        // a little clearing, trodden down round a hut or a stump
         for (let dy = -c.clear; dy <= c.clear; dy++) for (let dx = -c.clear; dx <= c.clear; dx++) {
           const t = this.get(tx + dx, ty + dy)!;
           if (t.kind !== 'grass' && !t.trail) this.set(tx + dx, ty + dy, 'grass');
           const g = this.get(tx + dx, ty + dy)!;
-          if (c.site !== 'field' && g.tall) { g.tall = undefined; this.tallCount--; this.dirty.add((ty + dy) * this.cols + tx + dx); }
+          if (g.tall) { g.tall = undefined; this.tallCount--; this.dirty.add((ty + dy) * this.cols + tx + dx); }
         }
         const at = World.center(tx, ty), it = this.dropItem('gear', 1, at.x, at.y);
         it.gear = { kind: 'tool', tool: c.tool };
@@ -1057,7 +1049,7 @@ export class World {
     }
   }
   /**
-   * A day's creep: each thicket tile may take one neighbouring tile of grass, field or forage. Fields
+   * A day's creep: each thicket tile may take one neighbouring tile of grass or forage. Forage
    * and forage it takes are lost to it, so the village has every reason to keep the axe busy.
    * `rng` is the scene's own thicket stream, so the creep never shifts births, raids or anything else.
    */

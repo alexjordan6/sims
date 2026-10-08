@@ -5,12 +5,13 @@ import type { VillageScene } from './main';
 
 // Enemy kinds beyond the plain raider. Each has a different job so raids need different answers.
 
-/** Fast, weak, harmless to people: eats the fields. Flees from anyone armed. */
+/** Fast, weak, harmless to people: gnaws the granary's stores. Flees from anyone armed. */
 export class Rat extends Raider {
   private gnawSeconds = 1.5;
   private gnaw = 0;
   private flee = 0;
-  private crop: TilePos | null = null;
+  /** the place at the granary's walls it gnaws at */
+  private spot: TilePos | null = null;
   /** the armed body it last saw, and seconds until it looks again */
   private threat: Mover | null = null;
   private lookT = 0;
@@ -25,7 +26,7 @@ export class Rat extends Raider {
     this.dmg = 0;
     this.speed = 55 * (opts.speedMul ?? 1);
     this.radius = 2.5;
-    this.task = 'sniffing for crops';
+    this.task = 'sniffing for the granary';
     this.gnawSeconds = opts.harmlessRats ? 3 : 1.5; // Foragers buys time, never immunity.
   }
 
@@ -54,19 +55,19 @@ export class Rat extends Raider {
     }
 
     this.retarget -= dt;
-    if (!this.crop || this.retarget <= 0 || s.world.get(this.crop.tx, this.crop.ty)?.kind !== 'crop') {
-      this.retarget = 1;
-      const w = s.world;
-      // Spread a swarm across the field instead of sending every rat to the same plant.
-      const crops = [...s.cropTiles()].filter((q) => w.get(q.tx, q.ty)?.kind === 'crop').sort((a, b) => this.dist(World.center(a.tx, a.ty)) - this.dist(World.center(b.tx, b.ty)));
-      this.crop = crops.length ? crops[this.id % Math.min(crops.length, 20)] : null;
-      if (this.crop) {
-        this.setGoal(s, this.crop.tx, this.crop.ty);
-        // a field it can't get into (walled off) is no field at all: give up on it and, in time, leave
-        if (!this.path.length && !(this.tile.tx === this.crop.tx && this.tile.ty === this.crop.ty)) { this.crop = null; this.retarget = 3; }
+    const granary = s.world.granary && !s.world.granary.ruined && s.food > 0 ? s.world.granary : null;
+    if (!granary) this.spot = null;
+    else if (!this.spot || this.retarget <= 0) {
+      this.retarget = 3;
+      // a swarm spreads round the granary's walls rather than every rat squeezing in at one corner
+      this.spot = s.gnawSpot(granary, this.id);
+      if (this.spot) {
+        this.setGoal(s, this.spot.tx, this.spot.ty);
+        // a granary it can't get to (walled off) is no granary at all: give up on it and, in time, leave
+        if (!this.path.length && !(this.tile.tx === this.spot.tx && this.tile.ty === this.spot.ty)) this.spot = null;
       }
     }
-    if (!this.crop) {
+    if (!this.spot) {
       this.bored += dt;
       this.task = 'nothing to eat';
       if (this.bored > 8) this.dead = true; // scampers off
@@ -75,19 +76,14 @@ export class Rat extends Raider {
     }
     this.bored = 0;
     const here = this.tile;
-    if (here.tx === this.crop.tx && here.ty === this.crop.ty) {
+    if (here.tx === this.spot.tx && here.ty === this.spot.ty) {
       this.vx = this.vy = 0;
-      this.task = 'gnawing the crops';
+      this.task = 'gnawing into the granary';
       this.gnaw += dt;
-      if (this.gnaw >= this.gnawSeconds) {
-        this.gnaw = 0;
-        s.world.set(this.crop.tx, this.crop.ty, 'tilled');
-        s.cropEaten();
-        this.crop = null;
-      }
+      if (this.gnaw >= this.gnawSeconds) { this.gnaw = 0; s.ratGnaw(); } // a bite of the stores
       return;
     }
-    this.task = 'heading for the field';
+    this.task = 'heading for the granary';
     this.followPath(dt);
   }
 
@@ -485,8 +481,6 @@ export class Ogre extends Raider {
   }
 
   private trample(s: VillageScene): void {
-    const t = this.tile;
-    if (s.world.get(t.tx, t.ty)?.kind === 'crop') s.world.set(t.tx, t.ty, 'tilled');
   }
 
   /** Each heavy step nearby: a thud and a tremor (the renderer decides by distance). */
@@ -542,8 +536,6 @@ export class Brute extends Raider {
     if (!this.path.length && (this.dist(this.target) > 30 || !s.world.lineClear(this, this.target)) && this.breach(dt, s)) return;
     if (!this.path.length && this.target.elevated && this.breach(dt, s)) return;
     this.followPath(dt);
-    const t = this.tile;
-    if (s.world.get(t.tx, t.ty)?.kind === 'crop') s.world.set(t.tx, t.ty, 'tilled');
   }
 }
 
@@ -708,7 +700,6 @@ export class Wrecker extends Raider {
       if (this.prey) this.clearGoal();
     }
     const t = this.tile;
-    if (s.world.get(t.tx, t.ty)?.kind === 'crop') s.world.set(t.tx, t.ty, 'tilled');
     if (this.prey) {
       this.bored = 0;
       const b = this.prey, e = this.edgeOf(b), name = BUILDINGS[b.kind].name.toLowerCase();

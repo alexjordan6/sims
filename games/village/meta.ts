@@ -9,10 +9,6 @@ export interface Mods {
   startWood: number;
   extraAdults: number;
   startSoldiers: number;
-  cropYield: number;
-  cropDaysDelta: number;
-  farmerSpeedMul: number;
-  fieldWide: boolean;
   foodPerDayMul: number;
   birthBonus: number;
   /** Baby Fever: births get p.feverBonus while food in store covers p.feverDays of rations */
@@ -79,7 +75,7 @@ export interface Mods {
 }
 export const DEFAULT_MODS: Mods = {
   startFood: 40, startWood: 25, extraAdults: 0, startSoldiers: 0,
-  cropYield: 6, cropDaysDelta: 0, farmerSpeedMul: 1, fieldWide: false, foodPerDayMul: 1,
+  foodPerDayMul: 1,
   birthBonus: 0, babyFever: false, twinChance: 0, houseCap: 4, adultAgeDelta: 0,
   hpMul: 1, soldierHpBonus: 0, soldierDmgMul: 1, soldierRegen: 0, cadetDaysDelta: 0, sponsorBonus: 0,
   raiderSpeedMul: 1, raiderHpMul: 1, playerDmgMul: 1, playerHpBonus: 0, playerRegen: 0,
@@ -91,7 +87,7 @@ export const DEFAULT_MODS: Mods = {
 
 export type Branch = 'harvest' | 'hearth' | 'war' | 'hold' | 'timber' | 'masonry' | 'bounty' | 'fortune';
 export const BRANCHES: { id: Branch; name: string; blurb: string }[] = [
-  { id: 'harvest', name: 'Harvest', blurb: 'food and farming' },
+  { id: 'harvest', name: 'Larder', blurb: 'food and stores' },
   { id: 'hearth', name: 'Hearth', blurb: 'families and children' },
   { id: 'war', name: 'War', blurb: 'soldiers and combat' },
   { id: 'hold', name: 'Stronghold', blurb: 'defence and you' },
@@ -117,12 +113,9 @@ export interface Node {
 }
 
 export const NODES: Node[] = [
-  // ---- Harvest
-  { id: 'harvest1', branch: 'harvest', tier: 1, name: 'Green Thumb', cost: 50, blurb: 'Crops yield +2 food', icon: { key: 'farm', frame: 81 }, apply: (m) => (m.cropYield += 2) },
-  { id: 'harvest2a', branch: 'harvest', tier: 2, side: 'a', requires: 'harvest1', name: 'Iron Harvest', cost: 100, blurb: 'Yield +3 more, farmers work 30% faster', icon: { key: 'farm', frame: 68 }, apply: (m) => { m.cropYield += 3; m.farmerSpeedMul *= 1.3; } },
-  { id: 'harvest3a', branch: 'harvest', tier: 3, side: 'a', requires: 'harvest2a', name: 'Bumper Crops', cost: 200, blurb: 'Crops ripen a day sooner', icon: { key: 'farm', frame: 43 }, apply: (m) => (m.cropDaysDelta -= 1) },
-  { id: 'harvest2b', branch: 'harvest', tier: 2, side: 'b', requires: 'harvest1', name: 'Deep Larder', cost: 100, blurb: '+50 starting food and a wider starting field', icon: { key: 'farm', frame: 44 }, apply: (m) => { m.startFood += 50; m.fieldWide = true; } },
-  { id: 'harvest3b', branch: 'harvest', tier: 3, side: 'b', requires: 'harvest2b', name: 'Granary', cost: 200, blurb: 'Villagers eat half as much', icon: { key: 'farm', frame: 96 }, apply: (m) => (m.foodPerDayMul *= 0.5) },
+  // ---- Larder (the Harvest branch, its crop boons gone with the fields; the ids stay so old saves keep what they bought)
+  { id: 'harvest2b', branch: 'harvest', tier: 1, name: 'Deep Larder', cost: 100, blurb: '+50 starting food', icon: { key: 'farm', frame: 44 }, apply: (m) => { m.startFood += 50; } },
+  { id: 'harvest3b', branch: 'harvest', tier: 2, side: 'a', requires: 'harvest2b', name: 'Granary', cost: 200, blurb: 'Villagers eat half as much', icon: { key: 'farm', frame: 96 }, apply: (m) => (m.foodPerDayMul *= 0.5) },
   // ---- Hearth
   { id: 'hearth1', branch: 'hearth', tier: 1, name: 'Baby Fever', cost: 50, blurb: 'While the granary holds 5+ days of food, births are far more likely — the bigger the village, the more it takes to keep the surplus', icon: { key: 'town', frame: 85 }, apply: (m) => (m.babyFever = true) },
   { id: 'hearth2a', branch: 'hearth', tier: 2, side: 'a', requires: 'hearth1', name: 'Big Families', cost: 100, blurb: 'Houses hold 6 instead of 4', icon: { key: 'town', frame: 53 }, apply: (m) => (m.houseCap = 6) },
@@ -155,7 +148,7 @@ export const NODES: Node[] = [
   { id: 'masonry3b', branch: 'masonry', tier: 3, side: 'b', requires: 'masonry2b', name: 'Great Hall', cost: 200, blurb: 'Houses get +2 beds at every level', icon: { key: 'town', frame: 85 }, apply: (m) => (m.bedBonus += 2) },
   // ---- Bounty
   { id: 'bounty1', branch: 'bounty', tier: 1, name: 'Plunder', cost: 50, blurb: 'Every raider slain drops 3 wood', icon: { key: 'dungeon', frame: 89 }, apply: (m) => (m.killWood += 3) },
-  { id: 'bounty2a', branch: 'bounty', tier: 2, side: 'a', requires: 'bounty1', name: 'Foragers', cost: 100, blurb: 'Rats take twice as long to eat crops; kills also drop 2 food', icon: { key: 'farm', frame: 44 }, apply: (m) => { m.ratsHarmless = true; m.killFood += 2; } },
+  { id: 'bounty2a', branch: 'bounty', tier: 2, side: 'a', requires: 'bounty1', name: 'Foragers', cost: 100, blurb: 'Rats gnaw the granary half as fast; kills also drop 2 food', icon: { key: 'farm', frame: 44 }, apply: (m) => { m.ratsHarmless = true; m.killFood += 2; } },
   { id: 'bounty3a', branch: 'bounty', tier: 3, side: 'a', requires: 'bounty2a', name: 'Trophies', cost: 200, blurb: 'Each kill heals you 5 HP; soldiers +20% HP', icon: { key: 'dungeon', frame: 116 }, apply: (m) => { m.killHeal += 5; m.soldierHpBonus += 12; } },
   { id: 'bounty2b', branch: 'bounty', tier: 2, side: 'b', requires: 'bounty1', name: 'Quick Hands', cost: 100, blurb: 'Snatchers take twice as long to grab a child', icon: { key: 'dungeon', frame: 110 }, apply: (m) => (m.snatchDelayMul *= 2) },
   { id: 'bounty3b', branch: 'bounty', tier: 3, side: 'b', requires: 'bounty2b', name: 'Guardians', cost: 250, blurb: 'Children can\'t be snatched at all', icon: { key: 'dungeon', frame: 102 }, apply: (m) => (m.noSnatch = true) },
@@ -179,8 +172,10 @@ export function pathOf(id: string): Node[] {
 }
 
 /** Old flat-boon ids from the first release, mapped onto the tree. */
+/** Boons taken out of the tree (their feature is gone): what each cost, given back to anyone who had bought it. */
+export const REMOVED_NODES: Record<string, number> = { harvest1: 50, harvest: 50, harvest2a: 100, harvest3a: 200 }; // ('harvest' is Green Thumb's id in the oldest saves)
 const LEGACY_IDS: Record<string, string> = {
-  larder: 'harvest2b', harvest: 'harvest1', timber: 'hold1', couple: 'hearth2b', families: 'hearth2a',
+  larder: 'harvest2b', timber: 'hold1', couple: 'hearth2b', families: 'hearth2a',
   drums: 'war2a', veteran: 'war2b', hardy: 'war1', champion: 'hold2b', palisade: 'hold2a',
 };
 
@@ -234,6 +229,9 @@ export class Meta {
       }
       return out;
     };
+    // a boon that has left the tree pays back its renown (once: it drops out of the save after)
+    const refund = this.state.unlocked.reduce((n, id) => n + (REMOVED_NODES[id] ?? 0), 0);
+    if (refund) this.state.renown += refund;
     const unlocked = fix(this.state.unlocked);
     // loadout: keep the deepest owned node per branch
     const loadout: string[] = [];
@@ -245,6 +243,7 @@ export class Meta {
     }
     this.state.unlocked = unlocked;
     this.state.loadout = loadout;
+    if (refund) this.save();
   }
 
   save(): void {
@@ -307,7 +306,7 @@ export class Meta {
   /** Run modifiers for the current loadout: every equipped node plus its ancestors. */
   mods(): Mods {
     // the economy sliders set the baseline the boons build on
-    const m: Mods = { ...DEFAULT_MODS, cropYield: p.cropYield, startFood: p.startFood, startWood: p.startWood };
+    const m: Mods = { ...DEFAULT_MODS, startFood: p.startFood, startWood: p.startWood };
     for (const id of this.state.loadout) for (const n of pathOf(id)) n.apply(m);
     return m;
   }

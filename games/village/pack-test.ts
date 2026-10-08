@@ -27,7 +27,7 @@ export function runPackChecks(s: VillageScene, assert: (ok:unknown,msg:string)=>
   };
   try {
     p.packSlots=12;p.gnomeStart=false;fresh();
-    assert(s.player.pack.emptySlots===7 && IMPLEMENTS.every(t=>s.player.pack.hasTool(t)),'with the whole kit the pack holds five implements and seven free slots');
+    assert(s.player.pack.emptySlots===8 && IMPLEMENTS.every(t=>s.player.pack.hasTool(t)),'with the whole kit the pack holds four implements and eight free slots');
     s.reset(42);assert(s.player.pack.emptySlots===10 && START_TOOLS.every(t=>s.player.pack.hasTool(t)) && !s.player.pack.hasTool('axe') && !s.player.pack.hasTool('hoe') && !s.player.pack.hasTool('hammer'),'a new village starts with the basket and wand, ten free slots, and none of the lost tools');fresh();
     assert(s.player.weapons.melee===0&&s.player.weapons.bow===0&&s.player.load===null,'club and bow start equipped outside pack; player load stays null');
     p.packSlots=5;assert(s.player.pack.slots.length===12,'pack size changes apply only on a new run');p.packSlots=12;
@@ -42,12 +42,12 @@ export function runPackChecks(s: VillageScene, assert: (ok:unknown,msg:string)=>
     assert(v.load?.n===6&&s.wood===s.woodCap,'villager partial deposit retains original armful');
     s.wood=0;s.deposit(v);assert(v.load===null&&s.wood===6,'villager remainder deposits normally');
     fresh();s.player.tool='axe';const axe=s.player.pack.findSlot(g=>g.kind==='tool'&&g.tool==='axe');s.player.pack.removeAt(axe);s.validateTool();
-    assert(String(s.player.tool)==='sword'&&!!s.toolLocked('axe')&&!s.toolLocked('seeds'),'missing implement falls back to the club you always have; free modes remain free');
-    assert(s.recoverBasicKit()&&s.player.pack.hasTool('axe')&&s.player.pack.emptySlots===7,'recovery supplies only missing items');
-    assert(s.recoverBasicKit()&&s.player.pack.emptySlots===7,'recovery does not duplicate kit');
+    assert(String(s.player.tool)==='sword'&&!!s.toolLocked('axe')&&!s.toolLocked('basket'),'missing implement falls back to the club you always have; free modes remain free');
+    assert(s.recoverBasicKit()&&s.player.pack.hasTool('axe')&&s.player.pack.emptySlots===8,'recovery supplies only missing items');
+    assert(s.recoverBasicKit()&&s.player.pack.emptySlots===8,'recovery does not duplicate kit');
     const empty=s.player.pack.slots.indexOf(null);s.swapEquipment(empty,'melee');
     assert(s.player.weapons.melee===-1&&s.player.pack.at(empty)?.kind==='weapon'&&!!s.toolLocked('sword')&&s.player.pressAttack()===-1,'tier-zero weapon can be unequipped; empty slot cannot attack');
-    assert(s.recoverBasicKit()&&s.player.pack.emptySlots===6,'recovery detects packed weapon');
+    assert(s.recoverBasicKit()&&s.player.pack.emptySlots===7,'recovery detects packed weapon');
     s.swapEquipment(empty,'melee');assert(s.player.weapons.melee===0&&s.player.pack.at(empty)===null,'tier-zero weapon equips from pack');
     const i=s.player.pack.put({kind:'armor',slot:'helmet',tier:1}),hp=s.player.maxHp;
     const snapshot=s.player.pack.slots.map(slotKey).join();
@@ -91,7 +91,7 @@ export function runPackChecks(s: VillageScene, assert: (ok:unknown,msg:string)=>
     it.rest=true;it.z=0;it.x=s.player.x;it.y=s.player.y;s.pickUpItems(1);assert(s.world.items.includes(it),'deliberate drop cannot immediately return');
     s.player.x+=p.pickupRange*TILE+ITEM.reach+1;s.pickUpItems(0);assert(!it.playerDropPending,'leaving pickup radius clears protection');
     Object.assign(s.player,{x:it.x,y:it.y});s.pickUpItems(0);assert(!s.world.items.includes(it),'returning collects deliberate drop normally');
-    const tools=s.player.pack.slots.filter(g=>g&&!isBulk(g)).length;assert(tools===5&&s.player.load===null,'pack operations never use player armful');
+    const tools=s.player.pack.slots.filter(g=>g&&!isBulk(g)).length;assert(tools===4&&s.player.load===null,'pack operations never use player armful');
     for(const start of [false,true]){p.gnomeStart=start;s.reset(42);assert(s.player.pack.emptySlots===10&&s.player.weapons.melee===0,'starting kit works for '+(start?'gnome':'normal')+' start');}
   } finally {p.pickupRange=saved.range;p.pickupPull=saved.pull;p.packSlots=saved.slots;p.gnomeStart=saved.start;s.reset(42);}
 }

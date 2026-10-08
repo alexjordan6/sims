@@ -31,10 +31,6 @@ export const TOWN = {
 } as const;
 
 export const FARM = {
-  tilled: 49,
-  tilledEnds: { l: 48, m: 49, r: 50 },
-  /** tomato: sprout → small → bushy → ripe */
-  crop: [40, 41, 42, 43] as const,
   iconTomato: 44,
   iconWheat: 68,
   iconCarrot: 8,

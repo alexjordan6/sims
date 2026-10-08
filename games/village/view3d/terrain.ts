@@ -1,10 +1,10 @@
 import * as THREE from 'three';
-import { COLS, ROWS, FOODS, POT_INGREDIENTS } from '../config';
+import { COLS, ROWS, POT_INGREDIENTS } from '../config';
 import { WILD_FOOD, type Tile, type TileKind } from '../world';
 import type { VillageScene } from '../main';
 import { GEO, COL, GROUND_MAT, PROP_MAT } from './models';
 import { MODELS } from './assets';
-import { FLORA_MODEL, pickModel, cropModel } from './registry';
+import { FLORA_MODEL, pickModel } from './registry';
 
 // The ground and everything rooted in it, cut into chunks of CH x CH tiles. A chunk is rebuilt only
 // when one of its tiles changes (world.dirty) or is first explored, so a still world costs nothing.
@@ -36,7 +36,6 @@ function hash(tx: number, ty: number, k = 0): number {
 }
 
 const c3 = new THREE.Color();
-function hexColour(s: string): number { return parseInt(s.slice(1), 16); }
 
 interface Chunk { ground: THREE.Mesh; props: Map<Shape, THREE.InstancedMesh>; group: THREE.Group }
 
@@ -99,8 +98,6 @@ export class Terrain {
 
   private groundColour(t: Tile, tx: number, ty: number): number {
     switch (t.kind as TileKind) {
-      case 'tilled': return COL.tilled;
-      case 'crop': return COL.soilWet;
       case 'thicket': return COL.thicketGround;
       case 'wall': case 'gate': case 'stairs': return COL.dirt;
       default:
@@ -177,15 +174,6 @@ export class Terrain {
           else prop('sapling', jx, jz, 0.7 + r * 0.4, 'sapling', COL.sapling);
           break;
         case 'thicket': add('thicket', jx, jz, 0.95 + r * 0.25, COL.thicket, turn); break;
-        case 'crop': {
-          const fk = t.food ?? 'wheat', days = s.cropDaysOf(t), grown = Math.min(1, t.stage / days);
-          const ripe = t.stage >= days;
-          const m = cropModel(fk, grown, ripe);
-          if (m && MODELS.props.has(m.key)) { add('m:' + m.key, cx2, cz, m.scale * (0.55 + 0.45 * grown), m.tint, turn); break; }
-          const colour = ripe ? hexColour(FOODS[fk].colour) : 0x4a6a30;
-          for (let k = 0; k < 4; k++) add('crop', tx + 0.25 + (k & 1) * 0.5, ty + 0.25 + (k >> 1) * 0.5, 0.35 + grown * 0.75, colour, turn + k);
-          break;
-        }
         case 'bush': case 'hazel': case 'garlic': case 'burdock': case 'mushroom': {
           const ripe = s.wildRipe(t);
           const wild = WILD_FOOD[t.kind], ingredient = !!wild && POT_INGREDIENTS.has(wild);

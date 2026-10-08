@@ -14,7 +14,6 @@ function canvas(g: Gear): HTMLCanvasElement {
   const shape = g.kind === 'tool' ? g.tool : g.kind === 'kit' ? g.kit : g.kind === 'weapon' ? (g.slot==='bow'?(tier>=4?'crossbow':'bow'):tier===0?'club':tier>=4?'warhammer':'sword') : g.slot==='shield'&&tier>=4?'tower':g.slot;
   switch(shape) {
     case 'axe': r(7,3,2,12,'#805532');r(3,3,5,5,'#b6c4cb');r(2,4,2,3,'#e0e8ee');break;
-    case 'hoe': r(7,3,2,12,'#805532');r(3,3,8,2,'#b6c4cb');r(3,4,2,3,'#b6c4cb');break;
     case 'hammer': r(7,6,2,9,'#805532');r(3,3,10,4,'#b6c4cb');break;
     case 'wand': r(7,6,2,9,'#805532');r(6,2,4,4,'#8ce6e5');r(5,3,6,2,'#b2ffff');break;
     case 'basket': r(3,8,10,6,'#ba8b4d');r(4,4,1,4);r(11,4,1,4);r(5,3,6,1);r(4,10,8,1,'#775132');r(4,12,8,1,'#775132');break;

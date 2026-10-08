@@ -25,27 +25,17 @@ export function preloadArt(scene: Phaser.Scene): void {
   scene.load.spritesheet('dungeon', dungeonUrl, { frameWidth: 16, frameHeight: 16 });
 }
 
-/** Which of the five crop frames to show: growth runs continuously through the day. */
-function cropPhase(t: Tile, cropDays: number, dayTime: number): number {
-  if (t.stage >= cropDays) return 4;
-  const g = (t.stage + Math.max(0, Math.min(1, (dayTime - 0.25) / 0.75))) / cropDays; // the day's growth happens from dawn on
-  return Math.min(3, Math.floor(g * 4));
-}
 
 /** Ground + object gids for a tile (and the crown-top for the tile above, for tall trees). */
 /** The picture the map draws for a tile, for the inspector's portrait: a flora frame (object over ground), the fort sheet for defences, or a town grass frame. */
 export function tileArt(t: Tile, s: VillageScene): { key: string; frame: number } {
   if (t.defense) return { key: 'fort', frame: t.defense.kind === 'stairs' ? 3 : t.defense.kind === 'gate' ? (t.defense.open ? 2 : 1) : 0 };
-  const f = tileFrames(t, s.cropDaysOf(t), s.dayTime, s.oldGrowthDays, s.wildRipe(t));
+  const f = tileFrames(t, s.oldGrowthDays, s.wildRipe(t));
   const pick = f.object !== EMPTY ? f.object : f.ground;
   if (pick >= GID.flora) return { key: 'flora', frame: pick - GID.flora };
   return { key: 'town', frame: pick - GID.town };
 }
-/** the five growth frames of the crop sown on a tile */
-function cropFrames(t: Tile): readonly number[] {
-  return t.food === 'wheat' ? FLORA.wheat : t.food === 'carrot' ? FLORA.carrot : t.v % 2 ? FLORA.crop2 : FLORA.crop;
-}
-function tileFrames(t: Tile, cropDays: number, dayTime: number, oldDays: number, wildRipe = false): { ground: number; object: number; canopy?: number } {
+function tileFrames(t: Tile, oldDays: number, wildRipe = false): { ground: number; object: number; canopy?: number } {
   const grass = GID.town + TOWN.grass[t.v % TOWN.grass.length];
   const F = GID.flora;
   switch (t.kind) {
@@ -57,8 +47,6 @@ function tileFrames(t: Tile, cropDays: number, dayTime: number, oldDays: number,
       const pine = t.v % 3 === 1;
       return { ground: grass, object: F + (t.work === 1 ? FLORA.oakChopped : pine ? FLORA.pineTrunk : FLORA.oakTrunk), canopy: F + (pine ? FLORA.pineTop : FLORA.oakTop) };
     }
-    case 'tilled': return { ground: F + FLORA.tilled, object: EMPTY };
-    case 'crop': return { ground: F + FLORA.tilled, object: F + cropFrames(t)[cropPhase(t, cropDays, dayTime)] };
     case 'thicket': return { ground: grass, object: F + FLORA.thicket[(t.v + t.work) % 3] }; // a hacked-at tile looks hacked at
     case 'bush': return { ground: grass, object: F + FLORA.bush[wildRipe ? 1 : 0] };
     case 'mushroom': return { ground: grass, object: F + FLORA.mushroom[wildRipe ? 1 : 0] };
@@ -81,12 +69,12 @@ export function lookFor(m: Mover): Look | null {
   const base = { ...seed, armor: m.armor, dye: m.dye, helmetStyle: m.helmetStyle, plume: m.plume };
   // a crude blade shows as a club until the chest forges a real sword
   const blade = m.weapons.melee < 0 ? 'none' : m.weapons.melee > 0 ? 'sword' : 'club';
-  if (m instanceof Player) return { ...base, skin: 1, hair: 0, hairStyle: 0, body: 'adult', outfit: 'head', held: m.tool === 'sword' ? blade : m.tool === 'bow' && m.weapons.bow >= 0 ? 'bow' : m.tool === 'axe' ? 'axe' : m.tool === 'hoe' ? 'hoe' : m.tool === 'wand' ? 'wand' : 'none' };
+  if (m instanceof Player) return { ...base, skin: 1, hair: 0, hairStyle: 0, body: 'adult', outfit: 'head', held: m.tool === 'sword' ? blade : m.tool === 'bow' && m.weapons.bow >= 0 ? 'bow' : m.tool === 'axe' ? 'axe' : m.tool === 'wand' ? 'wand' : 'none' };
   if (m instanceof Villager) {
     if (m.gnome) return { ...base, body: m.isChild ? 'gnomekid' : 'gnome', outfit: 'gnome', held: !m.isAdult ? 'none' : m.role === 'soldier' && m.weapon === 'pike' ? 'pike' : 'club' };
     if (m.role === 'kid' || m.role === 'infant') return { ...base, body: 'kid', outfit: 'kid', held: 'none' };
     if (m.elder) base.hair = 6; // grey
-    const held = m.role === 'farmer' ? 'hoe' : m.role === 'woodcutter' ? 'axe' : m.weapon === 'bow' ? 'bow' : m.weapon === 'pike' ? 'pike' : blade;
+    const held = m.role === 'farmer' ? 'none' : m.role === 'woodcutter' ? 'axe' : m.weapon === 'bow' ? 'bow' : m.weapon === 'pike' ? 'pike' : blade;
     return { ...base, body: 'adult', outfit: m.role, held };
   }
   if (m instanceof Raider) {

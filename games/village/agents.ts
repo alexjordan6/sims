@@ -1,6 +1,6 @@
 import type { Agent } from '@shared/index';
 import { World, WILD_FOOD, doorstep, buildingCenter, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
-import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, GNOME_CALLING, MOODS, type Mood, type DishKind, ORDER, YARD, GNOME_PACK, ITEM, MASS, BODY, FOODS, FOOD_KINDS, CROP_KINDS, DIET_CAP, zeroFood, BOAR, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
+import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, GNOME_CALLING, MOODS, type Mood, type DishKind, ORDER, YARD, GNOME_PACK, ITEM, MASS, BODY, FOODS, FOOD_KINDS, DIET_CAP, zeroFood, BOAR, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
 import type { Mods } from './meta';
 import { SHIELD_WALL, ADVANCE_SIGHT } from './regiment';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle, knockMul, reloadMul } from './characters';
@@ -35,7 +35,7 @@ export abstract class Mover implements Agent {
   /** what this body is carrying: chopped wood or picked food, on its way to the woodyard / granary */
   /** what the arms hold: wood, or food of one kind */
   load: { kind: LoadKind; n: number; food?: FoodKind } | null = null;
-  /** Put a yield in this body's arms (one kind at a time — the other kind is taken in first; one crop per armful). */
+  /** Put a yield in this body's arms (one kind at a time — the other kind is taken in first; one food per armful). */
   pickUp(kind: BulkKind, n: number, food?: FoodKind): number {
     if (kind === 'scrap' || (this.load && (this.load.kind !== kind || (kind === 'food' && this.load.food !== food)))) return 0;
     this.load = { kind, n: (this.load?.n ?? 0) + n, food: kind === 'food' ? food : undefined };
@@ -613,8 +613,8 @@ export class Villager extends Mover {
     switch (this.role) {
       case 'infant': return;
       case 'kid': this.kidUpdate(dt, s); break;
-      case 'farmer': if (this.moodNow?.bold) { this.soldierUpdate(dt, s); break; } this.civilUpdate(dt, s, this.gnome ? 'forage' : 'farm'); break; // gnomes never work the crops: the wild is their field
-      case 'woodcutter': if (this.moodNow?.bold) { this.soldierUpdate(dt, s); break; } this.civilUpdate(dt, s, this.helpingFarm(s) ? (this.gnome ? 'forage' : 'farm') : 'wood'); break;
+      case 'farmer': if (this.moodNow?.bold) { this.soldierUpdate(dt, s); break; } this.civilUpdate(dt, s, 'forage'); break; // no fields: the wild is the foragers' field
+      case 'woodcutter': if (this.moodNow?.bold) { this.soldierUpdate(dt, s); break; } this.civilUpdate(dt, s, this.helpingForage(s) ? 'forage' : 'wood'); break;
       case 'soldier': this.soldierUpdate(dt, s); break;
     }
   }
@@ -647,7 +647,7 @@ export class Villager extends Mover {
     const yard = this.gnome ? 'the gnome house' : 'the house';
     this.task = hungry ? `hungry — nothing by ${yard}`
       : lesson === 'soldier' ? 'drilling in the yard'
-      : lesson === 'farmer' ? (this.gnome ? 'learning to forage' : 'learning to farm')
+      : lesson === 'farmer' ? 'learning to forage'
       : lesson === 'woodcutter' ? 'learning the axe'
       : `playing by ${yard}`;
     // training accrues by the waking hour, every hour they are home and fed (the night asleep costs them nothing)
@@ -664,13 +664,13 @@ export class Villager extends Mover {
       const tx = Math.round(hc.tx) + s.rng.int(-r, r), ty = Math.round(hc.ty) + s.rng.int(-r, r);
       if (s.world.inBounds(tx, ty) && !s.world.isBlocked(tx, ty)) this.setGoal(s, tx, ty, true);
     }
-    // a swing of the sword or a stroke of the hoe now and then, while the lesson lasts
+    // a swing of the sword or of the axe now and then, while the lesson lasts (foraging is learned by watching)
     this.trainTimer -= dt;
     if (this.trainTimer <= 0 && lesson) {
       this.trainTimer = s.rng.range(2, 4);
       const here = this.tile;
       if (lesson === 'soldier') s.fx.push({ kind: 'swing', who: this, dx: this.dir, dy: 0, stage: 0 });
-      else s.fx.push({ kind: 'tool', tool: lesson === 'farmer' ? 'hoe' : 'axe', tx: here.tx, ty: here.ty, who: this });
+      else if (lesson === 'woodcutter') s.fx.push({ kind: 'tool', tool: 'axe', tx: here.tx, ty: here.ty, who: this });
     }
   }
 
@@ -699,15 +699,15 @@ export class Villager extends Mover {
   private eaten = 0;
   private eatTimer = 0;
 
-  // --- farmers / woodcutters ------------------------------------------------
+  // --- foragers / woodcutters ------------------------------------------------
 
-  /** Woodcutters farm instead when the woodyard is full (until it drops well below the cap) or the forest is at its floor. */
-  private helpingFarm(s: VillageScene): boolean {
-    if (s.wood >= s.woodCap) this.farmHelp = true;
-    else if (s.wood < s.woodCap * 0.55) this.farmHelp = false;
-    return this.farmHelp || (!s.mods.ignoreReserve && s.world.treeCount <= TREE_RESERVE);
+  /** Woodcutters forage instead when the woodyard is full (until it drops well below the cap) or the forest is at its floor. */
+  private helpingForage(s: VillageScene): boolean {
+    if (s.wood >= s.woodCap) this.forageHelp = true;
+    else if (s.wood < s.woodCap * 0.55) this.forageHelp = false;
+    return this.forageHelp || (!s.mods.ignoreReserve && s.world.treeCount <= TREE_RESERVE);
   }
-  private farmHelp = false;
+  private forageHelp = false;
 
   /** heading to the woodyard / granary with a load */
   private delivering = false;
@@ -879,9 +879,8 @@ export class Villager extends Mover {
   }
   private dropFetch(s: VillageScene): void { if (this.fetching) s.meatClaims.delete(this.fetching.id); this.fetching = null; this.clearGoal(); }
 
-  /** Farmers, woodcutters and foraging gnomes: find a job tile, walk there, work it, carry the take home. */
-  private civilUpdate(dt: number, s: VillageScene, job: 'farm' | 'wood' | 'forage'): void {
-    const farmer = job === 'farm';
+  /** Foragers and woodcutters: find a job tile, walk there, work it, carry the take home. */
+  private civilUpdate(dt: number, s: VillageScene, job: 'wood' | 'forage'): void {
     // a bowl out of the great pot steadies them: a fed gnome holds its ground whatever the dish, and
     // sees the fight through with whatever that dish gave it. Only a roast sends it at them (Mood.bold).
     const danger = !this.moodNow && !!s.nearestRaider(this.x, this.y, WORKER_DANGER);
@@ -948,10 +947,6 @@ export class Villager extends Mover {
       const spot = job === 'forage'
         ? (patch ? w.nearest(patch.x, patch.y, (t, tx, ty) => !!WILD_FOOD[t.kind] && s.wildLeft(t) > 0 && (!this.load || this.load.food === WILD_FOOD[t.kind]) && Math.hypot((tx + 0.5) * TILE - patch.x, (ty + 0.5) * TILE - patch.y) <= 6 * TILE && ok(tx, ty)) : null)
           ?? w.nearest(this.x, this.y, (t, tx, ty) => !!WILD_FOOD[t.kind] && s.wildLeft(t) > 0 && (!this.load || this.load.food === WILD_FOOD[t.kind]) && ok(tx, ty))
-        : farmer
-        ? (this.load?.kind === 'food' ? w.nearest(this.x, this.y, (t, tx, ty) => t.kind === 'crop' && s.isRipe(t) && t.food === this.load!.food && ok(tx, ty)) : null) ??
-          w.nearest(this.x, this.y, (t, tx, ty) => t.kind === 'crop' && s.isRipe(t) && ok(tx, ty)) ??
-          w.nearest(this.x, this.y, (t, tx, ty) => t.kind === 'tilled' && ok(tx, ty))
         : s.mods.ignoreReserve || w.treeCount > TREE_RESERVE ? this.pickTree(s, ok) : null;
       if (spot) {
         this.setGoal(s, spot.tx, spot.ty);
@@ -959,25 +954,25 @@ export class Villager extends Mover {
         // think — bringing the armful in first, so nobody stands about "looking for a tree" with wood on their back
         if (!this.path.length && !this.adjacentTo(spot)) {
           this.unreachable.set(spot.ty * w.cols + spot.tx, s.simTime + 60); this.clearGoal();
-          if (++this.failedPicks >= 5) { this.failedPicks = 0; this.thinkTimer = 4; this.wanderNear(s, this.home); this.task = job === 'forage' ? 'no way to the plants' : farmer ? 'no way to the field' : 'no way to the trees'; }
+          if (++this.failedPicks >= 5) { this.failedPicks = 0; this.thinkTimer = 4; this.wanderNear(s, this.home); this.task = job === 'forage' ? 'no way to the plants' : 'no way to the trees'; }
           else if (this.load) { this.delivering = true; this.deliver(dt, s); }
           return;
         }
         this.failedPicks = 0;
-        this.task = job === 'forage' ? 'off foraging' : farmer ? (this.role === 'woodcutter' ? 'helping in the field' : 'heading to the field') : 'looking for a tree';
+        this.task = job === 'forage' ? (this.role === 'woodcutter' ? 'helping the foragers' : 'off foraging') : 'looking for a tree';
       }
       else if (heeling) { this.walkToHead(dt, s, 'nothing to pick here'); }
       else if (this.load) { this.delivering = true; this.deliver(dt, s); return; } // nothing more to do: bring in what's carried
-      else { this.wanderNear(s, this.home); this.task = job === 'forage' ? 'nothing wild to pick' : farmer ? 'no crops to tend' : 'leaving the last trees to regrow'; }
+      else { this.wanderNear(s, this.home); this.task = job === 'forage' ? 'nothing wild to pick' : 'leaving the last trees to regrow'; }
       return;
     }
 
     if (this.goal && this.followPath(dt) && this.goal) { // (followPath drops the goal when the way is blocked)
       const t = s.world.get(this.goal.tx, this.goal.ty);
-      const isJob = job === 'forage' ? !!t && !!WILD_FOOD[t.kind] && s.wildLeft(t) > 0 : farmer ? t?.kind === 'crop' || t?.kind === 'tilled' : t?.kind === 'tree';
+      const isJob = job === 'forage' ? !!t && !!WILD_FOOD[t.kind] && s.wildLeft(t) > 0 : t?.kind === 'tree';
       if (isJob && this.adjacentTo(this.goal)) {
-        this.workTimer = job === 'forage' ? p.forageWork / this.workMul : (farmer ? p.farmerWork : p.cutterWork) / (farmer ? s.mods.farmerSpeedMul : s.mods.cutterSpeedMul) / this.workMul;
-        this.task = job === 'forage' ? 'foraging' : farmer ? (t!.kind === 'crop' ? 'harvesting' : 'planting') : 'chopping';
+        this.workTimer = job === 'forage' ? p.forageWork / this.workMul : p.cutterWork / s.mods.cutterSpeedMul / this.workMul;
+        this.task = job === 'forage' ? 'foraging' : 'chopping';
       } else this.clearGoal();
     }
   }
@@ -1031,8 +1026,7 @@ export class Villager extends Mover {
   /** the hearth this armful is promised to (so a pile another cutter just filled doesn't send us elsewhere mid-walk) */
   private firewoodFor: Building | null = null;
 
-  private finishWork(s: VillageScene, job: 'farm' | 'wood' | 'forage'): void {
-    const farmer = job === 'farm';
+  private finishWork(s: VillageScene, job: 'wood' | 'forage'): void {
     const g = this.goal!;
     const t = s.world.get(g.tx, g.ty)!;
     if (job === 'forage') {
@@ -1040,17 +1034,7 @@ export class Villager extends Mover {
       const kind = WILD_FOOD[t.kind];
       if (kind && s.wildLeft(t) > 0 && (this.toPouch || s.food < s.foodCap) && this.canStow('food', kind) && s.pickWild(g.tx, g.ty, 1)) this.stow('food', 1, kind);
     }
-    else if (farmer && t.kind === 'crop' && s.isRipe(t)) {
-      // leave ripe crops standing while the granary is full or the arms hold wood / another crop
-      const kind = t.food ?? 'wheat';
-      if (s.food < s.foodCap && this.canCarry('food', kind)) {
-        s.world.set(g.tx, g.ty, 'tilled'); // the soil remembers the crop
-        const yieldNow = (s.cropYieldOf(kind) + (this.skilled && this.role === 'farmer' ? 1 : 0)) * (this.trait === 'greenthumb' && s.rng.chance(0.25) ? 2 : 1);
-        this.pickUp('food', yieldNow, kind);
-      }
-    }
-    else if (farmer && t.kind === 'tilled') { s.world.sow(g.tx, g.ty, t.food ?? 'wheat'); }
-    else if (!farmer && t.kind === 'tree' && this.canStow('wood')) {
+    else if (t.kind === 'tree' && this.canStow('wood')) {
       const wood = s.treeYield(t) + (this.skilled ? 4 : 0);
       s.world.set(g.tx, g.ty, 'sapling');
       const took = this.stow('wood', wood);
@@ -1313,7 +1297,7 @@ export interface RaiderOpts {
   /** wave scaling on HP */
   hpMul?: number;
   speedMul?: number;
-  /** Bounty boons: snatchers need longer to get hold of a child, or can't at all; rats leave crops */
+  /** Bounty boons: snatchers need longer to get hold of a child, or can't at all; rats gnaw the granary slower */
   snatchDelayMul?: number;
   noSnatch?: boolean;
   harmlessRats?: boolean;
@@ -1495,9 +1479,6 @@ export class Raider extends Mover {
     this.setGoal(s, this.target.tile.tx, this.target.tile.ty);
     if (!this.path.length && (this.dist(this.target) > 14 || !s.world.lineClear(this, this.target) || this.target.elevated) && this.breach(dt, s)) return;
     this.followPath(dt);
-    // trample crops
-    const t = this.tile;
-    if (s.world.get(t.tx, t.ty)?.kind === 'crop') s.world.set(t.tx, t.ty, 'tilled');
   }
 }
 
@@ -1531,10 +1512,10 @@ export class Arrow extends Mover {
 // player
 
 /** What the player holds. The equipped tool decides what E does. */
-export type Tool = 'hoe' | 'seeds' | 'axe' | 'sword' | 'house' | 'barracks' | 'hammer' | 'bow' | 'tavern' | 'wall' | 'gate' | 'stairs' | 'basket' | 'gnomehouse' | 'warren' | 'wand';
-export const TOOLS: Tool[] = ['hoe', 'seeds', 'axe', 'sword', 'house', 'barracks', 'hammer', 'bow', 'tavern', 'wall', 'gate', 'stairs', 'basket', 'gnomehouse', 'warren', 'wand'];
+export type Tool = 'axe' | 'sword' | 'house' | 'barracks' | 'hammer' | 'bow' | 'tavern' | 'wall' | 'gate' | 'stairs' | 'basket' | 'gnomehouse' | 'warren' | 'wand';
+export const TOOLS: Tool[] = ['axe', 'sword', 'house', 'barracks', 'hammer', 'bow', 'tavern', 'wall', 'gate', 'stairs', 'basket', 'gnomehouse', 'warren', 'wand'];
 /** the tool belt, in order (1-8 and Tab): what you hold in your hands */
-export const BELT: Tool[] = ['sword', 'bow', 'hoe', 'seeds', 'axe', 'hammer', 'basket', 'wand'];
+export const BELT: Tool[] = ['sword', 'bow', 'axe', 'hammer', 'basket', 'wand'];
 /** what the hammer builds: a row over the belt while the hammer is out (1-8 then; 0 or Esc back to the hammer) */
 export const BUILDS: Tool[] = ['house', 'barracks', 'tavern', 'gnomehouse', 'warren', 'wall', 'gate', 'stairs'];
 
@@ -1573,10 +1554,8 @@ export class Player extends Mover {
   override get space(): number { return Math.max(this.radius, BODY.player); }
   facing = { x: 0, y: 1 };
   tool: Tool = 'sword'; // the club you always have: there is no empty-handed tool, the right button is your hands
-  /** which crop the seeds sow, and which food the basket takes */
-  cropKind: FoodKind = 'wheat';
+  /** which food the basket takes */
   basketKind: FoodKind = 'wheat';
-  cycleCrop(): void { this.cropKind = CROP_KINDS[(CROP_KINDS.indexOf(this.cropKind) + 1) % CROP_KINDS.length]; }
   /** next food kind for the basket; skips kinds the pantry is out of (unless every kind is) */
   cycleBasket(stock: Record<FoodKind, number>): void {
     const any = FOOD_KINDS.some((k) => stock[k] > 0 || this.carriedOf('food', k) > 0);

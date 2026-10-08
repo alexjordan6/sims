@@ -6,7 +6,7 @@ import { ARMOR, DYES, PLUMES, WEAPONS, p, type ArmorSlot, type WeaponSlot, FOUND
 
 export type Body = 'adult' | 'kid' | 'orc' | 'imp' | 'rat' | 'shaman' | 'boss' | 'brute' | 'ogre' | 'gnome' | 'gnomekid' | 'boar' | 'troll' | 'skulk';
 export type Outfit = 'farmer' | 'woodcutter' | 'soldier' | 'kid' | 'head' | 'none' | 'gnome';
-export type Held = 'none' | 'hoe' | 'axe' | 'sword' | 'club' | 'bow' | 'wand' | 'pike';
+export type Held = 'none' | 'axe' | 'sword' | 'club' | 'bow' | 'wand' | 'pike';
 export type HelmetStyle = 0 | 1 | 2;
 
 export interface Armor { helmet: number; chest: number; legs: number; shield: number }
@@ -154,8 +154,7 @@ function drawHelmet(ctx: Ctx, ox: number, oy: number, tier: number, style: Helme
 
 function drawHeld(ctx: Ctx, ox: number, oy: number, held: Held): void {
   const P = (x: number, y: number, c: string, w = 1, h = 1) => px(ctx, ox + x, oy + y, c, w, h);
-  if (held === 'hoe') { P(13, 6, '#8f5c34', 1, 9); P(12, 6, '#8d8f95', 3, 1); }
-  else if (held === 'axe') { P(13, 7, '#8f5c34', 1, 8); P(13, 5, '#8d8f95', 2, 3); P(13, 5, '#c9d3de', 1, 3); }
+  if (held === 'axe') { P(13, 7, '#8f5c34', 1, 8); P(13, 5, '#8d8f95', 2, 3); P(13, 5, '#c9d3de', 1, 3); }
   else if (held === 'sword') { P(13, 5, '#c9d3de', 1, 7); P(12, 12, '#e0b04a', 3, 1); P(13, 13, '#6b4226', 1, 2); }
   else if (held === 'club') { P(13, 8, '#8f5c34', 1, 7); P(12, 5, '#6b4226', 3, 4); P(13, 5, '#a8733f', 1, 3); } // a knotted stick with a fat head
   else if (held === 'pike') { P(13, 1, '#8f5c34', 1, 15); P(13, 0, '#d0d6de', 1, 2); P(12, 2, '#8d8f95', 3, 1); } // a long ash shaft standing well over the head, steel at the top

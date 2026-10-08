@@ -6,17 +6,18 @@ const clearBulk = (s: VillageScene) => s.player.pack.slots.forEach((b,i)=>{if(b 
 import type { VillageScene } from './main';
 import { World, WILD_FOOD, doorstep, buildingCenter, hearthCost, BUILDINGS, type BuildingKind, type Chest } from './world';
 import { Rng } from '../../src/shared/rng';
-import { Villager, Arrow, Raider, BELT, BUILDS } from './agents';
+import { Villager, Arrow, Raider, BELT, BUILDS, TOOLS } from './agents';
 import { Brute, Rat, Ogre, Wrecker, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm } from './wildlife';
 import { SLOT_GAP, Warband, Regiment, SHAPES, SHAPE_GAP, SHAPE_PACE, layout } from './regiment';
 import { hostSize, hostCounts } from './host';
 import { rollLoot, lootTier, danger, enemyDrop } from './loot';
 import { Caravan } from './caravan';
+import { Meta, REMOVED_NODES, nodesOf } from './meta';
 import { armorStats, knockMul, reloadMul } from './characters';
 const BATTLE_BIG_TEST = 20;
 import { WARREN, SOLDIER_CAP_PER_LEVEL, PLAINS, BANDAGE } from './config';
-import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, GNOME_PACK, RECIPES, DISHES, CROP_KINDS, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS, YARD, CALLINGS, TREE_RESERVE, MOODS, SERVE_RANGE, POT_INGREDIENTS, BODY } from './config';
+import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_HOME, GNOME_PACK, RECIPES, DISHES, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS, YARD, CALLINGS, TREE_RESERVE, MOODS, SERVE_RANGE, POT_INGREDIENTS, BODY } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
 const output = document.getElementById('test-results')!, summary = document.getElementById('test-summary')!;
@@ -158,12 +159,20 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(keep.ammo === s.towerCap(keep) && !s.restockTower(keep), 'the chest fills to its cap and refuses more');
     foe.dead = true; s.removeDead();
     s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(135, 100));
-    for (const q of s.world.find(t => t.kind === 'crop')) s.world.set(q.tx, q.ty, 'tilled');
-    s.world.set(120, 100, 'crop'); const rat = s.spawn(new Rat(1928, 1608, { harmlessRats: true })); s.grid.rebuild(s.agents);
-    for (let i = 0; i < 100; i++) rat.update(1 / 60, s);
-    assert(s.world.get(120, 100)!.kind === 'crop', 'Foragers gives time to respond to crop damage');
-    for (let i = 0; i < 100; i++) rat.update(1 / 60, s);
-    assert(s.world.get(120, 100)!.kind === 'tilled' && !rat.dead, 'Foragers still allows rats to eat crops');
+    // rats: no fields to eat, so they gnaw the granary's stores, a bite at a time, the swarm spread round its walls
+    for (const k of FOOD_KINDS) s.pantry[k] = 0; s.pantry.wheat = 30;
+    const gran = s.world.granary!, gnaw = (opts = {}) => {
+      const r = s.spawn(new Rat(0, 0, opts)), at = s.gnawSpot(gran, r.id)!; Object.assign(r, World.center(at.tx, at.ty)); s.grid.rebuild(s.agents);
+      const f0 = s.food; for (let i = 0; i < 400; i++) r.update(1 / 60, s);
+      const bit = f0 - s.food; r.dead = true; s.removeDead(); return bit;
+    };
+    const ratPlain = gnaw();
+    assert(ratPlain >= 3 && s.journal.some((j) => /Rats in the granary/.test(j.text)), `a rat at the granary walls gnaws the stores (${ratPlain} food in under seven seconds), and the journal says so`);
+    s.pantry.wheat = 30;
+    const ratSlow = gnaw({ harmlessRats: true });
+    assert(ratSlow >= 1 && ratSlow <= Math.ceil(ratPlain / 2), `Foragers: rats gnaw half as fast (${ratSlow} against ${ratPlain})`);
+    const gnawSpots = new Set([0, 1, 2, 3, 4, 5].map((id) => { const q = s.gnawSpot(gran, id)!; return `${q.tx},${q.ty}`; }));
+    assert(gnawSpots.size >= 4, `a swarm spreads round the granary's walls (${gnawSpots.size} places for six rats)`);
     s = fresh(); fort(s); s.agents = [s.player];
     const guard = s.spawn(new Villager(...Object.values(World.center(122, 100)) as [number, number], home0(s), 'soldier', 20, 'Wall tester', s.mods));
     assert(s.assignPost(guard, { tx: 124, ty: 95 }), 'wall post accepts a route through connected stairs');
@@ -569,15 +578,21 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     s.food = 50; assert(s.pantry.wheat === 50 && s.food === 50, 'a plainKid food gain lands in wheat');
     s.addFood(20, 'carrot'); s.addFood(5, 'berry'); assert(s.food === 75 && s.pantry.carrot === 20, 'the granary keeps each kind apart');
     s.food -= 60; assert(s.food === 15 && s.pantry.wheat === 0 && s.pantry.carrot === 10 && s.pantry.berry === 5, `generic spending drains the fullest kind first (${JSON.stringify(s.pantry)})`);
-    s.player.tool = 'seeds'; s.player.cropKind = 'carrot'; s.world.set(122, 98, 'tilled'); s.hoverTile = { tx: 122, ty: 98 }; Object.assign(s.player, World.center(122, 99)); s.interact();
-    const sown = s.world.get(122, 98)!;
-    assert(sown.kind === 'crop' && sown.food === 'carrot' && s.cropDaysOf(sown) === s.cropDays + FOODS.carrot.days, 'seeds sow the chosen crop and it ripens on its own clock');
-    sown.stage = 99; clearBulk(s); assert(s.handsAt({ tx: 122, ty: 98 }), 'a ripe crop comes up under your hands, whatever you are holding');
-    assert(held()?.food === 'carrot' && held()!.n === s.cropYieldOf('carrot') && s.world.get(122, 98)!.kind === 'tilled' && s.world.get(122, 98)!.food === 'carrot', 'harvesting by hand yields the crop and the soil remembers it');
-    const sower = s.spawn(new Villager(World.center(122, 99).x, World.center(122, 99).y, home0(s), 'farmer', 20, 'Sower', s.mods));
-    for (const q of s.world.find(t => t.kind === 'crop' || t.kind === 'tilled')) if (q.tx !== 122 || q.ty !== 98) s.world.set(q.tx, q.ty, 'grass');
-    step(s, 6); assert(s.world.get(122, 98)!.kind === 'crop' && s.world.get(122, 98)!.food === 'carrot', `a farmer replants what the soil remembers (${s.world.get(122, 98)!.kind} ${s.world.get(122, 98)!.food})`);
-    sower.dead = true; s.removeDead();
+    assert(!(BELT as string[]).includes('hoe') && !(BELT as string[]).includes('seeds') && !(IMPLEMENTS as readonly string[]).includes('hoe') && !(TOOLS as string[]).includes('seeds'),
+      'there is no farming: no hoe, no seeds, nothing on the belt to till or sow with');
+    // the Legacy tree: the crop boons are gone, and an old save that bought one gets its renown back (once)
+    {
+      const KEY = 'village.meta', was = localStorage.getItem(KEY);
+      try {
+        localStorage.setItem(KEY, JSON.stringify({ renown: 7, runs: 1, wins: 0, bestDay: 3, unlocked: ['harvest1', 'harvest2b'], loadout: ['harvest2b'] }));
+        const old = new Meta();
+        const again = new Meta();
+        assert(old.state.renown === 7 + REMOVED_NODES.harvest1 && !old.state.unlocked.includes('harvest1') && old.state.unlocked.includes('harvest2b') && old.state.loadout.includes('harvest2b') && again.state.renown === old.state.renown,
+          `an old save with Green Thumb gets its ${REMOVED_NODES.harvest1} renown back, once, and keeps Deep Larder as the Larder's root (${old.state.renown})`);
+        assert(!nodesOf('harvest').some((n) => /crop|yield/i.test(n.blurb)) && nodesOf('harvest').length === 2, 'the Larder branch has no crop boons left');
+      } finally { if (was === null) localStorage.removeItem(KEY); else localStorage.setItem(KEY, was); }
+    }
+    assert(FOODS.wheat.source === 'trade' && FOODS.carrot.source === 'trade' && FOODS.tomato.source === 'trade', 'grain, carrots and tomatoes come by trade (the caravans) now');
     s.world.set(126, 98, 'bush').stage = 99; Object.assign(s.player, World.center(126, 99)); clearBulk(s); s.handsAt({ tx: 126, ty: 98 });
     const bush = s.world.get(126, 98)!;
     assert(held()?.food === 'berry' && held()!.n === FOODS.berry.yield && bush.kind === 'bush' && bush.stage === 0 && !s.wildRipe(bush), 'a ripe bush is picked by hand and starts regrowing');
@@ -710,11 +725,6 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     pickAt(126, 100, 2); assert(s.selectedItem === lump && !s.selectedTile, 'a thing on the ground under the pointer beats the tile');
     const hut = home0(s); pickAt(hut.tx + 1, hut.ty + 1); assert(s.selectedBuilding === hut && !s.selectedItem && !s.selectedTile, 'a building beats the tile');
     s.selectItem(lump); s.world.removeItem(lump); s.tick(1 / 60); assert(!s.selectedItem, 'a vanished thing leaves the inspector');
-    s.world.set(120, 100, 'tilled'); s.setFieldPlan({ tx: 120, ty: 100 }, 'tomato');
-    const planter = s.spawn(new Villager(World.center(120, 101).x, World.center(120, 101).y, hut, 'farmer', 20, 'Planter', s.mods));
-    for (const q of s.world.find((t) => t.kind === 'crop' || t.kind === 'tilled')) if (q.tx !== 120 || q.ty !== 100) s.world.set(q.tx, q.ty, 'grass');
-    step(s, 6); assert(s.world.get(120, 100)!.kind === 'crop' && s.world.get(120, 100)!.food === 'tomato', 'the field plan decides what a farmer sows');
-    planter.dead = true; s.removeDead();
     s.world.placeDefense('stairs', 130, 100); for (let x = 131; x <= 134; x++) s.world.placeDefense('wall', x, 100);
     assert(s.stairsReach({ tx: 130, ty: 100 }) === 4, 'stairs report the battlements they serve');
     // gnome house: a founding couple, a family raised in the cottage yard, and gnomes of every calling
@@ -879,8 +889,8 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       const cut = s.fx.filter((e) => e.kind === 'cut').length;
       assert(!s.world.get(121, 100)!.tall && !s.world.get(122, 100)!.tall && !s.world.get(122, 99)!.tall && cut >= 3, `a swing mows the tiles in its arc (${cut} cut)`);
       assert(s.world.get(119, 100)!.tall && s.world.get(121, 98)!.tall, 'the grass behind and out of reach stands');
-      s.world.get(124, 100)!.tall = true; s.world.set(124, 100, 'tilled');
-      assert(!s.world.get(124, 100)!.tall, 'tilling (or anything replacing the ground) clears the grass');
+      s.world.get(124, 100)!.tall = true; s.world.set(124, 100, 'sapling');
+      assert(!s.world.get(124, 100)!.tall, 'anything replacing the ground clears the grass');
       const before = s.world.count((t) => !!t.tall); for (let d = 0; d < 5; d++) s.newDay();
       assert(s.world.count((t) => !!t.tall) <= before, 'mown grass never grows back');
     }
@@ -918,7 +928,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       const meat = s.world.items.find((it) => it.kind === 'food' && it.food === 'meat');
       assert(b1.dead && !!meat && meat.n === BOAR.meat && Math.hypot(meat.x - 126 * 16 - 8, meat.y - 100 * 16 - 8) < 24, `a hunted boar drops ${BOAR.meat} meat where it fell`);
       assert(s.stats.raidersKilled === killed && s.scrap === scrapBefore && s.stats.boarsHunted === 1 && sd.members.length === 1, 'a boar is game, not a raider: no scrap, no kill count');
-      b2.calm(); Object.assign(s.player, World.center(118, 92)); s.player.tool = 'hoe';
+      b2.calm(); Object.assign(s.player, World.center(118, 92)); s.player.tool = 'axe';
       const bden = s.world.place('gnomehouse', 129, 96), [bg, bg2] = s.foundGnomes(bden); bg2.dead = true; s.removeDead();
       Object.assign(bg, World.center(129, 98)); bg.load = null; bg.followPlayer(s, false); // it would trail the head otherwise
       settle(s, 2); step(s, 6);
@@ -1149,17 +1159,17 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       s.world.set(127, 100, 'thicket');
       assert(!s.world.cutThicket(127, 100, 2) && s.world.get(127, 100)!.kind === 'thicket', 'one sword swing only half-cuts a tile');
       assert(s.world.cutThicket(127, 100, 2) && s.world.get(127, 100)!.kind === 'grass', 'the second clears it');
-      // it creeps: over grass, fields and forage, never over a doorstep, a tree or a building
+      // it creeps: over grass and forage, never over a doorstep, a tree or a building
       for (const q of s.world.find((t) => t.kind === 'thicket')) s.world.set(q.tx, q.ty, 'grass');
       s.world.set(130, 100, 'thicket');
-      s.world.set(131, 100, 'crop'); s.world.set(129, 100, 'bush'); s.world.set(130, 99, 'tree'); s.world.set(130, 101, 'grass');
+      s.world.set(131, 100, 'mushroom'); s.world.set(129, 100, 'bush'); s.world.set(130, 99, 'tree'); s.world.set(130, 101, 'grass');
       const spareCrop = (tx: number, ty: number) => tx === 131 && ty === 100;
       // one roll a tile a day, in one random direction: over a few dawns a lone tile takes a neighbour
       let took = s.world.spreadThicket(new Rng(3), 1, spareCrop);
       for (let i = 0; i < 8 && !took.length; i++) took = s.world.spreadThicket(new Rng(40 + i), 1, spareCrop);
       assert(took.length === 1 && s.world.get(130, 99)!.kind === 'tree', `a day's creep takes one neighbour, and never a tree (${JSON.stringify(took)})`);
       for (let i = 0; i < 30; i++) s.world.spreadThicket(new Rng(10 + i), 1, spareCrop);
-      assert(s.world.get(131, 100)!.kind === 'crop', 'a spared tile is never taken');
+      assert(s.world.get(131, 100)!.kind === 'mushroom', 'a spared tile is never taken');
       assert(s.world.get(129, 100)!.kind === 'thicket' || s.world.get(130, 101)!.kind === 'thicket', 'forage and open ground go under it');
       for (const q of s.world.find((t) => t.kind === 'thicket')) s.world.set(q.tx, q.ty, 'grass');
     }
@@ -1170,7 +1180,6 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(s.world.barracks.length === 1, 'but a barracks stands, so the band may raise warriors from the first frame');
     assert(!s.world.wildGnomeHouse, 'and leaves no hidden cottage to find twice');
     assert(!!s.world.granary && !!s.world.woodyard, 'but the granary and woodyard still stand');
-    assert(!s.world.tiles.some((t) => t.kind === 'crop'), 'and no field is sown');
     const cot = s.world.gnomeStart!;
     assert(!!cot && !cot.wild && cot.kind === 'gnomehouse', 'a toadstool cottage stands in the clearing, already yours');
     // a forager and a woodcutter to keep it fed and warm, and a band of pikemen to keep it alive
@@ -1435,7 +1444,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       }
     }
     // dishes are food all the way down, but never a crop and never wild
-    assert(!DISHES.some((d) => CROP_KINDS.includes(d)) && !DISHES.some((d) => Object.values(WILD_FOOD).includes(d)), 'and nothing will ever sow or forage one');
+    assert(!DISHES.some((d) => FOODS[d].source === 'trade') && !DISHES.some((d) => Object.values(WILD_FOOD).includes(d)), 'and nothing will ever sow or forage one');
     for (const k of FOOD_KINDS) s.pantry[k] = 0;
     s.pantry.stew = 10; s.pantry.wheat = 5;
     assert(s.fullestKind() === 'wheat', 'rations come out of the raw bins first');
@@ -1558,7 +1567,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(!s.world.hiveAt(130, 100), 'felling a tree by any route takes its hive with it');
 
     // honey is food, but nothing will ever sow or forage it
-    assert(FOOD_KINDS.includes('honey') && !CROP_KINDS.includes('honey') && !Object.values(WILD_FOOD).includes('honey'), 'honey is food, but neither a crop nor a wild plant');
+    assert(FOOD_KINDS.includes('honey') && FOODS.honey.source === 'hive' && !Object.values(WILD_FOOD).includes('honey'), 'honey is food, but neither traded nor a wild plant');
     for (const k of FOOD_KINDS) s.pantry[k] = 0;
     const honeyPot = s.world.cookpot!;
     Object.assign(s.potStock(honeyPot), { honey: 2, wheat: 1 });
@@ -1594,8 +1603,8 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
         const raised = s.world.tallCount;
         assert(s.world.cutGrass(150, 150) && s.world.tallCount === raised - 1, 'mowing a tile takes it off the census');
         s.world.get(151, 150)!.tall = true; s.world.tallCount++;
-        s.world.set(151, 150, 'tilled');
-        assert(s.world.tallCount === raised - 1, 'and so does tilling it');
+        s.world.set(151, 150, 'sapling');
+        assert(s.world.tallCount === raised - 1, 'and so does anything that replaces the ground');
 
         // the ceiling is the standing grass, bounded by the slider
         p.skulks = 100; p.skulkTiles = 10; s.world.tallCount = 55;
@@ -2290,6 +2299,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       // the last stretch of the road: it walks to the granary and unloads
       const stop = s.caravanStop(), st = World.toTile(stop.x, stop.y);
       Object.assign(car, World.center(Math.floor(COLS / 2), st.ty + 12)); car.clearGoal();
+      for (const a of s.agents) if (a instanceof Raider) a.dead = true; s.removeDead(); // (the dawns above raised a raid: its rats would be at the granary)
       s.food = 20; s.wood = 20; s.arrows = 10; s.scrap = 0;
       const chest = s.nearestGearChest(car.x, car.y), kits0 = chest ? s.stashOf(chest).filter((g) => g.kind === 'kit').length : 0;
       run(30);
@@ -2308,22 +2318,21 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(savedGnomeStart === true && p.ps1Height === 1080, `the game starts as gnomes (${savedGnomeStart}) and draws 1080 rows (${p.ps1Height})`);
       for (const gnomes of [false, true]) {
         p.gnomeStart = gnomes; s = fresh();
-        const field = s.world.tiles.filter((t) => t.kind === 'crop' || t.kind === 'tilled').length;
         const hx = COLS / 2, hy = ROWS / 2, near: { kind: string; tx: number; ty: number }[] = [], from = s.world.nearest((hx + 0.5) * TILE, (hy + 0.5) * TILE, (_t, tx, ty) => !s.world.isBlocked(tx, ty))!;
         for (let ty = hy - 15; ty <= hy + 15; ty++) for (let tx = hx - 15; tx <= hx + 15; tx++) { const t = s.world.get(tx, ty); if (t && t.kind in WILD_FOOD && t.stage >= 99 && Math.hypot(tx - hx, ty - hy) <= 14 && s.world.bfs(from, { tx, ty }).length) near.push({ kind: t.kind, tx, ty }); } // ripe, and a walk from the square
         const n = (k: string) => near.filter((q) => q.kind === k).length;
-        assert(field === 0 && near.length >= 24 && n('mushroom') >= 4 && n('burdock') >= 2 && n('garlic') >= 1,
-          `a new ${gnomes ? 'gnome' : 'village'} start has no field (${field}) and ${near.length} ripe wild plants by the door — ${n('mushroom')} mushroom, ${n('burdock')} burdock, ${n('garlic')} garlic, ${n('bush')} berry, all a walk from the square`);
+        assert(near.length >= 24 && n('mushroom') >= 4 && n('burdock') >= 2 && n('garlic') >= 1,
+          `a new ${gnomes ? 'gnome' : 'village'} start has ${near.length} ripe wild plants by the door — ${n('mushroom')} mushroom, ${n('burdock')} burdock, ${n('garlic')} garlic, ${n('bush')} berry, all a walk from the square`);
       }
       p.gnomeStart = false;
       // the lost tools: none in the pack, each lying where it fell, found by walking onto it
       s.reset(42); s.screen = 'playing'; s.paused = true;
       const sq = { tx: COLS / 2, ty: ROWS / 2 }, from = s.world.nearest((sq.tx + 0.5) * TILE, (sq.ty + 0.5) * TILE, (_t, tx, ty) => !s.world.isBlocked(tx, ty))!;
-      const caches = s.world.toolCaches, band = { axe: [22, 32], hammer: [40, 60], hoe: [50, 75] } as const;
+      const caches = s.world.toolCaches, band = { axe: [22, 32], hammer: [40, 60] } as const;
       const out = (c: { tx: number; ty: number }) => Math.hypot(c.tx - sq.tx, (c.ty - sq.ty) / 0.75);
-      assert(!s.player.pack.hasTool('axe') && !s.player.pack.hasTool('hoe') && !s.player.pack.hasTool('hammer') && /Find your axe/.test(s.toolLocked('axe') ?? '') && !!s.toolLocked('hoe') && !!s.toolLocked('hammer'), `a new village has no axe, hoe or hammer, and says where to find them (${s.toolLocked('axe')})`);
-      assert(caches.length === 3 && caches.every((c) => out(c) >= band[c.tool][0] - 1 && out(c) <= band[c.tool][1] + 1 && s.world.bfs(from, c).length > 0 && s.world.items.some((it) => it.gear?.kind === 'tool' && it.gear.tool === c.tool && Math.hypot(it.x - World.center(c.tx, c.ty).x, it.y - World.center(c.tx, c.ty).y) < 2)),
-        `the axe, hammer and hoe lie a walk away, in their bands (${caches.map((c) => `${c.tool} ${Math.round(out(c))}`).join(', ')})`);
+      assert(!s.player.pack.hasTool('axe') && !s.player.pack.hasTool('hammer') && /Find your axe/.test(s.toolLocked('axe') ?? '') && !!s.toolLocked('hammer'), `a new village has no axe or hammer, and says where to find them (${s.toolLocked('axe')})`);
+      assert(caches.length === 2 && caches.every((c) => out(c) >= band[c.tool][0] - 1 && out(c) <= band[c.tool][1] + 1 && s.world.bfs(from, c).length > 0 && s.world.items.some((it) => it.gear?.kind === 'tool' && it.gear.tool === c.tool && Math.hypot(it.x - World.center(c.tx, c.ty).x, it.y - World.center(c.tx, c.ty).y) < 2)),
+        `the axe and hammer lie a walk away, in their bands (${caches.map((c) => `${c.tool} ${Math.round(out(c))}`).join(', ')})`);
       assert(s.journal.some((j) => /lost your tools/.test(j.text) && j.toast), 'and the opening says where they went');
       const walkTo = (tool: string) => { const c = caches.find((q) => q.tool === tool)!; Object.assign(s.player, World.center(c.tx, c.ty)); s.pickUpItems(0); };
       s.recoverBasicKit();
@@ -2550,7 +2559,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       s.player.cycleTool(1, (t) => !!s.toolLocked(t));
       assert(String(s.player.tool) === 'basket', `Tab from a build goes on along the belt from the hammer (${s.player.tool})`);
       s.reset(42); s.screen = 'playing'; s.paused = true;
-      assert(/hammer/i.test(s.toolLocked('house') ?? '') && /hoe/i.test(s.toolLocked('seeds') ?? ''), `with no hammer nothing can be built, and with no hoe no seeds (${s.toolLocked('house')})`);
+      assert(/hammer/i.test(s.toolLocked('house') ?? ''), `with no hammer nothing can be built (${s.toolLocked('house')})`);
       s.paused = true;
     }
 

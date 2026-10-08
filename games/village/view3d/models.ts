@@ -51,7 +51,6 @@ export const GEO = {
   blob: at(new THREE.IcosahedronGeometry(0.32, 0), 0, 0.26, 0),
   berry: at(new THREE.IcosahedronGeometry(0.07, 0), 0, 0, 0),
   cap: merged([at(new THREE.CylinderGeometry(0.05, 0.06, 0.18, 5), 0, 0.09, 0), at(new THREE.ConeGeometry(0.18, 0.14, 6), 0, 0.22, 0)]),
-  crop: at(new THREE.BoxGeometry(0.18, 0.4, 0.18), 0, 0.2, 0),
   thicket: merged([
     at(new THREE.IcosahedronGeometry(0.42, 0), 0, 0.32, 0),
     at(new THREE.ConeGeometry(0.06, 0.45, 3).rotateZ(0.9), 0.35, 0.45, 0),
@@ -75,7 +74,7 @@ for (const g of Object.values(GEO)) if (!g.getAttribute('color')) g.setAttribute
 
 /** colours the placeholder world is painted in: dark, damp, desaturated */
 export const COL = {
-  grass: 0x3e5232, grass2: 0x445a36, tall: 0x4f6638, trail: 0x6a5d44, dirt: 0x58483a, tilled: 0x4a3a2c, soilWet: 0x3e3026,
+  grass: 0x3e5232, grass2: 0x445a36, tall: 0x4f6638, trail: 0x6a5d44, dirt: 0x58483a,
   thicketGround: 0x2e3022, building: 0x5a4d3e, unseen: 0x000000,
   trunk: 0x4a3626, crown: 0x2f4a2a, crownOld: 0x2a3f24, sapling: 0x3f5a30, stump: 0x6a5238,
   thicket: 0x2a2a1a, tuft: 0x5a7040,
