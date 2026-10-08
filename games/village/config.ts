@@ -136,7 +136,8 @@ export const p = live(
     gnomeRation: [D.gnomeRation, 0, 1, 0.05, 'Share of foodPerDay a gnome eats at dawn — grown gnomes, and the warren children who eat from the granary. A thousand gnomes at 0.25 eat like 250 people.'],
     startFarmers: [D.startFarmers, 0, 10, 1, 'Farmers the village opens with (foragers in a gnome start). Founders are spawned as written, so an opening roster may sit over its cap.'],
     startWoodcutters: [D.startWoodcutters, 0, 10, 1, 'Woodcutters the village opens with.'],
-    startPikemen: [D.startPikemen, 0, 20, 1, 'Gnome warriors the gnome start opens with, every one of them carrying a pike (in place of startWarriors there). The warrior cap is per barracks, so more than it holds means no warrior is born until you build another.'],
+    startArchers: [D.startArchers, 0, 50, 1, 'Gnome archers the gnome start opens with (their own banner, III Archers, behind the pikes). The arrows come with the caravans.'],
+    startPikemen: [D.startPikemen, 0, 50, 1, 'Gnome warriors the gnome start opens with, every one of them carrying a pike (in place of startWarriors there). The warrior cap is per barracks, so more than it holds means no warrior is born until you build another.'],
     startWarriors: [D.startWarriors, 0, 20, 1, 'Warriors the village opens with. Both starts ship a barracks, so these are within the cap at ordinary settings.'],
   }, 'callings'),
   params({

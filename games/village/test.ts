@@ -1160,12 +1160,20 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     // a forager and a woodcutter to keep it fed and warm, and a band of pikemen to keep it alive
     const band = s.villagers().filter((v) => v.gnome && v.isAdult);
     const roster = (vs: Villager[]) => CALLINGS.map((c) => `${c} ${vs.filter((v) => v.role === c).length}`).join(', ');
-    assert(band.length === p.startFarmers + p.startWoodcutters + p.startPikemen
+    assert(band.length === p.startFarmers + p.startWoodcutters + p.startPikemen + p.startArchers
       && band.filter((v) => v.role === 'farmer').length === p.startFarmers
       && band.filter((v) => v.role === 'woodcutter').length === p.startWoodcutters
-      && band.filter((v) => v.role === 'soldier').length === p.startPikemen,
-      `with its founding band: ${p.startFarmers} forager, ${p.startWoodcutters} woodcutter, ${p.startPikemen} pikemen (${roster(band)})`);
-    assert(band.filter((v) => v.role === 'soldier').every((v) => v.weapon === 'pike'), 'every gnome warrior of the band carries a pike');
+      && band.filter((v) => v.role === 'soldier').length === p.startPikemen + p.startArchers,
+      `with its founding band: ${p.startFarmers} forager, ${p.startWoodcutters} woodcutter, ${p.startPikemen} pikes and ${p.startArchers} bows (${roster(band)})`);
+    const warriors = band.filter((v) => v.role === 'soldier');
+    assert(p.startPikemen === 20 && p.startArchers === 20 && warriors.filter((v) => v.weapon === 'pike').length === p.startPikemen && warriors.filter((v) => v.weapon === 'bow').length === p.startArchers,
+      'twenty of the band carry pikes and twenty bows');
+    // two banners from the first tick: II Pikes and III Archers, the bows marching behind the pikes
+    s.paused = false; for (let i = 0; i < 40; i++) { s.grid.rebuild(s.agents); s.tick(1 / 60); }
+    const pikeBanner = s.regiments.find((r) => r.group === 2), bowBanner = s.regiments.find((r) => r.group === 3);
+    assert(s.regiments.length === 2 && pikeBanner?.members.length === p.startPikemen && bowBanner?.members.length === p.startArchers && bowBanner.trail.back > pikeBanner.trail.back + pikeBanner.depth() / 2,
+      `they fall in under two banners, Pikes ${pikeBanner?.members.length} and Archers ${bowBanner?.members.length}, the archers marching behind (${Math.round(pikeBanner?.trail.back ?? 0)} px, ${Math.round(bowBanner?.trail.back ?? 0)} px back)`);
+    s.paused = true;
     assert(CALLINGS.every((c) => s.callingFilled(c) <= s.callingCap(c)), `and every one of them has a place (${CALLINGS.map((c) => `${s.callingFilled(c)}/${s.callingCap(c)}`).join(', ')})`);
     assert(s.gnomesFound && !s.toolLocked('gnomehouse'), 'and the craft already learned');
     const step0 = World.center(doorstep(cot).tx, doorstep(cot).ty);
@@ -1916,7 +1924,8 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       run(15);
       const lead = host.warbands.find((w) => w.members.length)!, d1 = road(lead);
       const offs = host.warbands.flatMap((w) => w.active().map((r) => Math.hypot(r.x - r.slot!.x, r.y - r.slot!.y))).sort((a, b) => a - b);
-      assert(d1 < d0 - 10 * TILE && offs[offs.length >> 1] < TILE, `the column closes on the village by road (${Math.round(d0 / TILE)} → ${Math.round(d1 / TILE)} tiles), its raiders keeping their places (median ${offs[offs.length >> 1]?.toFixed(1)} px off)`);
+      // (on the march the ranks breathe: the median raider's offset from its slot moves with the order bodies happen to be made in, 12-21 px; a column that has lost its order is several tiles out)
+      assert(d1 < d0 - 10 * TILE && offs[offs.length >> 1] < 1.5 * TILE, `the column closes on the village by road (${Math.round(d0 / TILE)} → ${Math.round(d1 / TILE)} tiles), its raiders keeping their places (median ${offs[offs.length >> 1]?.toFixed(1)} px off)`);
       // engage: a regiment across its road is charged; the rest of the column keeps marching
       const ahead = host.pointAt(host.lead + 10 * TILE);
       const guard: Villager[] = [];

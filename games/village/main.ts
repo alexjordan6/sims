@@ -341,7 +341,11 @@ export class VillageScene extends SimScene {
     for (let i = 0; i < p.startFarmers; i++) this.addVillager(home, 'farmer', grown);
     for (let i = 0; i < p.startWoodcutters; i++) this.addVillager(home, 'woodcutter', grown);
     // a gnome band marches with pikes: a hedge of points is what little people with 14 HP fight behind
-    if (p.gnomeStart) for (let i = 0; i < p.startPikemen; i++) this.addVillager(home, 'soldier', grown + 2).weapon = 'pike';
+    // two banners from the first minute: a block of pikes, and a block of bows to stand behind it
+    if (p.gnomeStart) {
+      for (let i = 0; i < p.startPikemen; i++) this.addVillager(home, 'soldier', grown + 2).weapon = 'pike';
+      for (let i = 0; i < p.startArchers; i++) this.addVillager(home, 'soldier', grown + 2).weapon = 'bow';
+    }
     else for (let i = 0; i < p.startWarriors; i++) this.addVillager(home, 'soldier', grown + 2);
     if (!p.gnomeStart) {
       // the Legacy boons are skipped in a gnome start on purpose: addVillager makes anyone homed in a
@@ -356,7 +360,7 @@ export class VillageScene extends SimScene {
     }
     const where = this.world.denseForests ? 'the deep woodland' : 'the open meadows';
     this.event('info', p.gnomeStart
-      ? `A gnome band keeps house in ${where}, ten of them under pikes. Nobody comes this far out without a reason. Set the pikes where a raid will run onto them, forage what grows wild, and cook it in the great pot in the square.`
+      ? `A gnome band keeps house in ${where}, under two banners: ${p.startPikemen} pikes and ${p.startArchers} bows. Nobody comes this far out without a reason. Set the pikes where a raid will run onto them with the bows behind (F1-F4 give your formations their orders), forage what grows wild, and cook it in the great pot in the square. Ox caravans bring arrows and food up the south road.`
       : `A new village in ${where}. The last one here is gone, and nobody says how. Follow the trails to explore. Build walls and stairs, then station archers.`);
     const lost = this.world.toolCaches.map((c) => `the ${c.tool} ${LOST_TOOLS[c.tool]} to the ${this.bearing(World.center(c.tx, c.ty).x, World.center(c.tx, c.ty).y)}`);
     if (lost.length) this.event('info', `In the flight you lost your tools: ${lost.join(', ')}. Go and fetch them — the hammer builds, the axe fells, the hoe tills.`, true);
@@ -3885,9 +3889,13 @@ export class VillageScene extends SimScene {
     // a soldier's default order, following the head, is the banner's job once it stands under one
     for (const r of this.regiments) for (const v of r.members) if (v.order?.kind === 'follow') { v.order = null; v.clearGoal(); }
     // the blocks following the head march in ranks of three behind it, each keeping its own station
-    const followers = this.regiments.filter((r) => r.stance === 'follow');
-    for (let row = 0, back = 2 * TILE; row * 3 < followers.length; row++) {
-      const rank = followers.slice(row * 3, row * 3 + 3), widths = rank.map((r) => r.width()), depth = Math.max(...rank.map((r) => r.depth()));
+    // the archers march behind everyone else: the foot in the first ranks (three banners abreast), the bows in ranks of their own after them
+    const following = this.regiments.filter((r) => r.stance === 'follow');
+    const foot = following.filter((r) => r.group !== 3), bows = following.filter((r) => r.group === 3);
+    const ranks: Regiment[][] = [];
+    for (const list of [foot, bows]) for (let i = 0; i < list.length; i += 3) ranks.push(list.slice(i, i + 3));
+    for (let row = 0, back = 2 * TILE; row < ranks.length; row++) {
+      const rank = ranks[row], widths = rank.map((r) => r.width()), depth = Math.max(...rank.map((r) => r.depth()));
       let at = -(widths.reduce((a, w) => a + w, 0) + TILE * (rank.length - 1)) / 2;
       rank.forEach((r, i) => { r.trail = { side: at + widths[i] / 2, back: back + depth / 2 }; at += widths[i] + TILE; });
       back += depth + TILE;
