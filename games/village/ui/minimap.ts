@@ -1,4 +1,5 @@
 import { Villager, Raider, Player, type Mover } from '../agents';
+import { Caravan } from '../caravan';
 import { COLS, ROWS, TILE } from '../config';
 import { buildingCenter } from '../world';
 import type { TileKind } from '../world';
@@ -76,6 +77,7 @@ export class Minimap {
       if (a instanceof Player) { colour = '#ffffff'; size = 2; }
       else if (a instanceof Raider) { colour = a.boss || a.huge ? '#ffcc33' : a.wild && a.harmless ? '#c9a26b' : '#ff4a3d'; size = a.boss || a.huge ? 2 : 1; }
       else if (a instanceof Villager) colour = ROLE[a.role];
+      else if (a instanceof Caravan) { colour = '#e8c860'; size = 3; } // the caravan: a gold block on the road
       if (!colour) continue;
       c.fillStyle = colour;
       c.fillRect(Math.floor(a.x / TILE) - (size >> 1), Math.floor(a.y / TILE) - (size >> 1), size, size);

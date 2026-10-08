@@ -1,5 +1,6 @@
 import { STACK, SKULK, STASH_SLOTS, FOUND_TIER, BANDAGE, type BulkKind } from './config';
 import { enemyDrop, rollLoot, danger } from './loot';
+import { Caravan } from './caravan';
 import { isImplement, IMPLEMENTS, START_TOOLS, LOST_TOOLS, type Implement, TOOL_NAME, Pack, type Gear, type EquipmentSlot, isBulk, slotName } from './pack';
 import Phaser from 'phaser';
 import { SimScene, launch, button, getGui, Rng } from '@shared/index';
@@ -619,6 +620,49 @@ export class VillageScene extends SimScene {
       }
       if (!r.roused && !r.chest.opened && !pl.dead && !pl.hidden && near < (r.kind === 'tower' ? 30 : 8) * TILE) this.rouseRuin(r);
     }
+  }
+
+  // ---- ox caravans: supplies up the south road every few days --------------------------------------
+
+  /**
+   * Send a caravan: it sets out from the map's south edge on the trail through the middle of the map
+   * (the road every seed keeps open), loaded with what the sliders say.
+   */
+  sendCaravan(): Caravan {
+    const hx = Math.floor(COLS / 2), edge = ROWS - 2;
+    const start = this.world.nearest((hx + 0.5) * TILE, (edge + 0.5) * TILE, (_t, tx, ty) => !this.world.isBlocked(tx, ty)) ?? { tx: hx, ty: edge };
+    const at = World.center(start.tx, start.ty);
+    const cargo = { food: Math.round(p.caravanFood), wood: Math.round(p.caravanWood), arrows: Math.round(p.caravanArrows), scrap: Math.round(p.caravanScrap), bandages: Math.round(p.caravanBandages) };
+    const c = this.spawn(new Caravan(at.x, at.y, cargo));
+    this.event('info', 'An ox caravan is on the south road, bringing supplies to the granary.', true);
+    return c;
+  }
+  /** Where a caravan unloads: the granary's door (else the woodyard's, else the middle of the village). */
+  caravanStop(): { x: number; y: number } {
+    const b = [this.world.granary, this.world.woodyard].find((x) => x && !x.ruined);
+    if (!b) return this.villageCentre();
+    const d = doorstep(b);
+    return World.center(d.tx, d.ty);
+  }
+  /** The cart unloads: food to the granary, wood to the woodyard (up to their caps), arrows to the quiver, scrap, bandages to a gear chest. */
+  unloadCaravan(c: Caravan): void {
+    if (c.unloaded) return;
+    c.unloaded = true;
+    const k = c.cargo, food0 = this.food, wood0 = this.wood;
+    // the food comes mixed: grain mostly, salted meat, roots and nuts
+    const mix: [FoodKind, number][] = [['wheat', 0.4], ['meat', 0.25], ['carrot', 0.2], ['hazelnut', 0.15]];
+    let left = k.food;
+    mix.forEach(([f, share], i) => { const n = i === mix.length - 1 ? left : Math.round(k.food * share); this.addFood(n, f); left -= n; });
+    this.addWood(k.wood);
+    this.arrows += k.arrows;
+    this.scrap += k.scrap;
+    const chest = this.nearestGearChest(c.x, c.y);
+    let rolls = 0;
+    if (chest) for (let i = 0; i < k.bandages && this.stashOf(chest).length < STASH_SLOTS; i++) { this.stashOf(chest).push({ kind: 'kit', kit: 'bandage' }); rolls++; }
+    const got = [`+${Math.round(this.food - food0)} food`, `+${Math.round(this.wood - wood0)} wood`, `+${k.arrows} arrows`, k.scrap ? `+${k.scrap} scrap` : '', rolls ? `${rolls} roll${rolls === 1 ? '' : 's'} of bandages` : ''].filter(Boolean);
+    c.cargo = { food: 0, wood: 0, arrows: 0, scrap: 0, bandages: 0 };
+    this.fx.push({ kind: 'deposit', x: c.x, y: c.y - TILE, text: got.slice(0, 3).join(' '), colour: '#e8c860' });
+    this.event('food', `The caravan unloads: ${got.join(', ')}.${this.food >= this.foodCap || this.wood >= this.woodCap ? ' (What would not fit went back on the cart.)' : ''}`, true);
   }
 
   /** Dawn: cleared camps are re-manned after a while, and now and then a new one grows out of sight. */
@@ -2212,6 +2256,7 @@ export class VillageScene extends SimScene {
     this.world.tiles.forEach((t, i) => { if (t.kind === 'crop') { t.stage++; this.world.dirty.add(i); } });
     this.creepThicket();
     this.tendCamps();
+    if (p.caravanEvery > 0 && this.day >= p.caravanFirstDay && (this.day - p.caravanFirstDay) % Math.round(p.caravanEvery) === 0) this.sendCaravan();
     // stumps and saplings grow back; trees seed their neighbours
     const seeds: { tx: number; ty: number }[] = [];
     this.world.tiles.forEach((t, i) => {

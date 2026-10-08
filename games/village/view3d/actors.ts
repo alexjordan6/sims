@@ -3,6 +3,7 @@ import { Bars } from './billboards';
 import { Mover, Villager, Raider, Player, Arrow, type EnemyKind } from '../agents';
 import { Bolt } from '../enemies';
 import { Boar, Swarm } from '../wildlife';
+import { Caravan } from '../caravan';
 import { lookFor, ENEMY_SCALE } from '../look';
 import { BOAR, FOODS, ITEM, p } from '../config';
 import type { Item } from '../items';
@@ -21,6 +22,7 @@ import { groundHeight } from './terrain';
 const box = new THREE.BoxGeometry(1, 1, 1);
 const cone = new THREE.ConeGeometry(0.5, 1, 6);
 const ico = new THREE.IcosahedronGeometry(0.5, 0);
+const cyl = new THREE.CylinderGeometry(0.5, 0.5, 1, 10);
 
 export function piece(colour: number, sx: number, sy: number, sz: number, x: number, y: number, z: number, g: THREE.BufferGeometry = box): THREE.Mesh {
   const m = new THREE.Mesh(g, lambert({ color: colour }));
@@ -138,6 +140,19 @@ export function makeActor(m: Mover): { body: THREE.Group; key: string; anim?: An
   const look = lookFor(m);
   if (m instanceof Arrow) { body.add(piece(0x8a6a3a, 0.04, 0.04, 0.6, 0, 0, 0), piece(0xd0d0d0, 0.06, 0.06, 0.1, 0, -0.01, 0.3, cone)); return { body, key }; }
   if (m instanceof Bolt) { const b = piece(0xb46bff, 0.35, 0.35, 0.35, 0, 0.4, 0, ico); (b.material as THREE.MeshLambertMaterial).emissive.setHex(0x7a2ad0); body.add(b); return { body, key }; }
+  if (m instanceof Caravan) {
+    // two oxen yoked side by side in front (+z), the laden cart behind
+    for (const x of [0.32, -0.32]) {
+      body.add(piece(0x6a4a2e, 0.42, 0.42, 0.9, x, 0.28, 0.75), piece(0x5a3e26, 0.3, 0.3, 0.3, x, 0.42, 1.32));
+      body.add(piece(0xe8e0c8, 0.5, 0.05, 0.05, x, 0.68, 1.32)); // horns
+      for (const [lx, lz] of [[0.13, 0.4], [-0.13, 0.4], [0.13, 1.1], [-0.13, 1.1]]) body.add(piece(0x3a2a1a, 0.1, 0.3, 0.1, x + lx, 0, lz));
+    }
+    body.add(piece(0x4a3420, 0.08, 0.08, 0.9, 0, 0.42, 0.15)); // the pole
+    body.add(piece(0x7a5a36, 1.0, 0.18, 1.3, 0, 0.42, -0.65)); // the cart bed
+    body.add(piece(0xb89a6a, 0.4, 0.3, 0.4, -0.22, 0.6, -0.4), piece(0x8a6a44, 0.35, 0.35, 0.35, 0.2, 0.6, -0.85), piece(0xd8c8a0, 0.5, 0.25, 0.3, 0, 0.6, -1.05)); // sacks and crates
+    for (const x of [0.55, -0.55]) body.add(piece(0x3a2a1a, 0.08, 0.6, 0.6, x, 0.12, -0.65, cyl).rotateZ(Math.PI / 2));
+    return { body, key };
+  }
   if (m instanceof Swarm) { for (let k = 0; k < 9; k++) body.add(piece(0x1a1408, 0.06, 0.06, 0.06, (Math.random() - 0.5) * 0.6, 0.4 + Math.random() * 0.5, (Math.random() - 0.5) * 0.6)); return { body, key }; }
   if (m instanceof Raider && (m.kind === 'rat' || m.kind === 'boar' || m instanceof Boar)) {
     const c = FOE[m.kind];

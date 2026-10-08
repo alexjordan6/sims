@@ -12,6 +12,7 @@ import { Boar, Swarm } from './wildlife';
 import { SLOT_GAP, Warband, Regiment, SHAPES, SHAPE_GAP, SHAPE_PACE, layout } from './regiment';
 import { hostSize, hostCounts } from './host';
 import { rollLoot, lootTier, danger, enemyDrop } from './loot';
+import { Caravan } from './caravan';
 import { armorStats, knockMul, reloadMul } from './characters';
 const BATTLE_BIG_TEST = 20;
 import { WARREN, SOLDIER_CAP_PER_LEVEL, PLAINS, BANDAGE } from './config';
@@ -74,8 +75,8 @@ function step(s: VillageScene, seconds: number) {
 }
 document.getElementById('run-checks')!.addEventListener('click', () => {
   output.textContent = ''; summary.textContent = 'Running';
-  const savedAdaptiveSpawns = p.adaptiveSpawns, savedGnomeStart = p.gnomeStart, savedForge = p.forgeMaxTier, savedDrop = p.dropChance;
-  p.forgeMaxTier = 3; p.dropChance = 0; // the old forge checks forge every tier, and no stray gear drop lands in a counted pile
+  const savedAdaptiveSpawns = p.adaptiveSpawns, savedGnomeStart = p.gnomeStart, savedForge = p.forgeMaxTier, savedDrop = p.dropChance, savedCaravan = p.caravanEvery;
+  p.forgeMaxTier = 3; p.dropChance = 0; p.caravanEvery = 0; // (and no caravan wanders into a check that counts the stores; its own check turns them on) // the old forge checks forge every tier, and no stray gear drop lands in a counted pile
   p.gnomeStart = false; // the checks below are laid out on the village start (the game starts gnomes by default)
   try {
     p.adaptiveSpawns = false; // Legacy timed scenarios isolate their own enemies.
@@ -2242,6 +2243,41 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(bar.hidden, 'and puts it away with the wand');
     }
 
+    // ---- ox caravans: supplies up the south road every few days ------------------------------------
+    {
+      const run = (secs: number) => { for (let i = 0; i < Math.ceil(secs * 60); i++) { s.grid.rebuild(s.agents); s.tick(1 / 60); } };
+      const caravans = () => s.agents.filter((a): a is Caravan => a instanceof Caravan && !a.dead);
+      s = fresh(); s.agents = [s.player]; s.dayTime = 0.3;
+      s.day = p.caravanFirstDay; s.newDay();
+      assert(caravans().length === 0, 'with caravanEvery at 0 none sets out');
+      p.caravanEvery = 3;
+      s.day = p.caravanFirstDay - 1; s.newDay();
+      const early = caravans().length;
+      s.day = p.caravanFirstDay; s.newDay();
+      const car = caravans()[0];
+      assert(early === 0 && caravans().length === 1 && car.y > (ROWS - 6) * TILE && Math.abs(car.x / TILE - COLS / 2) < 4 && s.journal.some((j) => /caravan/.test(j.text)),
+        `on day ${p.caravanFirstDay} an ox caravan sets out from the south edge, on the road (${Math.round(car.x / TILE)}, ${Math.round(car.y / TILE)})`);
+      s.day = p.caravanFirstDay + 1; s.newDay(); s.day = p.caravanFirstDay + 2; s.newDay();
+      const between = caravans().length;
+      s.day = p.caravanFirstDay + 3; s.newDay();
+      assert(between === 1 && caravans().length === 2, `and another every ${p.caravanEvery} days`);
+      for (const c of caravans().slice(1)) c.dead = true; s.removeDead();
+      // the last stretch of the road: it walks to the granary and unloads
+      const stop = s.caravanStop(), st = World.toTile(stop.x, stop.y);
+      Object.assign(car, World.center(Math.floor(COLS / 2), st.ty + 12)); car.clearGoal();
+      s.food = 20; s.wood = 20; s.arrows = 10; s.scrap = 0;
+      const chest = s.nearestGearChest(car.x, car.y), kits0 = chest ? s.stashOf(chest).filter((g) => g.kind === 'kit').length : 0;
+      run(30);
+      const kits = chest ? s.stashOf(chest).filter((g) => g.kind === 'kit').length - kits0 : 0;
+      assert(car.unloaded && s.arrows === 10 + p.caravanArrows && s.scrap === p.caravanScrap && s.food >= 20 + p.caravanFood - 1 && s.wood >= 20 + p.caravanWood - 1 && (!chest || kits === p.caravanBandages),
+        `it walks up to the granary and unloads: food ${Math.round(s.food)}, wood ${Math.round(s.wood)}, arrows ${s.arrows}, scrap ${s.scrap}, ${kits} roll of bandages in the chest`);
+      const y0 = car.y; run(4);
+      assert(car.y > y0 + TILE && /back/.test(car.task), `then it heads back down the south road (${car.task})`);
+      Object.assign(car, { x: car.origin.x, y: car.origin.y - 4 }); run(1);
+      assert(car.dead || !s.agents.includes(car), 'and is gone over the edge of the map');
+      p.caravanEvery = 0;
+    }
+
     // ---- the opening: gnomes by default, no farm, wild food by the door ------------------------------
     {
       assert(savedGnomeStart === true && p.ps1Height === 1080, `the game starts as gnomes (${savedGnomeStart}) and draws 1080 rows (${p.ps1Height})`);
@@ -2495,7 +2531,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
 
     const n = output.textContent!.split('\n').filter(Boolean).length;
     summary.textContent = `${n} checks passed`; s.paused = true;
-  } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); } finally { p.adaptiveSpawns = savedAdaptiveSpawns; p.gnomeStart = savedGnomeStart; p.forgeMaxTier = savedForge; p.dropChance = savedDrop; }
+  } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); } finally { p.adaptiveSpawns = savedAdaptiveSpawns; p.gnomeStart = savedGnomeStart; p.forgeMaxTier = savedForge; p.dropChance = savedDrop; p.caravanEvery = savedCaravan; }
 });
 document.querySelectorAll<HTMLButtonElement>('[data-preview]').forEach(btn => btn.addEventListener('click', () => {
   const s = fresh(), kind = btn.dataset.preview!;

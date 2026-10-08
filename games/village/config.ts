@@ -195,6 +195,16 @@ export const p = live(
     forgeMaxTier: [D.forgeMaxTier, 0, 3, 1, 'Best tier the barracks forges from nothing (1 = leather, bronze, yew, buckler). Iron and better are looted; a found iron piece can still be reforged to steel. 3 = forge anything, as of old.'],
   }, 'loot'),
   params({
+    caravanEvery: [D.caravanEvery, 0, 10, 1, 'Days between ox caravans up the south road (0 = none). Each one unloads its cargo at the granary and goes back.'],
+    caravanFirstDay: [D.caravanFirstDay, 1, 20, 1, 'The day the first caravan sets out.'],
+    caravanFood: [D.caravanFood, 0, 200, 5, 'Food a caravan brings (grain, salted meat, roots and nuts), up to the granary\'s cap.'],
+    caravanWood: [D.caravanWood, 0, 200, 5, 'Wood a caravan brings, up to the woodyard\'s cap.'],
+    caravanArrows: [D.caravanArrows, 0, 300, 10, 'Arrows a caravan brings for the shared quiver.'],
+    caravanScrap: [D.caravanScrap, 0, 40, 1, 'Scrap iron a caravan brings.'],
+    caravanBandages: [D.caravanBandages, 0, 6, 1, 'Rolls of bandages a caravan leaves in a gear chest.'],
+    caravanSpeed: [D.caravanSpeed, 8, 60, 1, 'How fast the oxen walk, in pixels a second.'],
+  }, 'caravans'),
+  params({
     fog: [D.fog, 'Fog of war. Off lifts it everywhere; on drops it back over the unexplored.'],
     hearths: [D.hearths, 'Off: hearths burn nothing and no building is ever cold.'],
     towerFires: [D.towerFires, 'Off: barracks towers hold their fire.'],
