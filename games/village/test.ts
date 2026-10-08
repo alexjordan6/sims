@@ -20,10 +20,20 @@ import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WREC
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
 const output = document.getElementById('test-results')!, summary = document.getElementById('test-summary')!;
-const assert = (ok: unknown, message: string) => { if (!ok) throw new Error(message); output.textContent += `PASS ${message}\n`; };
+/** ?keepgoing: a failed check is logged and the run goes on, so one run lists every failure (the checks after it may be off the rails) */
+const keepGoing = new URLSearchParams(location.search).has('keepgoing');
+const failures: string[] = [];
+const assert = (ok: unknown, message: string) => {
+  if (!ok) { if (!keepGoing) throw new Error(message); failures.push(message); output.textContent += `FAIL ${message}\n`; return; }
+  output.textContent += `PASS ${message}\n`;
+};
+/** The village's home: the toadstool cottage the band keeps (the old village start's house, while a check still builds one). */
+const home0 = (s: VillageScene) => s.world.houses.find(() => true) ?? s.world.gnomeHouses[0];
 /** `wild` keeps the boars, `trolls` keeps the trolls, `hives` keeps the beehives — both wander into timed checks otherwise, and a troll fights back. */
-function fresh(wild = false, trolls = false, hives = false, skulks = false, thickets = false): VillageScene {
-  const s = scene(); s.reset(42); s.screen = 'playing'; s.paused = true; s.wood = 150; s.food = 150; s.fx.length = 0;
+function fresh(wild = false, trolls = false, hives = false, skulks = false, thickets = false, band = false): VillageScene {
+  const s = scene(); s.reset(42);
+  // the founding band (forty warriors, a forager and a woodcutter) would fight every raider and fetch every crumb a check sets down: it stands aside unless asked for
+  if (!band && p.gnomeStart) { for (const v of s.villagers()) v.dead = true; s.removeDead(); s.regiments = []; } s.screen = 'playing'; s.paused = true; s.wood = 150; s.food = 150; s.fx.length = 0;
   for (const tool of IMPLEMENTS) { if (!s.player.pack.hasTool(tool)) s.player.pack.put({ kind: 'tool', tool }); s.foundTools.add(tool); } // the checks work with the whole kit
   s.world.mowAll(); // mown: the checks below time walks; the long grass checks raise it where they need it (mowAll keeps world.tallCount honest)
   if (!wild) { for (const a of s.agents) if (a instanceof Boar) a.dead = true; s.sounders = []; } // no stray sounder wanders into a check
@@ -38,6 +48,12 @@ function fresh(wild = false, trolls = false, hives = false, skulks = false, thic
   (s as unknown as { ui: { showScreen(v: null): void } }).ui.showScreen(null);
   document.querySelector('.ctrl-panel')?.classList.remove('open');
   return s;
+}
+/** The old village start (a house, a field, human farmers and warriors), for the checks of what only it has, until those go. */
+function freshVillage(...args: Parameters<typeof fresh>): VillageScene {
+  const was = p.gnomeStart;
+  p.gnomeStart = false;
+  try { return fresh(...args); } finally { p.gnomeStart = was; }
 }
 function clearing(s: VillageScene) {
   for (let y = 90; y <= 110; y++) for (let x = 115; x <= 140; x++) s.world.set(x, y, 'grass');
@@ -77,7 +93,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
   output.textContent = ''; summary.textContent = 'Running';
   const savedAdaptiveSpawns = p.adaptiveSpawns, savedGnomeStart = p.gnomeStart, savedForge = p.forgeMaxTier, savedDrop = p.dropChance, savedCaravan = p.caravanEvery;
   p.forgeMaxTier = 3; p.dropChance = 0; p.caravanEvery = 0; // (and no caravan wanders into a check that counts the stores; its own check turns them on) // the old forge checks forge every tier, and no stray gear drop lands in a counted pile
-  p.gnomeStart = false; // the checks below are laid out on the village start (the game starts gnomes by default)
+  p.gnomeStart = true; // the checks are laid out on the gnome start, the game's own (freshVillage() builds the old one for what only it has)
   try {
     p.adaptiveSpawns = false; // Legacy timed scenarios isolate their own enemies.
     assert(COLS * ROWS > 80 * 44 * 10, 'world is over ten times the old area');
@@ -149,7 +165,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     for (let i = 0; i < 100; i++) rat.update(1 / 60, s);
     assert(s.world.get(120, 100)!.kind === 'tilled' && !rat.dead, 'Foragers still allows rats to eat crops');
     s = fresh(); fort(s); s.agents = [s.player];
-    const guard = s.spawn(new Villager(...Object.values(World.center(122, 100)) as [number, number], s.world.houses[0], 'soldier', 20, 'Wall tester', s.mods));
+    const guard = s.spawn(new Villager(...Object.values(World.center(122, 100)) as [number, number], home0(s), 'soldier', 20, 'Wall tester', s.mods));
     assert(s.assignPost(guard, { tx: 124, ty: 95 }), 'wall post accepts a route through connected stairs');
     step(s, 8);
     assert(guard.elevated && guard.tile.tx === 124 && guard.tile.ty === 95 && guard.weapon === 'bow', 'soldier climbs stairs and reaches the assigned wall post');
@@ -170,7 +186,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(b.hp === BUILDING_HP[kind][1] && b.maxHp === b.hp && b.hp > 0, `${kind}: starts at its Lv1 hit points`);
     }
     assert(s.world.lair && !s.damageBuilding(s.world.lair, 999) && !s.world.lair.ruined, 'the lair cannot be hurt');
-    const home = s.world.houses[0], tenant = s.spawn(new Villager(0, 0, home, 'farmer', 20, 'Tenant', s.mods));
+    const home = home0(s), tenant = s.spawn(new Villager(0, 0, home, 'farmer', 20, 'Tenant', s.mods));
     tenant.hidden = true; tenant.indoors = home; Object.assign(tenant, World.center(home.tx + 1, home.ty + 1));
     assert(!s.damageBuilding(home, 100) && home.hp === BUILDING_HP.house[1] - 100 && !home.ruined, 'a blow takes hit points without wrecking');
     assert(s.damageBuilding(home, 999) && home.ruined && home.hp === 0, 'enough blows reduce a house to a ruin');
@@ -211,7 +227,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     s.wood = 8; assert(s.craftWeapon(s.player, 'melee') && s.player.weapons.melee === 1 && s.wood === 0, 'a bronze sword costs 8 wood');
     dummy.hp = dummy.maxHp; const bronzeHit = swingAt(); assert(bronzeHit === 9, `bronze hits for three quarters (${bronzeHit})`);
     s.wood = 100; s.scrap = 100; assert(s.weaponProblem(s.player, 'melee') === 'needs a Lv2 barracks', 'iron waits on a Lv2 barracks');
-    const sworn = s.spawn(new Villager(0, 0, s.world.houses[0], 'soldier', 20, 'Sworn', s.mods));
+    const sworn = s.spawn(new Villager(0, 0, home0(s), 'soldier', 20, 'Sworn', s.mods));
     assert(sworn.weapons.melee === 0 && s.craftWeapon(sworn, 'bow') && sworn.weapons.bow === 0 && sworn.kitFetch?.gear.kind === 'weapon' && s.completeFetch(sworn) && (sworn.weapons.bow as number) === 1, 'soldiers start crude; what is forged for one goes into the chest, and the soldier fetches it');
     assert(s.towerDmg(s.world.barracks[0]) === p.towerDmg && p.towerDmg === 5, 'a Lv1 tower fires light arrows');
     // the dodge roll: a committed tumble on a cooldown, the way you are moving or facing
@@ -274,7 +290,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     const awakeHp = ogre.hp; Object.assign(s.player, World.center(5, 5)); s.dayTime = 0.3; step(s, 20);
     assert(!ogre.hidden && ogre.state === 'hunting' && ogre.hp === awakeHp, 'a roused Ogre ignores the dawn and never goes home to heal');
     // a stationary farmer for him to hit
-    const straw = (s: VillageScene, tx: number, ty: number) => { const v = s.spawn(new Villager(0, 0, s.world.houses[0], 'farmer', 20, `Straw ${tx}`, s.mods)); Object.assign(v, World.center(tx, ty)); v.update = () => {}; return v; };
+    const straw = (s: VillageScene, tx: number, ty: number) => { const v = s.spawn(new Villager(0, 0, home0(s), 'farmer', 20, `Straw ${tx}`, s.mods)); Object.assign(v, World.center(tx, ty)); v.update = () => {}; return v; };
     const rouse = (s: VillageScene, tx: number, ty: number) => { const o = s.ogre!; o.state = 'roaming'; o.hidden = false; o.aggroed = true; Object.assign(o, World.center(tx, ty)); s.dayTime = 0.86; return o; };
     // wide swing: everyone in the half-circle in front of him, nobody behind
     s = fresh(); clearing(s); s.agents = [s.player, s.ogre!]; Object.assign(s.player, World.center(5, 5));
@@ -306,7 +322,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     for (const b of s.hearthBuildings()) b.firewood = p.hearthNights; // full piles, so this armful is for the woodyard
     const yard = s.world.woodyard!, yd = doorstep(yard);
     s.world.set(yd.tx, yd.ty + 3, 'tree'); s.world.set(yd.tx, yd.ty + 4, 'tree');
-    const cutter = s.spawn(new Villager(...Object.values(World.center(yd.tx + 1, yd.ty + 3)) as [number, number], s.world.houses[0], 'woodcutter', 22, 'Haul tester', s.mods));
+    const cutter = s.spawn(new Villager(...Object.values(World.center(yd.tx + 1, yd.ty + 3)) as [number, number], home0(s), 'woodcutter', 22, 'Haul tester', s.mods));
     step(s, 6);
     assert(cutter.load?.kind === 'wood' && cutter.load.n >= p.treeYield && s.wood === 0, 'a chopped tree goes into the woodcutter\'s arms, not the stockpile');
     step(s, 20);
@@ -320,7 +336,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     Object.assign(s.player, World.center(yd.tx, yd.ty)); s.tick(1 / 60);
     assert(!s.player.pack.bulk().length && s.wood === w0 + HAUL.player.wood, 'walking up to the woodyard unloads the head\'s arms');
     // taking things down: a sound wall comes down after a few hammer blows for half its cost; a hurt one is mended first
-    s = fresh(); clearing(s); s.agents = [s.player]; s.wood = 50;
+    s = freshVillage(); clearing(s); s.agents = [s.player]; s.wood = 50;
     Object.assign(s.player, World.center(121, 100)); s.player.tool = 'hammer'; s.player.facing = { x: 1, y: 0 }; s.hoverTile = null;
     const seg2 = s.world.placeDefense('wall', 122, 100)!; seg2.hp -= p.wallRepair;
     let w1 = s.wood; s.interact();
@@ -330,7 +346,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     s.interact();
     assert(!s.world.get(122, 100)!.defense && s.world.get(122, 100)!.kind === 'grass' && s.wood === w1 + Math.round(DEFENSE_COST.wall * DISMANTLE.refund), 'the last blow takes the wall down and returns half its wood');
     // demolishing a house: tenants move to another house, anyone inside steps out, half the wood spent comes back
-    s = fresh(); clearing(s); s.agents = [s.player]; s.wood = 50;
+    s = freshVillage(); clearing(s); s.agents = [s.player]; s.wood = 50;
     const spare = s.world.place('house', 122, 100), old = s.world.houses.find((h) => h !== spare)!;
     const tenant2 = s.spawn(new Villager(0, 0, old, 'farmer', 20, 'Tenant', s.mods)); old.residents++; Object.assign(tenant2, World.center(125, 100));
     tenant2.hidden = true; tenant2.indoors = old;
@@ -342,18 +358,18 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(s.wood === before2 + Math.round(COST.house * DISMANTLE.refund), 'half the wood comes back');
     assert(s.demolishProblem(spare) !== null && !s.demolish(spare), 'the last house cannot be demolished while someone lives in it');
     // a woodcutter walled in with the trees outside doesn't stand there "looking for a tree" forever with wood on his back
-    s = fresh(); s.agents = [s.player]; Object.assign(s.player, World.center(5, 5)); s.wood = 0;
+    s = freshVillage(); s.agents = [s.player]; Object.assign(s.player, World.center(5, 5)); s.wood = 0;
     for (const b of s.hearthBuildings()) b.firewood = p.hearthNights;
     const yd2 = doorstep(s.world.woodyard!), bx = yd2.tx, by = yd2.ty + 5;
     for (let dy = -7; dy <= 7; dy++) for (let dx = -7; dx <= 7; dx++) if (s.world.get(bx + dx, by + dy)?.kind === 'tree') s.world.set(bx + dx, by + dy, 'grass');
     s.world.set(bx, by, 'tree').stage = 99; for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) s.world.placeDefense('wall', bx + dx, by + dy); // a tree boxed in by walls: the nearest, and unreachable
-    const trapped = s.spawn(new Villager(World.center(bx, by - 3).x, World.center(bx, by - 3).y, s.world.houses[0], 'woodcutter', 22, 'Penned', s.mods));
+    const trapped = s.spawn(new Villager(World.center(bx, by - 3).x, World.center(bx, by - 3).y, home0(s), 'woodcutter', 22, 'Penned', s.mods));
     trapped.load = { kind: 'wood', n: 12 };
     step(s, 10);
     assert(s.wood >= 12 && s.world.get(bx, by)!.kind === 'tree' && !(trapped.goal?.tx === bx && trapped.goal?.ty === by), `a woodcutter whose first-choice tree is unreachable brings his armful in and moves on (${trapped.task})`);
     // hearths: piles burn a night at dawn, cold buildings stall, woodcutters bring firewood before logs
-    s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, { x: -400, y: -400 }); s.day = 1; s.dayTime = 0.3;
-    const home2 = s.world.houses[0], keep2 = s.world.barracks[0];
+    s = freshVillage(); clearing(s); s.agents = [s.player]; Object.assign(s.player, { x: -400, y: -400 }); s.day = 1; s.dayTime = 0.3;
+    const home2 = home0(s), keep2 = s.world.barracks[0];
     assert(home2.firewood === 1 && keep2.firewood === 1 && s.world.woodyard!.firewood === 0 && home2.warm, 'new buildings come with one night of wood; storage has no hearth');
     const cost0 = hearthCost(home2); s.wood = 100;
     s.newDay(); assert(home2.firewood === 0 && home2.warm && keep2.warm, 'dawn burns a night and the building stays warm');
@@ -389,8 +405,8 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     // (the cutter goes straight back to the grove afterwards, so the pile may have grown further by now)
     assert(cabin.firewood === Math.min(p.hearthNights, Math.floor(HAUL.villager.wood / hearthCost(cabin))) && s.wood >= woodBefore + HAUL.villager.wood - cabin.firewood * hearthCost(cabin), `the pile takes ${cabin.firewood} nights and the rest reaches the woodyard`);
     // Baby Fever: births surge while the larder holds a surplus; more mouths eat the surplus away
-    s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, { x: -400, y: -400 });
-    const nest = s.world.houses[0]; nest.firewood = p.hearthNights; nest.warm = true;
+    s = freshVillage(); clearing(s); s.agents = [s.player]; Object.assign(s.player, { x: -400, y: -400 });
+    const nest = home0(s); nest.firewood = p.hearthNights; nest.warm = true;
     const ma = s.spawn(new Villager(0, 0, nest, 'farmer', 20, 'Ma', s.mods)), pa = s.spawn(new Villager(0, 0, nest, 'farmer', 20, 'Pa', s.mods));
     ma.update = pa.update = () => {}; nest.residents = 2;
     s.mods.babyFever = false; s.food = 40;
@@ -398,12 +414,12 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     s.mods.babyFever = true;
     assert(s.feverActive() && Math.abs(s.birthChance(nest) - (p.birthChance + p.feverBonus)) < 1e-9, `with Baby Fever and ${s.surplusDays()} days of food, births run at ${Math.round(100 * s.birthChance(nest))}%`);
     s.food = 2 * p.feverDays - 1; assert(!s.feverActive() && s.birthChance(nest) === p.birthChance, 'below the surplus line the fever breaks and births fall back to normal');
-    const dawns = 30, tally = (fever: boolean) => { s.reset(7); s.screen = 'playing'; s.paused = true; s.agents = [s.player]; Object.assign(s.player, { x: -400, y: -400 }); const h = s.world.houses[0]; h.firewood = 99; const a = s.spawn(new Villager(0, 0, h, 'farmer', 20, 'A', s.mods)), b = s.spawn(new Villager(0, 0, h, 'farmer', 20, 'B', s.mods)); a.update = b.update = () => {}; h.residents = 2; s.mods.babyFever = fever; let born = 0; for (let i = 0; i < dawns; i++) { s.food = 1000; h.firewood = 99; h.warm = true; h.residents = 2; born += births(s, 1); for (const k of s.villagers()) if (k.role === 'infant') k.dead = true; s.removeDead(); } return born; };
+    const dawns = 30, tally = (fever: boolean) => { s.reset(7); s.screen = 'playing'; s.paused = true; s.agents = [s.player]; Object.assign(s.player, { x: -400, y: -400 }); const h = home0(s); h.firewood = 99; const a = s.spawn(new Villager(0, 0, h, 'farmer', 20, 'A', s.mods)), b = s.spawn(new Villager(0, 0, h, 'farmer', 20, 'B', s.mods)); a.update = b.update = () => {}; h.residents = 2; s.mods.babyFever = fever; let born = 0; for (let i = 0; i < dawns; i++) { s.food = 1000; h.firewood = 99; h.warm = true; h.residents = 2; born += births(s, 1); for (const k of s.villagers()) if (k.role === 'infant') k.dead = true; s.removeDead(); } return born; };
     const plain = tally(false), fevered = tally(true);
     assert(fevered > plain, `over ${dawns} well-fed birth rolls the fever brought ${fevered} births against ${plain} without it`);
     // the breeding program: nurseries, callings and their caps, the basket, the stages of life
-    s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(124, 100)); s.mods.babyFever = false;
-    const hearth = s.world.houses[0]; hearth.firewood = 99; hearth.warm = true;
+    s = freshVillage(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(124, 100)); s.mods.babyFever = false;
+    const hearth = home0(s); hearth.firewood = 99; hearth.warm = true;
     const mum = s.spawn(new Villager(0, 0, hearth, 'farmer', 20, 'Mum', s.mods)), dad = s.spawn(new Villager(0, 0, hearth, 'farmer', 20, 'Dad', s.mods));
     mum.update = dad.update = () => {}; hearth.residents = 2; s.food = 200;
     const chanceWas = p.birthChance; p.birthChance = 1;
@@ -494,8 +510,8 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     second.age = second.deathAt(s); s.tickAges(0); assert(second.dead, 'an elder passes away at the end of elderDays');
     s.removeDead();
     // the callings and their caps: the buildings decide what the village may raise
-    s = fresh(); clearing(s); s.agents = [s.player]; s.mods.babyFever = false;
-    const cHome = s.world.houses[0]; cHome.firewood = 99; cHome.warm = true;
+    s = freshVillage(); clearing(s); s.agents = [s.player]; s.mods.babyFever = false;
+    const cHome = home0(s); cHome.firewood = 99; cHome.warm = true;
     const cMum = s.spawn(new Villager(0, 0, cHome, 'farmer', 20, 'CapMum', s.mods)), cDad = s.spawn(new Villager(0, 0, cHome, 'farmer', 20, 'CapDad', s.mods));
     cMum.update = cDad.update = () => {}; cHome.residents = 2; s.food = 500;
     const wasChance = p.birthChance, wasTwins = s.mods.twinChance; p.birthChance = 1; s.mods.twinChance = 0;
@@ -521,7 +537,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(s.infantsOf(cHome).slice(-1)[0].calling === 'soldier', 'promised the only trade with a place');
     // a second barracks doubles the warrior places
     const capOne = s.callingCap('soldier');
-    const capBx = s.world.houses[0].tx + 10;
+    const capBx = home0(s).tx + 10;
     const second2 = s.world.canBuild('barracks', capBx, 96) ? s.world.place('barracks', capBx, 96) : null;
     assert(!!second2 && s.callingCap('soldier') === capOne * 2, `a second barracks makes room for ${p.soldierCap} more warriors (${s.callingCap('soldier')})`);
     // a ruin keeps nobody in work
@@ -534,8 +550,8 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     capDoomed.dead = true; s.removeDead();
     assert(s.callingFilled('soldier') === heldBy - 1, 'a child that dies gives its place back');
     // the emptiest trade by share of its cap: a 5/5/10 village opens farmer, woodcutter, warrior, warrior
-    s = fresh(); clearing(s); s.agents = [s.player]; s.mods.babyFever = false; s.mods.twinChance = 0;
-    const rHome = s.world.houses[0]; rHome.firewood = 99; rHome.warm = true; s.food = 500;
+    s = freshVillage(); clearing(s); s.agents = [s.player]; s.mods.babyFever = false; s.mods.twinChance = 0;
+    const rHome = home0(s); rHome.firewood = 99; rHome.warm = true; s.food = 500;
     const rMum = s.spawn(new Villager(0, 0, rHome, 'farmer', 20, 'RatioMum', s.mods)), rDad = s.spawn(new Villager(0, 0, rHome, 'farmer', 20, 'RatioDad', s.mods));
     rMum.update = rDad.update = () => {}; rHome.residents = 2; rHome.nextBirth = 0; p.birthChance = 1;
     p.farmerCap = 5; p.woodcutterCap = 5; p.soldierCap = 10;
@@ -558,7 +574,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(sown.kind === 'crop' && sown.food === 'carrot' && s.cropDaysOf(sown) === s.cropDays + FOODS.carrot.days, 'seeds sow the chosen crop and it ripens on its own clock');
     sown.stage = 99; clearBulk(s); assert(s.handsAt({ tx: 122, ty: 98 }), 'a ripe crop comes up under your hands, whatever you are holding');
     assert(held()?.food === 'carrot' && held()!.n === s.cropYieldOf('carrot') && s.world.get(122, 98)!.kind === 'tilled' && s.world.get(122, 98)!.food === 'carrot', 'harvesting by hand yields the crop and the soil remembers it');
-    const sower = s.spawn(new Villager(World.center(122, 99).x, World.center(122, 99).y, s.world.houses[0], 'farmer', 20, 'Sower', s.mods));
+    const sower = s.spawn(new Villager(World.center(122, 99).x, World.center(122, 99).y, home0(s), 'farmer', 20, 'Sower', s.mods));
     for (const q of s.world.find(t => t.kind === 'crop' || t.kind === 'tilled')) if (q.tx !== 122 || q.ty !== 98) s.world.set(q.tx, q.ty, 'grass');
     step(s, 6); assert(s.world.get(122, 98)!.kind === 'crop' && s.world.get(122, 98)!.food === 'carrot', `a farmer replants what the soil remembers (${s.world.get(122, 98)!.kind} ${s.world.get(122, 98)!.food})`);
     sower.dead = true; s.removeDead();
@@ -572,7 +588,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     s.player.tool = 'basket'; s.player.basketKind = 'carrot'; s.pantry.carrot = 40;
     const g2 = s.world.granary!; Object.assign(s.player, World.center(g2.tx + 1, g2.ty + BUILDINGS[g2.kind].h)); s.fillBasket();
     assert(held()?.food === 'carrot' && held()!.n === STACK.food && s.pantry.carrot === 40 - STACK.food, 'the basket fills with the chosen kind');
-    const yc = buildingCenter(s.world.houses[0]), yx = Math.round(yc.tx), yy = Math.round(yc.ty);
+    const yc = buildingCenter(home0(s)), yx = Math.round(yc.tx), yy = Math.round(yc.ty);
     const dSpot = ([[0, 3], [1, 3], [-1, 3], [2, 3], [3, 2], [-3, 2], [0, -3], [3, 0]] as const)
       .map(([dx, dy]) => ({ tx: yx + dx, ty: yy + dy })).find((q) => !s.world.isBlocked(q.tx, q.ty)) ?? { tx: yx, ty: yy + 3 };
     const dStand = ([[0, 2], [1, 2], [-1, 2], [0, 1], [2, 0], [-2, 0]] as const)
@@ -581,21 +597,21 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(carrots.food === 'carrot' && carrots.n === p.tossSize && s.world.inYard(carrots.x, carrots.y), 'a throw carries its kind');
     const carrotAt = World.center(dSpot.tx, dSpot.ty); // where the throw landed: the eater stands on it
     const shroomAt = World.center(dSpot.tx + 2, dSpot.ty); s.world.dropItem('food', 1, shroomAt.x, shroomAt.y, 'mushroom');
-    const eater = s.spawn(new Villager(carrotAt.x, carrotAt.y, s.world.houses[0], 'kid', 1, 'Eater', s.mods)); eater.calling = 'farmer'; eater.mealAt = 0; s.day = 9;
+    const eater = s.spawn(new Villager(carrotAt.x, carrotAt.y, home0(s), 'kid', 1, 'Eater', s.mods)); eater.calling = 'farmer'; eater.mealAt = 0; s.day = 9;
     const careWas = eater.care; step(s, 8);
     assert(eater.diet.carrot > 0 && eater.ateDay === 9, `bites go on the diet (${JSON.stringify(eater.diet)})`);
     eater.update = () => {}; eater.diet = zeroFood();
     eater.eatBite('mushroom', 0.5); eater.eatBite('mushroom', 0.5); assert(eater.care === careWas + 1, 'a mushroom meal is worth one care point');
     eater.diet.carrot = p.dietFull; eater.diet.wheat = p.dietFull / 2;
     const live = eater.dietNow(); assert(Math.abs(live.speed - DIET_CAP.speed * p.dietMul) < 1e-9 && Math.abs(live.hp - DIET_CAP.hp * p.dietMul / 2) < 1e-9 && live.work === 0, `the diet projects its bonuses (${JSON.stringify(live)})`);
-    const plainKid = s.spawn(new Villager(0, 0, s.world.houses[0], 'kid', 1, 'Plain', s.mods)); plainKid.update = () => {};
+    const plainKid = s.spawn(new Villager(0, 0, home0(s), 'kid', 1, 'Plain', s.mods)); plainKid.update = () => {};
     for (const k of [eater, plainKid]) { k.age = s.adultAge; k.calling = 'farmer'; } s.tickAges(0);
     assert(eater.isAdult && plainKid.isAdult && eater.dietBonus.speed === live.speed && eater.speed > plainKid.speed && eater.maxHp > plainKid.maxHp && plainKid.dietBonus.hp === 0, `the diet freezes at coming of age: ${eater.speed.toFixed(1)} vs ${plainKid.speed.toFixed(1)} speed, ${eater.maxHp} vs ${plainKid.maxHp} HP`);
     eater.diet.wheat = 99; assert(eater.dietNow().hp === eater.dietBonus.hp, 'the bonuses of a grown villager no longer move');
     s.removeDead();
     // what the dead were carrying, and what raiders drop, lies where they fell; the head walks over it
     s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(124, 100)); s.world.items.length = 0;
-    const hauler = s.spawn(new Villager(World.center(130, 100).x, World.center(130, 100).y, s.world.houses[0], 'woodcutter', 20, 'Hauler', s.mods)); hauler.load = { kind: 'wood', n: 9 };
+    const hauler = s.spawn(new Villager(World.center(130, 100).x, World.center(130, 100).y, home0(s), 'woodcutter', 20, 'Hauler', s.mods)); hauler.load = { kind: 'wood', n: 9 };
     hauler.hp = 0; hauler.dead = true; s.tick(1 / 60); settle(s);
     const dropped = s.world.items.find((it) => it.kind === 'wood');
     assert(!!dropped && dropped.n === 9 && dropped.rest && Math.hypot(dropped.x - World.center(130, 100).x, dropped.y - World.center(130, 100).y) < 24, 'a villager killed hauling drops the armful where they fell');
@@ -629,7 +645,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(!s.world.items.includes(snack) && s.player.carriedOf('food','berry')===3 && held()?.kind === 'wood', 'the pack carries food alongside wood');
     // bodies: nobody stands inside anybody; the light give way to the heavy; walls are never entered
     s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(124, 100)); s.world.items.length = 0;
-    const home3 = s.world.houses[0];
+    const home3 = home0(s);
     const twinA = s.spawn(new Villager(World.center(128, 100).x, World.center(128, 100).y, home3, 'farmer', 20, 'A', s.mods));
     const twinB = s.spawn(new Villager(World.center(128, 100).x, World.center(128, 100).y, home3, 'farmer', 20, 'B', s.mods));
     twinA.update = twinB.update = () => {};
@@ -670,9 +686,9 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     // a crowd at one pile all get to eat
     s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(124, 104)); s.world.items.length = 0;
     const crowd: Villager[] = [];
-    const cc = buildingCenter(s.world.houses[0]), ccx = Math.round(cc.tx), ccy = Math.round(cc.ty);
-    for (let i = 0; i < 8; i++) { const at = World.center(ccx - 2 + i % 4, ccy + 3 + (i >> 2)); const k = s.spawn(new Villager(at.x, at.y, s.world.houses[0], 'kid', 1, 'C' + i, s.mods)); k.calling = 'farmer'; k.mealAt = 0; crowd.push(k); }
-    const ch = buildingCenter(s.world.houses[0]);
+    const cc = buildingCenter(home0(s)), ccx = Math.round(cc.tx), ccy = Math.round(cc.ty);
+    for (let i = 0; i < 8; i++) { const at = World.center(ccx - 2 + i % 4, ccy + 3 + (i >> 2)); const k = s.spawn(new Villager(at.x, at.y, home0(s), 'kid', 1, 'C' + i, s.mods)); k.calling = 'farmer'; k.mealAt = 0; crowd.push(k); }
+    const ch = buildingCenter(home0(s));
     const pileAt = World.center(Math.round(ch.tx), Math.round(ch.ty) + 3); // in their own home's yard
     const pile = s.world.dropItem('food', 40, pileAt.x, pileAt.y, 'wheat'); s.day = 4;
     assert(s.world.inYard(pile.x, pile.y), 'the pile lies in the yard of the house they live in');
@@ -692,7 +708,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     pickAt(126, 100); assert(!!s.selectedTile && s.selectedTile.tx === 126 && s.selectedTile.ty === 100 && !s.selected && !s.selectedBuilding, 'picking open ground selects the tile');
     const lump = s.world.dropItem('wood', 5, World.center(126, 100).x + 3, World.center(126, 100).y, undefined);
     pickAt(126, 100, 2); assert(s.selectedItem === lump && !s.selectedTile, 'a thing on the ground under the pointer beats the tile');
-    const hut = s.world.houses[0]; pickAt(hut.tx + 1, hut.ty + 1); assert(s.selectedBuilding === hut && !s.selectedItem && !s.selectedTile, 'a building beats the tile');
+    const hut = home0(s); pickAt(hut.tx + 1, hut.ty + 1); assert(s.selectedBuilding === hut && !s.selectedItem && !s.selectedTile, 'a building beats the tile');
     s.selectItem(lump); s.world.removeItem(lump); s.tick(1 / 60); assert(!s.selectedItem, 'a vanished thing leaves the inspector');
     s.world.set(120, 100, 'tilled'); s.setFieldPlan({ tx: 120, ty: 100 }, 'tomato');
     const planter = s.spawn(new Villager(World.center(120, 101).x, World.center(120, 101).y, hut, 'farmer', 20, 'Planter', s.mods));
@@ -723,7 +739,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     // a gnome warrior is a gnome first: its HP starts at gnomeHp, never a human soldier's
     const warden = s.spawn(new Villager(World.center(126, 101).x, World.center(126, 101).y, den, 'soldier', s.adultAge + 3, 'Warden', s.mods));
     warden.gnome = true; warden.applyRole(s.mods); warden.hp = warden.maxHp; warden.update = () => {};
-    const manAtArms = s.spawn(new Villager(0, 0, s.world.houses[0], 'soldier', s.adultAge + 3, 'Tall', s.mods)); manAtArms.update = () => {};
+    const manAtArms = s.spawn(new Villager(0, 0, home0(s), 'soldier', s.adultAge + 3, 'Tall', s.mods)); manAtArms.update = () => {};
     assert(warden.maxHp < manAtArms.maxHp && warden.radius === 2 && !!warden.pouch,
       `a gnome warrior stays a little person with a pouch (${warden.maxHp} HP against a man-at-arms' ${manAtArms.maxHp})`);
     { const was = p.gnomeHp; p.gnomeHp = was * 2; warden.applyRole(s.mods); assert(warden.maxHp > was, 'and takes its base from gnomeHp, not soldierHp'); p.gnomeHp = was; warden.applyRole(s.mods); warden.hp = warden.maxHp; }
@@ -797,9 +813,9 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     // the shaman wand: pick a squad, send it, hunt, follow, man the wall, release
     s = fresh(); fort(s); s.agents = [s.player]; s.food = 100;
     const wden = s.world.place('gnomehouse', 127, 102), [wg] = s.foundGnomes(wden);
-    const wa = s.spawn(new Villager(...Object.values(World.center(122, 100)) as [number, number], s.world.houses[0], 'soldier', 20, 'Wand A', s.mods));
-    const wb = s.spawn(new Villager(...Object.values(World.center(123, 100)) as [number, number], s.world.houses[0], 'soldier', 20, 'Wand B', s.mods));
-    const wf = s.spawn(new Villager(...Object.values(World.center(124, 100)) as [number, number], s.world.houses[0], 'farmer', 20, 'Wand farmer', s.mods));
+    const wa = s.spawn(new Villager(...Object.values(World.center(122, 100)) as [number, number], home0(s), 'soldier', 20, 'Wand A', s.mods));
+    const wb = s.spawn(new Villager(...Object.values(World.center(123, 100)) as [number, number], home0(s), 'soldier', 20, 'Wand B', s.mods));
+    const wf = s.spawn(new Villager(...Object.values(World.center(124, 100)) as [number, number], home0(s), 'farmer', 20, 'Wand farmer', s.mods));
     Object.assign(wg, World.center(125, 100));
     s.selectBox(121 * 16, 99 * 16, 126 * 16, 101 * 16);
     assert(s.squad.length === 2 && s.squad.includes(wa) && s.squad.includes(wb) && !s.squad.includes(wg) && !s.squad.includes(wf), `a box picks soldiers, never a farmer or a gnome (${s.squad.map((v) => v.name).join(', ')})`);
@@ -831,8 +847,8 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     s.release();
     // bodies in the way: two soldiers sent through each other, and one sent through the head, get past instead of locking up
     s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(125, 100));
-    const sa = s.spawn(new Villager(...Object.values(World.center(120, 100)) as [number, number], s.world.houses[0], 'soldier', 20, 'Stall A', s.mods));
-    const sb = s.spawn(new Villager(...Object.values(World.center(130, 100)) as [number, number], s.world.houses[0], 'soldier', 20, 'Stall B', s.mods));
+    const sa = s.spawn(new Villager(...Object.values(World.center(120, 100)) as [number, number], home0(s), 'soldier', 20, 'Stall A', s.mods));
+    const sb = s.spawn(new Villager(...Object.values(World.center(130, 100)) as [number, number], home0(s), 'soldier', 20, 'Stall B', s.mods));
     s.selectSquad([sa]); s.orderHold(130, 100); s.selectSquad([sb]); s.orderHold(120, 100);
     step(s, 12);
     assert(sa.tile.tx === 130 && sb.tile.tx === 120, `soldiers walking through each other and the head both arrive (${sa.tile.tx},${sa.tile.ty} · ${sb.tile.tx},${sb.tile.ty})`);
@@ -854,7 +870,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       for (let x = 120; x <= 126; x++) s.world.get(x, 100)!.tall = true;
       const slow = walk(120, 100);
       assert(slow > 0 && Math.abs(slow / short - p.grassSlow) < 0.05, `the head wades at ${p.grassSlow}× through long grass (${slow.toFixed(1)} vs ${short.toFixed(1)} px)`);
-      const runner = (y: number) => { const v = s.spawn(new Villager(...Object.values(World.center(120, y)) as [number, number], s.world.houses[0], 'soldier', 20, 'Runner', s.mods)); v.speed = 40; s.selectSquad([v]); s.orderHold(126, y); step(s, 0.5); s.release(); s.clearSquad(); const dx = v.x - World.center(120, y).x; v.dead = true; s.removeDead(); return dx; };
+      const runner = (y: number) => { const v = s.spawn(new Villager(...Object.values(World.center(120, y)) as [number, number], home0(s), 'soldier', 20, 'Runner', s.mods)); v.speed = 40; s.selectSquad([v]); s.orderHold(126, y); step(s, 0.5); s.release(); s.clearSquad(); const dx = v.x - World.center(120, y).x; v.dead = true; s.removeDead(); return dx; };
       const openRun = runner(102), grassRun = runner(100);
       assert(grassRun > 0 && Math.abs(grassRun / openRun - p.grassSlow) < 0.1, `villagers and raiders wade too (${grassRun.toFixed(1)} vs ${openRun.toFixed(1)} px)`);
       for (let x = 118; x <= 126; x++) for (let y = 98; y <= 102; y++) s.world.get(x, y)!.tall = true;
@@ -878,8 +894,8 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       s = fresh(); clearing(s); s.agents = [s.player]; s.food = 0;
       const sd = s.foundSounder(126, 100, 2), [b1, b2] = sd.members;
       Object.assign(b1, World.center(126, 100)); Object.assign(b2, World.center(127, 100));
-      const guard = s.spawn(new Villager(...Object.values(World.center(122, 100)) as [number, number], s.world.houses[0], 'soldier', 20, 'Boar guard', s.mods));
-      const hand = s.spawn(new Villager(...Object.values(World.center(124, 101)) as [number, number], s.world.houses[0], 'farmer', 20, 'Boar hand', s.mods));
+      const guard = s.spawn(new Villager(...Object.values(World.center(122, 100)) as [number, number], home0(s), 'soldier', 20, 'Boar guard', s.mods));
+      const hand = s.spawn(new Villager(...Object.values(World.center(124, 101)) as [number, number], home0(s), 'farmer', 20, 'Boar hand', s.mods));
       s.grid.rebuild(s.agents);
       assert(!s.bestTarget(guard.x, guard.y, 130) && !s.nearestRaider(hand.x, hand.y, 90), 'a calm boar is no target for a soldier and scares no farmer');
       step(s, 2);
@@ -897,7 +913,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       Object.assign(s.player, World.center(105, 100)); step(s, BOAR.calmAfter + 2);
       assert(!b1.provoked && b1.harmless && !b2.provoked, 'out of reach, the boars calm down');
       Object.assign(s.player, World.center(125, 100)); Object.assign(b1, World.center(126, 100)); Object.assign(b2, World.center(133, 106));
-      b1.hp = 1; const killed = s.stats.raidersKilled, scrapBefore = s.scrap;
+      b1.hp = 1; const killed = s.stats.raidersKilled, scrapBefore = s.scrap; s.grid.rebuild(s.agents); // (the swing finds what it hits in the grid: lay it out where everyone was just put)
       s.player.pressAttack(); for (let i = 0; i < 15; i++) s.tick(1 / 60); // the scene's own tick fires onDeath (the loot); step() would just drop the body
       const meat = s.world.items.find((it) => it.kind === 'food' && it.food === 'meat');
       assert(b1.dead && !!meat && meat.n === BOAR.meat && Math.hypot(meat.x - 126 * 16 - 8, meat.y - 100 * 16 - 8) < 24, `a hunted boar drops ${BOAR.meat} meat where it fell`);
@@ -910,7 +926,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(held?.food === 'meat' && held.n === BOAR.meat && !s.world.items.includes(meat!), `a gnome fetches the whole piece (${bg.task})`);
       step(s, 40);
       assert(s.pantry.meat === BOAR.meat && (bg.load as { food?: string } | null)?.food !== 'meat', `and carries it to the granary (${s.pantry.meat} meat stored · ${bg.task})`);
-      const eater = s.spawn(new Villager(...Object.values(World.center(120, 100)) as [number, number], s.world.houses[0], 'kid', 1, 'Meat eater', s.mods));
+      const eater = s.spawn(new Villager(...Object.values(World.center(120, 100)) as [number, number], home0(s), 'kid', 1, 'Meat eater', s.mods));
       eater.diet.meat = p.dietFull;
       assert(Math.abs(eater.dietNow().dmg - DIET_CAP.dmg * 2 * p.dietMul) < 1e-9 && eater.dietNow().hp === 0, 'children raised on meat get twice the damage bonus berries give, and nothing else');
       // lurkers: a calm boar in long grass is unseen; treading on it finds it
@@ -932,7 +948,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       Object.assign(s.player, { x: lb.x + 4, y: lb.y }); step(s, 0.2);
       assert(lb.provoked && lb.prey === s.player && s.journal.some((j) => /bursts out of the long grass/.test(j.text)), 'treading on it, the head startles it and it charges');
       lb.calm(); Object.assign(lb, World.center(130, 100)); Object.assign(s.player, World.center(118, 92));
-      const hand2 = s.spawn(new Villager(...Object.values(World.center(130, 100)) as [number, number], s.world.houses[0], 'farmer', 20, 'Trodden hand', s.mods));
+      const hand2 = s.spawn(new Villager(...Object.values(World.center(130, 100)) as [number, number], home0(s), 'farmer', 20, 'Trodden hand', s.mods));
       step(s, 0.2);
       assert(lb.provoked && lb.prey === hand2, 'a villager blundering onto it is charged just the same');
       hand2.dead = true; s.removeDead(); lb.calm(); Object.assign(lb, World.center(130, 100));
@@ -986,7 +1002,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     }
     // the hidden gnome cottage: out in the woods, nobody's business until the head walks into its glade
     {
-      s = fresh();
+      s = freshVillage();
       const den = s.world.wildGnomeHouse!;
       const c = buildingCenter(den), away = Math.hypot(c.tx - COLS / 2, c.ty - ROWS / 2);
       assert(!!den && den.kind === 'gnomehouse' && den.wild, 'one toadstool cottage stands wild in the world');
@@ -1026,7 +1042,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     }
     // a village of people opens with the same roster, and every one of them has a place
     {
-      const v0 = fresh(), grown = v0.villagers().filter((x) => x.isAdult);
+      const v0 = freshVillage(), grown = v0.villagers().filter((x) => x.isAdult);
       assert(grown.filter((x) => x.role === 'farmer').length === p.startFarmers
         && grown.filter((x) => x.role === 'woodcutter').length === p.startWoodcutters
         && grown.filter((x) => x.role === 'soldier').length === p.startWarriors + v0.mods.startSoldiers,
@@ -1036,7 +1052,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     // ---- the pike: a thrust down a line, a dead zone, and a set point against a charge -------
     {
       s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, { x: -400, y: -400 });
-      const pk = s.spawn(new Villager(World.center(120, 100).x, World.center(120, 100).y, s.world.houses[0], 'soldier', 20, 'Pikey', s.mods));
+      const pk = s.spawn(new Villager(World.center(120, 100).x, World.center(120, 100).y, home0(s), 'soldier', 20, 'Pikey', s.mods));
       pk.gnome = true; pk.weapon = 'pike'; pk.applyRole(s.mods); pk.hp = pk.maxHp; pk.order = null;
       const dummy = (tx: number) => { const r = s.spawn(new Raider(World.center(tx, 100).x, World.center(tx, 100).y)); r.update = () => {}; r.hp = r.maxHp = 500; return r; };
       // two raiders on one line, both inside pike's length: one thrust takes both
@@ -1057,7 +1073,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       const charge = dummy(122); charge.vx = -90; charge.vy = 0; const cWas = charge.hp; s.pikeStrike(pk, 1, 0, 10); const chargeTook = cWas - charge.hp; charge.dead = true; s.removeDead();
       assert(chargeTook > standTook * 1.8, `a charge onto a set pike takes far more of it (${chargeTook} against ${standTook})`);
       // friends never stand in the way: a gnome in front, a raider behind it, and the raider is struck
-      const front = s.spawn(new Villager(World.center(121, 100).x, World.center(121, 100).y, s.world.houses[0], 'soldier', 20, 'Front', s.mods)); front.update = () => {};
+      const front = s.spawn(new Villager(World.center(121, 100).x, World.center(121, 100).y, home0(s), 'soldier', 20, 'Front', s.mods)); front.update = () => {};
       const past = dummy(122);
       assert(s.pikeStrike(pk, 1, 0, 10) === 1 && past.hp < 500 && front.hp === front.maxHp, 'a thrust goes straight past a friend in the front rank');
       past.dead = true; front.dead = true; s.removeDead();
@@ -1076,13 +1092,13 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       // following the head, a pikeman goes to meet a raider it sees near the band, not only one already on the head
       {
         Object.assign(s.player, World.center(120, 100));
-        const scout = s.spawn(new Villager(World.center(121, 100).x, World.center(121, 100).y, s.world.houses[0], 'soldier', 20, 'Scout', s.mods));
+        const scout = s.spawn(new Villager(World.center(121, 100).x, World.center(121, 100).y, home0(s), 'soldier', 20, 'Scout', s.mods));
         scout.gnome = true; scout.weapon = 'pike'; scout.applyRole(s.mods); scout.order = { kind: 'follow' };
         const far = s.spawn(new Raider(World.center(130, 100).x, World.center(130, 100).y)); far.update = () => {}; far.hp = far.maxHp = 500;
         const startGap = scout.dist(far);
         for (let i = 0; i < 60; i++) { s.grid.rebuild(s.agents); scout.update(1 / 60, s); }
         assert((scout as unknown as { target: unknown }).target === far && scout.dist(far) < startGap - 10, `a following pikeman closes on a raider ${Math.round(startGap / TILE)} tiles off that is not on the head (${scout.task}, ${(startGap - scout.dist(far)).toFixed(0)} px closer)`);
-        const plain = s.spawn(new Villager(World.center(121, 101).x, World.center(121, 101).y, s.world.houses[0], 'soldier', 20, 'Swordsman', s.mods));
+        const plain = s.spawn(new Villager(World.center(121, 101).x, World.center(121, 101).y, home0(s), 'soldier', 20, 'Swordsman', s.mods));
         plain.order = { kind: 'follow' };
         for (let i = 0; i < 30; i++) { s.grid.rebuild(s.agents); plain.update(1 / 60, s); }
         assert((plain as unknown as { target: unknown }).target === null, 'a swordsman at the head\'s heels still waits for a raider to come at the head');
@@ -1149,7 +1165,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     }
     // ---- the gnome start ------------------------------------------------------------------
     const wasGnome = p.gnomeStart, wasPeace = p.peaceful;
-    p.gnomeStart = true; s = fresh();
+    p.gnomeStart = true; s = fresh(false, false, false, false, false, true); // the band and all
     assert(s.world.houses.length === 0, 'the gnome start raises no house');
     assert(s.world.barracks.length === 1, 'but a barracks stands, so the band may raise warriors from the first frame');
     assert(!s.world.wildGnomeHouse, 'and leaves no hidden cottage to find twice');
@@ -1427,7 +1443,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     assert(s.pantry.stew === 10 && s.pantry.wheat === 0, 'so a dawn of eating leaves the dishes alone');
     s.food -= 4;
     assert(s.pantry.stew === 6, 'but once the raw food is gone the dishes are eaten rather than nothing');
-    p.gnomeStart = wasGnome; s = fresh();
+    p.gnomeStart = wasGnome; s = freshVillage();
     assert(s.world.houses.length > 0 && !!s.world.wildGnomeHouse && !s.gnomesFound, 'turning the gnome start off restores the founding family');
 
     // ---- trolls ---------------------------------------------------------------------------
@@ -1450,7 +1466,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     // hostile on sight: it hunts a villager it can see, with no provoking
     s = fresh(); clearing(s);
     const lone = s.spawn(new Troll(World.center(120, 100).x, World.center(120, 100).y));
-    const prey = s.spawn(new Villager(World.center(126, 100).x, World.center(126, 100).y, s.world.houses[0], 'farmer', 20, 'Bait', s.mods));
+    const prey = s.spawn(new Villager(World.center(126, 100).x, World.center(126, 100).y, home0(s), 'farmer', 20, 'Bait', s.mods));
     prey.update = () => {};
     assert(!lone.hunting, 'a troll that has seen nobody is only prowling');
     step(s, 2);
@@ -1461,7 +1477,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     // no leash: distance never calls it off, only losing the quarry does
     s = fresh(); clearing(s);
     const far = s.spawn(new Troll(World.center(120, 100).x, World.center(120, 100).y));
-    const runner = s.spawn(new Villager(World.center(125, 100).x, World.center(125, 100).y, s.world.houses[0], 'farmer', 20, 'Runner', s.mods));
+    const runner = s.spawn(new Villager(World.center(125, 100).x, World.center(125, 100).y, home0(s), 'farmer', 20, 'Runner', s.mods));
     runner.update = () => {};
     step(s, 2); assert(far.quarry === runner, 'it picks up the scent');
     Object.assign(runner, World.center(120, 60)); // bolt 40 tiles away, far past any boar's leash
@@ -1496,7 +1512,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     s.world.set(126, 100, 'tree').stage = 20;
     s.world.hives.set(100 * s.world.cols + 126, { tx: 126, ty: 100, angry: 0 });
     const hive = s.world.hiveAt(126, 100)!;
-    const walker = s.spawn(new Villager(World.center(122, 100).x, World.center(122, 100).y, s.world.houses[0], 'farmer', 20, 'Stung', s.mods));
+    const walker = s.spawn(new Villager(World.center(122, 100).x, World.center(122, 100).y, home0(s), 'farmer', 20, 'Stung', s.mods));
     walker.update = () => {};
     const swarms = () => s.agents.filter((a) => a instanceof Swarm && !a.dead) as Swarm[];
     ticks(s, 0.5);
@@ -1620,8 +1636,8 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
         clearing(s);
         const here = World.center(124, 100);
         // a gnome further off still beats a nearer villager
-        const near = new Villager(here.x + 3 * TILE, here.y, s.world.houses[0], 'farmer', 20, 'Near', s.mods);
-        const far = new Villager(here.x + 6 * TILE, here.y, s.world.houses[0], 'farmer', 20, 'Far', s.mods);
+        const near = new Villager(here.x + 3 * TILE, here.y, home0(s), 'farmer', 20, 'Near', s.mods);
+        const far = new Villager(here.x + 6 * TILE, here.y, home0(s), 'farmer', 20, 'Far', s.mods);
         far.gnome = true;
         s.agents.push(near, far);
         const k = new Skulk(here.x, here.y); s.spawn(k);
@@ -1732,7 +1748,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       const run = (secs: number) => { for (let i = 0; i < Math.ceil(secs * 60); i++) { s.grid.rebuild(s.agents); s.tick(1 / 60); } };
       s = fresh(); clearing(s); s.agents = [s.player]; s.world.items.length = 0;
       Object.assign(s.player, World.center(120, 100)); clearBulk(s);
-      const spot = World.center(125, 100), home3 = s.world.houses[0];
+      const spot = World.center(125, 100), home3 = home0(s);
       const gnome = (dx: number, dy: number, name: string) => { const g = s.spawn(new Villager(spot.x + dx, spot.y + dy, home3, 'farmer', 20, name, s.mods)); g.gnome = true; g.applyRole(s.mods); g.update = () => {}; return g; };
       const fed = [gnome(0, 0, 'A'), gnome(10, 0, 'B'), gnome(0, 10, 'C')], left = gnome(80, 0, 'Far');
       // with nothing cooked, R puts up the reticle but throws nothing
@@ -1772,7 +1788,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     // ---- fog at scale: a block of soldiers lights its ground through a dozen merged discs, never less than before ----
     {
       s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(120, 100));
-      for (let i = 0; i < 100; i++) { const g = s.spawn(new Villager(World.center(110 + (i % 10), 104 + Math.floor(i / 10)).x, World.center(110 + (i % 10), 104 + Math.floor(i / 10)).y, s.world.houses[0], 'soldier', 20, `F${i}`, s.mods)); g.gnome = true; g.applyRole(s.mods); }
+      for (let i = 0; i < 100; i++) { const g = s.spawn(new Villager(World.center(110 + (i % 10), 104 + Math.floor(i / 10)).x, World.center(110 + (i % 10), 104 + Math.floor(i / 10)).y, home0(s), 'soldier', 20, `F${i}`, s.mods)); g.gnome = true; g.applyRole(s.mods); }
       const f = s.fog as unknown as { sources(): { tx: number; ty: number; r: number }[]; bucketed(): { tx: number; ty: number; r: number }[] };
       const lit = (srcs: { tx: number; ty: number; r: number }[]) => { const set = new Set<number>(); for (const q of srcs) for (let y = Math.floor(q.ty - q.r); y <= q.ty + q.r; y++) for (let x = Math.floor(q.tx - q.r); x <= q.tx + q.r; x++) if (Math.hypot(x + 0.5 - q.tx, y + 0.5 - q.ty) < q.r) set.add(y * 1000 + x); return set; };
       const raw = f.sources(), merged = f.bucketed(), a = lit(raw), b = lit(merged);
@@ -1784,7 +1800,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     {
       s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(120, 100));
       const v = s.view!;
-      const g = s.spawn(new Villager(World.center(123, 100).x, World.center(123, 100).y, s.world.houses[0], 'soldier', 20, 'Crowded', s.mods));
+      const g = s.spawn(new Villager(World.center(123, 100).x, World.center(123, 100).y, home0(s), 'soldier', 20, 'Crowded', s.mods));
       g.gnome = true; g.weapon = 'pike'; g.applyRole(s.mods); g.update = () => {};
       v.snapCamera(); s.draw(); s.draw();
       const actorOf = (id: number) => (v as unknown as { actors: { actors: Map<number, unknown> } }).actors.actors.has(id);
@@ -1803,13 +1819,13 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       const army: Villager[] = [];
       for (let i = 0; i < 50; i++) {
         const at = World.center(122 + (i % 8), 96 + Math.floor(i / 8));
-        const g = s.spawn(new Villager(at.x, at.y, s.world.houses[0], 'soldier', 20, `Rank${i}`, s.mods));
+        const g = s.spawn(new Villager(at.x, at.y, home0(s), 'soldier', 20, `Rank${i}`, s.mods));
         g.gnome = true; g.applyRole(s.mods); g.weapon = 'pike'; army.push(g);
       }
       run(0.1);
       const reg = s.regiments[0];
       assert(s.regiments.length === 1 && reg.members.length === 50 && army.every((g) => g.regiment === reg) && reg.stance === 'follow', `fifty gnome soldiers fall in under one banner, following the head (${s.regiments.length} banners, ${reg?.members.length} under the first)`);
-      const extra = s.spawn(new Villager(army[0].x, army[0].y, s.world.houses[0], 'soldier', 20, 'Recruit', s.mods)); extra.gnome = true; extra.applyRole(s.mods);
+      const extra = s.spawn(new Villager(army[0].x, army[0].y, home0(s), 'soldier', 20, 'Recruit', s.mods)); extra.gnome = true; extra.applyRole(s.mods);
       run(0.6);
       assert(s.regiments.length === 2 && extra.regiment === s.regiments[1], `the fifty-first raises a second banner (${s.regiments.length})`);
       extra.dead = true; s.removeDead(); run(0.1);
@@ -1878,7 +1894,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       const lead = band.slice(0, 6); for (const r of lead) r.dead = true; s.removeDead(); run(6);
       assert(wb.members.length === 24 && off() < TILE / 2, `six fall and its ranks close, as a regiment's do (${wb.members.length} left, worst ${off().toFixed(1)} px)`);
       // one of yours comes within its sight: it charges, and the front rank strikes
-      const bait = s.spawn(new Villager(World.center(120, 100).x, World.center(120, 100).y, s.world.houses[0], 'farmer', 20, 'Bait', s.mods)); bait.update = () => {}; bait.hp = bait.maxHp = 500;
+      const bait = s.spawn(new Villager(World.center(120, 100).x, World.center(120, 100).y, home0(s), 'farmer', 20, 'Bait', s.mods)); bait.update = () => {}; bait.hp = bait.maxHp = 500;
       run(6);
       assert(wb.state === 'charge' && wb.quarry === bait && bait.hp < 500, `a villager ${12} tiles off is charged and struck (${bait.hp.toFixed(0)}/500 hp left)`);
       bait.dead = true; s.removeDead(); Object.assign(s.player, World.center(40, 60)); run(1); // (the head, too, out of its sight)
@@ -1888,7 +1904,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(band.filter((r) => !r.dead).every((r) => !r.block && !r.slot) && s.warbands.length === 0, 'released, its raiders leave the block and the banner is struck');
       for (const r of band) r.dead = true; s.removeDead();
       // the grid search for victims finds who a scan of everyone would
-      const folk = [0, 1, 2, 3].map((i) => s.spawn(new Villager(World.center(110 + i * 9, 92 + i * 4).x, World.center(110 + i * 9, 92 + i * 4).y, s.world.houses[0], 'farmer', 20, `Folk${i}`, s.mods)));
+      const folk = [0, 1, 2, 3].map((i) => s.spawn(new Villager(World.center(110 + i * 9, 92 + i * 4).x, World.center(110 + i * 9, 92 + i * 4).y, home0(s), 'farmer', 20, `Folk${i}`, s.mods)));
       s.grid.rebuild(s.agents);
       const scan = (x: number, y: number) => [s.player as Villager | typeof s.player, ...folk].filter((m) => !m.dead && !m.hidden).sort((a, b) => Math.hypot(a.x - x, a.y - y) - Math.hypot(b.x - x, b.y - y))[0];
       const spots = [[100, 100], [125, 96], [140, 110], [10, 10], [200, 140]].map(([tx, ty]) => World.center(tx, ty));
@@ -1929,7 +1945,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       // engage: a regiment across its road is charged; the rest of the column keeps marching
       const ahead = host.pointAt(host.lead + 10 * TILE);
       const guard: Villager[] = [];
-      for (let i = 0; i < 30; i++) { const g = s.spawn(new Villager(ahead.x + (i % 6) * 8, ahead.y + Math.floor(i / 6) * 8, s.world.houses[0], 'soldier', 20, `Guard${i}`, s.mods)); g.gnome = true; g.applyRole(s.mods); g.weapon = 'pike'; guard.push(g); }
+      for (let i = 0; i < 30; i++) { const g = s.spawn(new Villager(ahead.x + (i % 6) * 8, ahead.y + Math.floor(i / 6) * 8, home0(s), 'soldier', 20, `Guard${i}`, s.mods)); g.gnome = true; g.applyRole(s.mods); g.weapon = 'pike'; guard.push(g); }
       run(0.6);
       const reg = guard[0].regiment!; reg.place(ahead.x, ahead.y, lead.x - ahead.x, lead.y - ahead.y);
       const hostHp = () => host.bodies().reduce((a, r) => a + (r.dead ? 0 : r.hp), 0), guardHp = () => guard.reduce((a, g) => a + (g.dead ? 0 : g.hp), 0);
@@ -2006,7 +2022,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(used && s.player.pack.findSlot((g) => g.kind === 'kit') < 0 && midway > 10 && midway < 40 && Math.abs(s.player.hp - Math.min(s.player.maxHp, 40)) < 0.5, `a bandage gives back 30 HP over 3 s (10 → ${midway.toFixed(0)} → ${s.player.hp.toFixed(0)})`);
       assert(!s.useBandage(), 'and with none left, U says so');
       // a gnome warrior binds its own wounds from its pouch
-      const g = s.spawn(new Villager(s.player.x + 20, s.player.y, s.world.houses[0], 'soldier', 20, 'Burr', s.mods)); g.gnome = true; g.applyRole(s.mods);
+      const g = s.spawn(new Villager(s.player.x + 20, s.player.y, home0(s), 'soldier', 20, 'Burr', s.mods)); g.gnome = true; g.applyRole(s.mods);
       g.pouch!.put({ kind: 'kit', kit: 'bandage' }); g.hp = 2;
       mend(4);
       assert(g.pouch!.findSlot((q) => q.kind === 'kit') < 0 && g.hp >= Math.min(g.maxHp, 2 + BANDAGE.heal) - 0.5, `a hurt gnome warrior uses the bandage in its pouch (${g.hp.toFixed(0)}/${g.maxHp})`);
@@ -2079,8 +2095,8 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       const bar = s.world.barracks[0], door = doorstep(bar), stash = s.stashOf(bar);
       stash.length = 0;
       const at = World.center(door.tx + 6, door.ty + 2);
-      const sol = s.spawn(new Villager(at.x, at.y, s.world.houses[0], 'soldier', 20, 'Ash', s.mods)); sol.armor = { ...sol.armor, helmet: 2 };
-      const other = s.spawn(new Villager(at.x + 8, at.y, s.world.houses[0], 'soldier', 20, 'Birch', s.mods));
+      const sol = s.spawn(new Villager(at.x, at.y, home0(s), 'soldier', 20, 'Ash', s.mods)); sol.armor = { ...sol.armor, helmet: 2 };
+      const other = s.spawn(new Villager(at.x + 8, at.y, home0(s), 'soldier', 20, 'Birch', s.mods));
       const steel = { kind: 'armor' as const, slot: 'helmet' as const, tier: 3 }; stash.push(steel);
       const opts = s.fetchOptions(sol, 'helmet');
       assert(opts.length === 1 && opts[0].gear === steel && opts[0].b === bar && s.fetchOptions(sol, 'chest').length === 0, 'the armory offers a soldier what lies in the chests for each slot');
@@ -2095,7 +2111,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(!s.reserved(iron) && s.fetchOptions(sol, 'helmet').some((o) => o.gear === iron), 'a soldier who dies on the way frees the piece');
       // the gnomes' chests: no barracks needed to keep loot at home
       const savedStart = p.gnomeStart; p.gnomeStart = true;
-      s = fresh(); s.dayTime = 0.35; s.paused = false;
+      s = fresh(false, false, false, false, false, true); s.dayTime = 0.35; s.paused = false; // (its foragers do the hauling)
       p.gnomeStart = savedStart;
       const cottage = s.world.gnomeHouses[0];
       assert(s.gearChests().includes(cottage), 'in the gnome start the toadstool cottage keeps a gear chest too');
@@ -2158,7 +2174,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       for (let i = 0; i < 600 && r.shape === 'column'; i++) r.tick(1 / 60, s.world, head, none);
       assert(marching && r.shape === 'line' && Math.hypot(r.x - (400 + 6 * TILE), r.y - 400) < TILE, `a column marches in its narrow order and forms its line again on arrival (${r.shape})`);
       // the shield wall: a front-rank shield turns more blows from the front, none more from behind
-      const v = s.spawn(new Villager(s.player.x + 40, s.player.y, s.world.houses[0], 'soldier', 20, 'Holly', s.mods)); v.gnome = true; v.applyRole(s.mods);
+      const v = s.spawn(new Villager(s.player.x + 40, s.player.y, home0(s), 'soldier', 20, 'Holly', s.mods)); v.gnome = true; v.applyRole(s.mods);
       v.armor = { ...v.armor, shield: 2 }; v.update = () => {};
       const wall = new Regiment(98, '#fff', v.x, v.y - 5); wall.add(v); wall.fx = 0; wall.fy = 1; v.slot = { x: v.x, y: v.y };
       const rate = (shape: 'shieldwall' | 'line', from: number) => {
@@ -2178,7 +2194,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       s = fresh(); clearing(s); s.agents = [s.player]; Object.assign(s.player, World.center(104, 100)); s.world.items.length = 0; s.dayTime = 0.35;
       const raise = (weapon: 'sword' | 'pike' | 'bow', i: number, tag: string) => {
         const at = World.center(118 + (i % 4), 96 + Math.floor(i / 4));
-        const g = s.spawn(new Villager(at.x, at.y, s.world.houses[0], 'soldier', 20, `${tag}${i}`, s.mods)); g.gnome = true; g.applyRole(s.mods); g.weapon = weapon; return g;
+        const g = s.spawn(new Villager(at.x, at.y, home0(s), 'soldier', 20, `${tag}${i}`, s.mods)); g.gnome = true; g.applyRole(s.mods); g.weapon = weapon; return g;
       };
       const swords = [0, 1, 2, 3].map((i) => raise('sword', i, 'Sw')), pikes = [0, 1, 2, 3].map((i) => raise('pike', i + 4, 'Pk')), bows = [0, 1, 2, 3].map((i) => raise('bow', i + 8, 'Bw'));
       run(0.1);
@@ -2327,7 +2343,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       const kill = (n: number, make: (i: number) => Raider | Villager) => { for (let i = 0; i < n; i++) { const m = make(i); m.update = () => {}; m.hp = 0; m.dead = true; } };
       const told = s.journal.length;
       kill(30, (i) => s.spawn(new Raider(at.x + (i % 6) * 8, at.y + Math.floor(i / 6) * 8)));
-      kill(10, (i) => s.spawn(new Villager(at.x - 30 + i * 6, at.y, s.world.houses[0], 'soldier', 20, `Fallen${i}`, s.mods)));
+      kill(10, (i) => s.spawn(new Villager(at.x - 30 + i * 6, at.y, home0(s), 'soldier', 20, `Fallen${i}`, s.mods)));
       run(1);
       const during = s.journal.slice(told);
       assert(!during.some((j) => /slain|is dead|falls/.test(j.text)) && !during.some((j) => j.toast), `while the fight lasts nothing is posted body by body, and nothing toasts (${during.map((j) => j.text).join(' / ') || 'silence'})`);
@@ -2337,13 +2353,13 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(after.length === 1 && /30 raiders slain, 10 of yours lost/.test(after[0].text) && /to the east/.test(after[0].text) && !after[0].toast && !s.battle,
         `six quiet seconds later the fight is told once, and no alert for ten lost (${after[0]?.text})`);
       const told2 = s.journal.length;
-      kill(25, (i) => s.spawn(new Villager(at.x + i * 4, at.y + 20, s.world.houses[0], 'soldier', 20, `Fell${i}`, s.mods)));
+      kill(25, (i) => s.spawn(new Villager(at.x + i * 4, at.y + 20, home0(s), 'soldier', 20, `Fell${i}`, s.mods)));
       run(7);
       const big = s.journal.slice(told2).find((j) => /25 of yours lost/.test(j.text));
       assert(!!big && big.toast, `losing ${BATTLE_BIG_TEST} or more is worth an alert (${big?.text})`);
       // a night's starving: one line, no alert for one or two
       const told3 = s.journal.length;
-      const hungry = [0, 1].map((i) => s.spawn(new Villager(at.x, at.y, s.world.houses[0], 'farmer', 20, `Hungry${i}`, s.mods)));
+      const hungry = [0, 1].map((i) => s.spawn(new Villager(at.x, at.y, home0(s), 'farmer', 20, `Hungry${i}`, s.mods)));
       for (const v of hungry) { v.update = () => {}; v.hungerDays = 99; }
       s.food = 0; s.day++; s.newDay();
       const night = s.journal.slice(told3).filter((j) => /starved/.test(j.text));
@@ -2434,7 +2450,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       // the game loop ticks 120 times a second, sharing the heavy work out: the head moves every tick,
       // everyone else on alternate ticks with twice the time — the same ground covered, half the work a frame
       s = fresh(); s.agents = [s.player]; Object.assign(s.player, World.center(120, 80));
-      const walker = s.spawn(new Villager(s.player.x + 20, s.player.y, s.world.houses[0], 'farmer', 20, 'Walker', s.mods));
+      const walker = s.spawn(new Villager(s.player.x + 20, s.player.y, home0(s), 'farmer', 20, 'Walker', s.mods));
       const steps: number[] = [], headSteps: number[] = [], headUpdate = s.player.update.bind(s.player);
       walker.update = (dt: number) => { steps.push(dt); };
       s.player.update = (dt: number, sc: typeof s) => { headSteps.push(dt); headUpdate(dt, sc); };
@@ -2539,7 +2555,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     }
 
     const n = output.textContent!.split('\n').filter(Boolean).length;
-    summary.textContent = `${n} checks passed`; s.paused = true;
+    summary.textContent = failures.length ? `FAILED ${failures.length} (keepgoing) · ${n} checks run` : `${n} checks passed`; s.paused = true;
   } catch (e) { summary.textContent = 'FAILED'; output.textContent += String(e); console.error(e); } finally { p.adaptiveSpawns = savedAdaptiveSpawns; p.gnomeStart = savedGnomeStart; p.forgeMaxTier = savedForge; p.dropChance = savedDrop; p.caravanEvery = savedCaravan; }
 });
 document.querySelectorAll<HTMLButtonElement>('[data-preview]').forEach(btn => btn.addEventListener('click', () => {
@@ -2547,7 +2563,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-preview]').forEach(btn => bt
   if (kind === 'fort' || kind === 'combat') {
     fort(s); s.world.place('tavern', 125, 98); s.world.place('house', 120, 98);
     s.player.tool = 'bow';
-    const guard = s.spawn(new Villager(2008, 1528, s.world.houses[0], 'soldier', 20, 'Archer', s.mods)); guard.elevated = true; guard.weapon = 'bow'; guard.post = guard.tile;
+    const guard = s.spawn(new Villager(2008, 1528, home0(s), 'soldier', 20, 'Archer', s.mods)); guard.elevated = true; guard.weapon = 'bow'; guard.post = guard.tile;
     if (kind === 'combat') { const brute = s.spawn(new Brute(2008, 1720)); s.spawn(new Raider(1960, 1730)); brute.speed = 30; s.paused = false; }
   } else if (kind === 'forest') {
     const t = s.world.nearest(s.player.x, s.player.y, (t) => t.biome === 'deepwood' && t.kind === 'grass');
