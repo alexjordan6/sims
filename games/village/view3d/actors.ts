@@ -44,7 +44,6 @@ const FOE: Record<EnemyKind, { body: number; head: number; eyes: number }> = {
   troll: { body: 0x3a4a34, head: 0x2e3a28, eyes: 0xffe040 },
   skulk: { body: 0x141414, head: 0x0a0a0a, eyes: 0xe0e0e0 },
 };
-const ROLE: Record<string, number> = { farmer: 0x4a6a34, woodcutter: 0x6a4a2e, soldier: 0x5a5a62, kid: 0x7a6a4a, infant: 0x8a7a5a };
 
 export function heldMesh(held: string): THREE.Object3D | null {
   const g = new THREE.Group();
@@ -109,7 +108,7 @@ function makeCharacter(m: Mover, md: { key: string; tint?: number }): { body: TH
   const look = lookFor(m), held = look ? heldMesh(look.held) : null;
   if (held && hand) { held.scale.setScalar(1 / k); held.position.set(-0.05 / k, -0.32 / k, 0.06 / k); held.rotation.x = Math.PI / 2; hand.add(held); }
   else if (held) { held.position.set(0.3, 0.42, 0.12); held.rotation.x = 0.5; body.add(held); }
-  if (m instanceof Villager && m.gnome && head) { const hat = piece(0xa02a22, 0.34 / k, 0.55 / k, 0.34 / k, 0, 0.2 / k, 0, cone); head.add(hat); } // the red hat
+  if (m instanceof Villager && head) { const hat = piece(0xa02a22, 0.34 / k, 0.55 / k, 0.34 / k, 0, 0.2 / k, 0, cone); head.add(hat); } // the red hat
   if (m instanceof Player && head) head.add(piece(0xc8a040, 0.34 / k, 0.06 / k, 0.32 / k, 0, 0.24 / k, 0)); // the head's circlet
   const mixer = new THREE.AnimationMixer(rig);
   const actions = new Map<string, THREE.AnimationAction>();
@@ -167,7 +166,7 @@ export function makeActor(m: Mover): { body: THREE.Group; key: string; anim?: An
   // a person: legs, body, head, arms; the colours say who
   let torso = 0x5a5a5a, head = 0xb08a6a, legs = 0x2a241e, eyes: number | null = null;
   if (m instanceof Player) { torso = 0x2e4a6e; legs = 0x2a2a34; }
-  else if (m instanceof Villager) { torso = m.gnome ? 0x4a5a3a : ROLE[m.role] ?? 0x5a5a5a; if (m.elder) head = 0x9a8a7a; }
+  else if (m instanceof Villager) { torso = 0x4a5a3a; if (m.elder) head = 0x9a8a7a; }
   else if (m instanceof Raider) { const c = FOE[m.kind]; torso = c.body; head = c.head; legs = 0x141010; eyes = c.eyes; }
   const thin = m instanceof Raider && m.kind === 'skulk';
   const w = thin ? 0.28 : 0.42;
@@ -179,7 +178,7 @@ export function makeActor(m: Mover): { body: THREE.Group; key: string; anim?: An
     for (const x of [0.07, -0.07]) { const e = piece(eyes, 0.06, 0.04, 0.02, x, 1.04, 0.14); (e.material as THREE.MeshLambertMaterial).emissive.setHex(eyes); body.add(e); }
     if (m instanceof Raider && m.kind !== 'ogre' && m.kind !== 'troll') body.add(piece(0x0e0a0a, 0.36, 0.22, 0.34, 0, 1.08, -0.02, cone)); // the hood
   } else body.add(piece(0x141010, 0.05, 0.04, 0.02, 0.07, 1.02, 0.14), piece(0x141010, 0.05, 0.04, 0.02, -0.07, 1.02, 0.14));
-  if (m instanceof Villager && m.gnome) body.add(piece(0xa02a22, 0.34, 0.5, 0.34, 0, 1.18, 0, cone)); // the red hat
+  if (m instanceof Villager) body.add(piece(0xa02a22, 0.34, 0.5, 0.34, 0, 1.18, 0, cone)); // the red hat
   if (m instanceof Player) body.add(piece(0xc8a040, 0.32, 0.06, 0.3, 0, 1.06, 0)); // the head's circlet
   const held = look ? heldMesh(look.held) : null;
   if (held) { held.position.set(w / 2 + 0.08, 0.42, 0.12); held.rotation.x = 0.5; held.userData.held = true; body.add(held); }
@@ -188,12 +187,12 @@ export function makeActor(m: Mover): { body: THREE.Group; key: string; anim?: An
 
 function actorKey(m: Mover): string {
   const look = lookFor(m), md = modelFor(m);
-  return `${md && MODELS.characters.has(md.key) ? md.key : 'box'}|${m.constructor.name}|${look?.held ?? ''}|${look?.body ?? ''}|${m instanceof Villager ? m.role + m.gnome + m.elder : ''}|${m instanceof Raider ? m.kind + m.boss : ''}`;
+  return `${md && MODELS.characters.has(md.key) ? md.key : 'box'}|${m.constructor.name}|${look?.held ?? ''}|${look?.body ?? ''}|${m instanceof Villager ? m.role + m.elder : ''}|${m instanceof Raider ? m.kind + m.boss : ''}`;
 }
 
 export function scaleOf(m: Mover): number {
   const swollen = m instanceof Villager ? m.moodNow?.bulk?.scale ?? 1 : 1;
-  const base = m instanceof Villager ? (m.gnome ? (m.isChild ? 0.38 : 0.55) : m.isChild ? (m.role === 'infant' ? 0.45 : 0.68) : 1)
+  const base = m instanceof Villager ? (m.isChild ? 0.38 : 0.55)
     : m instanceof Boar ? (m.young ? BOAR.youngScale : 1)
     : m instanceof Raider ? ENEMY_SCALE[m.kind] * (m.boss ? 1.15 : 1)
     : 1;

@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { Mover, Villager, Raider, Player } from '../agents';
 import { Bolt } from '../enemies';
-import { TILE, OGRE, GNOME_HOME, FOODS } from '../config';
-import { buildingCenter, BUILDINGS, type Building } from '../world';
+import { TILE, OGRE, FOODS } from '../config';
+import { buildingCenter, BUILDINGS } from '../world';
 import { Sfx } from '../sfx';
 import type { VillageScene, FxEvent } from '../main';
 import { U } from './models';
@@ -12,8 +12,8 @@ import { skyAt } from './sky';
 
 // What the sim's fx queue looks like in 3D: bursts of low-poly specks, swings and thrusts drawn as
 // fading arcs and streaks, words floating up from where they happened, and every sound the 2D game
-// made, in the same places. Also the two places that are felt before they are seen — the cold wind
-// round the Ogre's lair and the gnomes' warm glade — which tell the journal when you first walk in.
+// made, in the same places. Also the place that is felt before it is seen — the cold wind
+// round the Ogre's lair — which tells the journal when you first walk in.
 
 const MAX = 900;
 const speck = new THREE.BoxGeometry(0.07, 0.07, 0.07);
@@ -65,7 +65,7 @@ export class Fx3d {
   private windLevel = 0; private windWarned = false; private windAcc = 0;
   /** the bowls of meals in the air, one mesh each */
   private bowls = new Map<object, THREE.Mesh>();
-  private gladeLevel = 0; private gladeWarned = false; private gladeAcc = 0; private gladeHome: Building | null = null;
+ 
   private wasRaid = false;
   /** seconds until the dark next makes a sound of its own */
   private eerieT = 8;
@@ -89,7 +89,6 @@ export class Fx3d {
     this.streaks = [];
     this.lines = [];
     this.windWarned = false; this.windLevel = 0; this.sfx.wind(0);
-    this.gladeWarned = false; this.gladeLevel = 0; this.gladeHome = null; this.sfx.glade(0);
   }
 
   // ---- primitives ----------------------------------------------------------------
@@ -311,28 +310,6 @@ export class Fx3d {
     if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
   }
 
-  private glade(dt: number): void {
-    const s = this.scene;
-    const den = (this.gladeHome ??= s.world.wildGnomeHouse ?? null);
-    if (!den) { this.sfx.glade(0); return; }
-    const c = buildingCenter(den), gx = c.tx * TILE, gy = c.ty * TILE, R = GNOME_HOME.ringRadius * TILE;
-    const pd = s.interior.active ? Infinity : Math.hypot(s.player.x - gx, s.player.y - gy) / TILE;
-    const target = Math.max(0, Math.min(1, 1 - pd / GNOME_HOME.ringRadius));
-    this.gladeLevel += (target - this.gladeLevel) * Math.min(1, dt * 2);
-    this.sfx.glade(this.sfx.muted ? 0 : this.gladeLevel);
-    if (target > 0.03 && !this.gladeWarned) { this.gladeWarned = true; s.event('info', 'Warm motes drift on the air — something small and friendly keeps house out here.', true); }
-    if (pd > GNOME_HOME.ringRadius + 20) return;
-    this.gladeAcc += dt * 12;
-    while (this.gladeAcc >= 1) {
-      this.gladeAcc -= 1;
-      const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * R;
-      const x = gx + Math.cos(a) * r, y = gy + Math.sin(a) * r;
-      if (!this.visible(x, y)) continue;
-      const p: Speck = { x: x * U, y: groundHeight(x * U, y * U) + 0.2, z: y * U, vx: -Math.cos(a) * 0.3, vy: 0.4 + Math.random() * 0.4, vz: -Math.sin(a) * 0.3, life: 0, max: 2 + Math.random() * 1.4, size: 1, grav: 0 };
-      if (this.specks.length < MAX) { this.mesh.setColorAt(this.specks.length, this.col.setHex(Math.random() < 0.5 ? 0xffe9a0 : 0xd9f0a0)); this.specks.push(p); }
-    }
-    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
-  }
 
   /**
    * The dark makes its own sounds: the drone thickens toward midnight, a sour swell when a raid comes on,
@@ -380,8 +357,8 @@ export class Fx3d {
     const s = this.scene;
     this.flyBowls();
     if (s.paused !== this.wasPaused) this.wasPaused = s.paused;
-    if (this.wasPaused) { this.sfx.wind(0); this.sfx.glade(0); this.sfx.drone(0); }
-    else { this.wind(dt); this.glade(dt); this.dread(dt); }
+    if (this.wasPaused) { this.sfx.wind(0); this.sfx.drone(0); }
+    else { this.wind(dt); this.dread(dt); }
     const step = this.wasPaused ? 0 : dt;
     // specks: integrate, drop the spent ones (keeping colours in step with their slots)
     let w = 0;

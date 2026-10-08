@@ -86,26 +86,26 @@ export const p = live(
     startFood: [D.startFood, 0, 200, 1, 'Food in the granary at NEW VILLAGE.'],
   }, 'economy'),
   params({
-    hearthMul: [D.hearthMul, 0, 3, 0.25, 'Scales every building\'s nightly wood (house 2, barracks/tavern 3 at ×1). 0 = warmth is free.'],
+    hearthMul: [D.hearthMul, 0, 3, 0.25, 'Scales every building\'s nightly wood (cottage 1, warren and barracks 2-3 at ×1). 0 = warmth is free.'],
     hearthNights: [D.hearthNights, 1, 7, 1, 'Nights of firewood a woodpile can hold. Smaller piles mean more cutter trips.'],
     hearthStart: [D.hearthStart, 0, 3, 1, 'Nights of wood a newly built building comes with.'],
   }, 'hearths'),
   params({
-    birthChance: [D.birthChance, 0, 1, 0.05, 'Base birth rate: chance per birth roll (every birthEvery seconds) for a couple in a warm house with a free crib and food to spare.'],
+    birthChance: [D.birthChance, 0, 1, 0.05, 'Base birth rate: chance per birth roll (every birthEvery seconds) for a couple in a warm cottage with a free crib and food to spare.'],
     feverDays: [D.feverDays, 1, 15, 1, 'Baby Fever: days of food in store (at today\'s rations) that count as a surplus.'],
     feverBonus: [D.feverBonus, 0, 0.9, 0.05, 'Baby Fever: birth chance added while the surplus holds.'],
     cadetDays: [D.cadetDays, 0.5, 8, 0.5, 'Days at home, fed, a child needs to come of age skilled. Must fit inside childDays.'],
-    bedBonus: [D.bedBonus, -2, 6, 1, 'Beds added to every house on top of its level (4 / 6 / 8). Beds no longer gate births — cribs do.'],
-    coldKidCare: [D.coldKidCare, -3, 0, 1, 'Care points a child loses after a night in a cold house.'],
+    bedBonus: [D.bedBonus, -2, 6, 1, 'Beds added to every cottage on top of its level (3 / 4 / 6). Beds no longer gate births — cribs do.'],
+    coldKidCare: [D.coldKidCare, -3, 0, 1, 'Care points a child loses after a night in a cold home.'],
     fleeRange: [D.fleeRange, 20, 300, 5, 'Pixels: children run for the nearest door when a raider is this close.'],
   }, 'growth'),
   params({
-    infantDays: [D.infantDays, 0.1, 10, 0.1, 'Days an infant spends in the nursery before walking out into the yard. A house births at most cribs / infantDays children a day.'],
+    infantDays: [D.infantDays, 0.1, 10, 0.1, 'Days an infant spends in the nursery before walking out into the yard. A cottage births at most cribs / infantDays children a day.'],
     childDays: [D.childDays, 0.25, 20, 0.25, 'Days from leaving the nursery to coming of age (Quick to Grow takes 2 off). Feed them for at least cadetDays of it, or nobody comes of age skilled.'],
     adultDays: [D.adultDays, 1, 100, 1, 'Days of adulthood before a villager grows old.'],
     elderDays: [D.elderDays, 0.5, 30, 0.5, 'Days an elder lives on (slower, grey) before passing away.'],
-    birthEvery: [D.birthEvery, 1, 120, 1, 'Real seconds between birth rolls in each house (needs a couple, a warm hearth, a free crib and food to spare; birthChance decides the roll).'],
-    cribs: [D.cribs, 1, 12, 1, 'Cribs in a Lv1 house nursery (+1 per level). A full nursery stalls births there.'],
+    birthEvery: [D.birthEvery, 1, 120, 1, 'Real seconds between birth rolls in each cottage (needs a couple, a warm hearth, a free crib and food to spare; birthChance decides the roll).'],
+    cribs: [D.cribs, 1, 12, 1, 'Cribs in a Lv1 cottage nursery (+1 per level). A full nursery stalls births there.'],
     kidFood: [D.kidFood, 0, 4, 0.25, 'Food a child eats per day (two half-meals) from the piles the head tosses into their home yard. Unfed: no training, then starvation. 0 = children feed themselves.'],
     kidStarveDays: [D.kidStarveDays, 1, 10, 1, 'Hungry days a child survives. Children eat nothing but what lands in their home yard.'],
     tossSize: [D.tossSize, 1, 12, 1, 'Food landing on the ground per throw from the basket.'],
@@ -134,8 +134,7 @@ export const p = live(
     startFarmers: [D.startFarmers, 0, 10, 1, 'Farmers the village opens with (foragers in a gnome start). Founders are spawned as written, so an opening roster may sit over its cap.'],
     startWoodcutters: [D.startWoodcutters, 0, 10, 1, 'Woodcutters the village opens with.'],
     startArchers: [D.startArchers, 0, 50, 1, 'Gnome archers the gnome start opens with (their own banner, III Archers, behind the pikes). The arrows come with the caravans.'],
-    startPikemen: [D.startPikemen, 0, 50, 1, 'Gnome warriors the gnome start opens with, every one of them carrying a pike (in place of startWarriors there). The warrior cap is per barracks, so more than it holds means no warrior is born until you build another.'],
-    startWarriors: [D.startWarriors, 0, 20, 1, 'Warriors the village opens with. Both starts ship a barracks, so these are within the cap at ordinary settings.'],
+    startPikemen: [D.startPikemen, 0, 50, 1, 'Gnome warriors the gnome start opens with, every one of them carrying a pike. The warrior cap is per barracks, so more than it holds means no warrior is born until you build another.'],
   }, 'callings'),
   params({
     playerHp: [D.playerHp, 10, 200, 5, 'The head\'s base HP before armor and boons. Applies at NEW VILLAGE or the next armor change.'],
@@ -161,7 +160,7 @@ export const p = live(
     wallHp: [D.wallHp, 50, 1500, 10, 'HP of a new wall segment.'],
     gateHp: [D.gateHp, 50, 1000, 10, 'HP of a new gate.'],
     wallRepair: [D.wallRepair, 10, 400, 10, 'HP one wood mends on a wall or gate with the hammer.'],
-    buildingHpMul: [D.buildingHpMul, 0.25, 4, 0.25, 'Scales every building\'s HP (house 240, barracks 400 at ×1). Applies to new buildings and upgrades.'],
+    buildingHpMul: [D.buildingHpMul, 0.25, 4, 0.25, 'Scales every building\'s HP (cottage 180, barracks 400 at ×1). Applies to new buildings and upgrades.'],
     towerRange: [D.towerRange, 40, 320, 8, 'Pixels: how far a Lv1 barracks tower shoots (+16 per level).'],
     towerDmg: [D.towerDmg, 1, 30, 1, 'Damage per tower arrow at Lv1 (+1.5 per barracks level).'],
     towerCd: [D.towerCd, 0.2, 5, 0.1, 'Seconds between tower shots.'],
@@ -171,7 +170,7 @@ export const p = live(
   params({
     raiderHp: [D.raiderHp, 5, 100, 1, 'Base HP of a plain raider before wave growth.'],
     raiderDmg: [D.raiderDmg, 1, 30, 1, 'Damage per blow from a plain raider.'],
-    wreckerDmg: [D.wreckerDmg, 1, 60, 1, 'Building damage per wrecker swing (a Lv1 house is 240 HP).'],
+    wreckerDmg: [D.wreckerDmg, 1, 60, 1, 'Building damage per wrecker swing (a Lv1 cottage is 180 HP).'],
     wreckerWallDmg: [D.wreckerWallDmg, 1, 30, 1, 'What a wrecker does to a wall segment per swing when walled off.'],
     bruteWallMul: [D.bruteWallMul, 1, 6, 0.5, 'A brute\'s wall damage as a multiple of its 24-damage blow.'],
     boarBreed: [D.boarBreed, 0, 1, 0.05, 'Daily chance a sounder of two or more boars gains a young one (up to 5 a sounder). Wipe a sounder out and it is gone.'],
@@ -209,7 +208,6 @@ export const p = live(
     godMode: [D.godMode, 'The head cannot die (revives at full HP).'],
     freeBuild: [D.freeBuild, 'Building, upgrading, fortifying, forging and hearth stocking cost nothing.'],
     collide: [D.collide, 'Bodies push each other apart. Off: everyone walks through everyone, as before.'],
-    gnomeStart: [D.gnomeStart, 'NEW VILLAGE starts you as a gnome family (the default): no house — a toadstool cottage in the clearing, its founders, and the craft already learned. ?start=village for the human family.'],
     homeForage: [D.homeForage, 0, 4, 0.25, 'Ripe wild food (mushrooms, burdock, garlic, berries) round the village at NEW VILLAGE, inside the thorns: enough for the first stews and roasts. 1 = about 32 plants.'],
     hunger: [D.hunger, 'The head gets hungry and starves. Off: the belly stays full, nothing drains and T does nothing. Also ?nohunger.'],
     peaceful: [D.peaceful, 'No raid schedule and no Warlord; the day you would have faced him you win instead. Boars and the Ogre still roam, and the SPAWN RAID button still works. Also ?peaceful.'],
@@ -227,10 +225,10 @@ export const TOWER = {
 } as const;
 
 /** Every kind of building on the map (world.ts re-exports this; the per-kind tables below key on it so a new kind can't be forgotten). */
-export type BuildingKind = 'house' | 'barracks' | 'granary' | 'woodyard' | 'tavern' | 'lair' | 'gnomehouse' | 'cookpot' | 'warren';
+export type BuildingKind = 'barracks' | 'granary' | 'woodyard' | 'lair' | 'gnomehouse' | 'cookpot' | 'warren';
 /** The shaman wand's orders, in tiles: how far a holding squad engages from its spot, how close followers keep to the head, and the ring a squad spreads over when sent somewhere. */
 export const ORDER = { leash: 5, followGap: 2.5, spread: 1 } as const;
-export const COST = { house: 20, barracks: 30, tavern: 50, gnomehouse: 25, warren: 60 } as const;
+export const COST = { barracks: 30, gnomehouse: 25, warren: 60 } as const;
 /** The gnome warren: a burrow mound that sleeps a crowd, keeps a big nursery, and feeds its children from the granary. */
 export const WARREN = { beds: 30, cribs: 8 } as const;
 /** warriors each barracks level above the first adds to that barracks' place count */
@@ -262,8 +260,7 @@ export const UPGRADE_COST: Record<BuildingKind, readonly number[]> = {
   cookpot: [0, 0, 0], // the great pot was here before you and takes no hammer
   gnomehouse: [0, 20, 40],
   warren: [0, 0, 0], // one size: build another
-  tavern: [0, 40, 80],
-  house: [0, 30, 60], barracks: [0, 40, 80], granary: [0, 30, 60], woodyard: [0, 30, 60],
+  barracks: [0, 40, 80], granary: [0, 30, 60], woodyard: [0, 30, 60],
 };
 /** what each level of a building gives, in a few words (index = level); shown in tooltips, hints and help */
 export const LEVEL_PERKS: Record<BuildingKind, readonly [string, string, string, string]> = {
@@ -271,8 +268,6 @@ export const LEVEL_PERKS: Record<BuildingKind, readonly [string, string, string,
   cookpot: ['', 'throw food in, cook it, ladle it out to the gnomes', '', ''],
   gnomehouse: ['', '3 beds', '4 beds', '6 beds'],
   warren: ['', `${WARREN.beds} beds · ${WARREN.cribs} cribs · quick births · its children eat from the granary`, '', ''],
-  tavern: ['', 'hearth meals restore 20 HP', 'hearth meals restore 35 HP', 'hearth meals restore 50 HP · family hall'],
-  house: ['', '4 beds', '6 beds', '8 beds · births +15%'],
   barracks: ['', 'fires arrows at raiders · drills the drill yard', 'soldiers +15 HP · iron forge · tower +1.5 dmg', 'soldiers +30 HP · +20% dmg · regen · steel forge · tower +3 dmg'],
   granary: ['', 'holds 150 food', 'holds 300 food', 'holds 600 food'],
   woodyard: ['', 'holds 150 wood', 'holds 300 wood', 'holds 600 wood'],
@@ -283,8 +278,6 @@ export const LEVEL_LOOKS: Record<BuildingKind, readonly [string, string, string,
   cookpot: ['', 'a black cauldron over a fire, steaming when there is something in it', '', ''],
   gnomehouse: ['', 'a toadstool cottage', 'a lantern and a second cap', 'a chimney and a fairy ring'],
   warren: ['', 'a grassy burrow mound with round doors and toadstool chimneys', '', ''],
-  tavern: ['', 'green roof, hanging mug sign', 'flower boxes and second chimney', 'guest loft and lanterns'],
-  house: ['', 'cottage', 'chimney, flower boxes, porch', 'second storey'],
   barracks: ['', 'stone keep', 'shields and stakes', 'tower and torches'],
   granary: ['', 'barn', 'open hay loft', 'silo'],
   woodyard: ['', 'cabin', 'chimney', 'lantern and loft window'],
@@ -310,9 +303,7 @@ export const TRAITS: Record<Trait, { name: string; blurb: string }> = {
   brave: { name: 'Brave', blurb: 'soldiers deal +20%' },
   tireless: { name: 'Tireless', blurb: 'works 25% faster' },
 };
-/** beds per house level (index = level); overridden upward by the Big Families boon */
-export const HOUSE_BEDS = [0, 4, 6, 8] as const;
-/** beds in a gnome house by level; a gnome family breeds like a human one (cribs are p.cribs + level - 1) */
+/** beds in a toadstool cottage by level (cribs are p.cribs + level - 1) */
 export const GNOME_BEDS = [0, 3, 4, 6] as const;
 /** tiles from a home's centre that count as its yard: food lying there feeds the children raised in it */
 export const YARD = 4;
@@ -452,13 +443,11 @@ export const SERVE_RANGE = 8;
 /** Every raw food some recipe calls for: what is worth carrying to the great pot. */
 export const POT_INGREDIENTS: ReadonlySet<FoodKind> = new Set<FoodKind>(DISHES.flatMap((d) => Object.keys(RECIPES[d].needs) as FoodKind[]));
 
-/** How a run begins: the founding family in their house, or a gnome family in their cottage (p.gnomeStart / ?start=gnome). */
-export type StartKind = 'village' | 'gnome';
 
 // ---- walkable interiors ----------------------------------------------------------------------
 /** Buildings you can push the door open and walk into. Every one needs a room palette (interior.ts ROOM). */
-export type InteriorKind = Extract<BuildingKind, 'house' | 'barracks' | 'tavern' | 'gnomehouse'>;
-export const INTERIOR_KINDS: readonly InteriorKind[] = ['house', 'barracks', 'tavern', 'gnomehouse'];
+export type InteriorKind = Extract<BuildingKind, 'barracks' | 'gnomehouse'>;
+export const INTERIOR_KINDS: readonly InteriorKind[] = ['barracks', 'gnomehouse'];
 export function hasInterior(k: BuildingKind): k is InteriorKind { return (INTERIOR_KINDS as readonly BuildingKind[]).includes(k); }
 
 // ---- bodies ---------------------------------------------------------------------------------
@@ -525,19 +514,6 @@ export const OGRE = {
 } as const;
 
 // ---- the hidden gnome cottage ---------------------------------------------------------------
-/**
- * One toadstool cottage stands out in the woods, fogged and unclaimed. Its glade — warm motes and a
- * soft chime inside `ringRadius` tiles — is the clue, the way the lair's cold wind is the Ogre's.
- * Walk into it and the family is yours, along with the craft (the GNOME HOUSE tool is locked until then).
- */
-export const GNOME_HOME = {
-  /** tiles: the glade's radius. The player sees 10, so the motes show before the cottage lifts out of the fog. */
-  ringRadius: 14,
-  /** tiles from the village centre it hides, and how far it keeps from the Ogre's lair */
-  minDist: 30, maxDist: 58, clear: 12,
-  /** mushrooms ringing the cottage: the fairy ring */
-  ringTiles: 10,
-} as const;
 
 // ---- wild boars -----------------------------------------------------------------------------
 /**
@@ -702,9 +678,7 @@ export const WEAPON_SLOTS: readonly WeaponSlot[] = ['melee', 'bow'];
 // ---- hearths --------------------------------------------------------------------------------
 /** Wood a building's hearth burns each night, by level (index = level); 0 means it has no hearth. Woodcutters keep the piles stocked. */
 export const HEARTH_WOOD: Record<BuildingKind, readonly [number, number, number, number]> = {
-  house: [0, 2, 2, 3],
   barracks: [0, 3, 3, 4],
-  tavern: [0, 3, 3, 4],
   granary: [0, 0, 0, 0],
   woodyard: [0, 0, 0, 0],
   lair: [0, 0, 0, 0],
@@ -718,8 +692,6 @@ export const SCRAP_DROP = { raider: 2, brute: 4, warlord: 10, snatcher: 1, shama
 // ---- building damage ------------------------------------------------------------------------
 /** Hit points per building level (index = level). Every kind must appear here, so new buildings are destructible by default; 0 means it can't be hurt (the Ogre's lair). */
 export const BUILDING_HP: Record<BuildingKind, readonly [number, number, number, number]> = {
-  house: [0, 240, 360, 480],
-  tavern: [0, 300, 420, 540],
   granary: [0, 300, 420, 540],
   woodyard: [0, 300, 420, 540],
   barracks: [0, 400, 560, 720],
@@ -734,7 +706,7 @@ export const REPAIR = { perWood: 60, rebuildFraction: 0.5, rebuildDefault: 15 } 
 export const DISMANTLE = { refund: 0.5, hits: 3 } as const;
 
 // ---- the Wrecker ----------------------------------------------------------------------------
-/** A raider that ignores people and tears down buildings, houses first. Walled off, it batters walls slowly. */
+/** A raider that ignores people and tears down buildings, homes first. Walled off, it batters walls slowly. */
 export const WRECKER = {
   hp: 45, dmg: 5, wallDmg: 6, speed: 42,
   /** seconds per swing at a building, and how close to its footprint it stands */

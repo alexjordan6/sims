@@ -18,7 +18,7 @@ export function runPackChecks(s: VillageScene, assert: (ok:unknown,msg:string)=>
   assert(pack.at(0)?.kind==='wood' && (pack.at(0) as {n:number}).n===8 && (pack.at(1) as {n:number}).n===STACK.wood,'merge overflow remains in source');
   assert(pack.take('wood',8)===8 && pack.at(0)===null,'smallest stack drains first');
   const before=pack.slots.map(slotKey).join();assert(!pack.move(-1,1)&&pack.slots.map(slotKey).join()===before,'invalid pack moves preserve data');
-  const saved={range:p.pickupRange,pull:p.pickupPull,slots:p.packSlots,start:p.gnomeStart};
+  const saved={range:p.pickupRange,pull:p.pickupPull,slots:p.packSlots};
   const fresh=()=>{
     s.reset(42);s.screen='playing';s.paused=true;s.agents=[s.player];s.world.items.length=0;s.meatClaims.clear();
     for(let y=90;y<110;y++)for(let x=115;x<140;x++)s.world.set(x,y,'grass');
@@ -26,7 +26,7 @@ export function runPackChecks(s: VillageScene, assert: (ok:unknown,msg:string)=>
     for(const tool of IMPLEMENTS){if(!s.player.pack.hasTool(tool))s.player.pack.put({kind:'tool',tool});s.foundTools.add(tool);} // the checks below work with the whole kit
   };
   try {
-    p.packSlots=12;p.gnomeStart=false;fresh();
+    p.packSlots=12;fresh();
     assert(s.player.pack.emptySlots===8 && IMPLEMENTS.every(t=>s.player.pack.hasTool(t)),'with the whole kit the pack holds four implements and eight free slots');
     s.reset(42);assert(s.player.pack.emptySlots===10 && START_TOOLS.every(t=>s.player.pack.hasTool(t)) && !s.player.pack.hasTool('axe') && !s.player.pack.hasTool('hoe') && !s.player.pack.hasTool('hammer'),'a new village starts with the basket and wand, ten free slots, and none of the lost tools');fresh();
     assert(s.player.weapons.melee===0&&s.player.weapons.bow===0&&s.player.load===null,'club and bow start equipped outside pack; player load stays null');
@@ -38,7 +38,7 @@ export function runPackChecks(s: VillageScene, assert: (ok:unknown,msg:string)=>
     assert(s.scrap===scrap+9&&s.player.carriedOf('scrap')===0,'scrap banks only at the woodyard');
     s.deposit(s.player,s.world.granary);
     assert(s.player.carriedOf('food','berry')===10&&s.food===s.foodCap,'full granary retains excess food in pack');
-    const v=new Villager(s.player.x,s.player.y,s.world.houses[0],'woodcutter',20,'Pack test',s.mods);v.pickUp('wood',8);s.wood=s.woodCap-2;s.deposit(v);
+    const v=new Villager(s.player.x,s.player.y,s.world.gnomeHouses[0],'woodcutter',20,'Pack test',s.mods);v.pickUp('wood',8);s.wood=s.woodCap-2;s.deposit(v);
     assert(v.load?.n===6&&s.wood===s.woodCap,'villager partial deposit retains original armful');
     s.wood=0;s.deposit(v);assert(v.load===null&&s.wood===6,'villager remainder deposits normally');
     fresh();s.player.tool='axe';const axe=s.player.pack.findSlot(g=>g.kind==='tool'&&g.tool==='axe');s.player.pack.removeAt(axe);s.validateTool();
@@ -80,7 +80,7 @@ export function runPackChecks(s: VillageScene, assert: (ok:unknown,msg:string)=>
     const house=s.world.place('gnomehouse',120,94)!,c=buildingCenter(house);Object.assign(s.player,{x:c.tx*TILE+YARD*TILE-33,y:c.ty*TILE});
     it=s.world.dropItem('food',2,s.player.x+32,s.player.y,'berry');x=it.x;s.pickUpItems(1);assert(it.x===x,'gnome yard food is not attracted');s.world.items.length=0;
     // every home's yard is its children's larder, not only a gnome cottage's
-    const hh=s.world.place('house',128,94)!,hcc=buildingCenter(hh);Object.assign(s.player,{x:hcc.tx*TILE+YARD*TILE-33,y:hcc.ty*TILE});
+    const hh=s.world.place('gnomehouse',128,94)!,hcc=buildingCenter(hh);Object.assign(s.player,{x:hcc.tx*TILE+YARD*TILE-33,y:hcc.ty*TILE});
     it=s.world.dropItem('food',2,s.player.x+32,s.player.y,'berry');x=it.x;s.pickUpItems(1);assert(it.x===x,'house yard food is not attracted either');s.world.items.length=0;
     Object.assign(s.player,World.center(124,100));while(!s.player.pack.full)s.player.pack.put({kind:'tool',tool:'axe'});
     it=s.world.dropItem('scrap',10,s.player.x+32,s.player.y);x=it.x;s.pickUpItems(1);assert(it.x===x,'no attraction without room');s.world.items.length=0;
@@ -92,6 +92,6 @@ export function runPackChecks(s: VillageScene, assert: (ok:unknown,msg:string)=>
     s.player.x+=p.pickupRange*TILE+ITEM.reach+1;s.pickUpItems(0);assert(!it.playerDropPending,'leaving pickup radius clears protection');
     Object.assign(s.player,{x:it.x,y:it.y});s.pickUpItems(0);assert(!s.world.items.includes(it),'returning collects deliberate drop normally');
     const tools=s.player.pack.slots.filter(g=>g&&!isBulk(g)).length;assert(tools===4&&s.player.load===null,'pack operations never use player armful');
-    for(const start of [false,true]){p.gnomeStart=start;s.reset(42);assert(s.player.pack.emptySlots===10&&s.player.weapons.melee===0,'starting kit works for '+(start?'gnome':'normal')+' start');}
-  } finally {p.pickupRange=saved.range;p.pickupPull=saved.pull;p.packSlots=saved.slots;p.gnomeStart=saved.start;s.reset(42);}
+    s.reset(42);assert(s.player.pack.emptySlots===10&&s.player.weapons.melee===0,'the starting kit: a club, a bow, the basket and the wand');
+  } finally {p.pickupRange=saved.range;p.pickupPull=saved.pull;p.packSlots=saved.slots;s.reset(42);}
 }

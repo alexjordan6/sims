@@ -74,7 +74,7 @@ export function kitBuilding(b: Building): KitBuilt | null {
   const WIN = stone ? 'town/wall-window-stone' : 'town/wall-wood-window-shutters', BROKEN = stone ? 'town/wall-broken' : 'town/wall-wood-broken';
   if (!have([W, DOOR, WIN, BROKEN, 'town/roof', 'town/roof-gable', 'town/roof-flat', 'town/chimney'])) return null;
   const tint = ruined ? 0x4a4038 : 0xd8d0c8; // a touch dimmer than the kit's bright paint; a ruin, charred
-  const storeys = ruined ? 1 : b.kind === 'house' ? (lvl >= 2 ? 2 : 1) : b.kind === 'granary' ? 2 : b.kind === 'tavern' ? 2 : 1;
+  const storeys = ruined ? 1 : b.kind === 'granary' ? 2 : 1;
   // the walls: every outer edge of the footprint, storey by storey
   for (let s = 0; s < storeys; s++) {
     const y = s * WALL_H;
@@ -121,8 +121,7 @@ export function kitBuilding(b: Building): KitBuilt | null {
   }
   const peak = half * RISE + (odd ? 0.57 : 0);
   for (const z of [0, d]) gableEnd(g, 0, w, top, peak, z, 0x5a4634);
-  if (lvl >= 3 || b.kind === 'tavern') piece(g, 'town/chimney', 0xffffff, w - 1, top + RISE * 0.5, 0.8, 0, 1, 1.4, 1);
-  if (b.kind === 'tavern') piece(g, 'town/banner-red', 0xffffff, f.door + 1.5, 0.6, d - 0.02, -Math.PI / 2);
+  if (lvl >= 3) piece(g, 'town/chimney', 0xffffff, w - 1, top + RISE * 0.5, 0.8, 0, 1, 1.4, 1);
   return { group: g, windows, top: top + peak };
 }
 

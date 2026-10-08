@@ -25,11 +25,9 @@ function part(g: THREE.BufferGeometry, colour: number, sx: number, sy: number, s
 
 /** what a building wears, by kind: walls, roof, and how tall it stands at level 1 */
 const STYLE: Record<BuildingKind, { wall: number; roof: number; h: number }> = {
-  house: { wall: 0x6e5c48, roof: 0x4a2a24, h: 1.3 },
   barracks: { wall: 0x5e5e62, roof: 0x3a3a44, h: 1.8 },
   granary: { wall: 0x7a6248, roof: 0x5a3a26, h: 1.6 },
   woodyard: { wall: 0x5a4632, roof: 0x3e3226, h: 1.1 },
-  tavern: { wall: 0x705a40, roof: 0x3e2420, h: 1.6 },
   lair: { wall: 0x2a2626, roof: 0x1a1818, h: 1.8 },
   gnomehouse: { wall: 0xcfc2a8, roof: 0x9a2a22, h: 0.9 },
   warren: { wall: 0x4e6a30, roof: 0x9a2a22, h: 1.2 },
@@ -137,7 +135,6 @@ function makeBuilding(b: Building): Built {
   if (lvl >= 3 && !ruined && b.kind !== 'barracks') g.add(part(box, 0x4a4040, 0.35, 0.9, 0.35, w - 0.8, h, 0.8)); // a chimney
   g.add(part(box, 0x24180f, 0.6, 0.95, 0.06, doorX, 0, d - 0.12));
   for (const wx of [0.7, w - 0.7]) if (Math.abs(wx - doorX) > 0.6) g.add(part(box, 0x1a1410, 0.38, 0.32, 0.06, wx, h * 0.5, d - 0.12, windows));
-  if (b.kind === 'tavern' && !ruined) g.add(part(box, 0x8a5a2a, 0.5, 0.35, 0.05, doorX + 0.7, 1.0, d - 0.05)); // the sign
   return { group: g, key: '', windows };
 }
 

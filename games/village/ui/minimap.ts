@@ -14,12 +14,11 @@ const TERRAIN: Record<TileKind, [number, number, number]> = {
   sapling: [72, 134, 58],
   bush: [70, 120, 52],
   mushroom: [150, 120, 90],
-  house: [196, 84, 62],
   barracks: [104, 122, 156],
   granary: [214, 110, 60],
   woodyard: [160, 116, 66],
   hazel: [110, 130, 60], garlic: [150, 190, 120], burdock: [90, 120, 60], thicket: [58, 70, 34],
-  tavern: [210, 164, 88], lair: [70, 50, 40], gnomehouse: [200, 70, 60], warren: [120, 150, 70], cookpot: [74, 66, 64], wall: [163, 169, 178], gate: [209, 177, 113], stairs: [128, 194, 218],
+  lair: [70, 50, 40], gnomehouse: [200, 70, 60], warren: [120, 150, 70], cookpot: [74, 66, 64], wall: [163, 169, 178], gate: [209, 177, 113], stairs: [128, 194, 218],
 };
 
 /** long grass reads a shade deeper than mown ground, so cleared lanes show */

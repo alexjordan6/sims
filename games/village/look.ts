@@ -54,10 +54,9 @@ function tileFrames(t: Tile, oldDays: number, wildRipe = false): { ground: numbe
     case 'garlic': return { ground: grass, object: F + FLORA.garlic[wildRipe ? 1 : 0] };
     case 'burdock': return { ground: grass, object: F + FLORA.burdock[wildRipe ? 1 : 0] };
     case 'sapling': return { ground: grass, object: F + (t.stage < 2 ? FLORA.stump : t.stage === 2 ? FLORA.sprout : FLORA.sapling) };
-    case 'house':
     case 'barracks':
     case 'granary':
-    case 'woodyard': case 'tavern': case 'lair': case 'gnomehouse': case 'warren': case 'cookpot': case 'wall': case 'gate': case 'stairs': return { ground: grass, object: EMPTY }; // the building sprite sits on top
+    case 'woodyard': case 'lair': case 'gnomehouse': case 'warren': case 'cookpot': case 'wall': case 'gate': case 'stairs': return { ground: grass, object: EMPTY }; // the building sprite sits on top
   }
 }
 
@@ -71,11 +70,9 @@ export function lookFor(m: Mover): Look | null {
   const blade = m.weapons.melee < 0 ? 'none' : m.weapons.melee > 0 ? 'sword' : 'club';
   if (m instanceof Player) return { ...base, skin: 1, hair: 0, hairStyle: 0, body: 'adult', outfit: 'head', held: m.tool === 'sword' ? blade : m.tool === 'bow' && m.weapons.bow >= 0 ? 'bow' : m.tool === 'axe' ? 'axe' : m.tool === 'wand' ? 'wand' : 'none' };
   if (m instanceof Villager) {
-    if (m.gnome) return { ...base, body: m.isChild ? 'gnomekid' : 'gnome', outfit: 'gnome', held: !m.isAdult ? 'none' : m.role === 'soldier' && m.weapon === 'pike' ? 'pike' : 'club' };
-    if (m.role === 'kid' || m.role === 'infant') return { ...base, body: 'kid', outfit: 'kid', held: 'none' };
-    if (m.elder) base.hair = 6; // grey
-    const held = m.role === 'farmer' ? 'none' : m.role === 'woodcutter' ? 'axe' : m.weapon === 'bow' ? 'bow' : m.weapon === 'pike' ? 'pike' : blade;
-    return { ...base, body: 'adult', outfit: m.role, held };
+    // every villager is a gnome: a little person in a red cap, whatever its calling
+    const held = !m.isAdult ? 'none' : m.role === 'soldier' ? (m.weapon === 'pike' ? 'pike' : m.weapon === 'bow' ? 'bow' : 'club') : m.role === 'woodcutter' ? 'axe' : 'none';
+    return { ...base, body: m.isChild ? 'gnomekid' : 'gnome', outfit: 'gnome', held };
   }
   if (m instanceof Raider) {
     const body = m.boss ? 'boss' : m.kind === 'ogre' ? 'ogre' : m.kind === 'brute' ? 'brute' : m.kind === 'rat' ? 'rat' : m.kind === 'boar' ? 'boar' : m.kind === 'troll' ? 'troll' : m.kind === 'skulk' ? 'skulk' : m.kind === 'snatcher' ? 'imp' : m.kind === 'shaman' ? 'shaman' : 'orc';

@@ -154,11 +154,9 @@ export class UI {
       </div>
       <div class="orders" data-panel="orders" hidden></div>
       <div class="buildrow" hidden>
-        ${slot('house', 'town', TOWN.wallWoodDoor, 'HOUSE', 'A family of 4 lives here and has children', COST.house)}
-        ${slot('barracks', 'town', TOWN.wallStoneDoor, 'BARRACKS', `Room for ${p.soldierCap} more warriors, and what drills them: a child promised a sword needs a warm barracks standing. Its tower shoots arrows at raiders in range; restock the chest inside with wood`, COST.barracks)}
-        ${slot('tavern', 'town', TOWN.wallWoodDoor, 'TAVERN', 'A cozy place to eat, rest and gather', COST.tavern)}
-        ${slot('gnomehouse', 'town', TOWN.wallWoodDoor, 'GNOME HOUSE', GNOME_TITLE, COST.gnomehouse)}
+        ${slot('gnomehouse', 'town', TOWN.wallWoodDoor, 'COTTAGE', GNOME_TITLE, COST.gnomehouse)}
         ${slot('warren', 'town', TOWN.wallWoodDoor, 'WARREN', WARREN_TITLE(), COST.warren)}
+        ${slot('barracks', 'town', TOWN.wallStoneDoor, 'BARRACKS', `Room for ${p.soldierCap} more warriors, and what drills them: a child promised a sword needs a warm barracks standing. Its tower shoots arrows at raiders in range; restock the chest inside with wood`, COST.barracks)}
         ${slot('wall', 'town', TOWN.wallStoneDoor, 'WALL', 'Build a connected stone perimeter. 4 wood per segment', 4)}
         ${slot('gate', 'town', TOWN.wallWoodDoor, 'GATE', 'Friendly villagers pass; X toggles opening to everyone', 12)}
         ${slot('stairs', 'town', TOWN.iconHammer, 'STAIRS', 'Connect stairs to your walls. Right click or X to climb and descend', 10)}
@@ -402,7 +400,7 @@ export class UI {
     this.hotbar.querySelectorAll<HTMLElement>('.slot[data-tool]').forEach((el) => {
       const tool = el.dataset.tool as Tool;
       el.classList.toggle('on', s.player.tool === tool || (tool === 'hammer' && BUILDS.includes(s.player.tool)));
-      el.classList.toggle('off', !!s.toolLocked(tool) || ((tool === 'house' || tool === 'barracks') && s.wood < COST[tool]));
+      el.classList.toggle('off', !!s.toolLocked(tool) || ((tool === 'barracks' || tool === 'gnomehouse' || tool === 'warren') && s.wood < COST[tool]));
       if (tool === 'warren') { const want = s.toolLocked(tool) ? 'Find the gnomes first: they dig the warrens.' : WARREN_TITLE(); if (el.title !== want) el.title = want; }
       if (tool === 'gnomehouse') { const want = s.toolLocked(tool) ? 'Somewhere in these woods a gnome family keeps house. Warm motes drift over their glade — walk into it and they will teach you the craft.' : GNOME_TITLE; if (el.title !== want) el.title = want; }
       if (tool === 'basket') { const lbl = el.querySelector('.lbl')!, want = `BASKET · ${s.player.carriedOf('food',s.player.basketKind)} ${FOODS[s.player.basketKind].name.toUpperCase()}`; if (lbl.textContent !== want) lbl.textContent = want; }
@@ -532,7 +530,7 @@ export class UI {
         const why = s.stockProblem(b);
         html += `<b>Hearth</b><span>${b.warm ? 'warm' : '<em class="warn">COLD</em>'} · ${b.firewood} / ${p.hearthNights} night${b.firewood === 1 ? '' : 's'} stocked · burns ${hearthCost(b)} wood a night <button class="btn small ${why ? '' : 'ok'} stock-hearth" ${why ? 'disabled' : ''} title="${why ? esc(why) : 'from the village pile; woodcutters stock it on their own'}">STOCK +1 NIGHT · ${hearthCost(b)} WOOD</button>${!b.warm ? `<em class="d"> ${b.firewood ? 'lit again at dawn' : 'empty — no births, drill, regen or meals until it burns'}</em>` : ''}</span>`;
       }
-      if (b.kind === 'house' || b.kind === 'gnomehouse') {
+      if (b.kind === 'gnomehouse') {
         const infants = s.infantsOf(b).length, why = s.birthProblem(b);
         html += `<b>Beds</b><span>${s.bedsTaken(b)} / ${s.beds(b)}${s.bedsTaken(b) > s.beds(b) ? ' <em class="warn">· crowded</em>' : ''}</span>`;
         html += `<b>Nursery</b><span>${infants} / ${s.cribs(b)} cribs${b.ruined ? '' : why ? ` · <em class="warn">no births: ${esc(why)}</em>` : ` · ${Math.round(100 * s.birthChance(b))}% every ${p.birthEvery}s · next roll in ${Math.ceil(s.birthIn(b))}s${s.feverActive() ? ' <em class="fever-txt">· baby fever</em>' : ''}`}<em class="d"> infants walk out into the yard after ${p.infantDays} days</em></span>`;
@@ -564,8 +562,8 @@ export class UI {
         html += `<p>The tower shoots raiders inside the ring while the chest has arrows.</p><button class="btn small ${why ? '' : 'ok'} restock" ${why ? 'disabled' : ''} title="${why ? esc(why) : ''}">RESTOCK ${TOWER.restockArrows} ARROWS · ${TOWER.restockWood} WOOD</button>${why ? `<span class="d"> ${esc(why)}</span>` : ''}`;
         html += `<p>Equip soldiers with bows in their cards. SET WALL POST, then click a connected battlement. Stairs are required.</p><button class="btn small craft-arrows">FLETCH 10 ARROWS · 2 WOOD</button> <button class="btn small ok open-armory" title="The chest inside: armor and tower arrows">ARMOR CHEST</button><p class="d">Forges leather now, iron at Lv2, steel at Lv3. Scrap iron drops where a raider falls — walk over it.</p>`;
       }
-      if ((b.kind === 'gnomehouse' || b.kind === 'warren') && !b.wild && !b.ruined) html += `<p class="d">A gear chest: stow loot here for your soldiers to FETCH. <button class="btn small ok open-armory">OPEN CHEST</button></p>`;
-      if (b.kind === 'house' || b.kind === 'barracks' || b.kind === 'tavern' || b.kind === 'gnomehouse' || b.kind === 'warren') {
+      if ((b.kind === 'gnomehouse' || b.kind === 'warren') && !b.ruined) html += `<p class="d">A gear chest: stow loot here for your soldiers to FETCH. <button class="btn small ok open-armory">OPEN CHEST</button></p>`;
+      if (b.kind === 'barracks' || b.kind === 'gnomehouse' || b.kind === 'warren') {
         const why = s.demolishProblem(b), refund = s.demolishRefund(b), arming = this.confirmDemolish === b;
         html += `<p class="d"><button class="btn small ${arming ? 'danger' : ''} demolish" ${why ? 'disabled' : ''} title="${why ? esc(why) : 'Take it down'}">${arming ? `REALLY TAKE IT DOWN? · ${refund} WOOD BACK` : `DEMOLISH · ${refund} WOOD BACK`}</button>${why ? ` ${esc(why)}` : arming ? ' <em class="warn">tenants move out, anyone inside steps out</em>' : b.ruined ? ' rubble is worth nothing' : ''}</p>`;
       }
@@ -603,11 +601,11 @@ export class UI {
     html += `<b>Health</b><div class="bar hp ${hpPct < 40 ? 'low' : ''}"><i style="width:${hpPct}%"></i><span class="bar-txt">${Math.max(0, m.hp | 0)} / ${m.maxHp}</span></div>`;
     if (m instanceof Villager) {
       const stage = m.role === 'infant' ? ` <em>· infant, leaves the nursery in ${Math.max(0, p.infantDays - m.age).toFixed(1)} days</em>`
-        : m.role === 'kid' ? ` <em>· child, comes of age in ${Math.max(0, s.adultAge - m.age).toFixed(1)} days${m.gnome ? ' by the gnome house' : m.calling ? ` learning the ${m.calling}'s trade at home` : ''}</em>`
+        : m.role === 'kid' ? ` <em>· child, comes of age in ${Math.max(0, s.adultAge - m.age).toFixed(1)} days by the cottage</em>`
         : m.elder ? ` <em>· elder</em>` : ` <em>· grows old at ${Math.round(s.elderAge)}</em>`;
       html += `<b>Age</b><span>${m.age.toFixed(1)} days${stage}</span>`;
       html += `<b>Home</b><span>${s.bedsTaken(m.home)} of ${s.beds(m.home)} beds</span>`;
-      html += `<b>Fed</b><span>${m.role === 'infant' ? (m.hungerDays ? `<em class="warn">hungry for ${m.hungerDays} days — nobody at home was fed; ${p.kidStarveDays} days starve an infant</em>` : 'nursed — a fed grown-up at home feeds the nursery') : m.role === 'kid' ? (m.ateDay >= s.day ? `ate today from a pile by ${m.gnome ? 'the gnome house' : 'the house'}` : m.hungerDays ? `<em class="warn">hungry for ${m.hungerDays} days — throw food in the yard (BASKET)</em>` : 'not yet today') : m.hungerDays === 0 ? 'yes' : `<em class="warn">hungry for ${m.hungerDays} days</em>`}</span>`;
+      html += `<b>Fed</b><span>${m.role === 'infant' ? (m.hungerDays ? `<em class="warn">hungry for ${m.hungerDays} days — nobody at home was fed; ${p.kidStarveDays} days starve an infant</em>` : 'nursed — a fed grown-up at home feeds the nursery') : m.role === 'kid' ? (m.ateDay >= s.day ? `ate today from a pile by the cottage` : m.hungerDays ? `<em class="warn">hungry for ${m.hungerDays} days — throw food in the yard (BASKET)</em>` : 'not yet today') : m.hungerDays === 0 ? 'yes' : `<em class="warn">hungry for ${m.hungerDays} days</em>`}</span>`;
     }
     if (m instanceof Player) html += `<b>Belly</b><span>${!p.hunger ? 'hunger is off' : m.hunger <= 0 ? `<em class="warn">empty — starving, ${p.starveHpPerDay} HP a day and no mending</em>` : `${m.hunger.toFixed(1)} / ${p.hungerMax} · about ${(m.hunger / Math.max(1e-6, p.hungerPerDay)).toFixed(1)} days · T eats a meal`}</span>`;
     if(m instanceof Player)html += `<b>Pack</b><span>${m.pack.slots.length-m.pack.emptySlots} / ${m.pack.slots.length} slots used</span>`;
@@ -667,9 +665,7 @@ export class UI {
     const groups: [string, string, Villager[]][] = [
       ['Infants', 'kid', vs.filter((v) => v.role === 'infant').sort((a, b) => b.age - a.age)],
       ['Children', 'kid', vs.filter((v) => v.role === 'kid').sort((a, b) => b.age - a.age)],
-      ['Soldiers', 'soldier', vs.filter((v) => v.role === 'soldier' && !v.gnome)],
-      ['Gnomes', 'gnome', vs.filter((v) => v.gnome && v.isAdult && !v.regiment)], // listed by blood, once: their calling shows on the row (the army is listed by banner)
-      ['Workers', 'farmer', vs.filter((v) => (v.role === 'farmer' || v.role === 'woodcutter') && !v.gnome)],
+      ['Gnomes', 'gnome', vs.filter((v) => v.isAdult && !v.regiment)], // their calling shows on the row (the army is listed by banner)
     ];
     let html = '';
     // the army: one row a banner — strength, shape, stance — rather than a row a gnome
@@ -1146,23 +1142,22 @@ export class UI {
           ${who('dungeon', DUNGEON.hero, 'player', 'You', 'Equip a tool, then left click: axe chops, sword fights, hammer upgrades. Your hands need no tool — right click picks, climbs, works a gate and opens the pot.')}
           ${who('farm', FARM.farmerHat, 'farmer', 'Forager', 'Picks what grows wild and brings it to the granary.')}
           ${who('dungeon', DUNGEON.man, 'woodcutter', 'Woodcutter', 'Fells trees for wood — old growth first, thinning a grove from its edge so the core keeps spreading. Leaves the last ' + TREE_RESERVE + ' standing. Helps in the field when the woodyard is full.')}
-          ${who('dungeon', DUNGEON.villager, 'kid', 'Child', 'Born into the house nursery; walks out into the yard and learns the trade the village had a place for, eating only what you toss in.')}
-          ${who('dungeon', DUNGEON.knight, 'soldier', 'Soldier', 'Guards the barracks and fights raiders.')}
+          ${who('dungeon', DUNGEON.villager, 'kid', 'Child', 'Born into the cottage nursery; walks out into the yard and learns the trade the village had a place for, eating only what you toss in.')}
+          ${who('dungeon', DUNGEON.knight, 'soldier', 'Warrior', 'Falls in under a banner by weapon (pikes, bows, swords) and fights where the banner is sent.')}
           <p><b>The shaman wand.</b> Pick it from the belt and the fighters answer like an army: <b>left click</b> a soldier (shift adds), or <b>drag a box</b> over several; then <b>right click</b> open ground to send them there — they <b>hold</b> that spot, fighting whatever comes within ${ORDER.leash} tiles and drifting back after — a <b>raider</b> to hunt it down (they hold where it fell), or a <b>wall top</b> to man the battlements (it hands them a bow). <b>F</b> makes the squad follow you; F again and they hold where they stand. With nobody picked, an order goes to every soldier. RETURN TO PATROL on a fighter's card cancels their order.</p>
           ${who('dungeon', DUNGEON.orc, 'raider', 'Hollow raider', 'Hooded, red-eyed, never speaks. Walks at the nearest person and hits them.')}
           ${who('dungeon', 123, 'raider', 'Rat swarm', 'At least 10 arrive together and spread round the granary, gnawing its stores. Foragers halves how fast they gnaw. Scare them with equipped weapons or stop them with gates.')}
           ${who('dungeon', DUNGEON.imp, 'raider', 'Snatcher', 'Grabs a child and runs for the map edge. Kill it to free them; kids indoors are safe.')}
           ${who('dungeon', DUNGEON.orc, 'raider', 'Butcher', '180 base HP, 24 damage, twice the speed, reach and attack rate, half the knockback. The axe winds up and swings even when you dodge. Devastates fortifications.')}
-          ${who('dungeon', DUNGEON.orc, 'raider', 'Wrecker', 'Ignores people and goes for the nearest house it can reach, then any other building. A Lv1 house falls in about 16 seconds. Walled off, it batters the wall — slowly. A ruin keeps its footprint but does nothing until the hammer rebuilds it.')}
+          ${who('dungeon', DUNGEON.orc, 'raider', 'Wrecker', 'Ignores people and goes for the nearest cottage or warren it can reach, then any other building. A Lv1 cottage falls in about 12 seconds. Walled off, it batters the wall — slowly. A ruin keeps its footprint but does nothing until the hammer rebuilds it.')}
           ${who('dungeon', DUNGEON.wizard, 'raider', 'Bone shaman', 'Keeps its distance and casts bolts. Close in on it.')}
           ${who('farm', FARM.cow, 'woodcutter', 'Boar', `Not a raider: grazes in sounders out in the woods. Leave it be and it leaves you be; strike one and the whole sounder charges whoever did it (${p.boarDmg} a blow) until it calms. Soldiers and towers ignore calm boars but fight provoked ones, and the wand can send soldiers hunting. A sounder of two or more breeds. Drops ${BOAR.meat} meat where it falls — gnomes carry it to the granary, or pick it up by hand. In long grass it is <b>hidden</b>: you'll see the grass stir as it moves, or tread on it and find out. Mow the grass along your lanes.`)}
           <h3>HEARTHS</h3>
-          <p>Houses, the barracks and the tavern each keep a <b>woodpile</b> that burns one night's wood at dawn (a house ${HEARTH_WOOD.house[1]}, the barracks ${HEARTH_WOOD.barracks[1]}; more at higher levels). <b>Woodcutters</b> fill the piles before they haul to the woodyard, so every armful spent on warmth is one the woodyard doesn't get — and the card can stock a night from the village pile in a pinch. A building with an empty pile spends the day <b>cold</b>: no births, no drill, no soldier regen, no meals, and its children lose care. Your own axe only clears ground (${p.playerTreeYield} wood a tree); the real wood comes in on woodcutters' backs.</p>
+          <p>Cottages, warrens and the barracks each keep a <b>woodpile</b> that burns one night's wood at dawn (a cottage ${HEARTH_WOOD.gnomehouse[1]}, the barracks ${HEARTH_WOOD.barracks[1]}; more at higher levels). <b>Woodcutters</b> fill the piles before they haul to the woodyard, so every armful spent on warmth is one the woodyard doesn't get — and the card can stock a night from the village pile in a pinch. A building with an empty pile spends the day <b>cold</b>: no births, no drill, no soldier regen, no meals, and its children lose care. Your own axe only clears ground (${p.playerTreeYield} wood a tree); the real wood comes in on woodcutters' backs.</p>
           <h3>BUILDINGS</h3>
           <p>Every building can be wrecked. The <b>HAMMER</b> mends a damaged one (1 wood = 60 HP) and raises a ruin again for half its build cost; on a sound building, 3 hits upgrade it for wood. Every building has three levels — the brass studs on the sign by the door count them, and each level changes the building itself:</p>
-          ${building('house', 'House · ' + COST.house + ' wood', 'A couple here has children.')}
-          ${building('gnomehouse', 'Gnome House · ' + COST.gnomehouse + ' wood', 'Comes with a gnome couple — one for the wild, one for the axe — who raise a family like any house (cribs, a hearth, food to spare). Gnome children are raised in the cottage yard, eating only what you throw within a few tiles of it (BASKET), and take a calling like anyone else, out of the same places your buildings keep in work. A gnome <b>forager</b> fills a granary place: the wild is their field, so they walk to the nearest ripe plant, pick one unit and carry it in. A gnome <b>woodcutter</b> fells trees like any other. A gnome <b>warrior</b> fills a barracks place and fights — though it is a little person, with a little person’s HP, whatever armor you forge it. Workers still run home from raiders. <b>You start without the craft:</b> one cottage stands out in the woods, ringed by mushrooms, with a glade of warm motes drifting over it. Walk into the glade and keep going until the cottage itself comes into sight — the family is yours, and they teach you to raise more.')}
-          ${building('warren', 'Gnome Warren · ' + COST.warren + ' wood', WARREN_TITLE() + '. Unlocked once you have found the gnomes; it comes in one size — dig another for more.')}
+          ${building('gnomehouse', 'Toadstool Cottage · ' + COST.gnomehouse + ' wood', 'Comes with a gnome couple — one for the wild, one for the axe — who raise a family (cribs, a hearth, food to spare). Gnome children are raised in the cottage yard, eating only what you throw within a few tiles of it (BASKET), and take a calling like anyone else, out of the same places your buildings keep in work. A gnome <b>forager</b> fills a granary place: the wild is their field, so they walk to the nearest ripe plant, pick one unit and carry it in. A gnome <b>woodcutter</b> fells trees like any other. A gnome <b>warrior</b> fills a barracks place and fights — though it is a little person, with a little person’s HP, whatever armor you forge it. Workers still run home from raiders. <b>You start without the craft:</b> one cottage stands out in the woods, ringed by mushrooms, with a glade of warm motes drifting over it. Walk into the glade and keep going until the cottage itself comes into sight — the family is yours, and they teach you to raise more.')}
+          ${building('warren', 'Gnome Warren · ' + COST.warren + ' wood', WARREN_TITLE() + '. It comes in one size — dig another for more.')}
           ${building('barracks', 'Barracks · ' + COST.barracks + ' wood', 'Keeps ' + p.soldierCap + ' warriors under arms (' + SOLDIER_CAP_PER_LEVEL + ' more at each level above the first) and drills the children promised a sword; its tower shoots raiders. Gnome warriors fall in under banners of ' + REGIMENT_SIZE + ' — see Regiments in the roster.')}
           ${building('granary', 'Granary', 'Holds your food and keeps ' + p.farmerCap + ' farmers in work. The crate stack beside it climbs as the store fills.')}
           ${building('woodyard', 'Woodyard', 'Holds your wood and keeps ' + p.woodcutterCap + ' woodcutters in work. The log stack beside the cabin climbs as it fills.')}

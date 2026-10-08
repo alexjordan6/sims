@@ -32,7 +32,7 @@ interface Fallen { look: Look; x: number; y: number; z: number; yaw: number; sca
 
 /** Is this mover drawn by the crowd (once its look has baked)? Bosses, the head and people stay full actors. */
 export function crowdModel(m: Mover): { key: string; held: string; hat: boolean; tint: number } | null {
-  if (m instanceof Villager && m.gnome) {
+  if (m instanceof Villager) {
     const held = lookFor(m)?.held ?? 'none';
     return { key: GNOME_LOOKS[m.id % GNOME_LOOKS.length], held, hat: true, tint: 0xffffff };
   }

@@ -696,7 +696,7 @@ export class Wrecker extends Raider {
     if (this.retarget <= 0 || (!this.prey && this.retarget <= 4)) {
       this.retarget = 5;
       const from = this.tile;
-      this.prey = s.nearestReachableBuilding(from, ['house']) ?? s.nearestReachableBuilding(from);
+      this.prey = s.nearestReachableBuilding(from, ['gnomehouse', 'warren']) ?? s.nearestReachableBuilding(from);
       if (this.prey) this.clearGoal();
     }
     const t = this.tile;
@@ -892,7 +892,7 @@ export class Skulk extends Raider {
       if (!(o instanceof Mover) || o.dead || o.hidden) return;
       const prey = o instanceof Player || (o instanceof Villager && !o.carriedBy && o.role !== 'infant');
       if (!prey) return;
-      const gnome = o instanceof Villager && o.gnome;
+      const gnome = o instanceof Villager;
       const score = Math.sqrt(d2) - (gnome ? SKULK.gnomeBias * TILE : 0);
       if (score < bs) { bs = score; best = o; }
     });
@@ -911,7 +911,7 @@ export class Skulk extends Raider {
 
     if (this.target) {
       this.speed = SKULK.huntSpeed;
-      this.task = this.target instanceof Villager && this.target.gnome ? 'stalking a gnome' : 'hunting';
+      this.task = this.target instanceof Villager ? 'stalking a gnome' : 'hunting';
       if (this.startAttack(s, this.target, this.dmg, SKULK.reach, SKULK.windup, SKULK.recover)) return;
       // the quarry moves, so the path is re-read on a timer rather than every frame (there are a lot of these)
       this.pathT -= dt;

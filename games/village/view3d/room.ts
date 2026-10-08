@@ -169,11 +169,9 @@ export class Room3d {
     for (const g of this.people.values()) g.userData.seen = false;
     const residents = s.villagers().filter((v) => v.hidden && v.indoors === b && v.role !== 'infant');
     const small = b.kind === 'gnomehouse' ? 0.8 : 1;
-    residents.forEach((v, i) => this.person(v, 46 + (i % 3) * 28, 86 + Math.floor(i / 3) * 46, small * (v.gnome ? 0.55 : v.isChild ? 0.68 : 1), 'r' + v.role + v.gnome));
+    residents.forEach((v, i) => this.person(v, 46 + (i % 3) * 28, 86 + Math.floor(i / 3) * 46, small * 0.55, 'r' + v.role));
     const cribs = it.furniture.filter((f) => f.kind === 'crib'), infants = s.infantsOf(b);
     infants.slice(0, cribs.length).forEach((v, i) => { const f = cribs[i]; this.person(v, f.x + f.w / 2, f.y + f.h / 2, 0.4, 'i'); });
-    const keeper = s.villagers().find((v) => v.role !== 'kid');
-    if (b.kind === 'tavern' && keeper) this.person(keeper, 247, 50, 1, 'k');
     this.person(s.player, it.x, it.y, 1, 'p');
     for (const [m, g] of this.people) if (!g.userData.seen) { this.room.remove(g); this.people.delete(m); }
     // the head turns to walk, and bobs

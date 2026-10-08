@@ -17,7 +17,6 @@ const IRON = '#4a4e57';
 const RED = '#c23b3b', RED_DARK = '#7d2424';
 const BLUE = '#3f6fd1';
 const HAY = '#e0b954', HAY_DARK = '#b8912f';
-const LEAF_BOX = '#4f9a3c';
 
 // log ends
 const BARK_DARK = '#3b2314', BARK = '#7a4a24', BARK_LIGHT = '#a56a36';
@@ -169,11 +168,6 @@ function merlons(ctx: Ctx, x: number, y: number, w: number, p: Palette): void {
 /** Arrow slit: a dark 2x6 slot with a stone lip. */
 function slit(ctx: Ctx, x: number, y: number): void { px(ctx, x - 1, y - 1, STONE_DARK, 4, 8); px(ctx, x, y, INK, 2, 6); litPx(ctx, x, y + 1, '#c99a3a', 2, 4); }
 
-function flowerBox(ctx: Ctx, x: number, y: number, w: number): void {
-  px(ctx, x, y, INK, w, 3); px(ctx, x + 1, y + 1, BARK, w - 2, 1);
-  for (let c = x + 1; c < x + w - 1; c += 2) px(ctx, c, y - 1, c % 4 ? '#e85a7a' : GLOW, 1, 1);
-  for (let c = x + 2; c < x + w - 1; c += 2) px(ctx, c, y, LEAF_BOX, 1, 1);
-}
 
 /** Grain silo: a banded stone cylinder with a domed cap and a weather vane. */
 function silo(ctx: Ctx, x: number, y: number, w: number, h: number): void {
@@ -211,26 +205,6 @@ export const STACK_W = 16, STACK_H = 48, STACK_ROWS = 9;
 
 // ---- buildings, three frames each (Lv1..Lv3) --------------------------------------------------
 
-function drawHouse(ctx: Ctx, ox: number, level: number): void {
-  const p = PALETTES.house;
-  const roofH = level >= 3 ? 26 : 36; // a second storey pushes the roof up
-  const wallTop = roofH - 2;
-  wall(ctx, ox + 4, wallTop, 56, BIG_H - wallTop, p);
-  archDoor(ctx, ox + 36, 62, 10, 18, p);
-  windowAt(ctx, ox + 9, 46, 9, 8, p); windowAt(ctx, ox + 22, 46, 9, 8, p);
-  if (level >= 2) {
-    windowAt(ctx, ox + 49, 46, 9, 8, p);
-    flowerBox(ctx, ox + 9, 55, 9); flowerBox(ctx, ox + 22, 55, 9); flowerBox(ctx, ox + 49, 55, 9);
-    px(ctx, ox + 34, 78, INK, 14, 2); px(ctx, ox + 35, 78, p.frame, 12, 1); // porch step
-  }
-  if (level >= 3) {
-    for (const x of [9, 22, 35, 48]) windowAt(ctx, ox + x, 30, 9, 8, p, x === 35);
-    lantern(ctx, ox + 48, 64);
-  }
-  gableRoof(ctx, ox, 0, BIG_W, roofH, p);
-  if (level >= 2) chimney(ctx, ox + 46, level >= 3 ? 6 : 10);
-  plaque(ctx, ox + 35, 55, level, p);
-}
 
 function drawBarracks(ctx: Ctx, ox: number, level: number): void {
   const p = PALETTES.barracks;
@@ -379,19 +353,6 @@ function drawLair(ctx: Ctx, ox: number, level: number): void {
   else px(ctx, ox + 63, 66, '#3a3a3e', 7, 2);
 }
 
-function drawTavern(ctx: Ctx, ox: number, level: number): void {
-  const p: Palette = { ...PALETTES.house, roof: '#567454', roofDark: '#334b3d', roofLight: '#809767' };
-  wall(ctx, ox + 4, 27, 56, 53, p);
-  gableRoof(ctx, ox, 0, 64, 30, p);
-  archDoor(ctx, ox + 20, 61, 11, 19, p);
-  windowAt(ctx, ox + 8, 43, 12, 11, p); windowAt(ctx, ox + 39, 43, 12, 11, p);
-  chimney(ctx, ox + 48, 8);
-  px(ctx, ox + 44, 58, INK, 2, 15); px(ctx, ox + 40, 60, p.frame, 14, 10);
-  px(ctx, ox + 44, 62, GLOW, 5, 6); px(ctx, ox + 49, 63, GLOW, 2, 3); // hanging mug sign
-  if (level >= 2) { flowerBox(ctx, ox + 8, 55, 12); flowerBox(ctx, ox + 39, 55, 12); chimney(ctx, ox + 9, 16); }
-  if (level >= 3) { windowAt(ctx, ox + 26, 14, 11, 10, p); lantern(ctx, ox + 6, 65); lantern(ctx, ox + 56, 65); }
-  plaque(ctx, ox + 21, 54, level, p);
-}
 
 /** Crenellated ramparts rise the same 64 pixels as the keep's fighting platform. */
 export function ensureFortArt(scene: Phaser.Scene): void {
@@ -459,15 +420,8 @@ export const LIGHTS: Record<BuildingKind, readonly (readonly { x: number; y: num
   warren: [[], [], [], []], // drawn in 3D only
   gnomehouse: [[], [{ x: 19, y: 33, r: 12 }], [{ x: 19, y: 33, r: 12 }, { x: 26, y: 36, r: 10 }], [{ x: 19, y: 33, r: 12 }, { x: 26, y: 36, r: 10 }, { x: 19, y: 43, r: 12 }, { x: 9, y: 46, r: 14, warm: true }]],
   cookpot: [[], [{ x: 24, y: 56, r: 26, warm: true }], [{ x: 24, y: 56, r: 26, warm: true }], [{ x: 24, y: 56, r: 26, warm: true }]], // the fire under it lights the square
-  tavern: [[], [{ x: 14, y: 48, r: 22 }, { x: 45, y: 48, r: 22 }], [{ x: 14, y: 48, r: 24 }, { x: 45, y: 48, r: 24 }], [{ x: 14, y: 48, r: 24 }, { x: 45, y: 48, r: 24 }, { x: 31, y: 19, r: 16 }, { x: 7, y: 65, r: 20, warm: true }]],
   // the lair's fire pit (level 0 = the Ogre is dead and the fire is out)
   lair: [[], [{ x: 66, y: 66, r: 26, warm: true }], [{ x: 66, y: 66, r: 26, warm: true }], []],
-  house: [
-    [],
-    [{ x: 13, y: 50, r: 16 }, { x: 26, y: 50, r: 16 }],
-    [{ x: 13, y: 50, r: 16 }, { x: 26, y: 50, r: 16 }, { x: 53, y: 50, r: 16 }],
-    [{ x: 13, y: 50, r: 16 }, { x: 26, y: 50, r: 16 }, { x: 53, y: 50, r: 16 }, { x: 13, y: 34, r: 14 }, { x: 26, y: 34, r: 14 }, { x: 39, y: 34, r: 16 }, { x: 52, y: 34, r: 14 }, { x: 49, y: 66, r: 20, warm: true }],
-  ],
   barracks: [
     [],
     [{ x: 14, y: 43, r: 8 }, { x: 50, y: 43, r: 8 }],
@@ -487,9 +441,7 @@ export const CHIMNEYS: Record<BuildingKind, readonly (readonly { x: number; y: n
   warren: [[], [], [], []],
   gnomehouse: [[], [], [], [{ x: 23, y: 1 }]],
   cookpot: [[], [{ x: 24, y: 30 }], [{ x: 24, y: 30 }], [{ x: 24, y: 30 }]], // steam off the pot reads like smoke
-  tavern: [[], [{ x: 50, y: 7 }], [{ x: 50, y: 7 }, { x: 11, y: 15 }], [{ x: 50, y: 7 }, { x: 11, y: 15 }]],
   lair: [[], [{ x: 66, y: 60 }], [{ x: 66, y: 60 }], []],
-  house: [[], [], [{ x: 48, y: 9 }], [{ x: 48, y: 5 }]],
   barracks: [[], [], [], []],
   granary: [[], [], [], []],
   woodyard: [[], [], [{ x: 25, y: 3 }], [{ x: 25, y: 3 }]],
@@ -518,9 +470,9 @@ export function ensureGlowTexture(scene: Phaser.Scene): void {
 }
 
 /** Texture key for a building kind; frame = level - 1. */
-export const BUILDING_TEXTURE: Record<BuildingKind, string> = { house: 'bld-house', barracks: 'bld-barracks', granary: 'bld-granary', woodyard: 'cabin', tavern: 'bld-tavern', lair: 'bld-lair', gnomehouse: 'bld-gnomehouse', cookpot: 'bld-cookpot', warren: 'bld-gnomehouse' };
+export const BUILDING_TEXTURE: Record<BuildingKind, string> = { barracks: 'bld-barracks', granary: 'bld-granary', woodyard: 'cabin', lair: 'bld-lair', gnomehouse: 'bld-gnomehouse', cookpot: 'bld-cookpot', warren: 'bld-gnomehouse' };
 /** The same buildings' windows, lanterns and torches alone — laid over the body at night. */
-export const LIT_TEXTURE: Record<BuildingKind, string> = { house: 'bld-house-lit', barracks: 'bld-barracks-lit', granary: 'bld-granary-lit', woodyard: 'cabin-lit', tavern: 'bld-tavern-lit', lair: 'bld-lair-lit', gnomehouse: 'bld-gnomehouse-lit', cookpot: 'bld-cookpot-lit', warren: 'bld-gnomehouse-lit' };
+export const LIT_TEXTURE: Record<BuildingKind, string> = { barracks: 'bld-barracks-lit', granary: 'bld-granary-lit', woodyard: 'cabin-lit', lair: 'bld-lair-lit', gnomehouse: 'bld-gnomehouse-lit', cookpot: 'bld-cookpot-lit', warren: 'bld-gnomehouse-lit' };
 
 /** Create every building and stock texture (safe to call more than once). */
 /** What people carry: a bundle of logs on the shoulder, a basket of produce. 14x8 each. */
@@ -576,20 +528,16 @@ function drawCookPot(ctx: Ctx, ox: number): void {
 export function ensureBuildingArt(scene: Phaser.Scene): void {
   ensureFortArt(scene);
   ensureCarryArt(scene);
-  buildingTexture(scene, 'bld-tavern', BIG_W, BIG_H, drawTavern);
   // lair frames: level 1-2 = the fire burns (the Ogre lives), level 3 = the fire is out (he's dead)
   buildingTexture(scene, 'bld-lair', 80, 80, (ctx, ox, level) => drawLair(ctx, ox, level < 3 ? 1 : 0));
   buildingTexture(scene, 'bld-lair-lit', 80, 80, (ctx, ox, level) => drawLair(ctx, ox, level < 3 ? 1 : 0), true);
-  buildingTexture(scene, 'bld-tavern-lit', BIG_W, BIG_H, drawTavern, true);
   buildingTexture(scene, 'bld-cookpot', POT_W, POT_H, (ctx, ox) => drawCookPot(ctx, ox));
   buildingTexture(scene, 'bld-cookpot-lit', POT_W, POT_H, (ctx, ox) => drawCookPot(ctx, ox), true);
   buildingTexture(scene, 'bld-gnomehouse', CABIN_W, CABIN_H, drawGnomeHouse);
   buildingTexture(scene, 'bld-gnomehouse-lit', CABIN_W, CABIN_H, drawGnomeHouse, true);
-  buildingTexture(scene, 'bld-house', BIG_W, BIG_H, drawHouse);
   buildingTexture(scene, 'bld-barracks', BIG_W, BIG_H, drawBarracks);
   buildingTexture(scene, 'bld-granary', CABIN_W, CABIN_H, drawGranary);
   buildingTexture(scene, 'cabin', CABIN_W, CABIN_H, drawCabin);
-  buildingTexture(scene, 'bld-house-lit', BIG_W, BIG_H, drawHouse, true);
   buildingTexture(scene, 'bld-barracks-lit', BIG_W, BIG_H, drawBarracks, true);
   buildingTexture(scene, 'bld-granary-lit', CABIN_W, CABIN_H, drawGranary, true);
   buildingTexture(scene, 'cabin-lit', CABIN_W, CABIN_H, drawCabin, true);

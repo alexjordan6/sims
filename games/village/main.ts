@@ -12,7 +12,7 @@ import { Interior } from './interior';
 import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, Bolt, Troll, Skulk } from './enemies';
 import { Boar, Swarm, type Sounder } from './wildlife';
 import { Fog } from './fog';
-import { p, TILE, COLS, ROWS, ZOOM, COST, BOAR, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, HOUSE_BEDS, GNOME_BEDS, YARD, ORDER, LEVEL_PERKS, CALLING_NAME, CALLINGS, MOODS, SERVE_RANGE, TROLL, HIVE, ITEM, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, zeroFood, isDish, foodCount, hasInterior, type Recipe, type DishKind, DIET_STAT_NAME, type DietStat, type FoodKind, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
+import { p, TILE, COLS, ROWS, ZOOM, COST, BOAR, RUN, SAPLING_DAYS, SEED_BASE, SEED_PER_NEIGHBOUR, SHELTERED_SAPLING_DAYS, OLD_GROWTH_DAYS, CAPS, UPGRADE_COST, GNOME_BEDS, YARD, ORDER, LEVEL_PERKS, CALLING_NAME, CALLINGS, MOODS, SERVE_RANGE, TROLL, HIVE, ITEM, FOODS, FOOD_KINDS, RAW_KINDS, DISHES, RECIPES, zeroFood, isDish, foodCount, hasInterior, type Recipe, type DishKind, DIET_STAT_NAME, type DietStat, type FoodKind, ARMOR, ARMOR_BARRACKS_LEVEL, SCRAP_DROP, DYES, PLUMES, TOWER, REPAIR, DISMANTLE, WEAPONS, type Calling, type ArmorSlot, type WeaponSlot } from './config';
 import { Meta, type Mods, type RenownBreakdown } from './meta';
 import { preloadArt } from './look';
 import { ensureFlora, ensureBuildingArt } from './pixelart';
@@ -195,8 +195,6 @@ export class VillageScene extends SimScene {
   /** the fog of war: what has been seen */
   fog!: Fog;
   lairFound = false;
-  /** the gnomes' cottage has been found: their family is yours and the GNOME HOUSE tool is unlocked */
-  gnomesFound = false;
   /** standing order for the gnomes: at their head's heels (the default) or off foraging. Toggled by H, inherited by gnomes coming of age. */
   gnomesFollow = true;
   /** set when the run ends */
@@ -281,7 +279,7 @@ export class VillageScene extends SimScene {
     this.buff = null;
     this.mods = this.meta.mods();
     this.world = new World();
-    this.world.generate(this.rng, 3, p.gnomeStart ? 'gnome' : 'village', this.seed);
+    this.world.generate(this.rng, this.seed);
     for (const k of FOOD_KINDS) this.pantry[k] = 0;
     this.food = this.mods.startFood;
     this.wood = this.mods.startWood;
@@ -310,7 +308,6 @@ export class VillageScene extends SimScene {
     this.ruinGuards.clear();
     this.spawnHives();
     this.lairFound = false;
-    this.gnomesFound = p.gnomeStart; // you already keep a toadstool cottage: the craft needs no finding
     this.foundTools = new Set(START_TOOLS);
     this.gnomesFollow = true; // every run starts with them at your heels (reset() does not re-run the field initialiser)
     this.fog?.reset();
@@ -318,42 +315,24 @@ export class VillageScene extends SimScene {
     this.result = null;
     this.nameIdx = this.rng.int(0, NAMES.length - 1);
 
-    const home = p.gnomeStart ? this.world.gnomeStart! : this.world.houses[0];
+    const home = this.world.gnomeStart!;
     const door = doorstep(home);
     const c = World.center(door.tx, door.ty);
-    this.player = this.spawn(new Player(c.x + (p.gnomeStart ? 0 : TILE * 3), c.y + TILE));
+    this.player = this.spawn(new Player(c.x, c.y + TILE));
     this.player.keys = this.wasd;
     this.player.maxHp += this.mods.playerHpBonus;
     this.player.hp = this.player.maxHp;
 
     // the founders are young adults: a few days past coming of age, well short of growing old
     const grown = this.adultAge + 3;
-    // The same opening roster either way, under a roof to match: a village of people, or a band of
-    // gnomes. Founders are spawned as written rather than drawn from the caps -- the caps gate births.
+    // The band: founders are spawned as written rather than drawn from the caps -- the caps gate births.
     for (let i = 0; i < p.startFarmers; i++) this.addVillager(home, 'farmer', grown);
     for (let i = 0; i < p.startWoodcutters; i++) this.addVillager(home, 'woodcutter', grown);
-    // a gnome band marches with pikes: a hedge of points is what little people with 14 HP fight behind
-    // two banners from the first minute: a block of pikes, and a block of bows to stand behind it
-    if (p.gnomeStart) {
-      for (let i = 0; i < p.startPikemen; i++) this.addVillager(home, 'soldier', grown + 2).weapon = 'pike';
-      for (let i = 0; i < p.startArchers; i++) this.addVillager(home, 'soldier', grown + 2).weapon = 'bow';
-    }
-    else for (let i = 0; i < p.startWarriors; i++) this.addVillager(home, 'soldier', grown + 2);
-    if (!p.gnomeStart) {
-      // the Legacy boons are skipped in a gnome start on purpose: addVillager makes anyone homed in a
-      // cottage a gnome, so a boon's soldiers and second family would arrive under the wrong roof.
-      for (let i = 0; i < this.mods.startSoldiers; i++) this.addVillager(home, 'soldier', grown + 2);
-      if (this.mods.extraAdults > 0) {
-        // a second family, in the nearest open 2x2 to the left of the first house
-        const spot = [[-5, 0], [-6, 0], [5, 0], [0, 5], [-5, 5], [5, 5]].map(([dx, dy]) => ({ tx: home.tx + dx, ty: home.ty + dy })).find((q) => this.world.canBuild('house', q.tx, q.ty)) ?? { tx: home.tx - 3, ty: home.ty };
-        const h2 = this.world.placeHouse(spot.tx, spot.ty);
-        for (let i = 0; i < this.mods.extraAdults; i++) this.addVillager(h2, 'soldier', grown);
-      }
-    }
+    // two banners from the first minute: a hedge of pikes (what little people with 14 HP fight behind), and a block of bows to stand behind it
+    for (let i = 0; i < p.startPikemen; i++) this.addVillager(home, 'soldier', grown + 2).weapon = 'pike';
+    for (let i = 0; i < p.startArchers; i++) this.addVillager(home, 'soldier', grown + 2).weapon = 'bow';
     const where = this.world.denseForests ? 'the deep woodland' : 'the open meadows';
-    this.event('info', p.gnomeStart
-      ? `A gnome band keeps house in ${where}, under two banners: ${p.startPikemen} pikes and ${p.startArchers} bows. Nobody comes this far out without a reason. Set the pikes where a raid will run onto them with the bows behind (F1-F4 give your formations their orders), forage what grows wild, and cook it in the great pot in the square. Ox caravans bring arrows and food up the south road.`
-      : `A new village in ${where}. The last one here is gone, and nobody says how. Follow the trails to explore. Build walls and stairs, then station archers.`);
+    this.event('info', `A gnome band keeps house in ${where}, under two banners: ${p.startPikemen} pikes and ${p.startArchers} bows. Nobody comes this far out without a reason. Set the pikes where a raid will run onto them with the bows behind (F1-F4 give your formations their orders), forage what grows wild, and cook it in the great pot in the square. Ox caravans bring arrows and food up the south road.`);
     const lost = this.world.toolCaches.map((c) => `the ${c.tool} ${LOST_TOOLS[c.tool]} to the ${this.bearing(World.center(c.tx, c.ty).x, World.center(c.tx, c.ty).y)}`);
     if (lost.length) this.event('info', `In the flight you lost your tools: ${lost.join(', ')}. Go and fetch them — the hammer builds, the axe fells.`, true);
     if (p.thicketRing > 0 && this.world.thicketCount) this.event('info', 'A ring of thorns hems the village in. It was not here last spring. The trails still run through it, but it creeps closer every night — cut it back with the axe, or it will close the trails and take the fields.');
@@ -420,14 +399,13 @@ export class VillageScene extends SimScene {
   }
   /** Pick open, reachable ground in the wild for a new camp — outside the thorn ring, off the trails, clear of the lair, the gnome glade and other camps, and out of everyone's sight. */
   private campSpot(): TilePos | null {
-    const rng = this.campRng, hx = COLS / 2, hy = ROWS / 2, den = this.world.wildGnomeHouse;
+    const rng = this.campRng, hx = COLS / 2, hy = ROWS / 2;
     for (let tries = 0; tries < 80; tries++) {
       const a = rng.range(0, Math.PI * 2), r = rng.range(32, 80 * Math.sqrt(MAP_AREA)); // the whole wild, however big the map
       const tx = Math.round(hx + Math.cos(a) * r), ty = Math.round(hy + Math.sin(a) * r * 0.7);
       const t = this.world.get(tx, ty);
       if (!t || t.trail || t.building || t.kind === 'thicket' || this.world.isBlocked(tx, ty, true)) continue;
       if (this.world.lair && Math.hypot(this.world.lair.tx - tx, this.world.lair.ty - ty) < 12) continue;
-      if (den && Math.hypot(den.tx - tx, den.ty - ty) < 12) continue;
       if (this.world.toolCaches.some((q) => Math.hypot(q.tx - tx, q.ty - ty) < 10)) continue; // nobody camps on your lost tools
       if (this.camps.some((c) => Math.hypot(c.x / TILE - tx, c.y / TILE - ty) < 14)) continue;
       if (this.fog && this.fog.enabled && this.fog.visibleAt(tx * TILE, ty * TILE) > 0) continue; // a camp grows where nobody is looking
@@ -676,7 +654,7 @@ export class VillageScene extends SimScene {
    * 20-30 tiles out, coming in. ?bench=1000 runs it at load; the debug panel has a button.
    */
   bench(gnomes: number, raiders: number, host = 0): void {
-    const pl = this.player, home = this.world.gnomeHouses[0] ?? this.world.houses[0], rng = new Rng(7);
+    const pl = this.player, home = this.world.gnomeHouses[0], rng = new Rng(7);
     // fill open tiles outward from the head, four gnomes to a tile, until all are placed
     const here = pl.tile, spots: { x: number; y: number }[] = [];
     for (let r = 1; spots.length < gnomes && r < 60; r++) for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) {
@@ -689,7 +667,7 @@ export class VillageScene extends SimScene {
     for (let i = 0; i < spots.length; i++) {
       const { x, y } = spots[i];
       const g = this.spawn(new Villager(x, y, home, 'soldier', 20, `Pike ${i}`, this.mods));
-      g.gnome = true; g.weapon = 'pike'; g.applyRole(this.mods); g.order = { kind: 'follow' };
+      g.weapon = 'pike'; g.applyRole(this.mods); g.order = { kind: 'follow' };
     }
     for (let i = 0; i < raiders; i++) {
       const a = rng.range(0, Math.PI * 2), d = rng.range(20, 30) * TILE, x = pl.x + Math.cos(a) * d, y = pl.y + Math.sin(a) * d, t = World.toTile(x, y);
@@ -841,28 +819,18 @@ export class VillageScene extends SimScene {
     }
   }
 
-  /** The head walks into the glade: the cottage joins the village, its family comes out, and the craft is learned. */
-  findGnomes(b: Building): void {
-    b.wild = undefined;
-    this.gnomesFound = true;
-    this.foundGnomes(b);
-    this.world.refresh(b);
-    this.fx.push({ kind: 'upgrade', building: b });
-    this.event('grow', 'You found the gnomes! Their cottage is yours, they fall in at your heels — and they will show you how to raise another. H sends them foraging.', true);
-  }
-
   /** A new gnome house comes with its founders: a grown couple who can feed themselves, and who breed like any family. */
   foundGnomes(b: Building): [Villager, Villager] {
     const grown = this.adultAge + 3;
     return [this.addVillager(b, 'farmer', grown), this.addVillager(b, 'woodcutter', grown)];
   }
 
-  private addVillager(home: (typeof this.world.houses)[number], role: Role, age: number): Villager {
+  private addVillager(home: Building, role: Role, age: number): Villager {
     const d = doorstep(home);
     const c = World.center(d.tx, d.ty);
     const v = new Villager(c.x + this.rng.range(-4, 4), c.y + this.rng.range(-4, 4), home, role, age, NAMES[this.nameIdx++ % NAMES.length], this.mods);
     if (role === 'soldier') v.order = { kind: 'follow' };
-    if (home.kind === 'gnomehouse' || home.kind === 'warren') { v.gnome = true; v.followingPlayer = this.gnomesFollow; v.applyRole(this.mods); v.hp = v.maxHp; } // born under a toadstool: a gnome for life, and one of your train
+    v.followingPlayer = this.gnomesFollow; v.hp = v.maxHp; // a gnome, and one of your train
     if (role === 'soldier') { v.barracksHp = this.world.barracksLevel >= 3 ? 30 : this.world.barracksLevel >= 2 ? 15 : 0; v.applyRole(this.mods); v.hp = v.maxHp; }
     // infants live in the nursery, unseen until they walk out
     if (role === 'infant') { v.hidden = true; v.indoors = home; const c = buildingCenter(home); v.x = c.tx * TILE; v.y = c.ty * TILE; }
@@ -1036,7 +1004,7 @@ export class VillageScene extends SimScene {
     const b = t?.building;
     const chest = this.chestNear(ptr.worldX, ptr.worldY);
     if (chest) { this.order({ kind: 'loot', chest }); return; }
-    if (b && hasInterior(b.kind) && !b.ruined && !b.wild) { this.order({ kind: 'enter', b }); return; }
+    if (b && hasInterior(b.kind) && !b.ruined) { this.order({ kind: 'enter', b }); return; }
     if (t && (t.defense?.kind === 'gate' || t.defense?.kind === 'stairs' || t.kind === 'cookpot' || (!t.defense && this.handsHint(q)))) { this.order({ kind: 'use', q, how: 'hands', repeat: false }); return; }
     this.order({ kind: 'move', x: ptr.worldX, y: ptr.worldY });
   }
@@ -1054,7 +1022,7 @@ export class VillageScene extends SimScene {
   private toolReach(): number {
     const tool = this.player.tool;
     if (tool === 'basket') return p.tossRange;
-    if (tool === 'wall' || tool === 'gate' || tool === 'stairs' || tool === 'house' || tool === 'tavern' || tool === 'gnomehouse' || tool === 'warren' || tool === 'barracks') return Math.min(3, VillageScene.BUILD_REACH);
+    if (tool === 'wall' || tool === 'gate' || tool === 'stairs' || tool === 'gnomehouse' || tool === 'warren' || tool === 'barracks') return Math.min(3, VillageScene.BUILD_REACH);
     return VillageScene.TOOL_REACH;
   }
 
@@ -1349,8 +1317,7 @@ export class VillageScene extends SimScene {
     }
     if ((tool === 'sword' && this.player.weapons.melee < 0) || (tool === 'bow' && this.player.weapons.bow < 0)) return 'Equip a weapon first';
     if (BUILDS.includes(tool) && !this.player.pack.hasTool('hammer')) return this.toolLocked('hammer') ?? 'Find your hammer first';
-    if (tool === 'warren' && !this.gnomesFound) return 'Find the gnomes first: they dig the warrens';
-    return tool === 'gnomehouse' && !this.gnomesFound ? 'You have never seen how a toadstool cottage is built' : null;
+    return null;
   }
   validateTool(): void { if (this.toolLocked(this.player.tool)) { this.player.tool = 'sword'; this.player.swing = null; } }
   equipped(slot: EquipmentSlot): Gear | null {
@@ -1853,7 +1820,7 @@ export class VillageScene extends SimScene {
   gnomesAtPot(b = this.world.cookpot): Villager[] {
     if (!b) return [];
     const c = buildingCenter(b);
-    return this.villagers().filter((v) => v.gnome && v.isAdult && !v.dead && !v.hidden && !v.carriedBy
+    return this.villagers().filter((v) => v.isAdult && !v.dead && !v.hidden && !v.carriedBy
       && Math.hypot(v.x - c.tx * TILE, v.y - c.ty * TILE) <= SERVE_RANGE * TILE);
   }
   /** Why nobody can be served right now, or null. */
@@ -2078,17 +2045,17 @@ export class VillageScene extends SimScene {
       { label: 'Well fed', ok: kid.ateDay >= this.day, note: 'ate in the yard today' },
       { label: 'Family', ok: parents >= 2, note: parents === 1 ? 'one parent' : parents === 0 ? 'no parents' : undefined },
       { label: 'Company', ok: sibling, note: 'another child at home' },
-      { label: 'Warm', ok: kid.home.warm, note: kid.home.warm ? 'the hearth is lit' : 'their house is cold — stock its hearth' },
-      { label: 'Home', ok: kid.home.level >= 2 && !kid.home.ruined && kid.home.warm, note: kid.home.ruined ? 'their house is in ruins' : 'house Lv2+' },
+      { label: 'Warm', ok: kid.home.warm, note: kid.home.warm ? 'the hearth is lit' : 'their cottage is cold — stock its hearth' },
+      { label: 'Home', ok: kid.home.level >= 2 && !kid.home.ruined && kid.home.warm, note: kid.home.ruined ? 'their cottage is in ruins' : 'cottage Lv2+' },
       { label: 'Attention', ok: kid.encouragedDay === this.day, note: 'encourage them' },
       { label: 'Safe', ok: kid.fledDay !== this.day, note: 'ran from raiders' },
     ];
   }
-  /** Where a child runs when raiders come: the nearest house or barracks door. */
+  /** Where a child runs when raiders come: the nearest cottage, warren or barracks door. */
   nearestShelter(x: number, y: number): Building | null {
     let best: Building | null = null, bd = Infinity;
     for (const b of this.world.buildings) {
-      if ((b.kind !== 'house' && b.kind !== 'barracks' && b.kind !== 'tavern' && b.kind !== 'gnomehouse' && b.kind !== 'warren') || b.ruined) continue;
+      if ((b.kind !== 'barracks' && b.kind !== 'gnomehouse' && b.kind !== 'warren') || b.ruined) continue;
       const d = doorstep(b), c = World.center(d.tx, d.ty), dd = (c.x - x) ** 2 + (c.y - y) ** 2;
       if (dd < bd) { bd = dd; best = b; }
     }
@@ -2149,7 +2116,7 @@ export class VillageScene extends SimScene {
         html = `<div class="t">${t.stage < 2 ? 'Stump' : 'Sapling'}</div><div class="d">grows into a tree in ${days} day${days === 1 ? '' : 's'}${this.world.treeNeighbours(tx, ty) >= 2 ? ' · sheltered by the grove' : ''}</div>`;
         break;
       }
-      case 'house': case 'barracks': case 'granary': case 'woodyard': case 'tavern': case 'gnomehouse': case 'warren': {
+      case 'barracks': case 'granary': case 'woodyard': case 'gnomehouse': case 'warren': {
         const b = t.building!;
         html = `<div class="t">${this.buildingTitle(b)}</div><div class="d">${this.buildingBlurb(b)}</div>`;
         break;
@@ -2206,12 +2173,6 @@ export class VillageScene extends SimScene {
     if (!this.lairFound && this.world.lair && this.fog) {
       const c = buildingCenter(this.world.lair);
       if (this.fog.visibleAt(c.tx * TILE, c.ty * TILE) > 0.5) { this.lairFound = true; this.event('raid', "You found the Ogre's lair. It reeks of old meat. He sleeps by day."); }
-    }
-    // finding the gnomes: walk into their glade until the cottage itself comes into sight
-    const den = this.world.wildGnomeHouse;
-    if (den && this.fog) {
-      const c = buildingCenter(den);
-      if (this.fog.visibleAt(c.tx * TILE, c.ty * TILE) > 0.5) this.findGnomes(den);
     }
     if (this.battle && (this.newsClock - this.battle.last >= BATTLE_QUIET || (this.raidActive && !this.agents.some((a) => a instanceof Raider && !a.lairBound)))) this.tellBattle();
     if (this.raidActive && !this.agents.some((a) => a instanceof Raider && !a.lairBound)) {
@@ -2281,7 +2242,6 @@ export class VillageScene extends SimScene {
       this.event('info', `The woodcutters won't go ${ns}${ns && ew ? '-' : ''}${ew} any more. Something walks the forest there, taller than the trees. Only at night.`);
     }
     // the gnomes: that they exist, never where. Their glade is the clue — walk into it.
-    if (this.day === 3 && this.world.wildGnomeHouse) this.event('info', 'The children swear a little red cap watches them from the ferns. They say it smiles.');
 
     this.burnHearths();
     // the warrens' night, in one line each rather than one a child
@@ -2303,7 +2263,7 @@ export class VillageScene extends SimScene {
         // children eat nothing but what lands in their home yard: yesterday's meal came off a pile, or it didn't
         if (p.kidFood <= 0 || v.ateDay >= this.day - 1) { v.hungerDays = 0; wellFed = true; }
         else if (++v.hungerDays >= p.kidStarveDays) { v.dead = true; v.hp = 0; v.starved = true; starved.push(v); continue; }
-        else if (!warnedHomes.has(v.home)) { warnedHomes.add(v.home); this.event('food', `Children at ${v.gnome ? 'the gnome house' : 'a house'} are going hungry — throw food in their yard (BASKET)`, true); }
+        else if (!warnedHomes.has(v.home)) { warnedHomes.add(v.home); this.event('food', `Children at a cottage are going hungry — throw food in their yard (BASKET)`, true); }
       }
       else if (this.food >= ration) { this.food -= ration; v.hungerDays = 0; }
       else if (++v.hungerDays >= 3 + this.mods.starveDaysDelta) { v.dead = true; v.hp = 0; v.starved = true; starved.push(v); continue; }
@@ -2324,7 +2284,7 @@ export class VillageScene extends SimScene {
     let nurseryWarned = false;
     for (const v of villagers) {
       if (v.role !== 'infant' || v.dead) continue;
-      const nursed = villagers.some((o) => o !== v && (v.home.kind === 'warren' ? o.gnome : o.home === v.home) && o.isAdult && !o.dead && o.hungerDays === 0);
+      const nursed = villagers.some((o) => o !== v && (v.home.kind === 'warren' || o.home === v.home) && o.isAdult && !o.dead && o.hungerDays === 0);
       if (nursed) { v.hungerDays = 0; continue; }
       if (++v.hungerDays >= p.kidStarveDays) { v.dead = true; v.hp = 0; v.starved = true; starved.push(v); continue; }
       if (!nurseryWarned) { nurseryWarned = true; this.event('food', `${v.name} goes hungry in the nursery — a fed grown-up at home nurses the infants`, true); }
@@ -2335,10 +2295,10 @@ export class VillageScene extends SimScene {
     else if (starved.length) this.event('death', `${starved.length} starved in the night: ${starved.slice(0, 4).map((v) => v.name).join(', ')}${starved.length > 4 ? ` and ${starved.length - 4} more` : ''}. Feed the yards and fill the granary.`, starved.length >= 3);
 
     // move-ins: adults from crowded houses take a spare room elsewhere
-    for (const h of this.world.familyHouses) {
+    for (const h of this.world.gnomeHouses) {
       if (!this.hasBed(h)) continue;
       const mover = villagers.find((v) => v.isAdult && !v.dead && v.home !== h && this.homesFor(v).includes(h) && villagers.filter((o) => o.home === v.home && o.isAdult).length > 2);
-      if (mover) { mover.home.residents--; mover.home = h; h.residents++; this.event('info', `${mover.name} moved into a new house`); }
+      if (mover) { mover.home.residents--; mover.home = h; h.residents++; this.event('info', `${mover.name} moved into a new cottage`); }
     }
 
     if (p.peaceful) {
@@ -2406,7 +2366,7 @@ export class VillageScene extends SimScene {
   birthProblem(h: Building): string | null {
     if (h.ruined) return 'in ruins';
     if (!h.warm) return 'the hearth is cold';
-    if (h.kind === 'warren') { if (this.villagers().filter((v) => v.gnome && v.isAdult && !v.dead).length < 2) return 'needs two grown gnomes in the village'; }
+    if (h.kind === 'warren') { if (this.villagers().filter((v) => v.isAdult && !v.dead).length < 2) return 'needs two grown gnomes in the village'; }
     else if (this.villagers().filter((v) => v.home === h && v.isAdult && !v.dead).length < 2) return 'needs a couple living here';
     if (this.infantsOf(h).length >= this.cribs(h)) return 'the nursery is full';
     if (this.food <= 10) return 'food to spare first';
@@ -2442,13 +2402,13 @@ export class VillageScene extends SimScene {
 
   tickBirths(): void {
     const fever = this.feverActive();
-    for (const h of this.world.familyHouses) {
+    for (const h of this.world.gnomeHouses) {
       if (h.nextBirth === undefined) h.nextBirth = this.simTime + this.rng.range(0, p.birthEvery);
       if (h.nextBirth > this.simTime) continue;
       const warren = h.kind === 'warren';
       h.nextBirth = this.simTime + (warren ? p.warrenBirthEvery : p.birthEvery);
       if (this.birthProblem(h) || !this.rng.chance(this.birthChance(h, fever))) continue;
-      const adults = this.villagers().filter((v) => (warren ? v.gnome : v.home === h) && v.isAdult && !v.dead);
+      const adults = this.villagers().filter((v) => (warren || v.home === h) && v.isAdult && !v.dead);
       const kid = this.addVillager(h, 'infant', 0);
       kid.calling = this.pickCalling(); // the place is theirs from birth, gnome or not
       kid.parents = [adults[0], adults[1]];
@@ -2481,7 +2441,7 @@ export class VillageScene extends SimScene {
     v.mealAt = this.simTime + p.dayLength / 4;
     v.ateDay = this.day;
     if (v.home.kind === 'warren') { this.warrenToddled++; return; }
-    this.event('grow', v.gnome ? `${v.name} toddled out of the gnome house` : v.calling ? `${v.name} left the nursery to learn the ${v.calling}'s trade` : `${v.name} left the nursery`);
+    this.event('grow', `${v.name} toddled out of the cottage`);
   }
   /** A new adult takes a bed near where they trained, else the least crowded house. */
   rehouse(v: Villager): void {
@@ -2493,7 +2453,7 @@ export class VillageScene extends SimScene {
     if (next && next !== v.home) { v.home.residents--; v.home = next; next.residents++; }
   }
   /** The houses `v` may live in: gnomes keep to gnome houses, people to people's. */
-  homesFor(v: Villager): Building[] { return v.gnome ? this.world.gnomeHouses : this.world.houses; }
+  homesFor(_v: Villager): Building[] { return this.world.gnomeHouses; }
   /** Walking up to the granary with the basket out takes food for the pens. */
   fillBasket(): void {
     const g = this.world.granary, pl = this.player;
@@ -2929,7 +2889,7 @@ export class VillageScene extends SimScene {
     // a warren's children eat from the granary like the grown; everywhere else they eat what lies in their yard
     if (v.role === 'kid' && v.home.kind === 'warren') return full * p.gnomeRation;
     if (v.isChild) return 0; // infants are nursed, children eat only what lies in their home yard
-    return v.gnome ? full * p.gnomeRation : full;
+    return full * p.gnomeRation;
   }
   /** births in the warrens since the last dawn, and children who left a warren's nursery: told once a dawn, together */
   warrenBorn = 0;
@@ -2957,8 +2917,7 @@ export class VillageScene extends SimScene {
   beds(h: Building): number {
     if (h.ruined) return 0;
     if (h.kind === 'warren') return WARREN.beds;
-    if (h.kind === 'gnomehouse') return Math.max(0, (GNOME_BEDS[h.level] ?? 3) + this.mods.bedBonus + p.bedBonus);
-    return Math.max(0, Math.max(HOUSE_BEDS[h.level] ?? 4, this.mods.houseCap) + this.mods.bedBonus + p.bedBonus);
+    return Math.max(0, (GNOME_BEDS[h.level] ?? 3) + p.bedBonus);
   }
   get foodCap(): number { return Math.round(CAPS[this.world.granary?.level ?? 1] * this.mods.capMul); }
   get woodCap(): number { return Math.round(CAPS[this.world.woodyard?.level ?? 1] * this.mods.capMul); }
@@ -2968,7 +2927,7 @@ export class VillageScene extends SimScene {
   /** Add to the stockpile, respecting storage; says so (once a day) when the store is full. */
   /** Hand a carried load in at its building: the stockpile takes it (up to the cap) and the arms are free. */
   deposit(m: Mover, at?: Building): void {
-    if (m instanceof Villager && m.gnome && m.role !== 'soldier') this.stowPouchGear(m);
+    if (m instanceof Villager && m.role !== 'soldier') this.stowPouchGear(m);
     for (const load of m.carriedLoads()) {
       const b = load.kind === 'food' ? this.world.granary : this.world.woodyard;
       if (!b || (at && at !== b) || b.ruined) continue;
@@ -3005,7 +2964,7 @@ export class VillageScene extends SimScene {
     if (b.ruined) return `in ruins · nothing works until the hammer rebuilds it (${this.rebuildCost(b)} wood)`;
     const hearth = hasHearth(b) ? (b.warm ? ` · hearth ${hearthCost(b)} wood/night · ${b.firewood} night${b.firewood === 1 ? '' : 's'} stocked` : ` · COLD — ${b.firewood ? 'lit again at dawn' : 'the pile is empty'}`) : '';
     const now = b.kind === 'warren' ? this.warrenReport(b)
-      : b.kind === 'house' || b.kind === 'gnomehouse' ? `${this.bedsTaken(b)}/${this.beds(b)} beds · nursery ${this.infantsOf(b).length}/${this.cribs(b)}${b.level >= 3 ? ' · births +15%' : ''}`
+      : b.kind === 'gnomehouse' ? `${this.bedsTaken(b)}/${this.beds(b)} beds · nursery ${this.infantsOf(b).length}/${this.cribs(b)}${b.level >= 3 ? ' · births +15%' : ''}`
       : b.kind === 'granary' ? `${this.food | 0}/${CAPS[b.level]} food (${FOOD_KINDS.filter((k) => this.pantry[k] >= 1).map((k) => `${this.pantry[k] | 0} ${FOODS[k].one}`).join(', ') || 'empty'}) · the harvest is carried here`
       : b.kind === 'woodyard' ? `${this.wood | 0}/${CAPS[b.level]} wood · chopped logs are carried here`
       : LEVEL_PERKS[b.kind][b.level];
@@ -3080,8 +3039,8 @@ export class VillageScene extends SimScene {
   }
   /** Why `b` can't be demolished right now, or null. */
   demolishProblem(b: Building): string | null {
-    if (!(b.kind in COST)) return 'only houses, barracks, gnome houses and the tavern can be taken down';
-    if ((b.kind === 'house' || b.kind === 'gnomehouse' || b.kind === 'warren') && this.villagers().some((v) => v.home === b && !v.dead) && !(b.kind === 'house' ? this.world.houses : this.world.gnomeHouses).some((h) => h !== b && !h.ruined)) return 'its tenants would have nowhere to live';
+    if (!(b.kind in COST)) return 'only cottages, warrens and barracks can be taken down';
+    if ((b.kind === 'gnomehouse' || b.kind === 'warren') && this.villagers().some((v) => v.home === b && !v.dead) && !this.world.gnomeHouses.some((h) => h !== b && !h.ruined)) return 'its tenants would have nowhere to live';
     return null;
   }
   /** Take a building down: tenants move to another house, anyone inside steps out, half the wood comes back. */
@@ -3134,7 +3093,7 @@ export class VillageScene extends SimScene {
   /** The nearest building of `kinds` (any breakable one by default) a walker from `from` can reach: nearest first, one search at a time, stopping at the first that answers. */
   nearestReachableBuilding(from: TilePos, kinds?: readonly BuildingKind[]): Building | null {
     const fx = (from.tx + 0.5) * TILE, fy = (from.ty + 0.5) * TILE;
-    const near = this.world.buildings.filter((b) => !(b.kind === 'lair' || b.wild || b.ruined || !b.maxHp || (kinds && !kinds.includes(b.kind))))
+    const near = this.world.buildings.filter((b) => !(b.kind === 'lair' || b.ruined || !b.maxHp || (kinds && !kinds.includes(b.kind))))
       .map((b) => { const c = buildingCenter(b); return { b, d: (c.tx * TILE - fx) ** 2 + (c.ty * TILE - fy) ** 2 }; }).sort((a, z) => a.d - z.d);
     for (const { b } of near) {
       const f = BUILDINGS[b.kind];
@@ -3147,7 +3106,7 @@ export class VillageScene extends SimScene {
     const fx = (from.tx + 0.5) * TILE, fy = (from.ty + 0.5) * TILE;
     const out: { b: Building; d: number }[] = [];
     for (const b of this.world.buildings) {
-      if (b.kind === 'lair' || b.wild || b.ruined || !b.maxHp || (kinds && !kinds.includes(b.kind))) continue; // nothing to gain from battering what cannot break
+      if (b.kind === 'lair' || b.ruined || !b.maxHp || (kinds && !kinds.includes(b.kind))) continue; // nothing to gain from battering what cannot break
       const f = BUILDINGS[b.kind];
       const adjacent = from.tx >= b.tx - 1 && from.tx <= b.tx + f.w && from.ty >= b.ty - 1 && from.ty <= b.ty + f.h;
       if (!adjacent && !this.world.bfs(from, doorstep(b), true).length) continue;
@@ -3167,7 +3126,7 @@ export class VillageScene extends SimScene {
    */
   summonGnomes(): void {
     if (this.screen !== 'playing' || this.paused || this.interior.active) return;
-    const adults = this.villagers().filter(v => v.gnome && v.isAdult && !v.dead);
+    const adults = this.villagers().filter(v => v.isAdult && !v.dead);
     const workers = adults.filter(v => v.role !== 'soldier');
     // only warriors whose orders are ours to move: a wand hold or attack, and a wall post, are not
     const warriors = adults.filter(v => v.role === 'soldier' && !v.post && !v.regiment && (!v.order || v.order.kind === 'follow'));
@@ -3360,7 +3319,7 @@ export class VillageScene extends SimScene {
   // a pile that runs dry leaves the building cold for the day: no births, no drill, no regen, no meals.
 
   /** standing buildings with a hearth */
-  hearthBuildings(): Building[] { return this.world.buildings.filter((b) => hasHearth(b) && !b.ruined && !b.wild); }
+  hearthBuildings(): Building[] { return this.world.buildings.filter((b) => hasHearth(b) && !b.ruined); }
   /** Dawn: every hearth burns one night, or goes cold. */
   private burnHearths(): void {
     let burned = 0; const cold: string[] = [];
@@ -3610,7 +3569,7 @@ export class VillageScene extends SimScene {
   /** One of yours has fallen in a fight. */
   tallyLoss(v: Villager): void {
     const b = this.battleNow();
-    b.lost++; if (v.gnome) b.gnomes++;
+    b.lost++; b.gnomes++;
     b.sx += v.x; b.sy += v.y; b.n++; b.last = this.newsClock;
     if (this.hosts.some((h) => h.state === 'marching')) b.host = true;
   }
@@ -3831,7 +3790,7 @@ export class VillageScene extends SimScene {
   /** the wand's right button held on open ground: press = the centre, drag = the facing (and a line's width) */
   placing: { x0: number; y0: number; x1: number; y1: number } | null = null;
   /** Who stands under a banner: grown gnome soldiers. */
-  rankable(v: Villager): boolean { return v.gnome && this.commandable(v); }
+  rankable(v: Villager): boolean { return this.commandable(v); }
   /** Orders to loose fighters: the picked ones (or everyone) not under a banner. */
   loose(): Villager[] { return this.recipients().filter((v) => !v.regiment); }
   /** The regiments an order goes to: those of the picked fighters (or every one when nobody is picked). */
@@ -4131,7 +4090,7 @@ export class VillageScene extends SimScene {
    * follows the pointer (the hovered tile becomes the door tile). Otherwise it sits one whole
    * tile in front of the player's own tile, so the player can never be inside it.
    */
-  buildAnchor(kind: BuildingKind = this.player.build === 'none' ? 'house' : this.player.build): { tx: number; ty: number } {
+  buildAnchor(kind: BuildingKind = this.player.build === 'none' ? 'gnomehouse' : this.player.build): { tx: number; ty: number } {
     const { w, h, door } = BUILDINGS[kind];
     const pt = this.player.tile, d = this.player.facing;
     const hv = this.hoverTile;
@@ -4151,7 +4110,7 @@ export class VillageScene extends SimScene {
   }
 
   /** Why a building can't go at `a`, or null if it can. */
-  buildProblem(a: { tx: number; ty: number }, kind: BuildingKind = this.player.build === 'none' ? 'house' : this.player.build): string | null {
+  buildProblem(a: { tx: number; ty: number }, kind: BuildingKind = this.player.build === 'none' ? 'gnomehouse' : this.player.build): string | null {
     const { w, h } = BUILDINGS[kind];
     const locked = this.toolLocked(kind as Tool);
     if (locked) return locked;
@@ -4260,8 +4219,6 @@ export class VillageScene extends SimScene {
         if (stage >= 0) this.fx.push({ kind: 'swing', who: pl, dx: pl.facing.x, dy: pl.facing.y, stage });
         return;
       }
-      case 'house':
-      case 'tavern':
       case 'gnomehouse':
       case 'warren':
       case 'barracks': {
@@ -4408,13 +4365,11 @@ export class VillageScene extends SimScene {
         if (why) return `${carry} — ${why}`;
         const aim = this.tossAim;
         const throwing = `E: throw ${Math.min(pl.carriedOf('food', pl.basketKind), p.tossSize)} ${FOODS[pl.basketKind].one}`;
-        const home = this.world.familyHouses.find((b) => { const c = buildingCenter(b); return Math.hypot(c.tx * TILE - aim.x, c.ty * TILE - aim.y) <= YARD * TILE; });
+        const home = this.world.gnomeHouses.find((b) => { const c = buildingCenter(b); return Math.hypot(c.tx * TILE - aim.x, c.ty * TILE - aim.y) <= YARD * TILE; });
         if (!home) return `${throwing} — no yard there: children only eat what lands within ${YARD} tiles of the home they live in (${carry})`;
         const r = this.yardReport(home);
-        return `${throwing} into the ${home.kind === 'gnomehouse' ? 'gnome house' : 'house'} yard (${carry} · ${r.kids} children, ${r.hungry} hungry · ${r.piles || 'nothing'} lying there)`;
+        return `${throwing} into the ${home.kind === 'warren' ? 'warren' : 'cottage'} yard (${carry} · ${r.kids} children, ${r.hungry} hungry · ${r.piles || 'nothing'} lying there)`;
       }
-      case 'house':
-      case 'tavern':
       case 'gnomehouse':
       case 'warren':
       case 'barracks': {
@@ -4460,9 +4415,7 @@ export class VillageScene extends SimScene {
 
 const query = new URLSearchParams(location.search);
 
-// Dev starts, so a link is enough: ?start=gnome and ?peaceful set the debug sliders before the first setup().
-if (query.get('start') === 'gnome') p.gnomeStart = true;
-if (query.get('start') === 'village') p.gnomeStart = false;
+// Dev switches, so a link is enough: ?peaceful and ?nohunger set the debug sliders before the first setup().
 if (query.has('peaceful')) p.peaceful = true;
 if (query.has('nohunger')) p.hunger = false;
 // ?bench=1000: a stress test once the first village is up (see VillageScene.bench)
@@ -4478,6 +4431,6 @@ if (query.has('bench')) {
   window.setTimeout(go, 2500);
 }
 // lil-gui caches its controllers' values at module load, so the panel needs telling the flag moved.
-if (p.gnomeStart || p.peaceful || query.has('nohunger')) getGui().controllersRecursive().forEach((c) => c.updateDisplay());
+if (p.peaceful || query.has('nohunger')) getGui().controllersRecursive().forEach((c) => c.updateDisplay());
 
 launch(VillageScene, { width: COLS * TILE, height: ROWS * TILE, zoom: ZOOM, scale: 'resize', pixelArt: true, background: '#1a2a1c' });

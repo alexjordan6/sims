@@ -354,8 +354,6 @@ export class Villager extends Mover {
   hungerDays = 0;
   /** grown old: slower, grey, and living on borrowed time (see p.elderDays) */
   elder = false;
-  /** born in a gnome house: a little person for life, whatever calling they take (see `applyRole` and the `forage` dispatch) */
-  gnome = false;
   /**
    * A bowl out of the great pot and the sim time it wears off (see MOODS). It is set by
    * `VillageScene.serveGnomes`, spent down in `update`, and every stat it touches is either a getter
@@ -469,7 +467,7 @@ export class Villager extends Mover {
     return (this.skilled ? 1.4 : 1) * (1 + STAR_BONUS * this.stars) * (this.trait === 'tireless' ? 1.25 : 1) * (1 + this.dietBonus.work) * (this.elder ? ELDER_MUL : 1);
   }
   override get space(): number {
-    const base = this.gnome ? (this.isChild ? BODY.gnomeKid : BODY.gnome) : this.isChild ? BODY.kid : BODY.adult;
+    const base = this.isChild ? BODY.gnomeKid : BODY.gnome;
     return Math.max(this.radius, base * (this.moodNow?.bulk?.scale ?? 1));
   }
   /** A swollen gnome shoulders bodies aside instead of giving way. */
@@ -500,9 +498,9 @@ export class Villager extends Mover {
       case 'soldier': this.radius = 3; this.color = 0x6f9bff; this.maxHp = p.soldierHp + mods.soldierHpBonus + this.barracksHp + (this.skilled ? 15 : 0) + armorStats(this.armor).hp; this.speed = 45 * armorStats(this.armor).speedMul; break;
     }
     // A gnome is a little person whatever its calling: its own base, and for a warrior only what the
-    // village earned it on top — never a human soldier's. A gnome warrior at a Lv1 barracks with no
-    // armor has exactly the HP of its foraging sister.
-    if (this.gnome && this.isAdult) {
+    // village earned it on top. A gnome warrior at a Lv1 barracks with no armor has exactly the HP of
+    // its foraging sister.
+    if (this.isAdult) {
       const armor = armorStats(this.armor);
       this.radius = 2; this.color = 0xd94a3a;
       this.pouch ??= new Pack(GNOME_PACK.slots, 1);
@@ -522,7 +520,7 @@ export class Villager extends Mover {
       this.maxHp *= stars * (this.trait === 'hardy' ? 1.25 : 1) * (this.stars <= 1 ? 0.9 : 1) * (1 + this.dietBonus.hp);
       this.speed *= stars * (this.trait === 'quick' ? 1.2 : 1) * (1 + this.dietBonus.speed) * (this.elder ? ELDER_MUL : 1);
     }
-    this.maxHp = Math.round(this.maxHp * mods.hpMul * (this.role === 'soldier' && !this.gnome ? 1 : mods.villagerHpMul));
+    this.maxHp = Math.round(this.maxHp * mods.hpMul * mods.villagerHpMul);
     this.hp = Math.min(this.hp, this.maxHp);
     this.clearGoal();
   }
@@ -539,15 +537,13 @@ export class Villager extends Mover {
     this.calling = null; // spent: their role holds it now, and they eat at the granary like everyone else
     this.barracksHp = s.world.barracksLevel >= 3 ? 30 : s.world.barracksLevel >= 2 ? 15 : 0;
     // a young gnome falls in with whatever the grown ones are doing: at your heels, or off at work
-    if (this.gnome) {
-      this.followingPlayer = s.gnomesFollow;
-      if (this.role === 'soldier' && !s.gnomesFollow) this.order = null; // sent to work: patrol like any soldier
-    }
+    this.followingPlayer = s.gnomesFollow;
+    if (this.role === 'soldier' && !s.gnomesFollow) this.order = null; // sent to work: patrol like any soldier
     this.applyRole(s.mods);
     this.hp = this.maxHp;
     const star = '★'.repeat(this.stars) + '☆'.repeat(5 - this.stars);
     // with a breeding program running, only the gifted are worth a toast; the rest go to the journal
-    s.event(this.role === 'soldier' ? 'soldier' : 'grow', `${this.name} came of age — ${skilled ? 'a skilled ' : 'a '}${this.gnome ? GNOME_CALLING[this.role as Calling] : this.role}, ${star}${this.trait ? ` (${TRAITS[this.trait].name})` : ''}`);
+    s.event(this.role === 'soldier' ? 'soldier' : 'grow', `${this.name} came of age — ${skilled ? 'a skilled ' : 'a '}${GNOME_CALLING[this.role as Calling]}, ${star}${this.trait ? ` (${TRAITS[this.trait].name})` : ''}`);
     s.stats.childrenRaised++;
     s.stats.starsTotal += this.stars;
     if (this.role === 'soldier') s.stats.soldiersRaised++;
@@ -644,7 +640,7 @@ export class Villager extends Mover {
     const learning = this.calling;
     const teaching = !!learning && (learning !== 'soldier' || s.world.barracks.some((b) => b.warm));
     const lesson = hungry || !teaching ? null : learning;
-    const yard = this.gnome ? 'the gnome house' : 'the house';
+    const yard = 'the cottage';
     this.task = hungry ? `hungry — nothing by ${yard}`
       : lesson === 'soldier' ? 'drilling in the yard'
       : lesson === 'farmer' ? 'learning to forage'
@@ -717,7 +713,7 @@ export class Villager extends Mover {
   private failedPicks = 0;
 
   /** How much of a kind these arms hold: a gnome brings home one find at a time — but drags a whole boar's meat in one go. */
-  haul(kind: LoadKind): number { return this.gnome ? (kind === 'food' && this.load?.food === 'meat' ? BOAR.meat : 1) : Math.round(HAUL.villager[kind] * p.haulMul); }
+  haul(kind: LoadKind): number { return kind === 'food' && this.load?.food === 'meat' ? BOAR.meat : 1; }
   /** the meat lying in the wild this gnome is on its way to (claimed in `VillageScene.meatClaims`, so two never chase one ham) */
   private fetching: Item | null = null;
   /** Arms and pouch together: what a granary trip hands in (see `VillageScene.deposit`), so a gnome sent back to work empties its pouch. */
@@ -743,8 +739,8 @@ export class Villager extends Mover {
     if (this.toPouch) return this.pouch!.room(kind, food) > 0;
     return kind !== 'scrap' && this.canCarry(kind, food); // bare arms never hold scrap
   }
-  /** Gnomes keep to the head's heels by default; H (`VillageScene.summonGnomes`) sends them off foraging. Ignored by every other role. */
-  followingPlayer = true;
+  /** At the head's heels, or off at work: set from the village's standing order (VillageScene.gnomesFollow) when a gnome is placed or comes of age; H toggles it. */
+  followingPlayer = false;
 
   /** Cancel the current job without losing the carried food or leaving a meat claim behind. */
   followPlayer(s: VillageScene, follow: boolean): void {
@@ -768,7 +764,7 @@ export class Villager extends Mover {
    * comes to the square to wait for one. A mood already on it means it has eaten; it goes back to work.
    */
   private wantsBowl(s: VillageScene): boolean {
-    return this.gnome && this.isAdult && !this.mood && !this.hidden && !this.carriedBy && s.potHasServings();
+    return this.isAdult && !this.mood && !this.hidden && !this.carriedBy && s.potHasServings();
   }
   /** Walk to the pot and stand about it. True while that is what this gnome is doing. */
   private comeForBowl(dt: number, s: VillageScene): boolean {
@@ -799,7 +795,7 @@ export class Villager extends Mover {
 
   /** Stable parties of up to three adults from one cottage; regroup when the household changes. */
   private foragingParty(s: VillageScene): Villager[] {
-    const adults = s.villagers().filter(v => v.gnome && v.isAdult && v.role !== 'soldier' && !v.dead && v.home === this.home).sort((a, b) => a.id - b.id);
+    const adults = s.villagers().filter(v => v.isAdult && v.role !== 'soldier' && !v.dead && v.home === this.home).sort((a, b) => a.id - b.id);
     const start = Math.floor(adults.indexOf(this) / 3) * 3;
     return adults.slice(start, start + 3).filter(v => v !== this && !v.hidden && !v.carriedBy && !v.followingPlayer && v.task !== 'fleeing');
   }
@@ -901,7 +897,7 @@ export class Villager extends Mover {
     if (wasFleeing) { this.clearGoal(); this.thinkTimer = 0; }
 
     // at the head’s heels: still working — foraging or chopping — but only what lies within a short walk
-    const heeling = this.gnome && this.followingPlayer && !!this.pouch;
+    const heeling = this.followingPlayer && !!this.pouch;
     if (heeling) {
       this.delivering = false; // no granary trips while following; the pouch holds the finds
       if (s.player.hidden || this.pouchFull || this.dist(s.player) > GNOME_PACK.leash * TILE) {
@@ -1011,7 +1007,7 @@ export class Villager extends Mover {
     if (!b) { this.delivering = false; this.clearGoal(); return; }
     const door = doorstep(b);
     this.setGoal(s, door.tx, door.ty);
-    this.task = hearth ? `bringing firewood to the ${BUILDINGS[hearth.kind].name.toLowerCase()}` : load.kind === 'wood' ? 'hauling logs to the woodyard' : this.gnome ? 'bringing the find to the granary' : 'carrying the harvest to the granary';
+    this.task = hearth ? `bringing firewood to the ${BUILDINGS[hearth.kind].name.toLowerCase()}` : load.kind === 'wood' ? 'hauling logs to the woodyard' : 'bringing the find to the granary';
     const arrived = this.followPath(dt);
     if (arrived) {
       const there = this.adjacentTo(door) || this.dist(World.center(door.tx, door.ty)) < TILE;
@@ -1512,12 +1508,12 @@ export class Arrow extends Mover {
 // player
 
 /** What the player holds. The equipped tool decides what E does. */
-export type Tool = 'axe' | 'sword' | 'house' | 'barracks' | 'hammer' | 'bow' | 'tavern' | 'wall' | 'gate' | 'stairs' | 'basket' | 'gnomehouse' | 'warren' | 'wand';
-export const TOOLS: Tool[] = ['axe', 'sword', 'house', 'barracks', 'hammer', 'bow', 'tavern', 'wall', 'gate', 'stairs', 'basket', 'gnomehouse', 'warren', 'wand'];
+export type Tool = 'axe' | 'sword' | 'barracks' | 'hammer' | 'bow' | 'wall' | 'gate' | 'stairs' | 'basket' | 'gnomehouse' | 'warren' | 'wand';
+export const TOOLS: Tool[] = ['axe', 'sword', 'barracks', 'hammer', 'bow', 'wall', 'gate', 'stairs', 'basket', 'gnomehouse', 'warren', 'wand'];
 /** the tool belt, in order (1-8 and Tab): what you hold in your hands */
 export const BELT: Tool[] = ['sword', 'bow', 'axe', 'hammer', 'basket', 'wand'];
 /** what the hammer builds: a row over the belt while the hammer is out (1-8 then; 0 or Esc back to the hammer) */
-export const BUILDS: Tool[] = ['house', 'barracks', 'tavern', 'gnomehouse', 'warren', 'wall', 'gate', 'stairs'];
+export const BUILDS: Tool[] = ['gnomehouse', 'warren', 'barracks', 'wall', 'gate', 'stairs'];
 
 /** A sword swing in progress: an arc in front of the player that connects during its active window. */
 /** A sword swing in progress: an arc in front of the player that connects during its active window. */
@@ -1595,7 +1591,7 @@ export class Player extends Mover {
 
   /** The building the tool would place, if it's a building tool. */
   get build(): BuildingKind | 'none' {
-    return this.tool === 'house' || this.tool === 'barracks' || this.tool === 'tavern' || this.tool === 'gnomehouse' || this.tool === 'warren' ? this.tool : 'none';
+    return this.tool === 'barracks' || this.tool === 'gnomehouse' || this.tool === 'warren' ? this.tool : 'none';
   }
 
   /** The tile just in front of the player. */

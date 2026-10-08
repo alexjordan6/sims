@@ -22,8 +22,6 @@ const COTTAGE: Room = {
   blanket: '#a75556', mat: '#16121a', matTrim: '#e7b970', glow: '#ffc36a24',
 };
 export const ROOM: Record<InteriorKind, Room> = {
-  house: COTTAGE,
-  tavern: COTTAGE,
   barracks: { ...COTTAGE, banner: '#375575', blanket: '#456989' },
   // under the cap: packed earth, pale plaster, red timber, and a spotted toadstool hanging
   gnomehouse: {
@@ -57,15 +55,10 @@ export class Interior {
     this.s.player.hidden = true; this.s.player.swing = null; this.s.player.vx = this.s.player.vy = 0;
     this.s.selectedBuilding = b; this.s.selected = null;
     this.furniture = [
-      { x: 139, y: 34, w: 42, h: 23, kind: 'hearth', label: b.kind === 'tavern' ? 'Share a hot meal · 2 food' : 'Warm yourself by the hearth' }, // label is refreshed live by hint()
+      { x: 139, y: 34, w: 42, h: 23, kind: 'hearth', label: 'Warm yourself by the hearth' }, // label is refreshed live by hint()
       { x: 26, y: 36, w: 35, h: 18, kind: 'shelf', label: 'Books, keepsakes and family stories' },
     ];
-    if (b.kind === 'house') {
-      for (let i = 0; i < Math.min(6, this.s.beds(b)); i++) this.furniture.push({ x: 32 + i % 3 * 29, y: 73 + Math.floor(i / 3) * 47, w: 22, h: 34, kind: 'bed', label: 'A soft bed · rest by the hearth' });
-      this.furniture.push({ x: 211, y: 101, w: 58, h: 26, kind: 'table', label: 'The family table' });
-      // the nursery: a row of cribs along the right wall (label is refreshed live by hint())
-      for (let i = 0; i < Math.min(8, this.s.cribs(b)); i++) this.furniture.push({ x: 202 + i % 4 * 23, y: 138 + Math.floor(i / 4) * 30, w: 19, h: 22, kind: 'crib', label: 'Nursery' });
-    } else if (b.kind === 'barracks') {
+    if (b.kind === 'barracks') {
       for (let i = 0; i < 3 + b.level; i++) this.furniture.push({ x: 30 + i % 3 * 28, y: 76 + Math.floor(i / 3) * 46, w: 21, h: 32, kind: 'bed', label: 'Soldiers’ bunks' });
       this.furniture.push({ x: 220, y: 42, w: 59, h: 29, kind: 'rack', label: 'Fletch 10 arrows · 2 wood' }, { x: 208, y: 112, w: 62, h: 27, kind: 'table', label: 'Command table · inspect soldiers to equip bows and set posts' });
       this.furniture.push({ x: 226, y: 162, w: 36, h: 24, kind: 'chest', label: 'Armor chest' }); // label is filled in live by hint()
@@ -74,9 +67,6 @@ export class Interior {
       this.furniture.push({ x: 124, y: 141, w: 46, h: 22, kind: 'table', label: 'The family table' });
       // gnome cottages breed like any house, so their nursery needs cribs to show the infants in
       for (let i = 0; i < Math.min(4, this.s.cribs(b)); i++) this.furniture.push({ x: 214 + i % 2 * 23, y: 134 + Math.floor(i / 2) * 30, w: 19, h: 22, kind: 'crib', label: 'Nursery' });
-    } else {
-      this.furniture.push({ x: 212, y: 52, w: 67, h: 24, kind: 'bar', label: 'Hot stew · 2 food' });
-      for (const [x, y] of [[42, 92], [216, 105], [55, 146], [208, 153]]) this.furniture.push({ x, y, w: 43, h: 22, kind: 'table', label: 'Gather around the table' });
     }
     this.s.event('info', `Inside ${BUILDINGS[b.kind].name}. Right-click the floor to walk there; click a bed, the hearth or the door to go and use it.`, true);
   }
@@ -138,7 +128,7 @@ export class Interior {
     if (f?.kind === 'chest' && this.building) f.label = `Armor chest · tower arrows ${this.building.ammo ?? 0} / ${this.s.towerCap(this.building)} · restock 10 for 2 wood · forge armor`;
     if (f?.kind === 'hearth' && this.building) {
       const b = this.building, pile = `${b.firewood} / ${p.hearthNights} nights of wood · burns ${hearthCost(b)} a night`;
-      f.label = b.warm ? `${b.kind === 'tavern' ? 'Share a hot meal · 2 food' : 'Warm yourself by the hearth'} · ${pile}` : `Cold hearth · ${pile} · woodcutters bring firewood`;
+      f.label = b.warm ? `Warm yourself by the hearth · ${pile}` : `Cold hearth · ${pile} · woodcutters bring firewood`;
     }
     return f ? `E: ${f.label}` : 'Walk around · approach the hearth, beds or equipment · door below to leave';
   }
@@ -151,10 +141,10 @@ export class Interior {
     if (f.kind === 'hearth' || f.kind === 'bar' || f.kind === 'bed') {
       if (!this.building.warm) { this.s.event('info', 'The hearth is cold — there is no fire to rest by until the pile is stocked and dawn lights it.', true); return; }
       if (this.time - this.mealAt < 8) { this.s.event('info', 'Enjoy the warmth a little longer before resting again.'); return; }
-      const cost = this.building.kind === 'tavern' ? 2 : 1;
+      const cost = 1;
       if (this.s.food < cost) { this.s.event('food', 'Bring some food for a warm meal.'); return; }
       this.s.food -= cost; this.mealAt = this.time;
-      const hp = this.building.kind === 'tavern' ? 5 + this.building.level * 15 : 12;
+      const hp = 12;
       this.s.player.hp = Math.min(this.s.player.maxHp, this.s.player.hp + hp);
       this.s.player.hunger = Math.min(p.hungerMax, this.s.player.hunger + cost); // a meal is a meal
       this.s.event('food', `A warm meal and a quiet moment · restored ${hp} HP.`, true); return;

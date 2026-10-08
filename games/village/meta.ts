@@ -7,14 +7,11 @@ import { LEGACY_TEST_MODE, p } from './config';
 export interface Mods {
   startFood: number;
   startWood: number;
-  extraAdults: number;
-  startSoldiers: number;
   foodPerDayMul: number;
   birthBonus: number;
   /** Baby Fever: births get p.feverBonus while food in store covers p.feverDays of rations */
   babyFever: boolean;
   twinChance: number;
-  houseCap: number;
   adultAgeDelta: number;
   hpMul: number;
   soldierHpBonus: number;
@@ -50,7 +47,6 @@ export interface Mods {
   buildCostMul: number;
   startGranaryLevel: number;
   capMul: number;
-  bedBonus: number;
   // ---- Bounty
   killWood: number;
   killFood: number;
@@ -74,13 +70,13 @@ export interface Mods {
   fullDrill: boolean;
 }
 export const DEFAULT_MODS: Mods = {
-  startFood: 40, startWood: 25, extraAdults: 0, startSoldiers: 0,
+  startFood: 40, startWood: 25,
   foodPerDayMul: 1,
-  birthBonus: 0, babyFever: false, twinChance: 0, houseCap: 4, adultAgeDelta: 0,
+  birthBonus: 0, babyFever: false, twinChance: 0, adultAgeDelta: 0,
   hpMul: 1, soldierHpBonus: 0, soldierDmgMul: 1, soldierRegen: 0, cadetDaysDelta: 0, sponsorBonus: 0,
   raiderSpeedMul: 1, raiderHpMul: 1, playerDmgMul: 1, playerHpBonus: 0, playerRegen: 0,
   treeYieldBonus: 0, seedMul: 1, shelteredDaysDelta: 0, oldGrowthDaysDelta: 0, oldYieldBonus: 0, startWoodyardLevel: 1, cutterSpeedMul: 1, ignoreReserve: false,
-  hammerHits: 3, upgradeCostMul: 1, buildCostMul: 1, startGranaryLevel: 1, capMul: 1, bedBonus: 0,
+  hammerHits: 3, upgradeCostMul: 1, buildCostMul: 1, startGranaryLevel: 1, capMul: 1,
   killWood: 0, killFood: 0, ratsHarmless: false, killHeal: 0, snatchDelayMul: 1, noSnatch: false,
   raidEveryDelta: 0, warnDaysDelta: 0, waveShrink: 0, bossEscortMul: 1, dawnHeal: false, villagerHpMul: 1, starveDaysDelta: 0, fullDrill: false,
 };
@@ -118,16 +114,12 @@ export const NODES: Node[] = [
   { id: 'harvest3b', branch: 'harvest', tier: 2, side: 'a', requires: 'harvest2b', name: 'Granary', cost: 200, blurb: 'Villagers eat half as much', icon: { key: 'farm', frame: 96 }, apply: (m) => (m.foodPerDayMul *= 0.5) },
   // ---- Hearth
   { id: 'hearth1', branch: 'hearth', tier: 1, name: 'Baby Fever', cost: 50, blurb: 'While the granary holds 5+ days of food, births are far more likely — the bigger the village, the more it takes to keep the surplus', icon: { key: 'town', frame: 85 }, apply: (m) => (m.babyFever = true) },
-  { id: 'hearth2a', branch: 'hearth', tier: 2, side: 'a', requires: 'hearth1', name: 'Big Families', cost: 100, blurb: 'Houses hold 6 instead of 4', icon: { key: 'town', frame: 53 }, apply: (m) => (m.houseCap = 6) },
-  { id: 'hearth3a', branch: 'hearth', tier: 3, side: 'a', requires: 'hearth2a', name: 'Twins', cost: 200, blurb: 'A quarter of births are twins', icon: { key: 'dungeon', frame: 88 }, apply: (m) => (m.twinChance += 0.25) },
-  { id: 'hearth2b', branch: 'hearth', tier: 2, side: 'b', requires: 'hearth1', name: 'Second Couple', cost: 100, blurb: 'Start with a second family and house', icon: { key: 'dungeon', frame: 99 }, apply: (m) => (m.extraAdults += 2) },
-  { id: 'hearth3b', branch: 'hearth', tier: 3, side: 'b', requires: 'hearth2b', name: 'Quick to Grow', cost: 200, blurb: 'Children come of age 2 days sooner', icon: { key: 'dungeon', frame: 85 }, apply: (m) => (m.adultAgeDelta -= 2) },
+  { id: 'hearth3a', branch: 'hearth', tier: 2, side: 'a', requires: 'hearth1', name: 'Twins', cost: 200, blurb: 'A quarter of births are twins', icon: { key: 'dungeon', frame: 88 }, apply: (m) => (m.twinChance += 0.25) },
+  { id: 'hearth3b', branch: 'hearth', tier: 2, side: 'b', requires: 'hearth1', name: 'Quick to Grow', cost: 200, blurb: 'Children come of age 2 days sooner', icon: { key: 'dungeon', frame: 85 }, apply: (m) => (m.adultAgeDelta -= 2) },
   // ---- War
   { id: 'war1', branch: 'war', tier: 1, name: 'Weapon Drills', cost: 50, blurb: 'Soldiers +15 HP', icon: { key: 'dungeon', frame: 102 }, apply: (m) => (m.soldierHpBonus += 15) },
   { id: 'war2a', branch: 'war', tier: 2, side: 'a', requires: 'war1', name: 'War Drums', cost: 100, blurb: 'Cadets need 2 days of drill instead of 3', icon: { key: 'town', frame: 95 }, apply: (m) => (m.cadetDaysDelta -= 1) },
   { id: 'war3a', branch: 'war', tier: 3, side: 'a', requires: 'war2a', name: 'Blooded', cost: 250, blurb: 'Soldiers deal +50%', icon: { key: 'dungeon', frame: 105 }, apply: (m) => { m.soldierDmgMul *= 1.5; m.sponsorBonus += 1; } },
-  { id: 'war2b', branch: 'war', tier: 2, side: 'b', requires: 'war1', name: 'Veteran', cost: 150, blurb: 'Start with a trained soldier', icon: { key: 'dungeon', frame: 96 }, apply: (m) => (m.startSoldiers += 1) },
-  { id: 'war3b', branch: 'war', tier: 3, side: 'b', requires: 'war2b', name: 'Old Guard', cost: 250, blurb: 'Start with two; soldiers regen 2 HP/s out of combat', icon: { key: 'dungeon', frame: 97 }, apply: (m) => { m.startSoldiers += 1; m.soldierRegen += 2; } },
   // ---- Stronghold
   { id: 'hold1', branch: 'hold', tier: 1, name: 'Watchtower', cost: 50, blurb: 'Raiders move 15% slower', icon: { key: 'town', frame: 83 }, apply: (m) => (m.raiderSpeedMul *= 0.85) },
   { id: 'hold2a', branch: 'hold', tier: 2, side: 'a', requires: 'hold1', name: 'Palisade', cost: 100, blurb: 'Raiders move 30% slower in all', icon: { key: 'town', frame: 81 }, apply: (m) => (m.raiderSpeedMul *= 0.82) },
@@ -143,9 +135,7 @@ export const NODES: Node[] = [
   // ---- Masonry
   { id: 'masonry1', branch: 'masonry', tier: 1, name: 'Steady Hands', cost: 50, blurb: 'Hammer upgrades take 2 hits instead of 3', icon: { key: 'town', frame: 128 }, apply: (m) => (m.hammerHits = 2) },
   { id: 'masonry2a', branch: 'masonry', tier: 2, side: 'a', requires: 'masonry1', name: 'Cheap Timber', cost: 100, blurb: 'Upgrades cost 30% less wood', icon: { key: 'town', frame: 57 }, apply: (m) => (m.upgradeCostMul *= 0.7) },
-  { id: 'masonry3a', branch: 'masonry', tier: 3, side: 'a', requires: 'masonry2a', name: 'Master Builder', cost: 200, blurb: 'Houses and barracks cost half to build; the granary starts at Lv2', icon: { key: 'town', frame: 53 }, apply: (m) => { m.buildCostMul *= 0.5; m.startGranaryLevel = Math.max(m.startGranaryLevel, 2); } },
   { id: 'masonry2b', branch: 'masonry', tier: 2, side: 'b', requires: 'masonry1', name: 'Deep Cellars', cost: 100, blurb: 'The granary and woodyard hold 50% more at every level', icon: { key: 'farm', frame: 75 }, apply: (m) => (m.capMul *= 1.5) },
-  { id: 'masonry3b', branch: 'masonry', tier: 3, side: 'b', requires: 'masonry2b', name: 'Great Hall', cost: 200, blurb: 'Houses get +2 beds at every level', icon: { key: 'town', frame: 85 }, apply: (m) => (m.bedBonus += 2) },
   // ---- Bounty
   { id: 'bounty1', branch: 'bounty', tier: 1, name: 'Plunder', cost: 50, blurb: 'Every raider slain drops 3 wood', icon: { key: 'dungeon', frame: 89 }, apply: (m) => (m.killWood += 3) },
   { id: 'bounty2a', branch: 'bounty', tier: 2, side: 'a', requires: 'bounty1', name: 'Foragers', cost: 100, blurb: 'Rats gnaw the granary half as fast; kills also drop 2 food', icon: { key: 'farm', frame: 44 }, apply: (m) => { m.ratsHarmless = true; m.killFood += 2; } },
@@ -173,10 +163,13 @@ export function pathOf(id: string): Node[] {
 
 /** Old flat-boon ids from the first release, mapped onto the tree. */
 /** Boons taken out of the tree (their feature is gone): what each cost, given back to anyone who had bought it. */
-export const REMOVED_NODES: Record<string, number> = { harvest1: 50, harvest: 50, harvest2a: 100, harvest3a: 200 }; // ('harvest' is Green Thumb's id in the oldest saves)
+export const REMOVED_NODES: Record<string, number> = {
+  harvest1: 50, harvest: 50, harvest2a: 100, harvest3a: 200, // the crop boons ('harvest' is Green Thumb's id in the oldest saves)
+  hearth2a: 100, families: 100, hearth2b: 100, couple: 100, war2b: 150, veteran: 150, war3b: 250, masonry3a: 200, masonry3b: 200, // the human boons: houses, families, a human veteran
+};
 const LEGACY_IDS: Record<string, string> = {
-  larder: 'harvest2b', timber: 'hold1', couple: 'hearth2b', families: 'hearth2a',
-  drums: 'war2a', veteran: 'war2b', hardy: 'war1', champion: 'hold2b', palisade: 'hold2a',
+  larder: 'harvest2b', timber: 'hold1',
+  drums: 'war2a', hardy: 'war1', champion: 'hold2b', palisade: 'hold2a',
 };
 
 export interface MetaState {
