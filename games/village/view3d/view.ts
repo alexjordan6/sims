@@ -10,7 +10,7 @@ import { Crowd } from './crowd';
 import { Overlay } from './overlay';
 import { Fx3d } from './fx3d';
 import { skyAt } from './sky';
-import { Ps1Pass, updateFow, setFowOn } from './ps1';
+import { updateFow, setFowOn } from './fow';
 import { Room3d } from './room';
 import { MODELS, loadModels } from './assets';
 import { propKeys, characterKeys } from './registry';
@@ -46,7 +46,6 @@ export class View {
   private torch = new THREE.PointLight(0xffa860, 0, 9, 1.4);
   /** a few lamps lent to whichever hearths, pots and fires are nearest the camera */
   private lamps: THREE.PointLight[] = [];
-  private ps1 = new Ps1Pass();
   private room: Room3d;
   private fowRevision = -1;
   private fowEnabled: boolean | null = null;
@@ -79,10 +78,11 @@ export class View {
 
   constructor(private scene: VillageScene) {
     const host = document.getElementById('game')!;
-    this.renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
-    this.renderer.setPixelRatio(1); // the frame is drawn small and blown up anyway (see Ps1Pass)
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace; // the post pass used to do this by hand
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.BasicShadowMap; // hard-edged, pixel shadows
+    this.renderer.shadowMap.type = THREE.PCFShadowMap; // (three r186 removed PCFSoftShadowMap and silently falls back to this)
     const canvas = this.renderer.domElement;
     canvas.className = 'view3d';
     host.prepend(canvas);
@@ -95,7 +95,7 @@ export class View {
     this.world.fog = new THREE.Fog(0x05060c, 10, 40);
     this.sun.position.set(-20, 30, 10);
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(1024, 1024);
+    this.sun.shadow.mapSize.set(2048, 2048);
     const sc = this.sun.shadow.camera; sc.left = -24; sc.right = 24; sc.top = 24; sc.bottom = -24; sc.near = 1; sc.far = 90;
     this.sun.shadow.bias = -0.002;
     this.world.add(this.hemi, this.sun, this.sun.target, this.torch);
@@ -124,8 +124,10 @@ export class View {
   private resize(): void {
     const host = document.getElementById('game')!;
     const w = Math.max(1, host.clientWidth), h = Math.max(1, host.clientHeight);
+    // the device's pixel ratio is read again here, not just at startup: it changes when the window is
+    // dragged to a screen of another density (and reads 1 while the page is still off screen)
+    this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
     this.renderer.setSize(w, h, false);
-    this.ps1.size(w, h, p.ps1Height);
     this.room?.resize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
@@ -353,21 +355,19 @@ export class View {
     s.fx.length = 0;
     this.fx.update(dt);
     this.overlay.sync(dt);
-    const host = this.renderer.domElement;
-    this.ps1.size(host.width, host.height, p.ps1Height);
     this.room.sync(dt);
     if (s.interior.active) {
       // indoors: the room's diorama, with no fog of war (its floor is not the map)
       setFowOn(false);
       this.renderer.shadowMap.autoUpdate = true;
-      this.ps1.render(this.renderer, this.room.scene, this.room.camera, dt, p.ps1Colours);
+      this.renderer.render(this.room.scene, this.room.camera);
       setFowOn(true);
     } else {
       // above 90 fps the shadows are redrawn every other frame: half the shadow pass, a lag nobody can see
       const sm = this.renderer.shadowMap;
       sm.autoUpdate = false;
       sm.needsUpdate = dt > 1 / 90 || (this.shadowFrame++ & 1) === 0;
-      this.ps1.render(this.renderer, this.world, this.camera, dt, p.ps1Colours);
+      this.renderer.render(this.world, this.camera);
     }
     this.drawRaidArrows();
   }

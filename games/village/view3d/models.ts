@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { TILE } from '../config';
-import { lambert } from './ps1';
+import { lambert } from './fow';
 
 // Shared low-poly geometry and materials. Everything is flat-shaded and coloured per vertex or per
 // instance, so the whole world is a handful of materials. Pack models (glTF) replace these one kind

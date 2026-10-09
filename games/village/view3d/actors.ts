@@ -9,7 +9,7 @@ import { BOAR, FOODS, ITEM, p } from '../config';
 import type { Item } from '../items';
 import type { VillageScene } from '../main';
 import { mat, U, WALL_UNITS } from './models';
-import { lambert, psxify } from './ps1';
+import { lambert, fogify } from './fow';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { MODELS } from './assets';
 import { FOLK, HEAD, FOE_MODEL } from './registry';
@@ -127,7 +127,7 @@ function makeCharacter(m: Mover, md: { key: string; tint?: number }): { body: TH
     const mt = (o.material as THREE.MeshLambertMaterial).clone(); // every actor flashes on its own
     if (md.tint !== undefined) mt.color.multiply(new THREE.Color(md.tint));
     if (m instanceof Villager && m.elder) mt.color.multiplyScalar(0.85);
-    psxify(mt); // a clone keeps the shader hook but not its defines
+    fogify(mt); // a clone keeps the shader hook but not its defines
     o.material = mt;
   });
   body.add(rig);

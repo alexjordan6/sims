@@ -2420,7 +2420,6 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
 
     // ---- the opening: gnomes by default, no farm, wild food by the door ------------------------------
     {
-      assert(p.ps1Height === 1080, `the game draws 1080 rows (${p.ps1Height})`);
       {
         s = fresh();
         const hx = COLS / 2, hy = ROWS / 2, near: { kind: string; tx: number; ty: number }[] = [], from = s.world.nearest((hx + 0.5) * TILE, (hy + 0.5) * TILE, (_t, tx, ty) => !s.world.isBlocked(tx, ty))!;

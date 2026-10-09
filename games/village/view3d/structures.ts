@@ -3,7 +3,7 @@ import { BUILDINGS, type Building, type BuildingKind, type Defense } from '../wo
 import type { VillageScene } from '../main';
 import { Mover } from '../agents';
 import { mat, WALL_UNITS, U } from './models';
-import { lambert } from './ps1';
+import { lambert } from './fow';
 import { groundHeight } from './terrain';
 import { kitBuilding, kitDefense } from './kit';
 import { MODELS, bake } from './assets';

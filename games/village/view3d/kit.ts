@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { BUILDINGS, type Building, type Defense } from '../world';
 import { MODELS } from './assets';
-import { lambert } from './ps1';
+import { lambert } from './fow';
 import { WALL_UNITS } from './models';
 
 // Buildings and fortifications assembled from the town and graveyard kits. A wall piece stands on the +x

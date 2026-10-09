@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { psxify } from './ps1';
+import { fogify, palette } from './fow';
 
 // The model packs (Kenney, CC0: see assets/CREDITS.md). Everything loads in the background at start;
 // until it lands, the world is drawn with the code-built placeholders, and anything that never loads
@@ -156,12 +156,12 @@ export async function loadModels(props: { key: string; centre: boolean }[], char
     if (MODELS.characters.has(key)) continue;
     jobs.push(load(key).then((gltf) => {
       if (!gltf) return;
-      // lit like the world: flat lambert with the palette sampled hard, wobbling, under the fog of war
+      // lit like the world: flat lambert with the palette sampled hard, under the fog of war
       gltf.scene.traverse((o) => {
         if (!(o instanceof THREE.Mesh)) return;
         const old = o.material as THREE.MeshStandardMaterial;
-        const m = new THREE.MeshLambertMaterial({ map: old.map ?? null, color: old.color ?? 0xffffff, flatShading: true });
-        psxify(m);
+        const m = new THREE.MeshLambertMaterial({ map: palette(old.map ?? null), color: old.color ?? 0xffffff, flatShading: true });
+        fogify(m);
         o.material = m;
         o.castShadow = true;
       });

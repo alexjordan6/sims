@@ -4,7 +4,7 @@ import { BUILDINGS, type Building } from '../world';
 import type { InteriorKind } from '../config';
 import { ROOM, type Furnishing } from '../interior';
 import type { Mover } from '../agents';
-import { lambert } from './ps1';
+import { lambert } from './fow';
 import { makeActor } from './actors';
 
 // A building's inside, as a little diorama: floor, back and side walls, the furniture the room logic

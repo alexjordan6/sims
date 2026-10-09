@@ -6,7 +6,7 @@ import type { VillageScene } from '../main';
 import { MODELS, bake } from './assets';
 import { FOE_MODEL } from './registry';
 import { heldMesh, gnomeHat, rankOf, modelFor, scaleOf, standHeight, PERSON, type Kick } from './actors';
-import { lambert } from './ps1';
+import { lambert } from './fow';
 import { U } from './models';
 import { groundHeight } from './terrain';
 
