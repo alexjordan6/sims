@@ -1,4 +1,4 @@
-import { STACK, SKULK, STASH_SLOTS, FOUND_TIER, BANDAGE, type BulkKind } from './config';
+import { STACK, SKULK, STASH_SLOTS, FOUND_TIER, BANDAGE, UNIT, type BulkKind, type UnitBranch } from './config';
 import { enemyDrop, rollLoot, danger } from './loot';
 import { Caravan } from './caravan';
 import { isImplement, IMPLEMENTS, START_TOOLS, LOST_TOOLS, type Implement, TOOL_NAME, Pack, type Gear, type EquipmentSlot, isBulk, slotName } from './pack';
@@ -3379,6 +3379,8 @@ export class VillageScene extends SimScene {
   }
   equipSoldier(v: Villager, weapon: 'sword' | 'bow' | 'pike'): void {
     if (v.role !== 'soldier' || v.dead) return;
+    // past the recruits a soldier keeps the weapon of its line
+    if (v.line && v.tier >= 2 && weapon !== v.line) { this.event('info', `${v.name} is a ${v.unitName}: it keeps its ${v.line}`, true); return; }
     v.weapon = weapon; v.attack = null; v.clearGoal();
     // a gnome with a new weapon leaves its banner for its weapon's group (it falls in again within half a second)
     const r = v.regiment;
@@ -3880,6 +3882,39 @@ export class VillageScene extends SimScene {
       return { reg, x, y, fx, fy, cols, slots: reg.slotsAt(x, y, fx, fy, n, reg.shape, cols) };
     });
   }
+  // ---- promotion: experience earned in the field, the step up bought at the barracks ------------
+
+  /** Why `v` can't be promoted (to its next tier, down `branch` at the fork), or null. */
+  promoteProblem(v: Villager, branch?: UnitBranch): string | null {
+    if (v.dead || v.role !== 'soldier') return 'only soldiers are promoted';
+    const next = v.tier + 1;
+    if (next > UNIT.maxTier) return 'already Elite';
+    if (v.xp < UNIT.xp[next]) return `needs ${UNIT.xp[next]} experience (has ${Math.floor(v.xp)})`;
+    if (!this.world.barracks.length) return 'promotions are made at a barracks: build one';
+    if (this.world.barracksLevel < UNIT.barracks[next]) return `needs a Lv${UNIT.barracks[next]} barracks`;
+    if (next === 3 && !branch) return 'pick the branch';
+    const c = this.promoteCost(next);
+    if (this.wood < c.wood) return `needs ${c.wood} wood (have ${this.wood | 0})`;
+    if (this.scrap < c.scrap) return `needs ${c.scrap} scrap (have ${this.scrap})`;
+    return null;
+  }
+  /** What a promotion to `tier` costs. */
+  promoteCost(tier: number): { wood: number; scrap: number } { const c = UNIT.cost[tier] ?? { wood: 0, scrap: 0 }; return p.freeBuild ? { wood: 0, scrap: 0 } : c; }
+  /** Promote `v` one tier (down `branch` at the fork): pays, steps up, and its role is re-applied. */
+  promote(v: Villager, branch?: UnitBranch): boolean {
+    const why = this.promoteProblem(v, branch);
+    if (why) { this.event('info', `Can't promote ${v.name}: ${why}`, true); return false; }
+    const next = v.tier + 1, c = this.promoteCost(next);
+    this.wood -= c.wood; this.scrap -= c.scrap;
+    if (next === 2) v.line = v.weapon;
+    if (next === 3) v.branch = branch ?? 'a';
+    v.tier = next;
+    const frac = v.hp / Math.max(1, v.maxHp);
+    v.applyRole(this.mods); v.hp = Math.round(v.maxHp * frac);
+    this.event('soldier', `${v.name} is promoted: ${v.unitName}.`);
+    return true;
+  }
+
   /** Set regiments' stance (a hold is where they stand). */
   setStance(regs: Regiment[], stance: Stance): void {
     for (const r of regs) {

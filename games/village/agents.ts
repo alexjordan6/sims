@@ -1,6 +1,6 @@
 import type { Agent } from '@shared/index';
 import { World, WILD_FOOD, doorstep, buildingCenter, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
-import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, GNOME_CALLING, MOODS, type Mood, type DishKind, ORDER, YARD, GNOME_PACK, ITEM, MASS, BODY, FOODS, FOOD_KINDS, DIET_CAP, zeroFood, BOAR, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat } from './config';
+import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, GNOME_CALLING, MOODS, type Mood, type DishKind, ORDER, YARD, GNOME_PACK, ITEM, MASS, BODY, FOODS, FOOD_KINDS, DIET_CAP, zeroFood, BOAR, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat, UNIT, unitName, type UnitLine, type UnitBranch } from './config';
 import type { Mods } from './meta';
 import { SHIELD_WALL, ADVANCE_SIGHT } from './regiment';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle, knockMul, reloadMul } from './characters';
@@ -221,14 +221,16 @@ export abstract class Mover implements Agent {
   /** Take a blow. Chest armor shaves it; a shield can turn a melee hit away entirely (`melee` = not an arrow/bolt). */
   /** Take a blow. `by` is whoever struck (a wild boar turns on them); arrows pass their archer, towers nobody. */
   hit(dmg: number, melee = true, by?: Mover): void {
-    void by;
     const st = armorStats(this.armor);
     this.blocked = false;
     const block = st.block > 0 && by && this.inShieldWall(by) ? Math.min(SHIELD_WALL.cap, st.block * SHIELD_WALL.mul) : st.block;
     if (melee && block > 0 && Math.random() < block) { this.blocked = true; this.hurtT = 0.2; return; }
+    const before = this.hp;
     this.hp -= Math.max(1, Math.round(dmg * st.dmgMul));
     this.hurtT = 0;
     if (this.hp <= 0) this.dead = true;
+    // experience: what a soldier of yours takes off an enemy, and a little more for the kill
+    if (by instanceof Villager && by.role === 'soldier' && this instanceof Raider) by.xp += Math.max(0, Math.min(before, before - this.hp)) + (this.dead && before > 0 ? UNIT.killXp : 0);
   }
 
   /**
@@ -394,6 +396,13 @@ export class Villager extends Mover {
   /** finished their apprenticeship: works faster, hits harder */
   skilled = false;
   trait: Trait | null = null;
+  /** the promotion ladder (see UNIT): experience earned, the tier bought with it, the line (by weapon, from tier 2) and the branch (from tier 3) */
+  xp = 0;
+  tier = 1;
+  line: UnitLine | null = null;
+  branch: UnitBranch | null = null;
+  /** what this soldier is called on the ladder: Recruit, Pikeman, Veteran Halberdier… */
+  get unitName(): string { return unitName(this.tier, this.line, this.branch); }
   /** the day the village head last encouraged them / they last had to run from raiders */
   encouragedDay = 0;
   fledDay = 0;
@@ -520,6 +529,7 @@ export class Villager extends Mover {
       this.maxHp *= stars * (this.trait === 'hardy' ? 1.25 : 1) * (this.stars <= 1 ? 0.9 : 1) * (1 + this.dietBonus.hp);
       this.speed *= stars * (this.trait === 'quick' ? 1.2 : 1) * (1 + this.dietBonus.speed) * (this.elder ? ELDER_MUL : 1);
     }
+    if (this.role === 'soldier' && this.isAdult) this.maxHp *= 1 + UNIT.hpPerTier * (this.tier - 1); // rank: each tier above the first
     this.maxHp = Math.round(this.maxHp * mods.hpMul * mods.villagerHpMul);
     this.hp = Math.min(this.hp, this.maxHp);
     this.clearGoal();
@@ -1126,7 +1136,7 @@ export class Villager extends Mover {
 
   /** What a soldier's blow does now: the weapon, the barracks, the drill, the trait and the diet. */
   private soldierDmg(s: VillageScene): number {
-    return p.soldierDmg * weaponMul(this.weapons, this.weapon === 'bow' ? 'bow' : 'melee') * s.mods.soldierDmgMul * (s.world.barracksLevel >= 3 ? 1.2 : 1) * (this.skilled ? 1.15 : 1) * (this.trait === 'brave' ? 1.2 : 1) * (1 + this.dietBonus.dmg);
+    return (1 + UNIT.dmgPerTier * (this.tier - 1)) * p.soldierDmg * weaponMul(this.weapons, this.weapon === 'bow' ? 'bow' : 'melee') * s.mods.soldierDmgMul * (s.world.barracksLevel >= 3 ? 1.2 : 1) * (this.skilled ? 1.15 : 1) * (this.trait === 'brave' ? 1.2 : 1) * (1 + this.dietBonus.dmg);
   }
 
   /**

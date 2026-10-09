@@ -1,7 +1,7 @@
 import './main';
 import { runPackChecks } from './pack-test';
 import { IMPLEMENTS } from './pack';
-import { STACK } from './config';
+import { STACK, UNIT, unitName } from './config';
 const clearBulk = (s: VillageScene) => s.player.pack.slots.forEach((b,i)=>{if(b && ['wood','food','scrap'].includes(b.kind))s.player.pack.removeAt(i);});
 import type { VillageScene } from './main';
 import { World, WILD_FOOD, doorstep, buildingCenter, hearthCost, BUILDINGS, type BuildingKind, type Chest } from './world';
@@ -2261,6 +2261,60 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       Object.assign(car, { x: car.origin.x, y: car.origin.y - 4 }); run(1);
       assert(car.dead || !s.agents.includes(car), 'and is gone over the edge of the map');
       p.caravanEvery = 0;
+    }
+
+    // ---- unit tiers: experience from the fight, promotions bought at the barracks, five tiers that fork at the third ----
+    {
+      s = fresh(); s.agents = [s.player]; s.dayTime = 0.3;
+      const at = World.center(120, 100);
+      const soldier = (weapon: 'sword' | 'bow' | 'pike', dx = 0) => { const v = s.spawn(new Villager(at.x + dx, at.y, home0(s), 'soldier', s.adultAge + 3, 'Rank', s.mods)); v.weapon = weapon; v.update = () => {}; return v; };
+      const foe = (dx: number, hp = 200) => { const r = s.spawn(new Raider(at.x + dx, at.y)); r.hp = r.maxHp = hp; r.update = () => {}; return r; };
+      // experience: what a blow takes off an enemy, from the sword, the arrow and the pike alike
+      const sw = soldier('sword'), bw = soldier('bow', -20), pk = soldier('pike', -40);
+      const r1 = foe(6); r1.hit(10, true, sw);
+      assert(sw.xp === 10 && sw.tier === 1 && sw.unitName === 'Recruit', `a sword blow credits the damage it dealt (${sw.xp}); the founders are Recruits`);
+      const arrow = s.spawn(new Arrow(r1.x - 8, r1.y, 1, 0, 6, bw)); s.grid.rebuild(s.agents); arrow.update(0.1, s);
+      assert(bw.xp === 6, `an arrow credits its archer (${bw.xp})`);
+      r1.x = pk.x + p.pikeReach * 0.7; r1.y = pk.y; r1.vx = r1.vy = 0;
+      const before = r1.hp; s.pikeStrike(pk, 1, 0, 8);
+      assert(pk.xp === before - r1.hp && pk.xp > 0, `a pike thrust credits its pikeman (${pk.xp})`);
+      const r2 = foe(6, 4); r2.hit(30, true, sw);
+      assert(sw.xp === 10 + 4 + UNIT.killXp, `a kill credits only what was left of it, and ${UNIT.killXp} more (${sw.xp})`);
+      const pal = soldier('sword', 20); pal.hp = pal.maxHp = 100; pal.hit(10, true, sw);
+      assert(sw.xp === 10 + 4 + UNIT.killXp, 'a blow on a friend credits nothing');
+      // promoting: experience, a barracks of the right level, and the price
+      s.wood = 100; s.scrap = 0; sw.xp = 0;
+      assert(/experience/.test(s.promoteProblem(sw) ?? ''), `no promotion without the experience (${s.promoteProblem(sw)})`);
+      sw.xp = UNIT.xp[2];
+      for (const b of s.world.barracks) b.ruined = true;
+      assert(/barracks/.test(s.promoteProblem(sw) ?? ''), `nor without a barracks (${s.promoteProblem(sw)})`);
+      const bar = s.world.place('barracks', 126, 96); bar.level = 1;
+      s.wood = UNIT.cost[2].wood - 1;
+      assert(/wood/.test(s.promoteProblem(sw) ?? '') && !s.promote(sw) && sw.tier === 1, `nor without the wood (${s.promoteProblem(sw)})`);
+      s.wood = 100; const hp1 = sw.maxHp, dmg1 = (sw as unknown as { soldierDmg(s: VillageScene): number }).soldierDmg(s);
+      assert(s.promote(sw) && sw.tier === 2 && sw.line === 'sword' && sw.unitName === 'Footman' && s.wood === 100 - UNIT.cost[2].wood && s.journal.some((j) => /Footman/.test(j.text)),
+        `promoted, a sword Recruit becomes a Footman for ${UNIT.cost[2].wood} wood (${sw.unitName}, wood ${s.wood})`);
+      // the line lock: past the recruits a soldier keeps the weapon of its line
+      s.equipSoldier(sw, 'bow'); const rec = soldier('pike', 40); s.equipSoldier(rec, 'bow');
+      assert(sw.weapon === 'sword' && rec.weapon === 'bow', 'a Footman keeps its sword; a Recruit still changes weapon');
+      // the fork at tier 3, the scrap, then the barracks levels
+      sw.xp = UNIT.xp[3]; s.scrap = 0;
+      assert(/branch/.test(s.promoteProblem(sw) ?? ''), `the third tier forks: a branch has to be picked (${s.promoteProblem(sw)})`);
+      assert(/scrap/.test(s.promoteProblem(sw, 'b') ?? ''), `and it costs scrap (${s.promoteProblem(sw, 'b')})`);
+      s.scrap = 100; assert(s.promote(sw, 'b') && sw.unitName === 'Berserker' && s.scrap === 100 - UNIT.cost[3].scrap, `down the second branch a Footman becomes a Berserker (${sw.unitName})`);
+      sw.xp = UNIT.xp[4];
+      assert(/Lv2/.test(s.promoteProblem(sw) ?? ''), `the fourth tier needs a Lv2 barracks (${s.promoteProblem(sw)})`);
+      bar.level = 2; assert(s.promote(sw) && sw.unitName === 'Veteran Berserker', `then: ${sw.unitName}`);
+      sw.xp = UNIT.xp[5];
+      assert(/Lv3/.test(s.promoteProblem(sw) ?? ''), `the fifth a Lv3 (${s.promoteProblem(sw)})`);
+      bar.level = 3;
+      const dmgOf = () => (sw as unknown as { soldierDmg(s: VillageScene): number }).soldierDmg(s);
+      sw.tier = 1; sw.applyRole(s.mods); const hpR = sw.maxHp, dmgR = dmgOf(); sw.tier = 4; sw.applyRole(s.mods);
+      assert(s.promote(sw) && sw.unitName === 'Elite Berserker' && /already Elite/.test(s.promoteProblem(sw) ?? ''), `and at the top an Elite Berserker, promoted no further (${sw.unitName})`);
+      const dmgMul = dmgOf() / dmgR;
+      assert(Math.abs(sw.maxHp - hpR * 1.48) <= 1.5 && Math.abs(dmgMul - 1.4) < 0.01 && hp1 > 0 && dmg1 > 0, `an Elite has +48% HP and +40% damage over a Recruit (${hpR} -> ${sw.maxHp} HP, x${dmgMul.toFixed(2)})`);
+      assert(unitName(2, 'pike', null) === 'Pikeman' && unitName(3, 'pike', 'a') === 'Shieldbearer' && unitName(4, 'pike', 'b') === 'Veteran Halberdier' && unitName(3, 'bow', 'a') === 'Longbowman' && unitName(5, 'bow', 'b') === 'Elite Skirmisher' && unitName(3, 'sword', 'a') === 'Guard',
+        'every rung of the ladder has its name');
     }
 
     // ---- the opening: gnomes by default, no farm, wild food by the door ------------------------------

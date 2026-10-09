@@ -647,6 +647,40 @@ export const ARMOR_SLOTS: readonly ArmorSlot[] = ['helmet', 'chest', 'legs', 'sh
 export const ARMOR_BARRACKS_LEVEL = [0, 1, 2, 3] as const;
 /** the loot-only tier: the tower shield, the warhammer and the crossbow are found, never forged */
 export const FOUND_TIER = 4;
+
+// ---- unit tiers ----------------------------------------------------------------------------
+/** a soldier's line, set by its weapon when it is promoted out of the recruits */
+export type UnitLine = 'pike' | 'bow' | 'sword';
+/** the fork at tier 3: each line splits two ways */
+export type UnitBranch = 'a' | 'b';
+/**
+ * The promotion ladder: five tiers, a recruit at 1, a line by weapon at 2, a branch at 3, Veteran and Elite
+ * of it at 4 and 5. Index = the tier being promoted to. Experience is damage dealt to the enemy (and a
+ * little more for a kill); the promotion itself is bought at the barracks.
+ */
+export const UNIT = {
+  maxTier: 5,
+  xp: [0, 0, 20, 60, 150, 300] as readonly number[],
+  cost: [{ wood: 0, scrap: 0 }, { wood: 0, scrap: 0 }, { wood: 8, scrap: 0 }, { wood: 15, scrap: 2 }, { wood: 25, scrap: 5 }, { wood: 40, scrap: 10 }] as readonly { wood: number; scrap: number }[],
+  /** the barracks level a promotion to each tier needs */
+  barracks: [0, 0, 1, 1, 2, 3] as readonly number[],
+  killXp: 5,
+  /** what each tier above the first adds: HP, damage */
+  hpPerTier: 0.12, dmgPerTier: 0.10,
+} as const;
+/** what the units are called: tier 2 by line, tiers 3-5 by branch (Veteran, Elite at 4 and 5) */
+export const UNIT_NAMES: Record<UnitLine, { t2: string; a: string; b: string }> = {
+  pike: { t2: 'Pikeman', a: 'Shieldbearer', b: 'Halberdier' },
+  bow: { t2: 'Bowman', a: 'Longbowman', b: 'Skirmisher' },
+  sword: { t2: 'Footman', a: 'Guard', b: 'Berserker' },
+};
+/** A unit's name at `tier` in `line`, down `branch`. */
+export function unitName(tier: number, line: UnitLine | null, branch: UnitBranch | null): string {
+  if (tier <= 1 || !line) return 'Recruit';
+  if (tier === 2 || !branch) return UNIT_NAMES[line].t2;
+  const name = UNIT_NAMES[line][branch];
+  return tier >= 5 ? `Elite ${name}` : tier === 4 ? `Veteran ${name}` : name;
+}
 /** what the warhammer's blow does to a shove, and how much longer a crossbow takes to span than a bow */
 export const FOUND_WEAPON = { knock: 2.5, reload: 1.4 } as const;
 /** a bandage: HP it gives back over `secs`; a gnome warrior binds its own wounds below `selfAt` of its HP */
