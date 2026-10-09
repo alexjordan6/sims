@@ -72,11 +72,15 @@ export const GEO = {
 // placeholders are white per vertex, so the instance colour alone paints them under PROP_MAT
 for (const g of Object.values(GEO)) if (!g.getAttribute('color')) g.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(g.getAttribute('position').count * 3).fill(1), 3));
 
-/** colours the placeholder world is painted in: dark, damp, desaturated */
+/**
+ * The colours the world is painted in. They used to be dark, damp and desaturated, chosen to survive
+ * a dither down to eighteen shades a channel; with that gone they can be what the old low-poly
+ * fantasy looked like — green grass, sand paths, and berries you can pick out at a distance.
+ */
 export const COL = {
-  grass: 0x3e5232, grass2: 0x445a36, tall: 0x4f6638, trail: 0x6a5d44, dirt: 0x58483a,
-  thicketGround: 0x2e3022, building: 0x5a4d3e, unseen: 0x000000,
-  trunk: 0x4a3626, crown: 0x2f4a2a, crownOld: 0x2a3f24, sapling: 0x3f5a30, stump: 0x6a5238,
-  thicket: 0x2a2a1a, tuft: 0x5a7040,
-  bush: 0x35502c, berry: 0x9a2a30, hazel: 0x405a2e, nut: 0x8a6a3a, garlic: 0xbab49a, burdock: 0x6a3a5a, mushroom: 0xb0a088, cap: 0x8a2a24,
+  grass: 0x5a8a3a, grass2: 0x639444, tall: 0x74a44a, trail: 0xa8906a, dirt: 0x8a7050,
+  thicketGround: 0x3f4a2a, building: 0x7a6a52, unseen: 0x000000,
+  trunk: 0x6b4a2e, crown: 0x3f6b32, crownOld: 0x356029, sapling: 0x5a8a3a, stump: 0x8a6c48,
+  thicket: 0x3a4424, tuft: 0x7fa650,
+  bush: 0x4a7a36, berry: 0xc8323a, hazel: 0x5a7a34, nut: 0xa8824a, garlic: 0xd8d2b8, burdock: 0x8a4a72, mushroom: 0xcfc0a4, cap: 0xc03028,
 } as const;
