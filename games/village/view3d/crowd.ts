@@ -5,8 +5,8 @@ import { lookFor } from '../look';
 import type { VillageScene } from '../main';
 import { MODELS, bake } from './assets';
 import { RIG } from './registry';
-import { heldMesh, grip, rankOf, modelFor, scaleOf, standHeight, PERSON, type Kick } from './actors';
-import { buildFigure, FIGURES, type Spec } from './figure';
+import { heldMesh, grip, rankOf, kitOf, weaponTier, modelFor, scaleOf, standHeight, PERSON, type Kick } from './actors';
+import { buildFigure, FIGURES, wearing, NO_KIT, type Spec, type Kit } from './figure';
 import { lambert } from './fow';
 import { U } from './models';
 import { groundHeight } from './terrain';
@@ -25,8 +25,16 @@ const POSES: { clip: string; at: number }[] = [
 ];
 const IDLE = [0, 1], WALK = [2, 3, 4, 5], STRIKE = [6, 7], FALLEN = 8;
 const CAPACITY0 = 64;
+/**
+ * How many distinct looks the crowd will bake. Each one is nine baked poses kept for the session, so
+ * geometry is the scarce thing here while per-instance colour is free. A village's soldiers share
+ * their kit, so the real count sits far below this; the cap is only there so that a village forever
+ * re-arming one piece at a time cannot pile up looks without end. Past it, gear stops being baked.
+ */
+const LOOK_CAP = 72;
 
 interface Look { poses: THREE.InstancedMesh[]; /** the mover drawn by each instance of each pose, for picking */ who: Mover[][]; /** instances set this frame, per pose */ n: Int32Array }
+type Warm = NonNullable<ReturnType<typeof crowdModel>>;
 interface Fallen { look: Look; x: number; y: number; z: number; yaw: number; scale: number; colour: THREE.Color; t: number }
 
 /**
@@ -34,13 +42,22 @@ interface Fallen { look: Look; x: number; y: number; z: number; yaw: number; sca
  * Every body is now built from boxes on one shared rig, so what a look costs is its figure, its tool,
  * its hat and its rank — not which of a dozen faces it was given.
  */
-export function crowdModel(m: Mover): { figure: string; held: string; hat: boolean; rank: number; tint: number } | null {
-  if (m instanceof Villager) return { figure: 'gnome', held: lookFor(m)?.held ?? 'none', hat: true, rank: rankOf(m), tint: 0xffffff };
+export function crowdModel(m: Mover): { figure: string; held: string; weapon: number; kit: Kit; hat: boolean; rank: number; tint: number } | null {
+  if (m instanceof Villager) {
+    const held = lookFor(m)?.held ?? 'none';
+    return { figure: 'gnome', held, weapon: weaponTier(m, held), kit: kitOf(m), hat: true, rank: rankOf(m), tint: 0xffffff };
+  }
   if (m instanceof Raider && !m.boss && !m.huge && m.kind !== 'ogre' && m.kind !== 'troll') {
     if (!modelFor(m)) return null; // rats and boars keep their code-built bodies
-    return { figure: m.kind, held: lookFor(m)?.held ?? 'none', hat: false, rank: 1, tint: 0xffffff };
+    return { figure: m.kind, held: lookFor(m)?.held ?? 'none', weapon: 0, kit: NO_KIT, hat: false, rank: 1, tint: 0xffffff };
   }
   return null;
+}
+
+/** A look's identity: everything about a body that is geometry rather than colour. */
+function lookId(cm: NonNullable<ReturnType<typeof crowdModel>>): string {
+  const k = cm.kit;
+  return `${cm.figure}|${cm.held}${cm.weapon ? cm.weapon : ''}|${cm.hat}${cm.rank > 1 ? `|${cm.rank}` : ''}${wearing(k) ? `|${k.helmet}${k.chest}${k.legs}${k.shield}` : ''}`;
 }
 
 /**
@@ -75,17 +92,19 @@ export class Crowd {
   clear(): void { this.fallen = []; this.yaw.clear(); this.drawn.next(); this.drawn.next(); this.picks.clear(); }
 
   /** Bake a look's poses (once). Null when the rig has not loaded (the actor path draws it meanwhile). */
-  private look(figure: string, held: string, hat: boolean, rank = 1): Look | null {
-    const id = `${figure}|${held}|${hat}${rank > 1 ? `|${rank}` : ''}`;
+  private look(cm: NonNullable<ReturnType<typeof crowdModel>>): Look | null {
+    let { kit } = cm;
+    let id = lookId(cm);
     if (this.looks.has(id)) return this.looks.get(id)!;
+    if (this.looks.size >= LOOK_CAP) { kit = NO_KIT; id = lookId({ ...cm, kit }); if (this.looks.has(id)) return this.looks.get(id)!; }
     const ch = MODELS.characters.get(RIG);
-    const spec: Spec | undefined = FIGURES[figure];
+    const spec: Spec | undefined = FIGURES[cm.figure];
     if (!ch || !spec) return null;
     const rig = SkeletonUtils.clone(ch.scene);
-    const k = PERSON / (buildFigure(rig, spec, { cap: hat ? rank : 0 }) || ch.height);
+    const k = PERSON / (buildFigure(rig, spec, { cap: cm.hat ? cm.rank : 0, kit }) || ch.height);
     rig.scale.setScalar(k);
     const hand = rig.getObjectByName('arm-right');
-    const tool = heldMesh(held);
+    const tool = heldMesh(cm.held, cm.weapon);
     if (tool && hand) { tool.scale.setScalar(1 / k); grip(tool, k, spec); hand.add(tool); }
     const mixer = new THREE.AnimationMixer(rig), mat = lambert({ vertexColors: true });
     const poses = POSES.map(({ clip, at }) => {
@@ -118,20 +137,20 @@ export class Crowd {
    * actor path leaves them alone. Bodies that died since last frame lie fallen and sink away.
    */
   /** looks still to bake ahead of need, one a frame, so no fight stalls on a first sight of something */
-  private warmList: [string, string, boolean][] | null = null;
+  private warmList: Warm[] | null = null;
   private warmRev = -1;
   private warm(): void {
     if (this.warmRev !== MODELS.revision) {
       this.warmRev = MODELS.revision;
-      const list: [string, string, boolean][] = [];
-      for (const held of ['pike', 'club', 'bow', 'axe', 'none']) list.push(['gnome', held, true]);
-      for (const f of ['raider', 'brute', 'snatcher', 'shaman', 'wrecker', 'skulk']) for (const held of ['sword', 'axe', 'none']) list.push([f, held, false]);
-      this.warmList = list.filter(([k, h, hat]) => !this.looks.has(`${k}|${h}|${hat}`));
+      const list: Warm[] = [];
+      for (const held of ['pike', 'club', 'bow', 'axe', 'none']) list.push({ figure: 'gnome', held, weapon: 0, kit: NO_KIT, hat: true, rank: 1, tint: 0xffffff });
+      for (const f of ['raider', 'brute', 'snatcher', 'shaman', 'wrecker', 'skulk']) for (const held of ['sword', 'axe', 'none']) list.push({ figure: f, held, weapon: 0, kit: NO_KIT, hat: false, rank: 1, tint: 0xffffff });
+      this.warmList = list.filter((w) => !this.looks.has(lookId(w)));
     }
     const next = this.warmList?.find(() => MODELS.characters.has(RIG));
     if (!next) return;
     this.warmList = this.warmList!.filter((x) => x !== next);
-    this.look(next[0], next[1], next[2]);
+    this.look(next);
   }
 
   /** what the camera can see: bodies further than this from its focus are not posed or drawn */
@@ -220,13 +239,17 @@ export class Crowd {
    * Each body's look, kept until what decides it changes (gnome or not, role, weapon, kind): working it out
    * afresh for two thousand bodies every frame was a third of the crowd's time.
    */
-  private picks = new Map<number, { m: Mover; gnome: unknown; role: unknown; weapon: unknown; kind: unknown; tier: unknown; cm: ReturnType<typeof crowdModel>; look: Look | null }>();
+  private picks = new Map<number, { m: Mover; id: string; cm: ReturnType<typeof crowdModel>; look: Look | null }>();
   private pickFor(m: Mover): { cm: ReturnType<typeof crowdModel>; look: Look | null } {
-    const o = m as Mover & { gnome?: unknown; role?: unknown; weapon?: unknown; kind?: unknown; tier?: unknown };
+    // what the body is wearing and wielding belongs in this key too: without it a soldier that
+    // re-arms at the chest would go on being drawn in the kit it walked over in
+    const o = m as Mover & { role?: unknown; weapon?: unknown; kind?: unknown; tier?: unknown };
+    const a = m.armor;
+    const id = `${o.role}|${o.weapon}|${o.kind}|${o.tier}|${m.weapons.melee},${m.weapons.bow}|${a.helmet}${a.chest}${a.legs}${a.shield}`;
     let pk = this.picks.get(m.id);
-    if (!pk || pk.m !== m || pk.gnome !== o.gnome || pk.role !== o.role || pk.weapon !== o.weapon || pk.kind !== o.kind || pk.tier !== o.tier || (pk.cm && !pk.look)) {
+    if (!pk || pk.m !== m || pk.id !== id || (pk.cm && !pk.look)) {
       const cm = crowdModel(m);
-      pk = { m, gnome: o.gnome, role: o.role, weapon: o.weapon, kind: o.kind, tier: o.tier, cm, look: cm ? this.look(cm.figure, cm.held, cm.hat, cm.rank) : null };
+      pk = { m, id, cm, look: cm ? this.look(cm) : null };
       this.picks.set(m.id, pk);
     }
     return pk;

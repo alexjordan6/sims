@@ -35,6 +35,20 @@ const NECK = 0.02;
 const BOX = new THREE.BoxGeometry(1, 1, 1);
 const CONE = new THREE.ConeGeometry(0.5, 1, 6);
 const RING = new THREE.CylinderGeometry(0.5, 0.5, 1, 8);
+/**
+ * The metal ladder, read off the gear's own names: leather and bronze, iron, steel, and the blue stuff
+ * that is only ever found. Index is the forged tier, so a piece's colour is its tier — which is the
+ * whole point: you can tell what a soldier is wearing from across the field.
+ */
+export const ARMOUR_METAL = [0, 0x8a5a30, 0x4b4b4f, 0xa8b0b8, 0x3f5fc0];
+export const WEAPON_METAL = [0x6a4a2a, 0xa9682f, 0x4b4b4f, 0xa8b0b8, 0x3f5fc0];
+
+/** what a body is wearing: a tier per slot, as `Armor` carries them */
+export interface Kit { helmet: number; chest: number; legs: number; shield: number }
+export const NO_KIT: Kit = { helmet: 0, chest: 0, legs: 0, shield: 0 };
+/** Is anything worn? (a bare body skips the gear entirely) */
+export function wearing(k: Kit): boolean { return k.helmet > 0 || k.chest > 0 || k.legs > 0 || k.shield > 0; }
+
 /** a soldier's rank, banded round its cap: none for a Recruit, then bronze, silver, gold, and gold with a plume */
 const RANK_BAND = [0, 0, 0xb0703a, 0xc8ccd4, 0xe3b341, 0xe3b341];
 
@@ -68,7 +82,7 @@ function cap(s: Spec, tier: number): THREE.Mesh[] {
  * joints belong, and boxes hang off them. Returns the standing height, in the same units — the caller
  * scales the rig by `PERSON / height`. Returns 0 if this is not one of the pack rigs, leaving it alone.
  */
-export function buildFigure(rig: THREE.Object3D, s: Spec, wear: { cap?: number; circlet?: boolean } = {}): number {
+export function buildFigure(rig: THREE.Object3D, s: Spec, wear: { cap?: number; circlet?: boolean; kit?: Kit } = {}): number {
   const bone = (n: string) => rig.getObjectByName(n);
   const torso = bone('torso'), head = bone('head');
   const arms = [bone('arm-left'), bone('arm-right')], legs = [bone('leg-left'), bone('leg-right')];
@@ -96,17 +110,55 @@ export function buildFigure(rig: THREE.Object3D, s: Spec, wear: { cap?: number; 
   if (s.hunch) chest.rotation.x = s.hunch; // on the mesh, not the bone: the clips drive the bone
   torso.add(chest);
   head.add(slab(s.skin, s.head * 0.86, s.head, s.head * 0.8, 0, 0, 0));
-  if (wear.cap) head.add(...cap(s, wear.cap));
+  const kit = wear.kit ?? NO_KIT;
+  // a helm takes the cap's place, the way a helmet does: you wear one or the other
+  if (kit.helmet > 0) head.add(...helm(s, kit.helmet, wear.cap ?? 1));
+  else if (wear.cap) head.add(...cap(s, wear.cap));
   if (wear.circlet) head.add(slab(0xc8a040, s.head * 0.95, s.head * 0.11, s.head * 0.9, 0, s.head * 0.8, 0));
+  if (kit.chest > 0) torso.add(...plate(s, kit.chest));
   for (const a of arms) {
     a!.add(slab(s.coat, s.armW, sleeve, s.armW, 0, -sleeve, 0));
     a!.add(slab(s.skin, s.armW * 1.1, hand, s.armW * 1.1, 0, -s.armLen, 0)); // a mitten, as they all were
+    if (kit.chest > 0) a!.add(slab(ARMOUR_METAL[kit.chest], s.armW * 1.3, s.armW * 1.1, s.armW * 1.3, 0, -s.armW * 0.5, 0)); // a pauldron
   }
   for (const l of legs) {
     l!.add(slab(s.trouser, s.legW, shank, s.legW, 0, -shank, 0));
     l!.add(slab(s.boot, s.legW * 1.1, boot, s.legW * 1.75, 0, -s.legLen, s.legW * 0.35)); // a flat foot, forward
+    if (kit.legs > 0) l!.add(slab(ARMOUR_METAL[kit.legs], s.legW * 1.16, shank * 0.62, s.legW * 1.16, 0, -shank * 0.62, 0)); // a greave
   }
+  // the shield rides on the off hand
+  if (kit.shield > 0) arms[0]!.add(...shieldOn(s, kit.shield));
   return height;
+}
+
+/** A helm over the head, cut so the face still shows; the rank band rides round its brow as it did the cap. */
+function helm(s: Spec, tier: number, rank: number): THREE.Mesh[] {
+  const c = ARMOUR_METAL[tier], out: THREE.Mesh[] = [];
+  out.push(slab(c, s.head * 0.96, s.head * 0.62, s.head * 0.9, 0, s.head * 0.42, 0));       // the skull of it
+  out.push(slab(c, s.head * 1.04, s.head * 0.16, s.head * 0.98, 0, s.head * 0.34, 0));      // a brow ridge
+  out.push(slab(c, s.head * 0.18, s.head * 0.42, s.head * 0.1, 0, s.head * 0.3, s.head * 0.44)); // the nasal
+  if (rank >= 2) out.push(slab(RANK_BAND[rank], s.head * 1.1, s.head * 0.12, s.head * 1.04, 0, s.head * 0.2, 0));
+  if (rank >= 5) out.push(slab(0xf4f0e6, s.head * 0.3, s.head * 0.9, s.head * 0.7, 0, s.head * 1.04, -s.head * 0.25));
+  return out;
+}
+
+/** A platebody over the chest: a shell with a raised collar. (The pauldrons go on the arms, so they swing.) */
+function plate(s: Spec, tier: number): THREE.Mesh[] {
+  const c = ARMOUR_METAL[tier];
+  return [
+    slab(c, s.torsoW * 1.08, s.torsoH * 0.74, s.torsoD * 1.14, 0, s.torsoH * 0.2, 0),
+    slab(c, s.torsoW * 0.66, s.torsoH * 0.12, s.torsoD * 1.2, 0, s.torsoH * 0.9, 0), // the collar
+  ];
+}
+
+/** A kite shield on the off arm, held across the body; the found tower shield is a wall of a thing. */
+function shieldOn(s: Spec, tier: number): THREE.Mesh[] {
+  const c = ARMOUR_METAL[tier], tower = tier >= 4;
+  const w = s.torsoW * (tower ? 0.78 : 0.62), h = s.torsoH * (tower ? 1.25 : 0.95), z = s.armW * 1.1;
+  const out = [slab(c, w, h * 0.62, s.armW * 0.5, 0, -s.armLen * 0.72, z)];
+  out.push(slab(c, w * 0.72, h * 0.42, s.armW * 0.5, 0, -s.armLen * 0.72 - h * 0.42, z)); // tapering to a point
+  out.push(slab(0x3a2a1c, w * 0.2, h * 0.5, s.armW * 0.56, 0, -s.armLen * 0.72 + h * 0.1, z)); // a boss down the middle
+  return out;
 }
 
 // ---- who is built how -------------------------------------------------------------------------------

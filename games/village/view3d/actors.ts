@@ -10,7 +10,7 @@ import type { Item } from '../items';
 import type { VillageScene } from '../main';
 import { mat, U, WALL_UNITS } from './models';
 import { lambert, fogify } from './fow';
-import { buildFigure, specFor, type Spec } from './figure';
+import { buildFigure, specFor, WEAPON_METAL, NO_KIT, type Spec, type Kit } from './figure';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { MODELS } from './assets';
 import { RIG } from './registry';
@@ -67,20 +67,43 @@ const FOE: Record<EnemyKind, { body: number; head: number; eyes: number }> = {
   skulk: { body: 0x141414, head: 0x0a0a0a, eyes: 0xe0e0e0 },
 };
 
-export function heldMesh(held: string): THREE.Object3D | null {
+/**
+ * What is in the hand, in world units, built from the butt of the grip upward. `tier` is the weapon's
+ * forged tier and decides its metal, so a bronze sword and a steel one are not the same grey box.
+ */
+export function heldMesh(held: string, tier = 0): THREE.Object3D | null {
   const g = new THREE.Group();
+  const m = WEAPON_METAL[Math.max(0, Math.min(WEAPON_METAL.length - 1, tier))];
+  const wood = 0x6a4a2a, grip = 0x3a2a1c;
   switch (held) {
-    case 'sword': g.add(piece(0xb8bcc4, 0.05, 0.55, 0.05, 0, 0, 0), piece(0x5a3a1a, 0.18, 0.04, 0.05, 0, 0.02, 0)); break;
-    case 'club': g.add(piece(0x5a3e24, 0.09, 0.5, 0.09, 0, 0, 0)); break;
-    case 'axe': g.add(piece(0x5a3e24, 0.05, 0.6, 0.05, 0, 0, 0), piece(0x9a9ea4, 0.2, 0.14, 0.04, 0.08, 0.42, 0)); break;
-    case 'hoe': g.add(piece(0x5a3e24, 0.05, 0.75, 0.05, 0, 0, 0), piece(0x8a8e94, 0.18, 0.05, 0.06, 0.06, 0.7, 0)); break;
-    case 'pike': g.add(piece(0x6a4a2a, 0.05, 1.7, 0.05, 0, 0, 0), piece(0xc8ccd4, 0.07, 0.18, 0.07, 0, 1.7, 0, cone)); break;
-    case 'bow': g.add(piece(0x6a4a2a, 0.05, 0.7, 0.05, 0, 0, 0)); break;
+    case 'sword': // a grip, a crossguard, and a blade that widens a little off the hilt
+      g.add(piece(grip, 0.05, 0.1, 0.05, 0, 0, 0), piece(m, 0.2, 0.04, 0.06, 0, 0.1, 0),
+        piece(m, 0.09, 0.46, 0.035, 0, 0.14, 0), piece(m, 0.05, 0.08, 0.03, 0, 0.6, 0, cone));
+      break;
+    case 'club': g.add(piece(wood, 0.07, 0.38, 0.07, 0, 0, 0), piece(wood, 0.12, 0.16, 0.12, 0, 0.36, 0)); break;
+    case 'axe': g.add(piece(wood, 0.05, 0.6, 0.05, 0, 0, 0), piece(m, 0.06, 0.2, 0.05, 0.07, 0.4, 0), piece(m, 0.1, 0.14, 0.04, 0.12, 0.43, 0)); break;
+    case 'hoe': g.add(piece(wood, 0.05, 0.75, 0.05, 0, 0, 0), piece(m, 0.18, 0.05, 0.06, 0.06, 0.7, 0)); break;
+    case 'pike': g.add(piece(wood, 0.05, 1.6, 0.05, 0, 0, 0), piece(m, 0.09, 0.26, 0.05, 0, 1.56, 0, cone)); break;
+    case 'bow': { // two limbs out of the grip and a string drawn between their tips
+      const limb = (dy: number, sign: number) => { const b = piece(wood, 0.045, 0.42, 0.055, 0, dy, 0); b.rotation.z = sign * 0.3; return b; };
+      g.add(piece(wood, 0.05, 0.16, 0.06, 0, 0, 0), limb(0.14, 0.3), limb(-0.1, -0.3), piece(0xe8e2d0, 0.012, 0.86, 0.012, 0.1, -0.22, 0));
+      break;
+    }
     case 'wand': g.add(piece(0x3a2a4a, 0.04, 0.5, 0.04, 0, 0, 0), piece(0x78d8f0, 0.1, 0.1, 0.1, 0, 0.5, 0, ico)); break;
     default: return null;
   }
   return g;
 }
+
+/** The tier of what this body is swinging or drawing, for the metal it is made of. */
+export function weaponTier(m: Mover, held: string): number {
+  if (held === 'bow') return Math.max(0, m.weapons.bow);
+  if (held === 'sword' || held === 'axe' || held === 'pike') return Math.max(0, m.weapons.melee);
+  return 0;
+}
+
+/** What `m` is wearing, for the figure to dress it in. */
+export function kitOf(m: Mover): Kit { const a = lookFor(m)?.armor; return a ? { helmet: a.helmet, chest: a.chest, legs: a.legs, shield: a.shield } : NO_KIT; }
 
 interface Actor {
   group: THREE.Group;
@@ -116,7 +139,7 @@ function makeCharacter(m: Mover, md: { key: string }): { body: THREE.Group; anim
   const rig = SkeletonUtils.clone(ch.scene);
   const fig = specFor(m);
   // the cap and the circlet go on with the body: the figure knows the head it has to fit them to
-  const wear = { cap: m instanceof Villager ? rankOf(m) : 0, circlet: m instanceof Player };
+  const wear = { cap: m instanceof Villager ? rankOf(m) : 0, circlet: m instanceof Player, kit: kitOf(m) };
   const built = fig ? buildFigure(rig, fig.spec, wear) : 0; // 0: a rig we can't dress, so the pack's own body stands
   const k = PERSON / (built || ch.height);
   rig.scale.setScalar(k);
@@ -129,7 +152,7 @@ function makeCharacter(m: Mover, md: { key: string }): { body: THREE.Group; anim
   });
   body.add(rig);
   const hand = rig.getObjectByName('arm-right');
-  const look = lookFor(m), held = look ? heldMesh(look.held) : null;
+  const look = lookFor(m), held = look ? heldMesh(look.held, weaponTier(m, look.held)) : null;
   if (held && hand) { held.scale.setScalar(1 / k); grip(held, k, fig?.spec); hand.add(held); }
   else if (held) { held.position.set(0.3, 0.42, 0.12); held.rotation.x = 0.5; body.add(held); }
   const mixer = new THREE.AnimationMixer(rig);
@@ -208,8 +231,10 @@ export function makeActor(m: Mover): { body: THREE.Group; key: string; anim?: An
 }
 
 function actorKey(m: Mover): string {
-  const look = lookFor(m), md = modelFor(m);
-  return `${md && MODELS.characters.has(md.key) ? md.key : 'box'}|${m.constructor.name}|${look?.held ?? ''}|${look?.body ?? ''}|${m instanceof Villager ? m.role + m.elder + rankOf(m) : ''}|${m instanceof Raider ? m.kind + m.boss : ''}`;
+  const look = lookFor(m), md = modelFor(m), a = m.armor;
+  // the gear is part of the key: a body that re-arms is rebuilt wearing what it just picked up
+  const gear = `${a.helmet}${a.chest}${a.legs}${a.shield}|${m.weapons.melee},${m.weapons.bow}`;
+  return `${md && MODELS.characters.has(md.key) ? md.key : 'box'}|${m.constructor.name}|${look?.held ?? ''}|${look?.body ?? ''}|${gear}|${m instanceof Villager ? m.role + m.elder + rankOf(m) : ''}|${m instanceof Raider ? m.kind + m.boss : ''}`;
 }
 
 export function scaleOf(m: Mover): number {
