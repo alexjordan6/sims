@@ -1,6 +1,6 @@
 import type { Agent } from '@shared/index';
 import { World, WILD_FOOD, doorstep, buildingCenter, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
-import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, GNOME_CALLING, MOODS, type Mood, type DishKind, ORDER, YARD, GNOME_PACK, ITEM, MASS, BODY, FOODS, FOOD_KINDS, DIET_CAP, zeroFood, BOAR, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat, UNIT, unitName, type UnitLine, type UnitBranch } from './config';
+import { p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, GNOME_CALLING, MOODS, type Mood, type DishKind, ORDER, YARD, GNOME_PACK, ITEM, MASS, BODY, FOODS, FOOD_KINDS, DIET_CAP, zeroFood, BOAR, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat, UNIT, PERK, unitName, type UnitLine, type UnitBranch } from './config';
 import type { Mods } from './meta';
 import { SHIELD_WALL, ADVANCE_SIGHT } from './regiment';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle, knockMul, reloadMul } from './characters';
@@ -213,6 +213,10 @@ export abstract class Mover implements Agent {
   pushY = 0;
   /** how much of a push this body takes (brutes 0.3, the warlord 0.15) */
   pushScale = 1;
+  /** a rank's edge (unit tiers; plain ones for every other body): pike reach and brace, bow range, reload time, the shield's extra block, the weight in a shield wall, extra foes a blow carries into */
+  reachMul = 1; braceMul = 1; rangeMul = 1; reloadPerk = 1; blockBonus = 0; wallWeight = 1; cleave = 0;
+  /** how far this body's pike reaches */
+  get pikeReach(): number { return p.pikeReach * this.reachMul; }
   /** hitstop: seconds this body stays frozen after a big hit lands */
   freeze = 0;
   /** telegraphed melee attack in progress (raiders, soldiers) */
@@ -223,7 +227,9 @@ export abstract class Mover implements Agent {
   hit(dmg: number, melee = true, by?: Mover): void {
     const st = armorStats(this.armor);
     this.blocked = false;
-    const block = st.block > 0 && by && this.inShieldWall(by) ? Math.min(SHIELD_WALL.cap, st.block * SHIELD_WALL.mul) : st.block;
+    // a shield wall: its bonus grows with the block's drill, and a Shieldbearer counts double in it
+    const own = st.block > 0 ? st.block + this.blockBonus : 0;
+    const block = own > 0 && by && this.inShieldWall(by) ? Math.min(SHIELD_WALL.cap, own * (1 + (SHIELD_WALL.mul - 1 + PERK.wall * this.block!.drill) * this.wallWeight)) : own;
     if (melee && block > 0 && Math.random() < block) { this.blocked = true; this.hurtT = 0.2; return; }
     const before = this.hp;
     this.hp -= Math.max(1, Math.round(dmg * st.dmgMul));
@@ -280,6 +286,12 @@ export abstract class Mover implements Agent {
         const d = this.dist(t) || 1;
         t.shove((t.x - this.x) / d, (t.y - this.y) / d, this.blowPush);
         s.fx.push({ kind: 'hit', attacker: this, target: t, dmg: a.dmg, crit: false, killed: !!t.dead });
+        // a cleaving blow carries on into the next foe in reach
+        if (this.cleave > 0) {
+          const more: Raider[] = [];
+          s.grid.forEachInRadius(this.x, this.y, a.reach + 4, (o) => { if (more.length < this.cleave && o !== t && o instanceof Raider && !o.dead && !o.hidden && !o.harmless && o.elevated === this.elevated) more.push(o); });
+          for (const o of more) { o.hit(a.dmg, true, this); s.fx.push({ kind: 'hit', attacker: this, target: o, dmg: a.dmg, crit: false, killed: !!o.dead }); }
+        }
       } else {
         s.fx.push({ kind: 'miss', who: this });
       }
@@ -403,6 +415,26 @@ export class Villager extends Mover {
   branch: UnitBranch | null = null;
   /** what this soldier is called on the ladder: Recruit, Pikeman, Veteran Halberdier… */
   get unitName(): string { return unitName(this.tier, this.line, this.branch); }
+  /** a rank's own edge in the fight (PERK): the Longbowman's damage, the Berserker's charge */
+  dmgPerk = 1; chargeMul = 1;
+  /** the branch from tier 3, as one key ('pike-a' = Shieldbearer...), or '' */
+  get unit(): string { return this.role === 'soldier' && this.isAdult && this.tier >= 3 && this.line && this.branch ? `${this.line}-${this.branch}` : ''; }
+  /** What the rank gives (PERK): discipline by tier, the branch's edge from tier 3, half as strong again at Elite. (Part of applyRole.) */
+  private setPerks(): void {
+    const t = this.role === 'soldier' && this.isAdult ? this.tier : 1, k = t >= 5 ? PERK.eliteMul : 1, u = this.unit;
+    this.pushScale = u === 'sword-a' ? 0 : Math.max(0, 1 - PERK.steady * (t - 1)); // a Guard is never shoved off its slot
+    this.reachMul = u === 'pike-b' ? 1 + PERK.halberdReach * k : 1;
+    this.braceMul = u === 'pike-b' ? 1 + PERK.halberdBrace * k : 1;
+    this.rangeMul = u === 'bow-a' ? 1 + PERK.longRange * k : 1;
+    this.dmgPerk = u === 'bow-a' ? 1 + PERK.longDmg * k : 1;
+    this.reloadPerk = u === 'bow-b' ? 1 - PERK.skirmReload * k : 1;
+    this.blockBonus = u === 'sword-a' ? PERK.guardBlock * k : 0;
+    this.wallWeight = u === 'pike-a' ? PERK.shieldWallWeight : 1;
+    this.cleave = u === 'sword-b' ? PERK.berserkCleave : 0;
+    this.chargeMul = u === 'sword-b' ? 1 + PERK.berserkCharge * k : 1;
+    if (u === 'pike-a') this.maxHp *= 1 + PERK.shieldHp * k;
+    if (u === 'bow-b') this.speed *= 1 + PERK.skirmSpeed * k;
+  }
   /** the day the village head last encouraged them / they last had to run from raiders */
   encouragedDay = 0;
   fledDay = 0;
@@ -530,6 +562,7 @@ export class Villager extends Mover {
       this.speed *= stars * (this.trait === 'quick' ? 1.2 : 1) * (1 + this.dietBonus.speed) * (this.elder ? ELDER_MUL : 1);
     }
     if (this.role === 'soldier' && this.isAdult) this.maxHp *= 1 + UNIT.hpPerTier * (this.tier - 1); // rank: each tier above the first
+    this.setPerks();
     this.maxHp = Math.round(this.maxHp * mods.hpMul * mods.villagerHpMul);
     this.hp = Math.min(this.hp, this.maxHp);
     this.clearGoal();
@@ -1084,17 +1117,17 @@ export class Villager extends Mover {
       this.target = order?.kind === 'attack' ? (order.target as Raider)
         : order?.kind === 'hold' ? s.bestTarget((order.tx + 0.5) * TILE, (order.ty + 0.5) * TILE, leash)
         : order?.kind === 'follow' ? s.attackingPlayer(s.player.x, s.player.y, leash) ?? (pike ? s.bestTarget(s.player.x, s.player.y, p.pikeSight) : null)
-        : s.bestTarget(this.x, this.y, this.weapon === 'bow' ? 190 : pike ? p.pikeSight : 130);
+        : s.bestTarget(this.x, this.y, this.weapon === 'bow' ? 190 * this.rangeMul : pike ? p.pikeSight : 130);
     }
     if (this.target && !this.target.dead) {
       this.task = 'fighting';
       if (this.attackTick(dt, s)) return;
       const dmg = this.soldierDmg(s);
       if (this.weapon === 'bow') {
-        const range = this.elevated ? 210 : 160;
+        const range = (this.elevated ? 210 : 160) * this.rangeMul;
         if (this.dist(this.target) <= range && s.world.lineClear(this, this.target, this.elevated)) {
           this.vx = this.vy = 0; this.task = this.post ? 'archer holding the wall' : 'firing arrows';
-          if (this.attackCd <= 0) { s.shoot(this, this.target.x - this.x, this.target.y - this.y, Math.round(dmg)); this.attackCd = 0.9 * reloadMul(this.weapons); }
+          if (this.attackCd <= 0) { s.shoot(this, this.target.x - this.x, this.target.y - this.y, Math.round(dmg)); this.attackCd = 0.9 * reloadMul(this.weapons) * this.reloadPerk; }
           return;
         }
       }
@@ -1136,7 +1169,7 @@ export class Villager extends Mover {
 
   /** What a soldier's blow does now: the weapon, the barracks, the drill, the trait and the diet. */
   private soldierDmg(s: VillageScene): number {
-    return (1 + UNIT.dmgPerTier * (this.tier - 1)) * p.soldierDmg * weaponMul(this.weapons, this.weapon === 'bow' ? 'bow' : 'melee') * s.mods.soldierDmgMul * (s.world.barracksLevel >= 3 ? 1.2 : 1) * (this.skilled ? 1.15 : 1) * (this.trait === 'brave' ? 1.2 : 1) * (1 + this.dietBonus.dmg);
+    return this.dmgPerk * (1 + UNIT.dmgPerTier * (this.tier - 1)) * p.soldierDmg * weaponMul(this.weapons, this.weapon === 'bow' ? 'bow' : 'melee') * s.mods.soldierDmgMul * (s.world.barracksLevel >= 3 ? 1.2 : 1) * (this.skilled ? 1.15 : 1) * (this.trait === 'brave' ? 1.2 : 1) * (1 + this.dietBonus.dmg);
   }
 
   /**
@@ -1154,11 +1187,13 @@ export class Villager extends Mover {
     const d = this.dist(foe), dmg = this.soldierDmg(s);
     this.task = 'charging';
     if (bow) {
-      if (d <= reach && s.world.lineClear(this, foe, this.elevated)) { this.vx = this.vy = 0; if (!this.regiment!.holdFire && this.attackCd <= 0) { s.shoot(this, foe.x - this.x, foe.y - this.y, Math.round(dmg)); this.attackCd = 0.9 * reloadMul(this.weapons); } return true; }
+      if (d <= reach && s.world.lineClear(this, foe, this.elevated)) { this.vx = this.vy = 0; if (!this.regiment!.holdFire && this.attackCd <= 0) { s.shoot(this, foe.x - this.x, foe.y - this.y, Math.round(dmg)); this.attackCd = 0.9 * reloadMul(this.weapons) * this.reloadPerk; } return true; }
     } else if (pike) {
-      if (d <= p.pikeReach + foe.radius) { this.pikeTick(dt, s, dmg); return true; }
+      if (d <= this.pikeReach + foe.radius) { this.pikeTick(dt, s, dmg); return true; }
     } else if (this.startAttack(s, foe, Math.round(dmg), 13, 0.15, 0.45)) return true;
+    const pace = this.speed; this.speed *= this.chargeMul; // a Berserker goes in faster
     this.stepToward(dt, s, foe.x, foe.y);
+    this.speed = pace;
     return true;
   }
   private rankTick(dt: number, s: VillageScene): void {
@@ -1166,7 +1201,7 @@ export class Villager extends Mover {
     if (this.thrust && this.thrustTick(dt, s)) return;
     if (this.attackTick(dt, s)) return;
     const pike = this.weapon === 'pike', bow = this.weapon === 'bow';
-    const reach = pike ? p.pikeReach : bow ? 160 : 13;
+    const reach = pike ? this.pikeReach : bow ? 160 * this.rangeMul : 13;
     // falling back: nobody stops to fight on the way
     if (reg.stance === 'retreat') { this.target = null; this.toSlot(dt, s, reg.fx, 'falling back to the village'); this.task = 'falling back to the village'; return; }
     // charging: ranks broken, every gnome hunts what it can see
@@ -1186,11 +1221,11 @@ export class Villager extends Mover {
         if (d <= reach && s.world.lineClear(this, foe, this.elevated)) {
           if (reg.holdFire) { this.target = null; this.toSlot(dt, s, reg.fx, 'holding fire'); this.task = 'holding fire'; return; }
           this.vx = this.vy = 0;
-          if (this.attackCd <= 0) { s.shoot(this, foe.x - this.x, foe.y - this.y, Math.round(dmg)); this.attackCd = 0.9 * reloadMul(this.weapons); }
+          if (this.attackCd <= 0) { s.shoot(this, foe.x - this.x, foe.y - this.y, Math.round(dmg)); this.attackCd = 0.9 * reloadMul(this.weapons) * this.reloadPerk; }
           return;
         }
       } else if (pike) {
-        if (d <= p.pikeReach + foe.radius + lunge) { this.pikeTick(dt, s, dmg); return; }
+        if (d <= this.pikeReach + foe.radius + lunge) { this.pikeTick(dt, s, dmg); return; }
       } else {
         if (this.startAttack(s, foe, Math.round(dmg), 13, 0.15, 0.45)) return;
         if (d <= reach + foe.radius + lunge) { this.stepToward(dt, s, foe.x, foe.y); return; }
@@ -1222,14 +1257,14 @@ export class Villager extends Mover {
       this.task = 'giving ground';
       return;
     }
-    if (d <= p.pikeReach + foe.radius && this.attackCd <= 0 && s.world.lineClear(this, foe, this.elevated)) {
+    if (d <= this.pikeReach + foe.radius && this.attackCd <= 0 && s.world.lineClear(this, foe, this.elevated)) {
       this.clearGoal(); this.vx = this.vy = 0;
       this.thrust = { t: 0, ux, uy, dmg, struck: false };
       s.fx.push({ kind: 'telegraph', who: this, ms: p.pikeWindup * 1000 });
       this.task = 'levelling the pike';
       return;
     }
-    if (d <= p.pikeReach + foe.radius) { this.vx = this.vy = 0; this.clearGoal(); this.task = 'holding the point'; return; }
+    if (d <= this.pikeReach + foe.radius) { this.vx = this.vy = 0; this.clearGoal(); this.task = 'holding the point'; return; }
     this.setGoal(s, foe.tile.tx, foe.tile.ty);
     this.followPath(dt);
     this.task = 'closing with the pike';
@@ -1495,7 +1530,7 @@ export class Arrow extends Mover {
   /** `owner` is null for a barracks tower shot, which is always loosed from the roof (elevated). */
   constructor(x: number, y: number, public ux: number, public uy: number, public dmg: number, public owner: Mover | null, public dropDistance = 170) {
     super(x, y); this.speed = 230; this.radius = 2; this.hp = this.maxHp = 1;
-    this.elevated = owner ? owner.elevated : true; this.range = owner ? (this.elevated ? 220 : 170) : dropDistance;
+    this.elevated = owner ? owner.elevated : true; this.range = owner ? (this.elevated ? 220 : 170) * owner.rangeMul : dropDistance;
   }
   update(dt: number, s: VillageScene): void {
     const total = this.speed * dt, steps = Math.ceil(total / 3), step = total / steps;

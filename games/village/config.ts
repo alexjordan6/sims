@@ -668,6 +668,21 @@ export const UNIT = {
   /** what each tier above the first adds: HP, damage */
   hpPerTier: 0.12, dmgPerTier: 0.10,
 } as const;
+/**
+ * What a rank gives beyond the stats. Discipline, per tier above the first: steadier under a shove, a block
+ * that dresses its ranks without slowing as much (slack, in tiles), a tighter shield wall. From tier 3 the
+ * branch's own edge, half as strong again at Elite (tier 5).
+ */
+export const PERK = {
+  steady: 0.08, slack: 0.25, wall: 0.05,
+  eliteMul: 1.5,
+  shieldHp: 0.2, shieldWallWeight: 2,
+  halberdBrace: 0.5, halberdReach: 0.2,
+  longRange: 0.25, longDmg: 0.15,
+  skirmReload: 0.25, skirmSpeed: 0.15,
+  guardBlock: 0.1,
+  berserkCharge: 0.2, berserkCleave: 1,
+} as const;
 /** what the units are called: tier 2 by line, tiers 3-5 by branch (Veteran, Elite at 4 and 5) */
 export const UNIT_NAMES: Record<UnitLine, { t2: string; a: string; b: string }> = {
   pike: { t2: 'Pikeman', a: 'Shieldbearer', b: 'Halberdier' },

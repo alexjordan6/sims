@@ -1,5 +1,5 @@
 import { World, type TilePos } from './world';
-import { TILE, BODY } from './config';
+import { TILE, BODY, PERK } from './config';
 import type { Mover, Villager, Raider } from './agents';
 
 export type Shape = 'line' | 'shieldwall' | 'loose' | 'circle' | 'square' | 'wedge' | 'column';
@@ -121,6 +121,8 @@ export abstract class Block<M extends Mover = Mover> {
   peak = 0;
   /** room between slots, in pixels */
   gap = SLOT_GAP;
+  /** the block's drill: its members' average tier above the first (unit tiers; 0 for the enemy) */
+  drill = 0;
   /** slot positions, one per active member (same order), in sim pixels; a slot may face its own way (the circle faces out) */
   slots: Slot[] = [];
   /** a column remembers the shape it marched out of, and takes it again once it arrives */
@@ -230,8 +232,11 @@ export abstract class Block<M extends Mover = Mover> {
     let lag = 0;
     for (const v of who) if (v.slot) lag += Math.hypot(v.x - v.slot.x, v.y - v.slot.y);
     lag = who.length ? lag / who.length : 0;
+    let tiers = 0;
+    for (const v of who) tiers += ((v as { tier?: number }).tier ?? 1) - 1;
+    this.drill = who.length ? tiers / who.length : 0;
     // (a column keeps its own loose order on the march: it dresses its ranks only when they trail far behind)
-    const column = this.shape === 'column', slack = column ? 2 * TILE : TILE, give = column ? 4 * TILE : 3 * TILE;
+    const column = this.shape === 'column', slack = (column ? 2 * TILE : TILE) + PERK.slack * TILE * this.drill, give = column ? 4 * TILE : 3 * TILE;
     this.march(dt, world, this.hurried() ? pace : pace * SHAPE_PACE[this.shape] * Math.min(1, Math.max(0.1, 1 - (lag - slack) / give)));
     this.slots = this.slotsAt(this.x, this.y, this.fx, this.fy, who.length).map((q) => this.footing(world, q));
     if (this.dirty || who.length !== this.lastActive) {

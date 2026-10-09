@@ -1,7 +1,7 @@
 import './main';
 import { runPackChecks } from './pack-test';
 import { IMPLEMENTS } from './pack';
-import { STACK, UNIT, unitName } from './config';
+import { STACK, UNIT, PERK, unitName } from './config';
 const clearBulk = (s: VillageScene) => s.player.pack.slots.forEach((b,i)=>{if(b && ['wood','food','scrap'].includes(b.kind))s.player.pack.removeAt(i);});
 import type { VillageScene } from './main';
 import { World, WILD_FOOD, doorstep, buildingCenter, hearthCost, BUILDINGS, type BuildingKind, type Chest } from './world';
@@ -2315,6 +2315,77 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(Math.abs(sw.maxHp - hpR * 1.48) <= 1.5 && Math.abs(dmgMul - 1.4) < 0.01 && hp1 > 0 && dmg1 > 0, `an Elite has +48% HP and +40% damage over a Recruit (${hpR} -> ${sw.maxHp} HP, x${dmgMul.toFixed(2)})`);
       assert(unitName(2, 'pike', null) === 'Pikeman' && unitName(3, 'pike', 'a') === 'Shieldbearer' && unitName(4, 'pike', 'b') === 'Veteran Halberdier' && unitName(3, 'bow', 'a') === 'Longbowman' && unitName(5, 'bow', 'b') === 'Elite Skirmisher' && unitName(3, 'sword', 'a') === 'Guard',
         'every rung of the ladder has its name');
+    }
+
+    // ---- unit perks and drill: each branch's edge from tier 3, and a steadier block with every tier ----
+    {
+      s = fresh(); s.agents = [s.player]; s.dayTime = 0.3;
+      const at = World.center(120, 100);
+      const unit = (weapon: 'sword' | 'bow' | 'pike', tier: number, branch: 'a' | 'b' | null, dy = 0) => {
+        const v = s.spawn(new Villager(at.x, at.y + dy, home0(s), 'soldier', s.adultAge + 3, 'Perk', s.mods)); v.update = () => {};
+        Object.assign(v, { weapon, line: tier >= 2 ? weapon : null, tier, branch: tier >= 3 ? branch : null }); v.applyRole(s.mods); v.hp = v.maxHp; return v;
+      };
+      const foe = (x: number, y: number, hp = 500) => { const r = s.spawn(new Raider(x, y)); r.hp = r.maxHp = hp; r.update = () => {}; r.vx = r.vy = 0; return r; };
+      const dmgOf = (v: Villager) => (v as unknown as { soldierDmg(s: VillageScene): number }).soldierDmg(s);
+      const clear = () => { for (const a of s.agents) if (a instanceof Raider || a instanceof Arrow) a.dead = true; s.removeDead(); };
+      // Halberdier: reaches 20% further and braces 50% harder
+      const pk = unit('pike', 2, null), hal = unit('pike', 3, 'b', 40);
+      assert(hal.unitName === 'Halberdier' && Math.abs(hal.pikeReach - p.pikeReach * (1 + PERK.halberdReach)) < 1e-6, `a Halberdier's pike reaches ${PERK.halberdReach * 100}% further (${hal.pikeReach.toFixed(1)} against ${p.pikeReach})`);
+      const far = (v: Villager) => foe(v.x + p.pikeReach + 6 + 3, v.y);
+      const f1 = far(pk), f2 = far(hal);
+      assert(s.pikeStrike(pk, 1, 0, 10) === 0 && s.pikeStrike(hal, 1, 0, 10) === 1 && f1.hp === 500 && f2.hp < 500, 'a raider just past a Pikeman\'s point is in a Halberdier\'s reach');
+      clear();
+      const c1 = foe(pk.x + 20, pk.y), c2 = foe(hal.x + 20, hal.y); c1.vx = c2.vx = -80;
+      s.pikeStrike(pk, 1, 0, 10); s.pikeStrike(hal, 1, 0, 10);
+      assert(500 - c2.hp > 500 - c1.hp, `and a set Halberdier's thrust hits a charge harder (${500 - c2.hp} against ${500 - c1.hp})`);
+      clear();
+      // Longbowman: further and harder; Skirmisher: quicker to loose and on its feet
+      const lb = unit('bow', 3, 'a'), sk = unit('bow', 3, 'b', 20), bm = unit('bow', 2, null, 40);
+      const range = (v: Villager) => new Arrow(v.x, v.y, 1, 0, 1, v).range;
+      assert(Math.abs(range(lb) - range(bm) * (1 + PERK.longRange)) < 1e-6 && Math.abs(dmgOf(lb) / dmgOf(sk) - (1 + PERK.longDmg)) < 1e-6,
+        `a Longbowman shoots ${PERK.longRange * 100}% further (${range(lb)} against ${range(bm)}) and ${PERK.longDmg * 100}% harder`);
+      s.arrows = 10; s.shoot(sk, 50, 0, 1); const skCd = sk.attackCd; s.shoot(bm, 50, 0, 1);
+      assert(Math.abs(skCd / bm.attackCd - (1 - PERK.skirmReload)) < 1e-6 && Math.abs(sk.speed / lb.speed - (1 + PERK.skirmSpeed)) < 0.01,
+        `a Skirmisher looses ${PERK.skirmReload * 100}% sooner (${skCd.toFixed(2)} s against ${bm.attackCd.toFixed(2)}) and runs ${PERK.skirmSpeed * 100}% faster`);
+      clear();
+      // Berserker: a blow carries into a second foe; a Footman's does not
+      const swing = (v: Villager) => {
+        const a = foe(v.x + 8, v.y), b = foe(v.x, v.y + 8); s.grid.rebuild(s.agents);
+        v.attackCd = 0; v.attack = null; v.startAttack(s, a, 10, 13, 0.1, 0.1);
+        for (let i = 0; i < 20; i++) v.attackTick(1 / 60, s);
+        const out = [a.hp < 500, b.hp < 500]; clear(); return out;
+      };
+      const brs = unit('sword', 3, 'b'), ft = unit('sword', 2, null, 60);
+      const bh = swing(brs), fh = swing(ft);
+      assert(bh[0] && bh[1] && fh[0] && !fh[1], `a Berserker's blow cleaves into a second raider in reach; a Footman's stops at the first (${bh}, ${fh})`);
+      assert(Math.abs(brs.chargeMul - (1 + PERK.berserkCharge)) < 1e-6, 'and a Berserker charges faster');
+      // Guard: never shoved off its slot, and its shield turns more
+      const gd = unit('sword', 3, 'a');
+      gd.pushX = gd.pushY = ft.pushX = ft.pushY = 0; gd.shove(1, 0, 6); ft.shove(1, 0, 6);
+      gd.armor = { ...gd.armor, shield: 1 }; gd.applyRole(s.mods);
+      assert(gd.pushX === 0 && ft.pushX > 0 && Math.abs(gd.blockBonus - PERK.guardBlock) < 1e-6, `a Guard takes no shove (${gd.pushX} against ${ft.pushX.toFixed(1)}) and blocks ${PERK.guardBlock * 100}% more`);
+      // Shieldbearer: counts double in a shield wall; and a drilled wall turns more blows
+      const sb = unit('pike', 3, 'a'), pw = unit('pike', 2, null, 20);
+      assert(sb.unitName === 'Shieldbearer' && sb.maxHp > pw.maxHp * (1 + PERK.shieldHp) * 0.98, `a Shieldbearer has ${PERK.shieldHp * 100}% more HP on top of its tier (${sb.maxHp} against ${pw.maxHp})`);
+      const blockAt = (v: Villager, drill: number, roll: number) => {
+        v.armor = { ...v.armor, shield: 1 }; v.applyRole(s.mods); v.hp = v.maxHp;
+        v.inShieldWall = () => true; v.block = { drill } as unknown as typeof v.block;
+        const rnd = Math.random; Math.random = () => roll;
+        try { v.hit(1, true, s.player); } finally { Math.random = rnd; }
+        const out = v.blocked; v.block = null; return out;
+      };
+      const b0 = armorStats({ helmet: 0, chest: 0, legs: 0, shield: 1 }).block;
+      const plain = Math.min(0.6, b0 * 1.5), twice = Math.min(0.6, b0 * 2), drilled = Math.min(0.6, b0 * (1.5 + PERK.wall * 3));
+      assert(b0 > 0 && plain < twice && !blockAt(pw, 0, (plain + twice) / 2) && blockAt(sb, 0, (plain + twice) / 2),
+        `in a shield wall a Shieldbearer turns blows a Pikeman's shield lets through (${(twice * 100).toFixed(0)}% against ${(plain * 100).toFixed(0)}%)`);
+      assert(plain < drilled && !blockAt(pw, 0, (plain + drilled) / 2) && blockAt(pw, 3, (plain + drilled) / 2), `and a drilled block's wall is tighter (${(drilled * 100).toFixed(0)}% at three tiers of drill)`);
+      // drill: a soldier four tiers up takes less of a shove
+      const vet = unit('pike', 4, 'b'), rec = unit('pike', 1, null, 20);
+      vet.pushX = rec.pushX = 0; vet.shove(1, 0, 6); rec.shove(1, 0, 6);
+      assert(Math.abs(vet.pushX / rec.pushX - (1 - 3 * PERK.steady)) < 1e-6, `a Veteran takes ${3 * PERK.steady * 100}% less knockback than a Recruit`);
+      const reg = new Regiment(97, '#fff', at.x, at.y); for (const v of [vet, rec]) { v.order = null; v.post = null; reg.add(v); }
+      reg.tick(1 / 60, s.world, s.player, () => null); assert(Math.abs(reg.drill - 1.5) < 1e-6, `and a block's drill is its average tier above the first (${reg.drill})`);
+      for (const v of s.villagers()) v.dead = true; s.removeDead();
     }
 
     // ---- the opening: gnomes by default, no farm, wild food by the door ------------------------------

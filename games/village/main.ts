@@ -3156,7 +3156,7 @@ export class VillageScene extends SimScene {
     if (this.arrows <= 0) { who.task = 'out of arrows'; if (who === this.player) this.event('info', 'Out of arrows. Craft a bundle at the barracks.'); return false; }
     const len = Math.hypot(dx, dy) || 1;
     who.aim = { x: dx / len, y: dy / len }; who.dir = dx < 0 ? -1 : 1;
-    this.arrows--; who.attackCd = 0.65 * reloadMul(who.weapons);
+    this.arrows--; who.attackCd = 0.65 * reloadMul(who.weapons) * who.reloadPerk;
     this.spawn(new Arrow(who.x, who.y, dx / len, dy / len, dmg, who, len > 2 ? len : who.elevated ? 220 : 170));
     this.fx.push({ kind: 'arrow', who });
     return true;
@@ -3393,7 +3393,7 @@ export class VillageScene extends SimScene {
    * Returns how many it struck.
    */
   pikeStrike(who: Mover, ux: number, uy: number, dmg: number): number {
-    const reach = p.pikeReach;
+    const reach = who.pikeReach;
     let hits = 0;
     for (const a of this.agents) {
       if (!(a instanceof Raider) || a.dead || a.hidden || a.elevated !== who.elevated) continue;
@@ -3402,7 +3402,7 @@ export class VillageScene extends SimScene {
       if (along < p.pikeDeadZone * 0.5 || along > reach + a.radius || across > p.pikeWidth + a.radius) continue;
       // how hard it was coming on: its speed toward the pikeman, as a share of a brisk charge
       const closing = Math.max(0, -(a.vx * ux + a.vy * uy));
-      const brace = 1 + p.pikeBrace * Math.min(1, closing / 80);
+      const brace = 1 + p.pikeBrace * who.braceMul * Math.min(1, closing / 80);
       const blow = Math.round(dmg * p.pikeDmgMul * brace);
       a.hit(blow, true, who);
       a.shove(ux, uy, brace > 1.5 ? 6 : 3);
