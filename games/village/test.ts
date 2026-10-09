@@ -2388,6 +2388,36 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       for (const v of s.villagers()) v.dead = true; s.removeDead();
     }
 
+    // ---- rank on show: PROMOTE READY on a banner, the armory's RANK row ----------------------------
+    {
+      s = fresh(); s.agents = [s.player]; s.dayTime = 0.3;
+      const at = World.center(120, 100);
+      const bar = s.world.place('barracks', 126, 96); bar.level = 1;
+      const man = (tier: number, xp: number, i: number) => {
+        const v = s.spawn(new Villager(at.x + i * 8, at.y, home0(s), 'soldier', s.adultAge + 3, `Pike${i}`, s.mods)); v.update = () => {};
+        Object.assign(v, { weapon: 'pike', line: tier >= 2 ? 'pike' : null, tier, xp }); v.applyRole(s.mods); return v;
+      };
+      const b = man(2, UNIT.xp[3], 0), a = man(1, UNIT.xp[2], 1), c = man(1, 5, 2), d = man(1, UNIT.xp[2] + 3, 3);
+      const reg = new Regiment(96, '#fff', at.x, at.y); for (const v of [b, a, c, d]) reg.add(v); reg.branch = 'b';
+      s.wood = 2 * UNIT.cost[2].wood + 4; s.scrap = 10;
+      const n1 = s.promoteReady(reg);
+      assert(n1 === 2 && a.tier === 2 && d.tier === 2 && b.tier === 2 && c.tier === 1 && s.wood === 4,
+        `PROMOTE READY promotes the ready, cheapest first, as far as the wood goes (${n1} promoted, the Pikeman at the fork left for want of wood: ${s.wood} left)`);
+      s.wood = 100;
+      assert(s.promoteReady(reg) === 1 && b.unitName === 'Halberdier' && Math.abs(reg.avgTier - 2) < 1e-6, `then the one at the fork, down the banner's branch (${b.unitName}, average tier ${reg.avgTier})`);
+      // the armory: a RANK row with the experience bar, and the two branches at the fork
+      const ui = (s as unknown as { ui: { renderArmory(): void } }).ui;
+      a.xp = UNIT.xp[3]; s.openArmory(a); ui.renderArmory();
+      const row = document.querySelector<HTMLElement>('.armory-screen .rankrow');
+      const forks = [...document.querySelectorAll<HTMLElement>('.armory-screen [data-promote]')].map((x) => x.dataset.promote);
+      assert(!!row && /Pikeman/.test(row.textContent ?? '') && forks.join() === 'a,b' && /Shieldbearer/i.test(row.textContent ?? '') && /Halberdier/i.test(row.textContent ?? ''),
+        `the armory shows a Pikeman's rank and both branches at the fork (${forks})`);
+      document.querySelector<HTMLElement>('.armory-screen [data-promote="a"]')!.click();
+      assert(a.unitName === 'Shieldbearer', `and its button promotes down that branch (${a.unitName})`);
+      s.openArmory(null); ui.renderArmory();
+      for (const v of s.villagers()) v.dead = true; s.removeDead();
+    }
+
     // ---- the opening: gnomes by default, no farm, wild food by the door ------------------------------
     {
       assert(p.ps1Height === 1080, `the game draws 1080 rows (${p.ps1Height})`);

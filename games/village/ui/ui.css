@@ -680,3 +680,18 @@ body::after {
 #overlay .orders .oitem kbd { margin-right: 4px; color: #e8c860; }
 #overlay .orders .otitle { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; opacity: 0.8; margin-right: 4px; }
 #overlay .orders .ohint { font-size: 9px; opacity: 0.55; margin-left: 4px; }
+
+/* ---- unit tiers: rank pips, the armory's RANK row, a banner's rank ---- */
+.rank { letter-spacing: 1px; font-size: 11px; color: #d9a35a; }
+.rank.t3 { color: #c8ccd4; }
+.rank.t4, .rank.t5 { color: #e3b341; }
+.rank .dim { color: #5a4636; }
+.rankrow { background: #0005; border: 2px solid #5a4636; padding: 6px 8px; margin-bottom: 6px; }
+.rankrow .d { font-size: 12px; color: var(--ink-dim); margin-top: 2px; }
+.rankrow .promotes { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.rankrow .promote { height: auto; line-height: 1.3; padding-top: 4px; padding-bottom: 4px; white-space: normal; text-align: left; }
+.rankrow .promote small { display: block; font-size: 10px; opacity: 0.85; text-transform: none; margin-top: 2px; }
+.bar.xp { height: 6px; margin-top: 3px; }
+.bar.xp i { background: #e3b341; }
+.roster .reg-row .rk { font-size: 11px; color: var(--ink-dim); margin-left: 4px; }
+.roster .reg-row .rk b { color: #e3b341; }

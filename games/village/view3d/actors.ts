@@ -22,6 +22,33 @@ import { groundHeight } from './terrain';
 const box = new THREE.BoxGeometry(1, 1, 1);
 const cone = new THREE.ConeGeometry(0.5, 1, 6);
 const ico = new THREE.IcosahedronGeometry(0.5, 0);
+const ring = new THREE.CylinderGeometry(0.5, 0.5, 1, 8);
+/** a soldier's rank on its red cap: none for a Recruit, then a band of bronze, silver, gold, and gold with a white plume at Elite */
+const RANK_BAND = [0, 0, 0xb0703a, 0xc8ccd4, 0xe3b341, 0xe3b341];
+export function rankOf(m: Mover): number { return m instanceof Villager && m.role === 'soldier' && m.isAdult ? m.tier : 1; }
+/** The band (and the plume) for a cap whose brim is at `brim` (world units above the head bone), in a rig scaled by `k`. */
+export function rankPieces(tier: number, k: number, brim: number): THREE.Mesh[] {
+  if (tier < 2) return [];
+  const out = [piece(RANK_BAND[tier], 0.36 / k, 0.11 / k, 0.36 / k, 0, (brim + 0.05) / k, 0, ring)];
+  if (tier >= 5) out.push(piece(0xf4f0e6, 0.07 / k, 0.42 / k, 0.2 / k, 0, (brim + 0.5) / k, -0.06 / k));
+  return out;
+}
+/** Where the top of a rig's head is, in world units above its head bone (the hat sits there). */
+export function headTop(rig: THREE.Object3D, head: THREE.Object3D): number {
+  const found: THREE.Mesh[] = [];
+  rig.traverse((o) => { if ((o as THREE.Mesh).isMesh && o.name.startsWith('head')) found.push(o as THREE.Mesh); });
+  const mesh = found[0];
+  if (!mesh) return 0.3;
+  rig.updateMatrixWorld(true);
+  if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+  const top = new THREE.Vector3(0, mesh.geometry.boundingBox!.max.y, 0).applyMatrix4(mesh.matrixWorld);
+  return head.worldToLocal(top).y * rig.scale.y;
+}
+/** A gnome's red hat, sat on its head (the brim a little down into it), and its rank on the hat. */
+export function gnomeHat(rig: THREE.Object3D, head: THREE.Object3D, k: number, tier: number): THREE.Mesh[] {
+  const brim = headTop(rig, head);
+  return [piece(0xa02a22, 0.34 / k, 0.55 / k, 0.34 / k, 0, (brim + 0.125) / k, 0, cone), ...rankPieces(tier, k, brim)];
+}
 const cyl = new THREE.CylinderGeometry(0.5, 0.5, 1, 10);
 
 export function piece(colour: number, sx: number, sy: number, sz: number, x: number, y: number, z: number, g: THREE.BufferGeometry = box): THREE.Mesh {
@@ -108,7 +135,7 @@ function makeCharacter(m: Mover, md: { key: string; tint?: number }): { body: TH
   const look = lookFor(m), held = look ? heldMesh(look.held) : null;
   if (held && hand) { held.scale.setScalar(1 / k); held.position.set(-0.05 / k, -0.32 / k, 0.06 / k); held.rotation.x = Math.PI / 2; hand.add(held); }
   else if (held) { held.position.set(0.3, 0.42, 0.12); held.rotation.x = 0.5; body.add(held); }
-  if (m instanceof Villager && head) { const hat = piece(0xa02a22, 0.34 / k, 0.55 / k, 0.34 / k, 0, 0.2 / k, 0, cone); head.add(hat); } // the red hat
+  if (m instanceof Villager && head) head.add(...gnomeHat(rig, head, k, rankOf(m))); // the red hat, and the rank on it
   if (m instanceof Player && head) head.add(piece(0xc8a040, 0.34 / k, 0.06 / k, 0.32 / k, 0, 0.24 / k, 0)); // the head's circlet
   const mixer = new THREE.AnimationMixer(rig);
   const actions = new Map<string, THREE.AnimationAction>();
@@ -178,7 +205,7 @@ export function makeActor(m: Mover): { body: THREE.Group; key: string; anim?: An
     for (const x of [0.07, -0.07]) { const e = piece(eyes, 0.06, 0.04, 0.02, x, 1.04, 0.14); (e.material as THREE.MeshLambertMaterial).emissive.setHex(eyes); body.add(e); }
     if (m instanceof Raider && m.kind !== 'ogre' && m.kind !== 'troll') body.add(piece(0x0e0a0a, 0.36, 0.22, 0.34, 0, 1.08, -0.02, cone)); // the hood
   } else body.add(piece(0x141010, 0.05, 0.04, 0.02, 0.07, 1.02, 0.14), piece(0x141010, 0.05, 0.04, 0.02, -0.07, 1.02, 0.14));
-  if (m instanceof Villager) body.add(piece(0xa02a22, 0.34, 0.5, 0.34, 0, 1.18, 0, cone)); // the red hat
+  if (m instanceof Villager) body.add(piece(0xa02a22, 0.34, 0.5, 0.34, 0, 1.18, 0, cone), ...rankPieces(rankOf(m), 1, 1.02)); // the red hat, and the rank on it
   if (m instanceof Player) body.add(piece(0xc8a040, 0.32, 0.06, 0.3, 0, 1.06, 0)); // the head's circlet
   const held = look ? heldMesh(look.held) : null;
   if (held) { held.position.set(w / 2 + 0.08, 0.42, 0.12); held.rotation.x = 0.5; held.userData.held = true; body.add(held); }
@@ -187,7 +214,7 @@ export function makeActor(m: Mover): { body: THREE.Group; key: string; anim?: An
 
 function actorKey(m: Mover): string {
   const look = lookFor(m), md = modelFor(m);
-  return `${md && MODELS.characters.has(md.key) ? md.key : 'box'}|${m.constructor.name}|${look?.held ?? ''}|${look?.body ?? ''}|${m instanceof Villager ? m.role + m.elder : ''}|${m instanceof Raider ? m.kind + m.boss : ''}`;
+  return `${md && MODELS.characters.has(md.key) ? md.key : 'box'}|${m.constructor.name}|${look?.held ?? ''}|${look?.body ?? ''}|${m instanceof Villager ? m.role + m.elder + rankOf(m) : ''}|${m instanceof Raider ? m.kind + m.boss : ''}`;
 }
 
 export function scaleOf(m: Mover): number {

@@ -1,5 +1,5 @@
 import { World, type TilePos } from './world';
-import { TILE, BODY, PERK } from './config';
+import { TILE, BODY, PERK, type UnitBranch } from './config';
 import type { Mover, Villager, Raider } from './agents';
 
 export type Shape = 'line' | 'shieldwall' | 'loose' | 'circle' | 'square' | 'wedge' | 'column';
@@ -308,6 +308,10 @@ export class Regiment extends Block<Villager> {
   faceEnemy = false;
   /** retreating: where the banner is running to (the village) */
   rally: { x: number; y: number } | null = null;
+  /** PROMOTE READY: the branch its tier-2 soldiers take at the fork */
+  branch: UnitBranch = 'a';
+  /** its members' average tier (1-5) */
+  get avgTier(): number { return this.members.length ? this.members.reduce((a, v) => a + v.tier, 0) / this.members.length : 1; }
   protected override hurried(): boolean { return this.stance === 'retreat' || this.stance === 'charge'; }
 
   /** Members the block is laying out: on their feet, without a wand order or a wall post of their own. */

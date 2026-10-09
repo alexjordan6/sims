@@ -3915,6 +3915,20 @@ export class VillageScene extends SimScene {
     return true;
   }
 
+  /** Has `v` the experience for its next tier? */
+  promoteEarned(v: Villager): boolean { return v.role === 'soldier' && !v.dead && v.tier < UNIT.maxTier && v.xp >= UNIT.xp[v.tier + 1]; }
+  /**
+   * PROMOTE READY: every soldier of the banner with the experience for it, cheapest step first, as far as the
+   * wood and scrap go (the fork takes the banner's branch). Returns how many were promoted.
+   */
+  promoteReady(r: Regiment): number {
+    const ready = r.members.filter((v) => this.promoteEarned(v)).sort((a, b) => a.tier - b.tier || b.xp - a.xp);
+    let n = 0;
+    for (const v of ready) if (!this.promoteProblem(v, r.branch) && this.promote(v, r.branch)) n++;
+    if (!n && ready.length) this.event('info', `Can't promote: ${this.promoteProblem(ready[0], r.branch)}`, true);
+    return n;
+  }
+
   /** Set regiments' stance (a hold is where they stand). */
   setStance(regs: Regiment[], stance: Stance): void {
     for (const r of regs) {

@@ -1,11 +1,13 @@
 import { PackUI } from './pack-ui';
 
 /** An armory tier as pips: three for the forged tiers, and a gold star for a found piece. */
+/** A soldier's rank as five pips, the tiers it holds filled. */
+const rankPips = (tier: number) => `<span class="rank t${tier}">${'◆'.repeat(tier)}<span class="dim">${'◇'.repeat(Math.max(0, 5 - tier))}</span></span>`;
 const pips = (tier: number) => `${'●'.repeat(Math.min(3, Math.max(0, tier)))}${'○'.repeat(Math.max(0, 3 - Math.max(0, tier)))}${tier >= 4 ? '<b class="found" title="found, never forged">★</b>' : ''}`;
 import { slotName, type Gear, type EquipmentSlot } from '../pack';
 import { gearUrl } from '../gear-art';
-import { STACK, WARREN, SOLDIER_CAP_PER_LEVEL } from '../config';
-import { REGIMENT_SIZE, GROUPS, GROUP_NAME, ORDER_MENUS, SHAPE_NAME } from '../regiment';
+import { STACK, WARREN, SOLDIER_CAP_PER_LEVEL, UNIT, UNIT_NAMES, PERK_TEXT, unitName, type UnitBranch } from '../config';
+import { REGIMENT_SIZE, GROUPS, GROUP_NAME, ORDER_MENUS, SHAPE_NAME, type Regiment } from '../regiment';
 import { getGui } from '@shared/index';
 import { Villager, Raider, Player, Mover, BUILDS, type Tool } from '../agents';
 import { Boar } from '../wildlife';
@@ -218,6 +220,8 @@ export class UI {
         const act = (e.target as HTMLElement).closest<HTMLElement>('[data-act]')?.dataset.act;
         if (act === 'shape') s.cycleShape([r]);
         else if (act === 'hold' || act === 'advance' || act === 'follow') s.setStance([r], act);
+        else if (act === 'promote') s.promoteReady(r);
+        else if (act === 'branch') r.branch = r.branch === 'a' ? 'b' : 'a';
         else { s.player.tool = 'wand'; s.selectRegiment(r, (e as MouseEvent).shiftKey); }
         this.lastRoster = ''; this.renderRoster();
         return;
@@ -605,6 +609,7 @@ export class UI {
         : m.elder ? ` <em>· elder</em>` : ` <em>· grows old at ${Math.round(s.elderAge)}</em>`;
       html += `<b>Age</b><span>${m.age.toFixed(1)} days${stage}</span>`;
       html += `<b>Home</b><span>${s.bedsTaken(m.home)} of ${s.beds(m.home)} beds</span>`;
+      if (m.role === 'soldier') html += `<b>Rank</b><span>${esc(m.unitName)} ${rankPips(m.tier)} <small>${Math.floor(m.xp)}${m.tier < UNIT.maxTier ? ` / ${UNIT.xp[m.tier + 1]}` : ''} xp${s.promoteEarned(m) ? ' · <b>ready to promote</b> at the armory' : ''}</small></span>`;
       html += `<b>Fed</b><span>${m.role === 'infant' ? (m.hungerDays ? `<em class="warn">hungry for ${m.hungerDays} days — nobody at home was fed; ${p.kidStarveDays} days starve an infant</em>` : 'nursed — a fed grown-up at home feeds the nursery') : m.role === 'kid' ? (m.ateDay >= s.day ? `ate today from a pile by the cottage` : m.hungerDays ? `<em class="warn">hungry for ${m.hungerDays} days — throw food in the yard (BASKET)</em>` : 'not yet today') : m.hungerDays === 0 ? 'yes' : `<em class="warn">hungry for ${m.hungerDays} days</em>`}</span>`;
     }
     if (m instanceof Player) html += `<b>Belly</b><span>${!p.hunger ? 'hunger is off' : m.hunger <= 0 ? `<em class="warn">empty — starving, ${p.starveHpPerDay} HP a day and no mending</em>` : `${m.hunger.toFixed(1)} / ${p.hungerMax} · about ${(m.hunger / Math.max(1e-6, p.hungerPerDay)).toFixed(1)} days · T eats a meal`}</span>`;
@@ -677,6 +682,7 @@ export class UI {
         const st = (k: string, label: string) => `<button class="btn tiny${r.stance === k ? ' on' : ''}" data-act="${k}">${label}</button>`;
         html += `<div class="reg-row${picked.has(r) ? ' sel' : ''}" data-reg="${r.id}"><i class="swatch" style="background:${r.colour}"></i><span class="n">${GROUP_NAME[r.group]} · Banner ${r.id}</span><span class="a">${r.members.length}/${r.peak}</span>`
           + `<button class="btn tiny" data-act="shape" title="cycle the formation">${SHAPE_NAME[r.shape].toUpperCase()}</button>${st('follow', 'FOLLOW')}${st('hold', 'HOLD')}${st('advance', 'ADVANCE')}`
+          + this.bannerRank(r)
           + `<div class="bar hp ${pct < 40 ? 'low' : ''}"><i style="width:${pct}%"></i></div></div>`;
       }
     }
@@ -696,7 +702,7 @@ export class UI {
           bar = `<div class="bar hp ${pct < 40 ? 'low' : ''}"><i style="width:${pct}%"></i></div>`;
         }
         const lk = lookFor(v);
-        html += `<div class="row ${s.selected === v ? 'sel' : ''}" data-id="${v.id}">${lk ? `<img class="art row-portrait" src="${charImg(lk)}" alt="">` : spr(c.key, c.frame, 24)}<span class="n">${esc(v.name)}</span><span class="a">${v.age.toFixed(1)}d${v.elder ? ' · old' : ''}</span>${bar}</div>`;
+        html += `<div class="row ${s.selected === v ? 'sel' : ''}" data-id="${v.id}">${lk ? `<img class="art row-portrait" src="${charImg(lk)}" alt="">` : spr(c.key, c.frame, 24)}<span class="n">${esc(v.name)}</span><span class="a">${v.role === 'soldier' ? `${esc(v.unitName)} · ` : ''}${v.age.toFixed(1)}d${v.elder ? ' · old' : ''}</span>${bar}</div>`;
       }
       if (list.length > 40) html += `<div class="grp-more">… and ${list.length - 40} more</div>`;
     }
@@ -796,6 +802,34 @@ export class UI {
   private armoryEl: HTMLElement | null = null;
   private lastArmory = "";
   /** The ARMORY: pick a wearer, forge the next tier per slot, dye the tabard, pick a helmet and plume. */
+  /** A banner row's rank: its average tier, how many are ready, PROMOTE READY and the branch its Pikemen/Bowmen/Footmen take. */
+  private bannerRank(r: Regiment): string {
+    const s = this.scene, ready = r.members.filter((v) => s.promoteEarned(v));
+    const fork = ready.find((v) => v.tier === 2);
+    const line = fork?.line ?? null;
+    return `<span class="rk" title="average tier">T${r.avgTier.toFixed(1)}${ready.length ? ` · <b>${ready.length} ready</b>` : ''}</span>`
+      + (fork && line ? `<button class="btn tiny" data-act="branch" title="the branch its tier-2 soldiers take: ${esc(PERK_TEXT[`${line}-${r.branch}`])}">→ ${UNIT_NAMES[line][r.branch].toUpperCase()}</button>` : '')
+      + (ready.length ? `<button class="btn tiny ok" data-act="promote" title="promote everyone ready, cheapest first, while the wood and scrap last">PROMOTE READY</button>` : '');
+  }
+
+  /** The armory's RANK row for a soldier: name and pips, experience to the next tier, PROMOTE or the fork's two branches. */
+  private rankRow(v: Villager): string {
+    const s = this.scene, next = v.tier + 1;
+    if (next > UNIT.maxTier) return `<div class="rankrow"><div class="aname">${esc(v.unitName)} ${rankPips(v.tier)}</div><div class="d">Elite: the top of the ladder · ${Math.floor(v.xp)} experience</div></div>`;
+    const need = UNIT.xp[next], pct = Math.min(100, Math.round(v.xp / need * 100)), c = s.promoteCost(next);
+    const price = `${c.wood} wood${c.scrap ? ` + ${c.scrap} scrap` : ''}`;
+    const button = (branch?: UnitBranch) => {
+      const why = s.promoteProblem(v, branch), label = branch ? unitName(3, v.line ?? v.weapon, branch).toUpperCase() : `PROMOTE TO ${unitName(next, v.line ?? v.weapon, v.branch).toUpperCase()}`;
+      const perk = branch ? `<small>${esc(PERK_TEXT[`${v.line ?? v.weapon}-${branch}`])}</small>` : '';
+      return `<button class="btn small ${why ? '' : 'ok'} promote" data-promote="${branch ?? ''}" ${why ? `disabled title="${esc(why)}"` : ''}>${label} · ${price}${perk}</button>`;
+    };
+    const why = s.promoteProblem(v, next === 3 ? 'a' : undefined);
+    return `<div class="rankrow"><div class="aname">${esc(v.unitName)} ${rankPips(v.tier)}</div>
+      <div class="acur">${Math.floor(v.xp)} / ${need} experience<div class="bar xp"><i style="width:${pct}%"></i></div></div>
+      <div class="promotes">${next === 3 ? button('a') + button('b') : button()}</div>
+      <div class="d">${why ? `<em class="warn">${esc(why)}</em>` : next === 2 ? `takes the ${v.weapon} line for good` : `+${Math.round(UNIT.hpPerTier * 100)}% HP · +${Math.round(UNIT.dmgPerTier * 100)}% damage`}</div></div>`;
+  }
+
   renderArmory(): void {
     if(this.inventory.dragging)return;
     const s = this.scene;
@@ -862,6 +896,7 @@ export class UI {
         <div class="wearers">${list}</div>
         <div class="afit">
           <div class="portrait-big"><img class="art" src="${charImg(look)}" alt=""><div class="d">${esc(name(who))} · ${WEAPONS.melee.tiers[who.weapons.melee]?.name.toLowerCase() ?? 'no melee weapon'} ×${weaponMul(who.weapons, 'melee')} · ${WEAPONS.bow.tiers[who.weapons.bow]?.name.toLowerCase() ?? 'no bow'} ×${weaponMul(who.weapons, 'bow')} · ${st.hp ? `+${st.hp} HP · ` : ''}${Math.round((1 - st.dmgMul) * 100)}% less damage · ${Math.round(st.block * 100)}% block</div></div>
+          ${who instanceof Villager && who.role === 'soldier' ? `<div class="cap">RANK</div>${this.rankRow(who)}` : ''}
           <div class="cap">WEAPONS</div>
           <div class="aslots">${weapons}</div>
           <div class="cap">ARMOR</div>
@@ -884,6 +919,7 @@ export class UI {
     el.querySelector('.chest .fletch')?.addEventListener('click', () => { s.craftArrows(); this.renderArmory(); });
     el.querySelectorAll<HTMLElement>('[data-wearer]').forEach((b) => b.addEventListener('click', () => { const m = wearers.find((w) => w.id === Number(b.dataset.wearer)); if (m) s.openArmory(m); }));
     el.querySelectorAll<HTMLElement>('[data-slot]').forEach((b) => b.addEventListener('click', () => { s.craftArmor(who, b.dataset.slot as ArmorSlot); this.renderArmory(); }));
+    el.querySelectorAll<HTMLElement>('[data-promote]').forEach((b) => b.addEventListener('click', () => { if (who instanceof Villager) s.promote(who, (b.dataset.promote || undefined) as UnitBranch | undefined); this.renderArmory(); }));
     el.querySelectorAll<HTMLElement>('[data-fetch]').forEach((b) => b.addEventListener('click', () => { const o = fetchList[Number(b.dataset.fetch)]; if (o && who instanceof Villager) s.orderFetch(who, o.b, o.gear); this.renderArmory(); }));
     el.querySelectorAll<HTMLElement>('[data-weapon-slot]').forEach((b) => b.addEventListener('click', () => { s.craftWeapon(who, b.dataset.weaponSlot as WeaponSlot); this.renderArmory(); }));
     el.querySelectorAll<HTMLElement>('[data-dye]').forEach((b) => b.addEventListener('click', () => { s.setDye(who, Number(b.dataset.dye)); this.renderArmory(); }));
@@ -906,7 +942,7 @@ export class UI {
       const regs = s.regiments.filter((r) => r.group === g);
       if (!regs.length) continue;
       const n = regs.reduce((a, r) => a + r.members.length, 0), sel = regs.some((r) => picked.has(r)), r0 = regs[0];
-      cards += `<button class="fcard${sel ? ' sel' : ''}" data-group="${g}" title="${g}: pick · Shift+${g}: add · Alt+${g}: move the picked banners here"><b>${g}</b><span class="gname">${GROUP_NAME[g]}</span>${regs.map((r) => `<i class="sw" style="background:${r.colour}"></i>`).join('')}<span class="gn">${n}</span><small>${SHAPE_NAME[r0.shape]} · ${r0.stance}${r0.holdFire ? ' · hold fire' : ''}</small></button>`;
+      cards += `<button class="fcard${sel ? ' sel' : ''}" data-group="${g}" title="${g}: pick · Shift+${g}: add · Alt+${g}: move the picked banners here"><b>${g}</b><span class="gname">${GROUP_NAME[g]}</span>${regs.map((r) => `<i class="sw" style="background:${r.colour}"></i>`).join('')}<span class="gn">${n}</span><small>${SHAPE_NAME[r0.shape]} · ${r0.stance}${r0.holdFire ? ' · hold fire' : ''} · T${(regs.reduce((a, r) => a + r.avgTier * r.members.length, 0) / Math.max(1, n)).toFixed(1)}</small></button>`;
     }
     const items = menu === 0
       ? ORDER_MENUS.map((m, i) => `<button class="oitem" data-menu="${i + 1}"><kbd>F${i + 1}</kbd>${m.name}</button>`).join('') + `<span class="ohint">${picked.size ? '' : 'all formations · '}1-8 pick · 0 all · right-drag places</span>`

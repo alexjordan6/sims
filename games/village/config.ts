@@ -689,6 +689,15 @@ export const UNIT_NAMES: Record<UnitLine, { t2: string; a: string; b: string }> 
   bow: { t2: 'Bowman', a: 'Longbowman', b: 'Skirmisher' },
   sword: { t2: 'Footman', a: 'Guard', b: 'Berserker' },
 };
+/** what each branch does, for the armory's fork buttons (PERK has the numbers) */
+export const PERK_TEXT: Record<string, string> = {
+  'pike-a': '+20% HP · counts double in a shield wall',
+  'pike-b': 'brace +50% · reach +20%',
+  'bow-a': 'range +25% · damage +15%',
+  'bow-b': 'reload -25% · speed +15%',
+  'sword-a': 'block +10% with a shield · never shoved out of rank',
+  'sword-b': 'each blow cleaves one more foe · charge +20%',
+};
 /** A unit's name at `tier` in `line`, down `branch`. */
 export function unitName(tier: number, line: UnitLine | null, branch: UnitBranch | null): string {
   if (tier <= 1 || !line) return 'Recruit';
