@@ -4,8 +4,9 @@ import { Mover, Villager, Raider } from '../agents';
 import { lookFor } from '../look';
 import type { VillageScene } from '../main';
 import { MODELS, bake } from './assets';
-import { FOE_MODEL } from './registry';
-import { heldMesh, gnomeHat, rankOf, modelFor, scaleOf, standHeight, PERSON, type Kick } from './actors';
+import { RIG } from './registry';
+import { heldMesh, grip, rankOf, modelFor, scaleOf, standHeight, PERSON, type Kick } from './actors';
+import { buildFigure, FIGURES, type Spec } from './figure';
 import { lambert } from './fow';
 import { U } from './models';
 import { groundHeight } from './terrain';
@@ -23,23 +24,21 @@ const POSES: { clip: string; at: number }[] = [
   { clip: 'die', at: 1 },
 ];
 const IDLE = [0, 1], WALK = [2, 3, 4, 5], STRIKE = [6, 7], FALLEN = 8;
-/** gnomes wear one of a few folk faces under the hat */
-const GNOME_LOOKS = ['folk/character-male-b', 'folk/character-female-c', 'folk/character-male-d'];
 const CAPACITY0 = 64;
 
 interface Look { poses: THREE.InstancedMesh[]; /** the mover drawn by each instance of each pose, for picking */ who: Mover[][]; /** instances set this frame, per pose */ n: Int32Array }
 interface Fallen { look: Look; x: number; y: number; z: number; yaw: number; scale: number; colour: THREE.Color; t: number }
 
-/** Is this mover drawn by the crowd (once its look has baked)? Bosses, the head and people stay full actors. */
-export function crowdModel(m: Mover): { key: string; held: string; hat: boolean; rank: number; tint: number } | null {
-  if (m instanceof Villager) {
-    const held = lookFor(m)?.held ?? 'none';
-    return { key: GNOME_LOOKS[m.id % GNOME_LOOKS.length], held, hat: true, rank: rankOf(m), tint: 0xffffff };
-  }
+/**
+ * Is this mover drawn by the crowd (once its look has baked)? Bosses, the head and people stay full actors.
+ * Every body is now built from boxes on one shared rig, so what a look costs is its figure, its tool,
+ * its hat and its rank — not which of a dozen faces it was given.
+ */
+export function crowdModel(m: Mover): { figure: string; held: string; hat: boolean; rank: number; tint: number } | null {
+  if (m instanceof Villager) return { figure: 'gnome', held: lookFor(m)?.held ?? 'none', hat: true, rank: rankOf(m), tint: 0xffffff };
   if (m instanceof Raider && !m.boss && !m.huge && m.kind !== 'ogre' && m.kind !== 'troll') {
-    const md = modelFor(m);
-    if (!md) return null;
-    return { key: md.key, held: lookFor(m)?.held ?? 'none', hat: false, rank: 1, tint: md.tint ?? 0xffffff };
+    if (!modelFor(m)) return null; // rats and boars keep their code-built bodies
+    return { figure: m.kind, held: lookFor(m)?.held ?? 'none', hat: false, rank: 1, tint: 0xffffff };
   }
   return null;
 }
@@ -75,19 +74,19 @@ export class Crowd {
 
   clear(): void { this.fallen = []; this.yaw.clear(); this.drawn.next(); this.drawn.next(); this.picks.clear(); }
 
-  /** Bake a look's poses (once). Null when its model has not loaded (the actor path draws it meanwhile). */
-  private look(key: string, held: string, hat: boolean, rank = 1): Look | null {
-    const id = `${key}|${held}|${hat}${rank > 1 ? `|${rank}` : ''}`;
+  /** Bake a look's poses (once). Null when the rig has not loaded (the actor path draws it meanwhile). */
+  private look(figure: string, held: string, hat: boolean, rank = 1): Look | null {
+    const id = `${figure}|${held}|${hat}${rank > 1 ? `|${rank}` : ''}`;
     if (this.looks.has(id)) return this.looks.get(id)!;
-    const ch = MODELS.characters.get(key);
-    if (!ch) return null;
+    const ch = MODELS.characters.get(RIG);
+    const spec: Spec | undefined = FIGURES[figure];
+    if (!ch || !spec) return null;
     const rig = SkeletonUtils.clone(ch.scene);
-    const k = PERSON / ch.height;
+    const k = PERSON / (buildFigure(rig, spec, { cap: hat ? rank : 0 }) || ch.height);
     rig.scale.setScalar(k);
-    const hand = rig.getObjectByName('arm-right'), head = rig.getObjectByName('head');
+    const hand = rig.getObjectByName('arm-right');
     const tool = heldMesh(held);
-    if (tool && hand) { tool.scale.setScalar(1 / k); tool.position.set(-0.05 / k, -0.32 / k, 0.06 / k); tool.rotation.x = Math.PI / 2; hand.add(tool); }
-    if (hat && head) head.add(...gnomeHat(rig, head, k, rank));
+    if (tool && hand) { tool.scale.setScalar(1 / k); grip(tool, k, spec); hand.add(tool); }
     const mixer = new THREE.AnimationMixer(rig), mat = lambert({ vertexColors: true });
     const poses = POSES.map(({ clip, at }) => {
       const c = ch.clips.find((x) => x.name === clip) ?? ch.clips.find((x) => x.name === 'idle') ?? ch.clips[0];
@@ -125,11 +124,11 @@ export class Crowd {
     if (this.warmRev !== MODELS.revision) {
       this.warmRev = MODELS.revision;
       const list: [string, string, boolean][] = [];
-      for (const k of GNOME_LOOKS) for (const held of ['pike', 'club', 'none']) list.push([k, held, true]);
-      for (const f of Object.values(FOE_MODEL)) for (const held of ['sword', 'axe', 'none']) list.push([f!.key, held, false]);
+      for (const held of ['pike', 'club', 'bow', 'axe', 'none']) list.push(['gnome', held, true]);
+      for (const f of ['raider', 'brute', 'snatcher', 'shaman', 'wrecker', 'skulk']) for (const held of ['sword', 'axe', 'none']) list.push([f, held, false]);
       this.warmList = list.filter(([k, h, hat]) => !this.looks.has(`${k}|${h}|${hat}`));
     }
-    const next = this.warmList?.find(([k]) => MODELS.characters.has(k));
+    const next = this.warmList?.find(() => MODELS.characters.has(RIG));
     if (!next) return;
     this.warmList = this.warmList!.filter((x) => x !== next);
     this.look(next[0], next[1], next[2]);
@@ -227,7 +226,7 @@ export class Crowd {
     let pk = this.picks.get(m.id);
     if (!pk || pk.m !== m || pk.gnome !== o.gnome || pk.role !== o.role || pk.weapon !== o.weapon || pk.kind !== o.kind || pk.tier !== o.tier || (pk.cm && !pk.look)) {
       const cm = crowdModel(m);
-      pk = { m, gnome: o.gnome, role: o.role, weapon: o.weapon, kind: o.kind, tier: o.tier, cm, look: cm ? this.look(cm.key, cm.held, cm.hat, cm.rank) : null };
+      pk = { m, gnome: o.gnome, role: o.role, weapon: o.weapon, kind: o.kind, tier: o.tier, cm, look: cm ? this.look(cm.figure, cm.held, cm.hat, cm.rank) : null };
       this.picks.set(m.id, pk);
     }
     return pk;

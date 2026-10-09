@@ -1,4 +1,3 @@
-import type { EnemyKind } from '../agents';
 
 // Which model draws what. One line to swap a model; scales bring each pack's units to ours (one tile is
 // one unit, a grown person about 1.2 tall). Anything not listed, or not yet loaded, is drawn with the
@@ -35,26 +34,14 @@ export function propKeys(): string[] {
 
 // ---- people and monsters --------------------------------------------------------------------
 
-/** the villagers' faces: a person's id picks one */
-export const FOLK = ['folk/character-male-a', 'folk/character-male-b', 'folk/character-male-c', 'folk/character-male-d', 'folk/character-male-e', 'folk/character-male-f',
-  'folk/character-female-a', 'folk/character-female-b', 'folk/character-female-c', 'folk/character-female-d', 'folk/character-female-e', 'folk/character-female-f'];
-/** the head of the village */
-export const HEAD = 'folk/character-male-e';
-
-/** what walks out of the trees. (rats and boars keep their code-built bodies: nothing in the packs is four-legged) */
-export const FOE_MODEL: Partial<Record<EnemyKind, { key: string; tint?: number }>> = {
-  raider: { key: 'grave/character-zombie' },
-  warlord: { key: 'grave/character-vampire' },
-  snatcher: { key: 'grave/character-skeleton', tint: 0xc8c8d0 },
-  brute: { key: 'grave/character-zombie', tint: 0xb08070 },
-  shaman: { key: 'grave/character-ghost', tint: 0xb090d0 },
-  wrecker: { key: 'grave/character-skeleton', tint: 0xd0a070 },
-  troll: { key: 'grave/character-zombie', tint: 0x80a070 },
-  skulk: { key: 'grave/character-ghost', tint: 0x404048 },
-  ogre: { key: 'grave/character-zombie', tint: 0x90a880 },
-};
+/**
+ * The one rig every person and monster is animated on. Bodies are built as boxes over it (see
+ * figure.ts), so a pack character is only ever a skeleton to us: `root`, `torso`, `head`, two arms,
+ * two legs and 32 clips, which every folk and grave character carries alike. One is all we need.
+ * (The grave pack's ghost is the exception that proves it: no legs and no head bone, so it could
+ * never have carried a figure.)
+ */
+export const RIG = 'folk/character-male-a';
 
 /** every character model, for the loader */
-export function characterKeys(): string[] {
-  return [...new Set([...FOLK, HEAD, ...Object.values(FOE_MODEL).map((f) => f!.key), 'grave/character-keeper'])];
-}
+export function characterKeys(): string[] { return [RIG]; }

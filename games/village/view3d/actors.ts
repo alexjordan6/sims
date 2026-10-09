@@ -10,9 +10,10 @@ import type { Item } from '../items';
 import type { VillageScene } from '../main';
 import { mat, U, WALL_UNITS } from './models';
 import { lambert, fogify } from './fow';
+import { buildFigure, specFor, type Spec } from './figure';
 import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
 import { MODELS } from './assets';
-import { FOLK, HEAD, FOE_MODEL } from './registry';
+import { RIG } from './registry';
 import { groundHeight } from './terrain';
 
 // Everyone who moves, and everything lying on the ground. Placeholder people are a few boxes —
@@ -33,21 +34,15 @@ export function rankPieces(tier: number, k: number, brim: number): THREE.Mesh[] 
   if (tier >= 5) out.push(piece(0xf4f0e6, 0.07 / k, 0.42 / k, 0.2 / k, 0, (brim + 0.5) / k, -0.06 / k));
   return out;
 }
-/** Where the top of a rig's head is, in world units above its head bone (the hat sits there). */
-export function headTop(rig: THREE.Object3D, head: THREE.Object3D): number {
-  const found: THREE.Mesh[] = [];
-  rig.traverse((o) => { if ((o as THREE.Mesh).isMesh && o.name.startsWith('head')) found.push(o as THREE.Mesh); });
-  const mesh = found[0];
-  if (!mesh) return 0.3;
-  rig.updateMatrixWorld(true);
-  if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
-  const top = new THREE.Vector3(0, mesh.geometry.boundingBox!.max.y, 0).applyMatrix4(mesh.matrixWorld);
-  return head.worldToLocal(top).y * rig.scale.y;
-}
-/** A gnome's red hat, sat on its head (the brim a little down into it), and its rank on the hat. */
-export function gnomeHat(rig: THREE.Object3D, head: THREE.Object3D, k: number, tier: number): THREE.Mesh[] {
-  const brim = headTop(rig, head);
-  return [piece(0xa02a22, 0.34 / k, 0.55 / k, 0.34 / k, 0, (brim + 0.125) / k, 0, cone), ...rankPieces(tier, k, brim)];
+/**
+ * Put a tool in the hand: at the end of the sleeve, held upright out of the fist, the way a pike is
+ * shouldered and a sword is carried. (The pack's own hands wanted it laid flat across the palm instead.)
+ */
+export function grip(held: THREE.Object3D, k: number, s?: Spec): void {
+  // the idle pose splays the arm about 32 degrees out; the tool is stood back up out of the fist
+  if (s) { held.position.set(0, -(s.armLen - s.armW * 0.9), s.armW * 0.6); held.rotation.set(-0.1, 0, -0.56); return; }
+  held.position.set(-0.05 / k, -0.32 / k, 0.06 / k);
+  held.rotation.x = Math.PI / 2;
 }
 const cyl = new THREE.CylinderGeometry(0.5, 0.5, 1, 10);
 
@@ -106,37 +101,37 @@ interface Anim { mixer: THREE.AnimationMixer; actions: Map<string, THREE.Animati
 /** how tall a grown person stands, in units */
 export const PERSON = 1.25;
 
-/** The pack character that plays this mover, if there is one (rats, boars, bolts, arrows and swarms keep code bodies). */
-export function modelFor(m: Mover): { key: string; tint?: number } | null {
-  if (m instanceof Player) return { key: HEAD };
-  if (m instanceof Villager) return { key: FOLK[m.id % FOLK.length] };
-  if (m instanceof Raider && !(m instanceof Boar) && m.kind !== 'rat' && m.kind !== 'boar') return FOE_MODEL[m.boss ? 'warlord' : m.kind] ?? null;
+/** The rig this mover is animated on, if it walks on two legs (rats, boars, bolts, arrows and swarms keep code bodies). */
+export function modelFor(m: Mover): { key: string } | null {
+  if (m instanceof Player || m instanceof Villager) return { key: RIG };
+  if (m instanceof Raider && !(m instanceof Boar) && m.kind !== 'rat' && m.kind !== 'boar') return { key: RIG };
   return null;
 }
 
-/** Build a pack character for a mover: its own copy of the rig and materials, a mixer, its held tool in the right hand. */
-function makeCharacter(m: Mover, md: { key: string; tint?: number }): { body: THREE.Group; anim: Anim } | null {
+/** Build a figure for a mover on its own copy of the rig: its own materials, a mixer, its tool in hand. */
+function makeCharacter(m: Mover, md: { key: string }): { body: THREE.Group; anim: Anim } | null {
   const ch = MODELS.characters.get(md.key);
   if (!ch) return null;
   const body = new THREE.Group();
   const rig = SkeletonUtils.clone(ch.scene);
-  const k = PERSON / ch.height;
+  const fig = specFor(m);
+  // the cap and the circlet go on with the body: the figure knows the head it has to fit them to
+  const wear = { cap: m instanceof Villager ? rankOf(m) : 0, circlet: m instanceof Player };
+  const built = fig ? buildFigure(rig, fig.spec, wear) : 0; // 0: a rig we can't dress, so the pack's own body stands
+  const k = PERSON / (built || ch.height);
   rig.scale.setScalar(k);
   rig.traverse((o) => {
     if (!(o instanceof THREE.Mesh)) return;
     const mt = (o.material as THREE.MeshLambertMaterial).clone(); // every actor flashes on its own
-    if (md.tint !== undefined) mt.color.multiply(new THREE.Color(md.tint));
     if (m instanceof Villager && m.elder) mt.color.multiplyScalar(0.85);
     fogify(mt); // a clone keeps the shader hook but not its defines
     o.material = mt;
   });
   body.add(rig);
-  const hand = rig.getObjectByName('arm-right'), head = rig.getObjectByName('head');
+  const hand = rig.getObjectByName('arm-right');
   const look = lookFor(m), held = look ? heldMesh(look.held) : null;
-  if (held && hand) { held.scale.setScalar(1 / k); held.position.set(-0.05 / k, -0.32 / k, 0.06 / k); held.rotation.x = Math.PI / 2; hand.add(held); }
+  if (held && hand) { held.scale.setScalar(1 / k); grip(held, k, fig?.spec); hand.add(held); }
   else if (held) { held.position.set(0.3, 0.42, 0.12); held.rotation.x = 0.5; body.add(held); }
-  if (m instanceof Villager && head) head.add(...gnomeHat(rig, head, k, rankOf(m))); // the red hat, and the rank on it
-  if (m instanceof Player && head) head.add(piece(0xc8a040, 0.34 / k, 0.06 / k, 0.32 / k, 0, 0.24 / k, 0)); // the head's circlet
   const mixer = new THREE.AnimationMixer(rig);
   const actions = new Map<string, THREE.AnimationAction>();
   for (const clip of ch.clips) actions.set(clip.name, mixer.clipAction(clip));

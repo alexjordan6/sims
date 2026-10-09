@@ -333,7 +333,9 @@ export class View {
     this.sun.target.position.copy(this.focus);
     this.sun.castShadow = p.shadows && sky.sunI > 0.3;
     this.placeLamps(sky.night);
-    if (pl) this.torch.position.set(pl.x * U, groundHeight(pl.x * U, pl.y * U) + standHeight(pl) + 1.4, pl.y * U);
+    // carried off to one side rather than hung straight overhead: a light directly above a figure
+    // blows out the flat top of its head and lights nothing else
+    if (pl) this.torch.position.set(pl.x * U + 0.5, groundHeight(pl.x * U, pl.y * U) + standHeight(pl) + 1.1, pl.y * U + 0.5);
     this.torch.intensity = (pl && !pl.hidden ? 3.2 : 0) * (0.35 + 0.65 * sky.night) * (0.93 + 0.07 * Math.sin(this.t * 13) * Math.sin(this.t * 7.3));
     // models landing: once they stop arriving for a moment, the ground and its flora are rebuilt with them
     if (MODELS.revision !== this.modelsSeen) { this.modelsSeen = MODELS.revision; this.modelsQuiet = 0; }
