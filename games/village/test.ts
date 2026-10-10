@@ -9,7 +9,7 @@ import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider, BELT, BUILDS, TOOLS } from './agents';
 import { Brute, Rat, Ogre, Wrecker, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm } from './wildlife';
-import { SLOT_GAP, Warband, Regiment, SHAPES, SHAPE_GAP, SHAPE_PACE, layout } from './regiment';
+import { ORDER_MENUS, SLOT_GAP, Warband, Regiment, SHAPES, SHAPE_GAP, SHAPE_PACE, layout } from './regiment';
 import { hostSize, hostCounts } from './host';
 import { rollLoot, lootTier, danger, enemyDrop } from './loot';
 import { Caravan } from './caravan';
@@ -92,6 +92,34 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     p.adaptiveSpawns = false; // Legacy timed scenarios isolate their own enemies.
     assert(COLS * ROWS > 80 * 44 * 10, 'world is over ten times the old area');
     runPackChecks(scene(), assert);
+    {
+      const s = fresh(); clearing(s); s.agents = [s.player];
+      const keysOff = () => ({ W: { isDown: false }, A: { isDown: false }, S: { isDown: false }, D: { isDown: false } });
+      const pl = s.player; Object.assign(pl, World.center(125, 100));
+      pl.keys = { ...keysOff(), D: { isDown: true } };
+      pl.update(1 / 60, s);
+      assert(pl.vx > 0 && pl.vx < pl.speed * 0.5, 'footwork accelerates rather than snapping to full speed');
+      pl.keys = keysOff(); const before = pl.vx; pl.update(1 / 60, s);
+      assert(pl.vx > 0 && pl.vx < before, 'released movement brakes progressively');
+      for (let i = 0; i < 60; i++) pl.update(1 / 60, s);
+      assert(pl.vx === 0 && pl.vy === 0, 'footwork settles completely without drift');
+      assert(pl.beginWind(['left', 'right', 'up', 'down']), 'a free weapon can wind up');
+      pl.aimWind(48, 0); pl.update(1 / 60, s);
+      assert(pl.weaponMotion.x > 0 && pl.weaponMotion.x < 1, 'weapon follows mouse with bounded lag');
+      pl.update(0.5, s);
+      assert(Number.isFinite(pl.weaponMotion.x) && Math.abs(pl.weaponMotion.x) <= 1.05, 'weapon spring stays stable on a long frame');
+      pl.releaseWind({ x: pl.x + 30, y: pl.y });
+      assert(pl.chambered === -1, 'an unopposed attack does not claim a chamber');
+      const charged = pl.swing!.dmgMul; pl.swing = null; pl.recover = 0;
+      pl.beginWind(['right']); pl.releaseWind({ x: pl.x + 30, y: pl.y });
+      assert(pl.swing!.dmgMul < charged, 'a settled wind-up carries more force than a tap');
+      pl.swing = null; pl.recover = 0; pl.vx = pl.vy = 0;
+      pl.facing = { x: 1, y: 0 }; pl.pressAttack();
+      const foe = s.spawn(new Raider(pl.x + 15, pl.y)); foe.hp = foe.maxHp = 100;
+      s.grid.rebuild(s.agents); const hp = foe.hp;
+      pl.update(0.25, s);
+      assert(foe.hp < hp, 'a slow frame crossing the whole active window still lands a blow');
+    }
     let dense = 0;
     for (let seed = 1; seed <= 20; seed++) {
       const w = new World(); w.generate(new Rng(seed)); if (w.denseForests) dense++;
@@ -867,7 +895,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(![...raw.find((t, tx, ty) => !!t.tall && tx >= hx - 11 && tx <= hx + 10 && ty >= hy - 7 && ty <= hy + 4)].length, 'the village clearing starts mown');
       const l = raw.lair!; assert(!raw.get(l.tx + 2, l.ty + BUILDINGS.lair.h)!.tall, 'so does the Ogre\'s doorstep');
       clearing(s); s.agents = [s.player];
-      const walk = (x: number, y: number) => { Object.assign(s.player, World.center(x, y)); const x0 = s.player.x; const keys = s.player.keys; s.player.keys = { W: { isDown: false }, A: { isDown: false }, S: { isDown: false }, D: { isDown: true } }; step(s, 0.3); s.player.keys = keys; return s.player.x - x0; };
+      const walk = (x: number, y: number) => { Object.assign(s.player, World.center(x, y), { vx: 0, vy: 0 }); const x0 = s.player.x; const keys = s.player.keys; s.player.keys = { W: { isDown: false }, A: { isDown: false }, S: { isDown: false }, D: { isDown: true } }; step(s, 0.3); s.player.keys = keys; return s.player.x - x0; };
       const short = walk(120, 100);
       for (let x = 120; x <= 126; x++) s.world.get(x, 100)!.tall = true;
       const slow = walk(120, 100);
@@ -2222,9 +2250,64 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       s.player.tool = 'wand'; ui.render(0.2);
       const bar = document.querySelector<HTMLElement>('#overlay .orders')!, cards = bar.querySelectorAll('.fcard').length;
       const groups = new Set(s.regiments.map((r) => r.group)).size;
-      assert(s.commandOpen() && !bar.hidden && cards === groups && bar.querySelectorAll('.omenu [data-menu]').length === 4, `with the wand out the command bar shows a card a group (${cards}) and the four menus`);
+      assert(s.commandOpen() && !bar.hidden && cards === groups && bar.querySelectorAll('.omenu [data-menu]').length === ORDER_MENUS.length, `with the wand out the command bar shows a card a group (${cards}) and every order menu`);
       s.player.tool = 'sword'; ui.render(0.2);
       assert(bar.hidden, 'and puts it away with the wand');
+    }
+
+    // ---- FORAGE: a banner puts down the line and works the wild until it is called back -------------
+    {
+      const run = (secs: number) => { for (let i = 0; i < Math.ceil(secs * 60); i++) { s.grid.rebuild(s.agents); s.tick(1 / 60); } };
+      s = fresh(false, false, false, false, false, true); s.dayTime = 0.35; s.paused = false;
+      run(1); // the muster runs on the tick: the banners are raised there, not at setup
+      const band = s.villagers().filter((v) => v.isAdult && v.role === 'soldier' && !!v.regiment);
+      assert(band.length > 0 && !!band[0].regiment, `the founding band musters under a banner (${band.length} under ${band[0]?.regiment ? 'one' : 'none'})`);
+      const reg = band[0].regiment!;
+      const out = () => s.foragers([reg]).length;
+      assert(out() === 0 && reg.active().length > 0, 'nobody is out foraging to begin with, and the line is full');
+
+      const sent = s.forageOrder([reg], true);
+      const under = reg.members.filter((v) => !v.dead && !v.hidden && v.isAdult);
+      assert(sent === under.length && out() === sent && under.every((v) => v.order?.kind === 'forage'),
+        `FORAGE sends every gnome under the banner (${sent} of ${under.length}, the other banner left alone)`);
+      assert(s.foragers(s.regiments).length === sent, 'and only that banner: the other is still in its ranks');
+      assert(reg.active().length === 0, 'and the banner lays out nobody: a forage party is out of the ranks');
+
+      // they actually pick: one ripe plant by the cottage, and the pantry climbs
+      for (const q of [...s.world.find((t) => !!WILD_FOOD[t.kind])]) s.world.set(q.tx, q.ty, 'grass'); // a bare map but for ours
+      const home = home0(s), near = World.center(home.tx + 2, home.ty + 2);
+      for (const v of band) Object.assign(v, { x: near.x, y: near.y });
+      for (let i = 0; i < 6; i++) { const q = s.world.set(home.tx + 3 + (i % 3), home.ty + 2 + ((i / 3) | 0), 'hazel'); q.stage = 99; } // enough to keep a party busy
+      const nuts = s.pantry.hazelnut; s.food = 0;
+      run(6);
+      const atWork = reg.members.filter((v) => /forag|granary/i.test(v.task)).length;
+      assert(atWork > 0, `the party says what it is at (${atWork} of ${reg.members.length}: ${reg.members[0].task})`);
+      run(20);
+      const carried = reg.members.reduce((n, v) => n + v.carriedOf('food', 'hazelnut'), 0);
+      assert(s.pantry.hazelnut > nuts || carried > 0, `a foraging banner picks the wild (${s.pantry.hazelnut - nuts} in the granary, ${carried} in hand)`);
+
+      // called back: the order clears and they fall in again
+      const backIn = s.forageOrder([reg], false);
+      assert(backIn > 0 && out() === 0 && under.every((v) => !v.order), `BACK TO THE RANKS calls them in (${backIn})`);
+      run(1);
+      assert(reg.active().length > 0, 'and the banner lays them out once more');
+
+      // a movement order forms the party up on its own: a banner told to charge leaves nobody picking berries
+      s.forageOrder([reg], true);
+      assert(out() > 0, 'sent out again');
+      s.selectRegiment(reg); s.commandItem(1, 3); // Movement > Charge
+      assert(out() === 0, 'an order to move forms the foragers up first');
+      // while facing, forming and firing leave a working party alone
+      s.forageOrder([reg], true);
+      const before = out();
+      s.commandItem(3, 1); s.commandItem(4, 1);
+      assert(out() === before && before > 0, `forming and firing do not call a party in (${out()} of ${before})`);
+      s.forageOrder([reg], false);
+
+      // the menu is where the order lives
+      const work = ORDER_MENUS[ORDER_MENUS.length - 1];
+      assert(work.name === 'Work' && work.items[0] === 'Forage' && work.items.length === 2, `the last order menu is Work (${work.name}: ${work.items.join(', ')})`);
+      s.clearSquad();
     }
 
     // ---- ox caravans: supplies up the south road every few days ------------------------------------

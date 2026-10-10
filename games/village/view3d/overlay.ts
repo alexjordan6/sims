@@ -36,8 +36,15 @@ class Pool<T extends THREE.Object3D> {
   end(): void { for (let i = this.used; i < this.items.length; i++) this.items[i].visible = false; this.used = 0; }
 }
 
-const lineMat = () => new THREE.LineBasicMaterial({ transparent: true, depthTest: false });
-const fillMat = () => new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, depthTest: false, side: THREE.DoubleSide });
+/**
+ * Rings, boxes and arrows painted on the ground. They test depth — a hill or a house between you and a
+ * selection ring should hide it, which from the old top-down angle could never happen and from this one
+ * happens constantly — but they are pulled a touch toward the camera so they never fight the very ground
+ * they are lying on.
+ */
+const DECAL = { depthTest: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -8 } as const;
+const lineMat = () => new THREE.LineBasicMaterial({ transparent: true, ...DECAL });
+const fillMat = () => new THREE.MeshBasicMaterial({ transparent: true, side: THREE.DoubleSide, ...DECAL });
 
 export class Overlay {
   readonly group = new THREE.Group();
@@ -111,7 +118,7 @@ export class Overlay {
     const s = this.scene, pl = s.player;
     const pulse = 0.5 + 0.5 * Math.sin(this.t * 4.5);
     const playing = s.screen === 'playing' && !s.interior.active;
-    if (s.view) this.barBatch.begin(s.view.camera);
+    if (s.view) { this.barBatch.begin(s.view.camera); this.flagBatch.begin(s.view.camera); }
     if (playing) this.draw(pulse);
     if (s.screen !== 'title' && !s.interior.active) this.drawBars();
     this.barBatch.end(); this.flagBatch.end();

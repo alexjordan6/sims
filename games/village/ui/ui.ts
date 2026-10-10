@@ -121,6 +121,8 @@ export class UI {
   private inspT = 0;
   private lastInspector = '';
   private rosterT = 0;
+  private reticle!: HTMLElement;
+  private lastDuel = '';
   private topT = 0;
   private feedSeen = 0;
   private lastBuilding: import('../world').Building | null = null;
@@ -151,7 +153,8 @@ export class UI {
       <div class="vitals" data-hud="vitals">
         <div class="t-hp" title="Your HP. You heal overnight — not on an empty belly. If you die the run ends"><span class="bar hp"><i></i></span></div>
         <div class="t-hunger" title="Your belly. Empty, you lose HP and stop mending. T eats (your pack first, then the granary). Click to eat"><span class="bar belly"><i></i></span><span class="belly-num"></span></div>
-        <div class="abilities">${(["Q", "W", "E", "R"] as const).map((k) => `<div class="ability" data-ab="${k}"><kbd>${k}</kbd><span class="ab-name"></span><span class="ab-cd"></span><span class="ab-count"></span></div>`).join("")}</div>
+        <div class="abilities">${(["Q", "W", "E", "R"] as const).map((k) => `<div class="ability" data-ab="${k}"><kbd>${k === "Q" || k === "W" ? "LMB" : k === "E" ? "Space" : k}</kbd><span class="ab-name"></span><span class="ab-cd"></span><span class="ab-count"></span></div>`).join("")}</div>
+        <div class="t-stam" title="Wind. A blow, a sprint and a guard that turns one all spend it; it comes back when you leave off"><span class="bar stam"><i></i></span></div>
         <div class="t-buff" hidden title="The dish you last ate, and how long it keeps working"><span class="buff"></span></div>
       </div>
       <div class="orders" data-panel="orders" hidden></div>
@@ -234,6 +237,9 @@ export class UI {
 
     this.tooltipEl = h('<div class="tooltip" hidden></div>');
     this.overlay.append(this.tooltipEl);
+    // the crosshair, and round it the dial that says which way the blow or the guard is set
+    this.reticle = h(`<div class="reticle" hidden><i class="dot"></i>${['up', 'down', 'left', 'right'].map((d) => `<i class="arm ${d}"></i>`).join('')}<span class="draw"></span></div>`);
+    this.overlay.append(this.reticle);
 
     this.mountControls();
 
@@ -284,7 +290,7 @@ export class UI {
       <div class="ctrl-card panel">
         <div class="ph">${spr('town', TOWN.iconKey, 24)}<h2>Controls</h2><button class="btn small ctrl-close">×</button></div>
         <div class="ctrl-rows">${rows.map(([k, d]) => `<kbd>${esc(k)}</kbd><span>${esc(d)}</span>`).join('')}</div>
-        <div class="ctrl-foot">Right-click to walk, fight and use things; Q W E R for abilities. The bar above the belt says what a click will do.</div>
+        <div class="ctrl-foot">Click the view to take the mouse (Alt or Esc gives it back). W A S D walks where you are looking, Shift runs, Space dodges. Hold the left button and move the mouse to position your weapon (hold middle mouse to look around) — up for an overhead, down to thrust, left or right to swing — and let go to strike. A settled wind-up hits harder than a tap. Hold the right button to guard, the same four ways. Q kicks through a guard. F1-F4 still command the banners.</div>
         <div class="ctrl-foot"><button class="btn small mute">SOUND</button></div>
       </div>
     </div>`);
@@ -336,6 +342,7 @@ export class UI {
       this.inspT += 0.1; if (this.inspT >= 0.25 && showInspector) { this.inspT = 0; this.renderInspector(); } // cards rebuild their DOM: a few times a second is plenty
     }
     if (this.rosterT > 0.5 && !this.roster.hidden) { this.rosterT = 0; this.renderRoster(); }
+    this.renderDuel();
     this.renderFeed();
     this.inventory.render();
     if(this.scene.armoryFor)this.renderArmory();
@@ -399,6 +406,35 @@ export class UI {
     }
   }
 
+  /**
+   * The duel, drawn every frame because a blow is chosen and let go inside a handful of them: the
+   * crosshair, the arm of the dial that says which way the blow or the guard is set, the arm that says
+   * which way one is coming at you, and the wind left to pay for any of it.
+   */
+  private renderDuel(): void {
+    const s = this.scene;
+    const show = s.screen === 'playing' && !s.interior.active;
+    if (this.reticle.hidden === show) this.reticle.hidden = !show;
+    if (!show) return;
+    const d = s.duelState();
+    const key = `${d.wind}|${d.guard}|${d.incoming}|${Math.round(d.stam)}|${Math.round(d.draw * 20)}|${d.chambered}`;
+    if (key === this.lastDuel) return;
+    this.lastDuel = key;
+    const set = d.wind ?? d.guard;
+    this.reticle.classList.toggle('guarding', !!d.guard && !d.wind);
+    this.reticle.classList.toggle('chambered', d.chambered);
+    for (const arm of this.reticle.querySelectorAll<HTMLElement>('.arm')) {
+      const dir = arm.className.split(' ')[1];
+      arm.classList.toggle('set', set === dir);
+      arm.classList.toggle('coming', d.incoming === dir);
+    }
+    const draw = this.reticle.querySelector<HTMLElement>('.draw')!;
+    draw.hidden = d.draw < 0;
+    if (d.draw >= 0) draw.style.setProperty('--d', `${Math.round(d.draw * 100)}%`);
+    const bar = this.hotbar.querySelector<HTMLElement>('.bar.stam i');
+    if (bar) { bar.style.width = `${Math.round((d.stam / d.stamMax) * 100)}%`; bar.parentElement!.classList.toggle('low', d.stam < 25); }
+  }
+
   private renderHotbar(): void {
     const s = this.scene;
     this.hotbar.querySelectorAll<HTMLElement>('.slot[data-tool]').forEach((el) => {
@@ -424,7 +460,7 @@ export class UI {
       el.style.setProperty('--cd', `${pct}%`);
       el.classList.toggle('cooling', pct > 0);
       el.classList.toggle('off', !a.usable);
-      el.title = `${a.key} · ${a.name}: ${a.note}`;
+      el.title = a.key === "Q" ? "Blade: hold LMB, move to wind, release to strike" : a.key === "W" ? "Bow: equip bow, hold LMB to draw, release to shoot" : a.key === "E" ? "Space: dodge in your movement direction" : `${a.key} · ${a.name}: ${a.note}`;
     }
     const quiver = this.hotbar.querySelector<HTMLElement>('.ability[data-ab="W"] .ab-count');
     if (quiver && quiver.textContent !== String(s.arrows)) quiver.textContent = String(s.arrows);
@@ -942,7 +978,8 @@ export class UI {
       const regs = s.regiments.filter((r) => r.group === g);
       if (!regs.length) continue;
       const n = regs.reduce((a, r) => a + r.members.length, 0), sel = regs.some((r) => picked.has(r)), r0 = regs[0];
-      cards += `<button class="fcard${sel ? ' sel' : ''}" data-group="${g}" title="${g}: pick · Shift+${g}: add · Alt+${g}: move the picked banners here"><b>${g}</b><span class="gname">${GROUP_NAME[g]}</span>${regs.map((r) => `<i class="sw" style="background:${r.colour}"></i>`).join('')}<span class="gn">${n}</span><small>${SHAPE_NAME[r0.shape]} · ${r0.stance}${r0.holdFire ? ' · hold fire' : ''} · T${(regs.reduce((a, r) => a + r.avgTier * r.members.length, 0) / Math.max(1, n)).toFixed(1)}</small></button>`;
+      const out = s.foragers(regs).length; // a party out in the wild is invisible in the line: say so on the card
+      cards += `<button class="fcard${sel ? ' sel' : ''}" data-group="${g}" title="${g}: pick · Shift+${g}: add · Alt+${g}: move the picked banners here"><b>${g}</b><span class="gname">${GROUP_NAME[g]}</span>${regs.map((r) => `<i class="sw" style="background:${r.colour}"></i>`).join('')}<span class="gn">${n}</span><small>${SHAPE_NAME[r0.shape]} · ${r0.stance}${r0.holdFire ? ' · hold fire' : ''} · T${(regs.reduce((a, r) => a + r.avgTier * r.members.length, 0) / Math.max(1, n)).toFixed(1)}${out ? ` · ${out} foraging` : ''}</small></button>`;
     }
     const items = menu === 0
       ? ORDER_MENUS.map((m, i) => `<button class="oitem" data-menu="${i + 1}"><kbd>F${i + 1}</kbd>${m.name}</button>`).join('') + `<span class="ohint">${picked.size ? '' : 'all formations · '}1-8 pick · 0 all · right-drag places</span>`
@@ -1076,13 +1113,13 @@ export class UI {
           <p class="sub">The last village here is gone. Farm the dark soil, raise a family behind thin walls, and teach the children to hold a blade, because something walks out of the trees every few nights.<br>
           Survive ${p.bossDay} days of raids and <b>beat the Warlord</b>.</p>
           <div class="controls">
-            <kbd>right click</kbd><span>walk there — or attack the enemy, or go and use the plant, pot, gate or door under the cursor, or break open a chest</span>
-            <kbd>Q W E</kbd><span>strike · shoot · roll, toward the cursor</span><kbd>hold R</kbd><span>aim a meal, let go to lob it</span>
+            <kbd>hold LMB</kbd><span>move the mouse to wind your weapon · release to strike · hold RMB to guard</span>
+            <kbd>W A S D</kbd><span>move · Shift to run · Space to dodge · Q to kick</span><kbd>hold R</kbd><span>aim a meal, let go to lob it</span>
             <kbd>G</kbd><span>throw the largest supply stack</span>
             <kbd>T</kbd><span>eat one meal. Your pack is eaten before the granary, and raw food before cooked so a dish's warmth is never spent on a routine meal. Meat and honey fill twice as much per unit, a cooked dish three or four times.</span>
             <kbd>click / C</kbd><span>walk over and use the tool you hold there</span>
             <kbd>X</kbd><span>check a villager</span><kbd>1-9 · Tab</kbd><span>pick a tool</span>
-            <kbd>screen edge · arrows</kbd><span>pan the camera</span><kbd>Space · Y</kbd><span>back to you · lock on</span>
+            <kbd>mouse</kbd><span>look around · middle mouse to look while winding or guarding</span><kbd>Alt</kbd><span>release the cursor for menus</span>
             <kbd>wheel · Z</kbd><span>camera distance</span><kbd>Esc</kbd><span>menu</span><kbd>- / =</kbd><span>game speed</span>
           </div>
           <div class="row"><label class="sub">seed <input class="seed" value="${s.seed}"></label></div>
@@ -1231,17 +1268,17 @@ export class UI {
         <section>
           <h3>CONTROLS</h3>
           <div class="controls">
-            <kbd>right click</kbd><span>the command. On open ground: walk there (the way round walls and thorns is found for you). On an enemy: chase it and attack with the sword or bow in hand. On a ripe crop or plant, the great pot, a gate or stairs: walk up and use it with your hands. On a door: go in.</span>
-            <kbd>Q</kbd><span>strike: the sword toward the cursor; press again inside the swing to combo</span>
-            <kbd>W</kbd><span>shoot: a bow shot at the cursor (needs a bow and arrows)</span>
-            <kbd>E</kbd><span>roll: a committed tumble toward the cursor. It goes clean through bodies but not through walls, and you cannot steer or swing until it lands. A raider's blow checks its reach at the moment it strikes, so rolling out of a wind-up beats it.</span>
+            <kbd>W A S D</kbd><span>walk relative to the camera, with weight on starts, stops and changes of direction. Shift runs and spends stamina.</span>
+            <kbd>hold LMB</kbd><span>wind your weapon with the mouse: left or right to slash, up for an overhead, down to thrust with a blade. Release to strike. A settled wind-up hits harder. With a bow, hold to draw and release to shoot.</span>
+            <kbd>hold RMB · Q</kbd><span>hold a directional guard with the mouse · kick to break an enemy guard</span>
+            <kbd>Space</kbd><span>roll: a committed tumble in your movement direction, or forward when still. It goes clean through bodies but not through walls, and you cannot steer or swing until it lands. A raider's blow checks its reach at the moment it strikes, so rolling out of a wind-up beats it.</span>
             <kbd>hold R</kbd><span>meal: a reticle shows the throw's reach and where it will land; let go to lob a cooked meal from your pack there (a left-click throws too, a right-click puts it away). Every gnome, villager — and you — inside the splash eats it: gnomes take its mood (Sporeburst, Emboldened…), you its heal and buff. The wheel, or clicking the R button, picks which meal. Cook meals at the Great Pot.</span>
             <kbd>G</kbd><span>throw the largest wood, food or scrap stack toward the cursor. Drag any pack item onto the world to drop it. Walk away from your dropped items before returning to pick them up.</span>
             <kbd>click / C</kbd><span>use the tool you hold on the clicked tile: you walk into reach first, and the axe keeps chopping until the tree is down. The bottom bar says what the tool will do. With the sword or bow in hand, a click looks the thing over instead.</span>
             <kbd>X</kbd><span>check a villager (opens the inspector)</span>
-            <kbd>1-9 · Tab</kbd><span>pick a tool — hoe, seeds, axe, sword, house, barracks, hammer</span>
-            <kbd>screen edge · arrows · middle-drag</kbd><span>pan the camera; it looks down from a fixed angle, north up</span>
-            <kbd>Space · Y</kbd><span>camera back to you (held: stays on you) · Y locks it on you</span>
+            <kbd>1-6 · Tab</kbd><span>pick a tool — sword, bow, axe, hammer, basket, wand. The hammer opens the build row.</span>
+            <kbd>mouse · MMB</kbd><span>look around; while winding or guarding, hold middle mouse to turn the camera as well</span>
+            <kbd>Alt</kbd><span>release the mouse to use menus; click the view to return to combat</span>
             <kbd>wheel · Z</kbd><span>camera distance — the wheel eases in and out, Z steps through presets</span>
             <kbd>Esc</kbd><span>menu (pause, restart, how to play)</span>
             <kbd>- / =</kbd><span>game speed 1x / 4x / 16x</span>

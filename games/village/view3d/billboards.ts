@@ -96,15 +96,30 @@ export class Flags {
   private pennants: Batch;
   private m4 = new THREE.Matrix4();
   private c = new THREE.Color();
+  private q = new THREE.Quaternion();
+  private up = new THREE.Vector3(0, 1, 0);
+  private p = new THREE.Vector3();
+  private sc = new THREE.Vector3();
+  private eye = new THREE.Vector3();
 
   constructor(pole: THREE.BufferGeometry, pennant: THREE.BufferGeometry) {
     this.poles = new Batch(this.group, pole, new THREE.MeshBasicMaterial({ color: 0xffffff }), 0);
     this.pennants = new Batch(this.group, pennant, new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide }), 0);
   }
 
-  /** A banner `size` times the pole's height standing at (x, y, z). */
+  /** Where the camera stands, so each banner can turn its pennant toward it. */
+  begin(camera: THREE.Camera): void { this.eye.setFromMatrixPosition(camera.matrixWorld); }
+
+  /**
+   * A banner `size` times the pole's height standing at (x, y, z).
+   *
+   * The pennant is a flat triangle, so from the old fixed camera it always happened to be face-on. Let
+   * the camera swing and it turns edge-on and disappears. It turns about its pole to face the camera —
+   * about that axis only, since a banner that tips over with the camera is no banner at all.
+   */
   flag(x: number, y: number, z: number, colour: number, size: number): void {
-    this.m4.makeScale(size, size, size).setPosition(x, y, z);
+    this.q.setFromAxisAngle(this.up, Math.atan2(this.eye.x - x, this.eye.z - z));
+    this.m4.compose(this.p.set(x, y, z), this.q, this.sc.setScalar(size));
     const i = this.poles.next(); this.poles.mesh.setMatrixAt(i, this.m4); this.poles.mesh.setColorAt(i, this.c.setHex(0x2a1a16));
     const j = this.pennants.next(); this.pennants.mesh.setMatrixAt(j, this.m4); this.pennants.mesh.setColorAt(j, this.c.setHex(colour));
   }

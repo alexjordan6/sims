@@ -1,4 +1,4 @@
-import { STACK, SKULK, STASH_SLOTS, FOUND_TIER, BANDAGE, UNIT, type BulkKind, type UnitBranch } from './config';
+import { DUEL, STACK, SKULK, STASH_SLOTS, FOUND_TIER, BANDAGE, UNIT, type BulkKind, type UnitBranch } from './config';
 import { enemyDrop, rollLoot, danger } from './loot';
 import { Caravan } from './caravan';
 import { isImplement, IMPLEMENTS, START_TOOLS, LOST_TOOLS, type Implement, TOOL_NAME, Pack, type Gear, type EquipmentSlot, isBulk, slotName } from './pack';
@@ -6,7 +6,7 @@ import Phaser from 'phaser';
 import { SimScene, launch, button, getGui, Rng } from '@shared/index';
 import { launch as throwItem, type Item } from './items';
 import { World, WILD_FOOD, doorstep, buildingCenter, buildingMaxHp, hasHearth, hearthCost, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos, type Hive, type Chest, type Ruin, isGearChest } from './world';
-import { Villager, Raider, Player, Mover, Arrow, TOOLS, BELT, BUILDS, SWING, type Role, type Tool, type Order } from './agents';
+import { Villager, Raider, Player, Mover, Arrow, TOOLS, BELT, BUILDS, SWING, MOVES, type AttackDir, type Role, type Tool, type Order } from './agents';
 import { DEFENSE_COST, WALL_HEIGHT, WARREN, SOLDIER_CAP_PER_LEVEL, MAP_AREA, PLAINS } from './config';
 import { Interior } from './interior';
 import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, Bolt, Troll, Skulk } from './enemies';
@@ -33,7 +33,7 @@ export interface GameEvent { kind: EventKind; text: string; toast: boolean; day:
 /** Things the sim reports for the renderer to animate; drained every frame. */
 export type FxEvent =
   | { kind: 'hit'; attacker: Mover; target: Mover; dmg: number; crit: boolean; killed: boolean; streak?: number; ux?: number; uy?: number; push?: number }
-  | { kind: 'telegraph'; who: Mover; ms: number }
+  | { kind: 'telegraph'; who: Mover; ms: number; /** which way the blow comes in, so it can be read and answered */ dir?: AttackDir }
   | { kind: 'miss'; who: Mover }
   | { kind: 'slowmo' }
   | { kind: 'tool'; tool: 'axe' | 'seed' | 'hammer'; tx: number; ty: number; who?: Mover }
@@ -204,8 +204,10 @@ export class VillageScene extends SimScene {
   private hovered: Mover | null = null;
   view?: View;
   private ui?: UI;
-  /** WASD no longer steers (right-click does): the player reads keys that are never down */
+  /** the four that walk the head, read straight off the window and handed to the player */
   private wasd = { W: { isDown: false }, A: { isDown: false }, S: { isDown: false }, D: { isDown: false } };
+  /** Shift: a sprint while it is held */
+  sprinting = false;
   /** (the 2D camera follow; the 3D view does its own following) */
   following = false;
 
@@ -906,7 +908,7 @@ export class VillageScene extends SimScene {
       else this.togglePause();
     };
     kb.on('keydown-ESC', closePanel);
-    for (const k of ['Q', 'W', 'E'] as const) kb.on(`keydown-${k}`, (e: KeyboardEvent) => { if (!e.repeat) this.ability(k); });
+    kb.on('keydown-Q', (e: KeyboardEvent) => { if (!e.repeat) this.kick(); }); // the blade is on the mouse; W and E walk
     kb.on('keyup-R', () => this.releaseMeal());
     kb.on('keydown-B', () => this.ui?.toggleBag());
     kb.on('keydown-V', () => this.openArmory(this.armoryFor ? null : this.player));
@@ -917,9 +919,9 @@ export class VillageScene extends SimScene {
     kb.on('keydown-H', (e: KeyboardEvent) => { if (!e.repeat && !this.regimentKey('H')) this.summonGnomes(); });
 
     super.create(); // creates gfx + hud, then calls reset() -> setup()
-    kb.removeAllListeners('keydown-SPACE'); // Esc handles pause; Space brings the camera back to the head
-    kb.on('keydown-SPACE', () => this.view?.recentre());
-    kb.on('keydown-Y', () => this.view?.toggleLock());
+    kb.removeAllListeners('keydown-SPACE'); // Esc handles pause; Space is the dodge
+    kb.on('keydown-SPACE', (e: KeyboardEvent) => { if (!e.repeat) this.ability('E'); });
+    this.bindWalk();
     kb.on('keydown-U', (e: KeyboardEvent) => { if (!e.repeat && this.screen === 'playing') this.useBandage(); });
     kb.on('keydown-G', () => { if (!this.regimentKey('G')) this.tossLoad(); });
     kb.on('keydown-T', () => { if (this.regimentKey('T')) return; if (this.screen === 'playing' && !this.paused) this.eat(); });
@@ -2076,6 +2078,138 @@ export class VillageScene extends SimScene {
     if (this.forcedAim) return this.forcedAim;
     if (!this.hoverPoint) return null;
     return this.view?.aimPoint() ?? null;
+  }
+
+  /**
+   * WASD off the window rather than through Phaser's keyboard plugin: the command bar already reads the
+   * window directly, and holding a key must survive whatever has focus. Shift sprints.
+   */
+  private bindWalk(): void {
+    const set = (e: KeyboardEvent, down: boolean) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      const k = e.code;
+      if (k === 'KeyW') this.wasd.W.isDown = down;
+      else if (k === 'KeyA') this.wasd.A.isDown = down;
+      else if (k === 'KeyS') this.wasd.S.isDown = down;
+      else if (k === 'KeyD') this.wasd.D.isDown = down;
+      else if (k === 'ShiftLeft' || k === 'ShiftRight') this.sprinting = down;
+    };
+    window.addEventListener('keydown', (e) => set(e, true));
+    window.addEventListener('keyup', (e) => set(e, false));
+    // a key held while the tab goes away would stay held for ever
+    const letGo = () => { this.wasd.W.isDown = this.wasd.A.isDown = this.wasd.S.isDown = this.wasd.D.isDown = false; this.sprinting = false; };
+    window.addEventListener('blur', letGo);
+    document.addEventListener('visibilitychange', () => { if (document.hidden) letGo(); });
+  }
+
+  // ---- the weapon on the mouse: hold to wind a blow or draw a string, let go to loose it ----------
+
+  /** What the weapon in hand can do: a forged blade thrusts, a club has no point to it. */
+  private moveSet(): readonly AttackDir[] { return this.player.weapons.melee > 0 ? MOVES.blade : MOVES.club; }
+
+  /** Can the head fight at all this moment? */
+  private canFight(): boolean {
+    const pl = this.player;
+    return this.screen === 'playing' && !this.paused && !this.interior.active && !pl.dead && !pl.hidden && pl.busy <= 0;
+  }
+
+  /** The left button went down. True when the weapon took it, so the click is not also a tool use. */
+  beginAttack(): boolean {
+    if (!this.canFight()) return false;
+    const pl = this.player;
+    if (pl.tool === 'bow') {
+      if (pl.weapons.bow < 0 || this.arrows <= 0) return false;
+      pl.draw = 0; // the string comes back; how far decides the spread
+      return true;
+    }
+    if (pl.tool !== 'sword') return false;
+    if (pl.weapons.melee < 0) { this.event('info', 'No blade to swing — forge one at the barracks.', true); return true; }
+    if (pl.winded) { this.event('info', 'Out of wind.', true); return true; }
+    return pl.beginWind(this.moveSet());
+  }
+
+  /** The left button came up: the blow goes where the crosshair is pointing, or the arrow does. */
+  releaseAttack(): boolean {
+    const pl = this.player, aim = this.aimAt();
+    if (pl.draw >= 0) {
+      const drawn = Math.min(1, pl.draw / DUEL.draw);
+      pl.draw = -1;
+      if (!this.canFight()) return true;
+      // a snap shot sprays; a full draw goes where it is pointed
+      const spread = DUEL.snapSpread * (1 - drawn);
+      const a = Math.atan2(aim.y - pl.y, aim.x - pl.x) + this.rng.range(-spread, spread);
+      this.faceTo(aim.x, aim.y);
+      this.shoot(pl, Math.cos(a) * 100, Math.sin(a) * 100, Math.round(p.playerDmg * weaponMul(pl.weapons, 'bow') * this.mods.playerDmgMul * this.buffMul('dmg')));
+      return true;
+    }
+    if (!pl.wind) return false;
+    if (!this.canFight()) { pl.wind = null; return true; }
+    this.faceTo(aim.x, aim.y);
+    const dir = pl.releaseWind(aim);
+    if (dir) {
+      this.fx.push({ kind: 'swing', who: pl, dx: pl.facing.x, dy: pl.facing.y, stage: dir === 'up' ? 2 : dir === 'down' ? 1 : 0 });
+      // the same blow as the one already coming in catches it on the way
+      if (pl.chamber(this, dir)) this.event('soldier', 'Chambered!', true);
+    }
+    return true;
+  }
+
+  /**
+   * What the duel looks like this instant, for the HUD: the blow being held back or the guard being
+   * held up, how much wind is left, and the nearest blow coming the other way.
+   */
+  duelState(): { wind: AttackDir | null; guard: AttackDir | null; stam: number; stamMax: number; draw: number; incoming: AttackDir | null; chambered: boolean } {
+    const pl = this.player;
+    let incoming: AttackDir | null = null, near = Infinity;
+    for (const a of this.agents) {
+      if (!(a instanceof Raider) || a.dead) continue;
+      const at = a.attack;
+      if (!at || at.struck || at.target !== pl || at.t > at.windup) continue;
+      const d = a.dist(pl);
+      if (d < near) { near = d; incoming = at.dir; }
+    }
+    return {
+      wind: pl.wind?.dir ?? null, guard: pl.guard?.dir ?? null,
+      stam: pl.stam, stamMax: DUEL.stamMax,
+      draw: pl.draw >= 0 ? Math.min(1, pl.draw / DUEL.draw) : -1,
+      incoming, chambered: pl.chambered >= 0 && pl.chambered < 0.8,
+    };
+  }
+
+  /** The right button: the guard goes up, and the mouse picks the side it is held. */
+  raiseGuard(): boolean {
+    if (!this.canFight() || this.player.tool !== 'sword' || this.player.weapons.melee < 0) return false;
+    this.player.wind = null; // you cannot wind a blow and hold a guard at once
+    this.player.raiseGuard();
+    return true;
+  }
+  dropGuard(): void { this.player.dropGuard(); }
+
+  /**
+   * A kick: no damage worth the name, but it goes through a guard and leaves whoever was behind it wide
+   * open — which is the only answer to someone who simply never drops theirs.
+   */
+  kick(): void {
+    const pl = this.player;
+    if (!this.canFight() || pl.swing || pl.roll) return;
+    if (!pl.spend(DUEL.kick)) { this.event('info', 'Out of wind.', true); return; }
+    const aim = this.aimAt();
+    this.faceTo(aim.x, aim.y);
+    const fx = pl.facing.x, fy = pl.facing.y;
+    pl.recover = Math.max(pl.recover, 0.3);
+    this.fx.push({ kind: 'swing', who: pl, dx: fx, dy: fy, stage: 0 });
+    let landed = 0;
+    this.grid.forEachInRadius(pl.x, pl.y, 22, (o, d2) => {
+      if (!(o instanceof Raider) || o.dead || o.elevated !== pl.elevated) return;
+      const d = Math.sqrt(d2) || 1, ux = (o.x - pl.x) / d, uy = (o.y - pl.y) / d;
+      if (ux * fx + uy * fy < 0.3) return;
+      o.attack = null; // through the guard, and through whatever was being wound up behind it
+      o.freeze = Math.max(o.freeze, 0.5);
+      o.shove(ux, uy, 9);
+      o.hit(2, true, pl);
+      landed++;
+    });
+    if (landed) this.fx.push({ kind: 'impact', x: pl.x + fx * 14, y: pl.y + fy * 14 });
   }
 
   onPointerMove(ptr: Ptr): void {
@@ -3448,6 +3582,37 @@ export class VillageScene extends SimScene {
   }
   clearSquad(): void { this.squad = []; }
   private giveOrder(v: Villager, order: Order | null): void { v.order = order; v.post = null; v.clearGoal(); }
+
+  /** Everyone under these banners who is out foraging. */
+  foragers(regs: Regiment[]): Villager[] {
+    const out: Villager[] = [];
+    for (const r of regs) for (const v of r.members) if (!v.dead && v.order?.kind === 'forage') out.push(v);
+    return out;
+  }
+
+  /**
+   * FORAGE: the banner puts down its formation and works the wild — the same job a forager does all day,
+   * pouches and granary trips and all. They stay at it until they are called back to the ranks, or until
+   * the banner is given somewhere to be (see commandItem: a movement order forms the party up first).
+   * Returns how many went out, or came back.
+   */
+  forageOrder(regs: Regiment[], out: boolean, announce = true): number {
+    let n = 0;
+    for (const r of regs) for (const v of r.members) {
+      if (v.dead || v.hidden || !v.isAdult) continue;
+      if (out ? v.order?.kind === 'forage' : v.order?.kind !== 'forage') continue;
+      // a gnome soldier trails the head by default, and a follower only picks what grows within a few tiles
+      // of where you stand. A forage party works the whole wild, so it is let off the leash first.
+      if (out) v.followPlayer(this, false);
+      this.giveOrder(v, out ? { kind: 'forage' } : null);
+      n++;
+    }
+    if (!announce) return n;
+    if (n) this.event('info', out ? `${n} gnome${n === 1 ? '' : 's'} put down the line and went foraging.` : `${n} forager${n === 1 ? '' : 's'} back in the ranks.`, true);
+    else if (regs.length) this.event('info', out ? 'Nobody under that banner to send.' : 'Nobody out foraging.', true);
+    if (n && regs.length) this.wandFx(regs[0].x, regs[0].y - 12, out ? 'FORAGE' : 'FALL IN');
+    return n;
+  }
   private wandFx(x: number, y: number, text: string): void {
     this.fx.push({ kind: 'deposit', x, y, text, colour: '#78d8f0' });
     this.fx.push({ kind: 'cast', who: this.player });
@@ -3968,10 +4133,14 @@ export class VillageScene extends SimScene {
     if (!regs.length) return false;
     const def = ORDER_MENUS[menu - 1];
     if (!def || item < 1 || item > def.items.length) return false;
+    // somewhere to be forms the party up first: a banner told to charge should not leave half of itself
+    // out picking berries. Facing, forming and firing are details of a line already standing, so they don't.
+    if (menu === 1) this.forageOrder(regs, false, false);
     if (menu === 1) [() => this.moveTo(regs, aim.x, aim.y), () => this.setStance(regs, 'follow'), () => this.charge(regs), () => this.setStance(regs, 'advance'), () => this.setStance(regs, 'hold'), () => this.retreat(regs)][item - 1]();
     else if (menu === 2) this.faceOrder(regs, item === 1 ? 'enemy' : 'point', aim.x, aim.y);
     else if (menu === 3) this.formOrder(regs, SHAPES[item - 1]);
     else if (menu === 4) this.fireOrder(regs, item === 2);
+    else if (menu === 5) this.forageOrder(regs, item === 1);
     // an order given: back to the top, and shut altogether when an F-key opened the bar
     this.cmdMenu = this.cmdByKey ? null : 0;
     return true;
@@ -3984,7 +4153,7 @@ export class VillageScene extends SimScene {
     const f = /^F([1-7])$/.exec(e.key);
     if (f) {
       const n = Number(f[1]);
-      if (n <= 4 && this.commandMenu() === 0 && this.openCommand(n)) { e.preventDefault(); e.stopPropagation(); return; }
+      if (n <= ORDER_MENUS.length && this.commandMenu() === 0 && this.openCommand(n)) { e.preventDefault(); e.stopPropagation(); return; }
       if (this.commandOpen() && this.commandMenu() > 0) { e.preventDefault(); e.stopPropagation(); this.commandItem(this.commandMenu(), n); }
       return;
     }

@@ -35,6 +35,9 @@ type UnionToIntersection<U> = (U extends unknown ? (k: U) => void : never) exten
 export const p = live(
   params({
     cameraZoom: [D.cameraZoom, 0.5, 4, 0.25, 'Camera closeness multiplier: 1 is the original view, 2 is twice as close. Applies immediately; Z cycles zoom presets.'],
+    lookSpeed: [D.lookSpeed, 0.2, 4, 0.1, 'How far the camera swings for a given push of the mouse.'],
+    lookInvert: [D.lookInvert, 'Push the mouse away to look down instead of up.'],
+    sprintMul: [D.sprintMul, 1, 3, 0.05, 'How much faster the head runs with Shift held.'],
     shadows: [D.shadows, 'Sun and moon shadows (costs some frame time).'],
   }, 'camera'),
   params({
@@ -644,6 +647,24 @@ export const ARMOR_SLOTS: readonly ArmorSlot[] = ['helmet', 'chest', 'legs', 'sh
 /** barracks level needed to forge each tier (armor and weapons alike) */
 export const ARMOR_BARRACKS_LEVEL = [0, 1, 2, 3] as const;
 /** the loot-only tier: the tower shield, the warhammer and the crossbow are found, never forged */
+/**
+ * Duelling: what a blow, a sprint and a block cost, and how fast the wind comes back. Stamina is the
+ * governor on all of it — swing wildly and you have nothing left to turn the answer with.
+ */
+export const DUEL = {
+  stamMax: 100,
+  /** per second, once nothing has been spent for `regenDelay` */
+  regen: 24, regenDelay: 0.5,
+  /** per second, while Shift is held and there is somewhere to be */
+  sprint: 13,
+  /** per blow turned on a held guard, and per kick */
+  block: 17, kick: 22,
+  /** how far the mouse must travel to choose a blow, in device pixels */
+  flick: 16,
+  /** a bow at full draw, in seconds, and the spread of a snap shot in radians */
+  draw: 0.75, snapSpread: 0.22,
+} as const;
+
 export const FOUND_TIER = 4;
 
 // ---- unit tiers ----------------------------------------------------------------------------

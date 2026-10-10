@@ -32,7 +32,7 @@ interface Streak { obj: THREE.Object3D; mat: THREE.Material & { opacity: number 
 /** a line that fades: its ends, its colour, and its clock (drawn together with every other, see Lines) */
 interface Line { ax: number; ay: number; az: number; bx: number; by: number; bz: number; r: number; g: number; b: number; t: number; ttl: number }
 /** the shapes swings and shocks are drawn with: made once and shared, never one per blow */
-const ARC = new THREE.RingGeometry(0.55, 0.85, 14, 1, 0, 2.4).rotateX(-Math.PI / 2);
+const ARC = new THREE.RingGeometry(0.76, 0.85, 24, 1, 0, 2.4).rotateX(-Math.PI / 2);
 const SPIN = new THREE.RingGeometry(0.55, 0.85, 14, 1, 0, Math.PI * 2).rotateX(-Math.PI / 2);
 const SHOCK = new THREE.RingGeometry(0.85, 1, 32).rotateX(-Math.PI / 2);
 /** at most this many arcs and shocks at once: in a battle of thousands the oldest give way */
@@ -172,10 +172,16 @@ export class Fx3d {
         this.burst(b, 2, 0xffffff, 0.5, 0.3, 0.15, 0);
         sfx.swing(0); break;
       }
-      case 'swing':
-        this.arc(ev.who, ev.dx, ev.dy, ev.stage === 2 ? 0.3 : 0.18, ev.stage === 2);
+      case 'swing': {
+        const sw = ev.who instanceof Player ? ev.who.swing : null;
+        if (sw?.dir === 'up' || sw?.dir === 'down') {
+          const start = this.at(ev.who.x, ev.who.y, sw.dir === 'up' ? 1.6 : 0.7);
+          const end = this.at(ev.who.x + sw.dx * sw.reach, ev.who.y + sw.dy * sw.reach, 0.65);
+          this.streak(start, end, 0xf2e6c8, 0.16);
+        } else this.arc(ev.who, sw?.dx ?? ev.dx, sw?.dy ?? ev.dy, 0.18, sw?.spin ?? ev.stage === 2);
         this.actors.kick(ev.who.id).attack = 0.4;
         sfx.swing(ev.stage); break;
+      }
       case 'telegraph': {
         const k = this.actors.kick(ev.who.id); k.flash = Math.max(k.flash, ev.ms / 1000); k.flashColour = 0xffc040;
         this.word('!', this.actors.headOf(ev.who).add(new THREE.Vector3(0, 0.3, 0)), '#ffe066', 18, 0.9);

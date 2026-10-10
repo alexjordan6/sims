@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { Raider, type Mover } from '../agents';
 import type { VillageScene, Ptr } from '../main';
 import { BUILDINGS, doorstep, type Defense, type TilePos } from '../world';
-import { TILE, COLS, ROWS, p } from '../config';
+import { TILE, p } from '../config';
 import { Terrain, groundHeight } from './terrain';
 import { Structures } from './structures';
 import { Actors, standHeight } from './actors';
@@ -12,6 +12,7 @@ import { Fx3d } from './fx3d';
 import { skyAt } from './sky';
 import { updateFow, setFowOn } from './fow';
 import { Room3d } from './room';
+import { Dome } from './dome';
 import { MODELS, loadModels } from './assets';
 import { propKeys, characterKeys } from './registry';
 import { KIT_PIECES, KIT_PROPS } from './kit';
@@ -22,14 +23,18 @@ import { U, WALL_UNITS } from './models';
 // the scene's state and the fx queue; it never changes the sim except through the same pointer
 // handlers the 2D canvas used to call.
 //
-// The camera is a MOBA's: a fixed high angle with north up, panned by pushing the mouse against a
-// screen edge (or the arrow keys, or a middle-button drag), Space to snap back to the head, Y to lock
-// it there, the wheel to zoom.
+// The camera rides behind the head on a mouse-look, the way a third-person brawler's does: click to
+// take the pointer, the mouse turns the camera, and WASD walks relative to wherever it has swung to.
+// (It was a MOBA's camera - fixed high angle, north up, edge-panned - which is what main still has.)
 
-/** camera distances the Z key / zoom button steps through (in tiles) */
-const DISTANCES = [8, 11, 14, 18, 23, 30, 38] as const; // the far two take in a battle on the open plains
-/** how close to a screen edge the mouse pans the camera, px */
-const EDGE = 14;
+/** how close behind the head the camera sits, in tiles: a duelling range, not a battle map's */
+const DIST_MIN = 2, DIST_MAX = 7;
+/** how far the look may swing up and down, in radians, where 0 is level with the ground */
+const PITCH_MIN = 0.06, PITCH_MAX = 1.15;
+/** how far above the head's feet the camera looks */
+const EYE = 1.0;
+/** how far to one side the whole view slides, so the head stands clear of its own crosshair */
+const SHOULDER = 0.6;
 
 export class View {
   readonly renderer: THREE.WebGLRenderer;
@@ -47,6 +52,7 @@ export class View {
   /** a few lamps lent to whichever hearths, pots and fires are nearest the camera */
   private lamps: THREE.PointLight[] = [];
   private room: Room3d;
+  private dome = new Dome();
   private fowRevision = -1;
   private fowEnabled: boolean | null = null;
   /** the model revision the world was last built with, and when it last changed (rebuilds wait for a quiet moment) */
@@ -56,12 +62,11 @@ export class View {
   /** set on frames where tiles were repainted (the minimap redraws its terrain then) */
   tilesChanged = false;
 
-  // the camera: fixed yaw (north up) and pitch, distance out, and whether it is locked onto the head
-  readonly yaw = 0;
-  readonly pitch = 0.96;
-  locked = false;
-  dist: number = DISTANCES[2];
-  /** where the camera looks when it is not following the head (edge-panned) */
+  // the camera: where the mouse has turned it to, and how far back it sits
+  yaw = 0;
+  pitch = 0.42;
+  dist = 5.5;
+  /** where the camera wants to look (the head, always, in third person) */
   private pan = new THREE.Vector3();
   private focus = new THREE.Vector3();
   /** the camera's view this frame, for the crowd to skip what it cannot see */
@@ -70,9 +75,7 @@ export class View {
   private shadowFrame = 0;
   private shakeAmt = 0;
   private bumpAmt = 0; private bumpT = 0; private bumpMs = 1;
-  private keys = new Set<string>();
-  private dragging: { x: number; y: number } | null = null;
-  /** the last pointer position over the canvas, in client pixels (null when it left) */
+  /** the last pointer position over the canvas, in client pixels; the crosshair's while the pointer is locked */
   private mouse: { x: number; y: number } | null = null;
   private t = 0;
 
@@ -82,6 +85,8 @@ export class View {
     this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace; // the post pass used to do this by hand
     this.renderer.shadowMap.enabled = true;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.16;
     this.renderer.shadowMap.type = THREE.PCFShadowMap; // (three r186 removed PCFSoftShadowMap and silently falls back to this)
     const canvas = this.renderer.domElement;
     canvas.className = 'view3d';
@@ -97,8 +102,9 @@ export class View {
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     const sc = this.sun.shadow.camera; sc.left = -24; sc.right = 24; sc.top = 24; sc.bottom = -24; sc.near = 1; sc.far = 90;
-    this.sun.shadow.bias = -0.002;
-    this.world.add(this.hemi, this.sun, this.sun.target, this.torch);
+    this.sun.shadow.bias = -0.0004;
+    this.sun.shadow.normalBias = 0.035;
+    this.world.add(this.hemi, this.sun, this.sun.target, this.torch, this.dome.mesh);
     for (let i = 0; i < 6; i++) { const l = new THREE.PointLight(0xff9a50, 0, 10, 1.3); this.lamps.push(l); this.world.add(l); }
     this.terrain = new Terrain(scene);
     this.room = new Room3d(scene);
@@ -150,14 +156,87 @@ export class View {
     if (pl) { this.focus.set(pl.x * U, groundHeight(pl.x * U, pl.y * U) + standHeight(pl) + 0.8, pl.y * U); this.pan.copy(this.focus); }
   }
 
-  /** Space: the camera jumps back onto the head (and stays while Space is held). */
-  recentre(): void { this.snapCamera(); }
-  /** Y: lock the camera onto the head, or free it to pan. */
-  toggleLock(): void { this.locked = !this.locked; if (this.locked) this.snapCamera(); }
+  cycleZoom(): void { this.dist = this.dist >= DIST_MAX - 0.01 ? DIST_MIN : Math.min(DIST_MAX, this.dist + 1.5); }
 
-  cycleZoom(): void {
-    const i = DISTANCES.findIndex((d) => d > this.dist + 0.01);
-    this.dist = DISTANCES[i < 0 ? 0 : i];
+  /**
+   * Is the mouse turning the camera? Normally that means the pointer is locked to the canvas. Some
+   * documents are not allowed to take the pointer at all (an iframe without allow="pointer-lock", and
+   * the editor's own preview pane), so when the request is refused we fall back to turning while a
+   * button is held and dragged — the same look, one button busier.
+   */
+  get looking(): boolean { return document.pointerLockElement === this.renderer.domElement || this.dragLook; }
+  /** true once a lock request has been refused: this document will never get the pointer */
+  private noLock = false;
+  private dragLook = false;
+  private freeLook = false;
+
+  /** Take the pointer, or learn that we cannot. */
+  private grabPointer(): void {
+    if (this.noLock) return;
+    const r = this.renderer.domElement.requestPointerLock() as unknown as Promise<void> | undefined;
+    void r?.catch?.(() => { this.noLock = true; console.info('[village] the page may not lock the pointer here: hold a mouse button to look round'); });
+  }
+
+  /** Turn the camera by a mouse movement, in raw device pixels. */
+  private turn(dx: number, dy: number): void {
+    // a blow held back, or a guard held up, reads the same mouse: whichever way it travels picks the side
+    this.scene.player?.aimWind(dx, dy);
+    this.scene.player?.aimGuard(dx, dy);
+    if ((this.scene.player?.wind || this.scene.player?.guard) && !this.freeLook) return;
+    const k = p.lookSpeed * 0.0022;
+    // the camera sits at +sin(yaw), +cos(yaw) and looks inward, so a rightward push wants yaw to fall
+    this.yaw -= dx * k;
+    this.pitch = Math.max(PITCH_MIN, Math.min(PITCH_MAX, this.pitch + dy * k * (p.lookInvert ? -1 : 1)));
+  }
+
+  /**
+   * With the pointer locked there is no cursor to hover with, so the middle of the screen becomes one:
+   * a ray down the crosshair every frame feeds the same hoverPoint and hoverTile that the tools, the bow
+   * and the roll already read, and nothing downstream has to know the difference.
+   */
+  private aimCrosshair(): void {
+    const s = this.scene;
+    if (!this.looking || s.interior.active) return;
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    this.mouse = { x: cx, y: cy };
+    s.onPointerMove(this.crosshairPtr());
+  }
+
+  /**
+   * Pull the camera in until nothing stands between it and the head. A third-person camera that keeps
+   * its distance spends half a village watching the fight through the back of a house.
+   */
+  private back = new THREE.Vector3();
+  private aimAt_ = new THREE.Vector3();
+  private unblock(dist: number): void {
+    this.back.copy(this.camera.position).sub(this.focus);
+    const len = this.back.length();
+    if (len < 0.01) return;
+    this.back.divideScalar(len);
+    this.ray.set(this.focus, this.back);
+    this.ray.far = len;
+    const walls = [...this.structures.buildingGroups, ...this.structures.pickable, ...this.terrain.propsAround(this.focus.x, this.focus.z)];
+    const hit = this.ray.intersectObjects(walls, true).find((h) => h.distance > 0.2);
+    this.ray.far = Infinity;
+    if (!hit) return;
+    const want = Math.max(0.9, Math.min(dist, hit.distance - 0.25));
+    this.camera.position.copy(this.focus).addScaledVector(this.back, want);
+    const floor = groundHeight(this.camera.position.x, this.camera.position.z) + 0.35;
+    if (this.camera.position.y < floor) this.camera.position.y = floor;
+  }
+
+  /** The pick down the crosshair, as the pointer the scene expects. */
+  private crosshairPtr(right = false): Ptr {
+    const r = this.renderer.domElement.getBoundingClientRect();
+    const cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    const hit = this.pickAt(cx, cy);
+    return {
+      worldX: hit.x * TILE, worldY: hit.z * TILE, agent: hit.agent,
+      wallTile: hit.defense ? { tx: hit.defense.tx, ty: hit.defense.ty } : null,
+      event: new MouseEvent('mousemove', { clientX: cx, clientY: cy }),
+      rightButtonDown: () => right,
+    };
   }
 
   // ---- input ---------------------------------------------------------------------------
@@ -166,36 +245,42 @@ export class View {
     const s = this.scene;
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     canvas.addEventListener('pointermove', (e) => {
+      if (this.looking) { this.turn(e.movementX, e.movementY); return; } // the mouse is the camera now
       this.mouse = { x: e.clientX, y: e.clientY };
-      if (this.dragging) {
-        // grab the ground and drag it
-        const k = this.dist * 0.0022;
-        this.pan.x -= (e.clientX - this.dragging.x) * k; this.pan.z -= (e.clientY - this.dragging.y) * k * 1.3;
-        this.dragging = { x: e.clientX, y: e.clientY };
-        this.locked = false;
-        return;
-      }
       s.onPointerMove(this.ptrAt(e));
     });
     canvas.addEventListener('pointerdown', (e) => {
-      try { canvas.setPointerCapture(e.pointerId); } catch { /* a synthetic or already-gone pointer */ }
-      if (e.button === 1) { e.preventDefault(); this.dragging = { x: e.clientX, y: e.clientY }; return; }
+      if (e.button === 1) { e.preventDefault(); this.freeLook = true; return; }
       if (s.interior.active) { const q = this.room.floorAt(e.clientX, e.clientY, canvas); if (q) s.interior.tap(q.x, q.y, false); return; }
-      s.onPointerDown(this.ptrAt(e));
+      // the first click takes the pointer; after that the mouse is the look and the clicks are the fight
+      if (!this.looking) { this.grabPointer(); if (!this.noLock) return; }
+      if (this.noLock) { this.dragLook = true; try { canvas.setPointerCapture(e.pointerId); } catch { /* already gone */ } }
+      if (e.button === 2) { s.raiseGuard(); return; } // the right button holds the guard up
+      if (e.button === 0 && s.beginAttack()) return; // a blade winds up, a bow draws
+      s.onPointerDown(this.crosshairPtr());
     });
     canvas.addEventListener('pointerup', (e) => {
-      if (this.dragging && e.button === 1) { this.dragging = null; return; }
-      s.wandUp(this.ptrAt(e));
+      if (e.button === 1) { this.freeLook = false; return; }
+      if (e.button === 2) { s.dropGuard(); this.dragLook = false; return; }
+      if (e.button === 0 && s.releaseAttack()) { this.dragLook = false; return; } // the blow goes
+      if (this.looking && e.button !== 2) s.wandUp(this.crosshairPtr());
+      this.dragLook = false;
     });
-    canvas.addEventListener('pointerleave', () => { this.mouse = null; s.onPointerOut(); });
+    const cancelHands = () => {
+      this.freeLook = false; this.dragLook = false;
+      if (s.player) { s.player.wind = null; s.player.draw = -1; s.player.dropGuard(); }
+    };
+    window.addEventListener('blur', cancelHands);
+    canvas.addEventListener('pointercancel', cancelHands);
+    document.addEventListener('pointerlockchange', () => { if (!document.pointerLockElement) cancelHands(); });
+    canvas.addEventListener('pointerleave', () => { if (!this.looking) { this.mouse = null; s.onPointerOut(); } });
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
       if (s.mealAim) { s.cycleMeal(e.deltaY > 0 ? 1 : -1); return; } // aiming a meal: the wheel picks which
-      this.dist = Math.max(DISTANCES[0], Math.min(DISTANCES[DISTANCES.length - 1], this.dist * (e.deltaY > 0 ? 1.1 : 1 / 1.1)));
+      this.dist = Math.max(DIST_MIN, Math.min(DIST_MAX, this.dist * (e.deltaY > 0 ? 1.1 : 1 / 1.1)));
     }, { passive: false });
-    window.addEventListener('keydown', (e) => { if (e.key.startsWith('Arrow') || e.key === ' ') { this.keys.add(e.key); if (!(e.target instanceof HTMLInputElement)) e.preventDefault(); } });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.key));
-    window.addEventListener('blur', () => this.keys.clear());
+    // Alt gives the cursor back without leaving the game, for the armory and the build menus
+    window.addEventListener('keydown', (e) => { if (e.key === 'Alt' && this.looking) { e.preventDefault(); this.dragLook = false; document.exitPointerLock(); } });
   }
 
   private ray = new THREE.Raycaster();
@@ -288,44 +373,44 @@ export class View {
     const s = this.scene;
     this.t += dt;
     // the camera: arrows turn it, the head is followed, a jolt or a punch-in when fx ask
-    const k = this.keys, pl = s.player;
-    if (pl) pl.camYaw = 0;
-    // pan: arrow keys, or the mouse pushed against an edge of the view
-    let px = (k.has('ArrowRight') ? 1 : 0) - (k.has('ArrowLeft') ? 1 : 0), pz = (k.has('ArrowDown') ? 1 : 0) - (k.has('ArrowUp') ? 1 : 0);
-    const r = this.renderer.domElement.getBoundingClientRect(), m = this.mouse;
-    if (m && s.screen === 'playing') {
-      if (m.x < r.left + EDGE) px = -1; else if (m.x > r.right - EDGE) px = 1;
-      if (m.y < r.top + EDGE) pz = -1; else if (m.y > r.bottom - EDGE) pz = 1;
-    }
-    const following = this.locked || k.has(' ') || s.screen !== 'playing';
-    if (pl && following) {
-      const want = new THREE.Vector3(pl.x * U, groundHeight(pl.x * U, pl.y * U) + standHeight(pl) + 0.8, pl.y * U);
-      this.pan.copy(want);
-    } else if (px || pz) {
-      const sp = this.dist * 1.6 * dt;
-      this.pan.x = Math.max(0, Math.min(COLS, this.pan.x + px * sp)); this.pan.z = Math.max(0, Math.min(ROWS, this.pan.z + pz * sp));
-      this.pan.y = groundHeight(this.pan.x, this.pan.z) + 0.8;
-    }
-    this.focus.lerp(this.pan, Math.min(1, dt * (following ? 8 : 14)));
+    const pl = s.player;
+    // WASD walks relative to the camera, wherever the mouse has swung it round to
+    if (pl) pl.camYaw = this.yaw;
+    if (pl) this.pan.set(pl.x * U, groundHeight(pl.x * U, pl.y * U) + standHeight(pl) + EYE, pl.y * U);
+    // tight: at this range a slow follow reads as the world swimming under the head
+    this.focus.lerp(this.pan, 1 - Math.exp(-dt * 18));
     this.bumpT += dt * 1000;
     const bump = this.bumpT < this.bumpMs ? this.bumpAmt * Math.sin((this.bumpT / this.bumpMs) * Math.PI) : 0;
-    const dist = this.dist * (1 - bump * 3) * p.cameraZoom / 2;
+    // a jolt pulls the camera in by a fixed amount rather than scaling the distance: at duelling range
+    // a multiplier would yank it through the back of the head
+    const dist = Math.max(1.2, this.dist * p.cameraZoom / 2 - bump * 2.2);
     const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
     this.camera.position.set(this.focus.x + Math.sin(this.yaw) * cp * dist, this.focus.y + sp * dist, this.focus.z + Math.cos(this.yaw) * cp * dist);
+    // over the shoulder: the camera and what it looks at both slide sideways, so the view stays parallel
+    // and the head sits off to one side of its own crosshair instead of standing in front of it
+    const rx = Math.cos(this.yaw) * SHOULDER, rz = -Math.sin(this.yaw) * SHOULDER;
+    this.camera.position.x += rx; this.camera.position.z += rz;
+    this.aimAt_.copy(this.focus); this.aimAt_.x += rx; this.aimAt_.z += rz;
+    // and never below the ground it is looking over
+    const floor = groundHeight(this.camera.position.x, this.camera.position.z) + 0.35;
+    if (this.camera.position.y < floor) this.camera.position.y = floor;
+    this.unblock(dist);
     if (this.shakeAmt > 0.001) {
       this.camera.position.x += (Math.random() - 0.5) * this.shakeAmt;
       this.camera.position.y += (Math.random() - 0.5) * this.shakeAmt;
       this.shakeAmt *= Math.max(0, 1 - dt * 9);
     }
-    this.camera.lookAt(this.focus);
+    this.camera.lookAt(this.aimAt_);
     // light: the hour sets the sky, the sun and how far the dark lets you see
     const sky = skyAt(s.dayTime);
-    // the fog starts just past the head, however far out the camera sits, and closes in at night
+    // how far the eye reaches is the hour's business, not the zoom's: close behind the head the old
+    // dist-relative fog shut the world down to six tiles, and closed it further the more you zoomed in
     const fog = this.world.fog as THREE.Fog;
-    fog.color.setHex(sky.sky); fog.near = dist + 1; fog.far = dist + sky.fogD;
+    fog.color.setHex(sky.sky); fog.near = sky.fogD * 0.5; fog.far = sky.fogD + 6;
     // nothing past the fog is drawn at all
     if (Math.abs(this.camera.far - (fog.far + 4)) > 0.5) { this.camera.far = fog.far + 4; this.camera.updateProjectionMatrix(); }
     this.renderer.setClearColor(sky.sky);
+    this.dome.sync(this.camera, sky.sky, this.camera.far);
     this.hemi.color.setHex(sky.amb); this.hemi.intensity = sky.ambI * 2.2;
     this.sun.color.setHex(sky.sun); this.sun.intensity = sky.sunI * 1.6;
     const arc = sky.arc;
@@ -345,12 +430,15 @@ export class View {
     this.syncFow();
     this.tilesChanged = this.terrain.sync();
     this.structures.sync(sky.night, this.t);
-    // only what the camera can reach is posed: the crowd and the actors both
-    const reach = this.dist * 2.5 + 30;
+    // only what the camera can reach is posed. A low view looks down a long wedge rather than at a disc
+    // under it, so the circle is sized by how far the eye actually sees and pushed out ahead of the head -
+    // otherwise an army you walk toward pops into being halfway there
+    const reach = fog.far * 0.8 + 16, ahead = reach * 0.35;
+    const cullX = this.focus.x - Math.sin(this.yaw) * ahead, cullZ = this.focus.z - Math.cos(this.yaw) * ahead;
     this.camera.updateMatrixWorld();
     this.frustum.setFromProjectionMatrix(this.projView.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse));
-    this.crowd.cull(this.focus.x, this.focus.z, reach, this.frustum);
-    this.actors.cull(this.focus.x, this.focus.z, reach);
+    this.crowd.cull(cullX, cullZ, reach, this.frustum);
+    this.actors.cull(cullX, cullZ, reach);
     this.crowd.sync(dt);
     this.actors.sync(dt);
     for (const ev of s.fx) this.fx.handle(ev);
@@ -372,6 +460,7 @@ export class View {
       this.renderer.render(this.world, this.camera);
     }
     this.drawRaidArrows();
+    this.aimCrosshair();
   }
 
   /** The fog of war, uploaded for the shaders whenever the sight pass has run. */

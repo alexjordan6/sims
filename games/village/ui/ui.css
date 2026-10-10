@@ -610,7 +610,7 @@ body::after {
 #overlay .hint { background: none; padding: 0 8px; min-height: 0; font-size: 13px; color: var(--ink-dim); text-shadow: 1px 1px 0 #000; transition: opacity .6s; pointer-events: none; }
 #overlay .hint.faded { opacity: 0; }
 #overlay .vitals { display: flex; align-items: center; gap: 10px; padding: 4px 8px; }
-#overlay .vitals .t-hp, #overlay .vitals .t-hunger { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--ink-dim); }
+#overlay .vitals .t-hp, #overlay .vitals .t-hunger, #overlay .vitals .t-stam { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--ink-dim); }
 #overlay .vitals .bar { width: 110px; height: 8px; border: 1px solid #000; background: #0009; }
 #overlay .vitals .bar.belly i { background: #d9a441; }
 #overlay .vitals .bar.belly.low i, #overlay .vitals .bar.belly.empty i { background: var(--danger); }
@@ -695,3 +695,25 @@ body::after {
 .bar.xp i { background: #e3b341; }
 .roster .reg-row .rk { font-size: 11px; color: var(--ink-dim); margin-left: 4px; }
 .roster .reg-row .rk b { color: #e3b341; }
+
+/* ---- the duel: a crosshair, the dial of blows round it, and the wind to pay for them ---- */
+.reticle { position: absolute; left: 50%; top: 50%; width: 0; height: 0; pointer-events: none; z-index: 2; }
+.reticle .dot { position: absolute; left: -3px; top: -3px; width: 6px; height: 6px; background: #f4f0e6; box-shadow: 0 0 0 2px rgba(0,0,0,0.8); border-radius: 50%; }
+.reticle .arm { position: absolute; background: rgba(244, 240, 230, 0.5); box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.65); }
+.reticle .arm.up, .reticle .arm.down { left: -3px; width: 6px; height: 26px; }
+.reticle .arm.left, .reticle .arm.right { top: -3px; height: 6px; width: 26px; }
+.reticle .arm.up { bottom: 14px; } .reticle .arm.down { top: 14px; }
+.reticle .arm.left { right: 14px; } .reticle .arm.right { left: 14px; }
+/* the blow you have chosen */
+.reticle .arm.set { background: #e3b341; box-shadow: 0 0 0 2px rgba(0,0,0,0.75), 0 0 8px #e3b341; }
+.reticle.guarding .arm.set { background: #78d8f0; }
+/* the blow coming the other way: block this side, or chamber it */
+.reticle .arm.coming { background: #e05a4a; box-shadow: 0 0 0 1px rgba(0,0,0,0.6), 0 0 6px #e05a4a; }
+.reticle .arm.set.coming { background: #ff8a3a; }
+.reticle.chambered .dot { background: #e3b341; box-shadow: 0 0 10px #e3b341; }
+.reticle .draw { position: absolute; left: -22px; top: -22px; width: 44px; height: 44px; border: 2px solid rgba(244,240,230,0.25); border-radius: 50%; }
+.reticle .draw::after { content: ""; position: absolute; inset: 2px; border-radius: 50%; background: conic-gradient(#e3b341 var(--d, 0%), transparent 0); opacity: 0.55; }
+.bar.stam i { background: #e3b341; }
+.bar.stam.low i { background: #e05a4a; }
+/* the wind sits with the other two, a little shorter: it is spent and refilled far more often */
+#overlay .vitals .bar.stam { width: 80px; }

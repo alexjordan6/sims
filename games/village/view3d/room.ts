@@ -54,6 +54,7 @@ export class Room3d {
   floorAt(cx: number, cy: number, canvas: HTMLCanvasElement): { x: number; y: number } | null {
     const r = canvas.getBoundingClientRect();
     this.ray.setFromCamera(new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1), this.camera);
+    if (!this.floor) return null; // a click before the room was ever built (the title screen counts as inside)
     const hit = this.ray.intersectObject(this.floor)[0];
     return hit ? { x: hit.point.x / S + 160, y: hit.point.z / S + 120 } : null;
   }
