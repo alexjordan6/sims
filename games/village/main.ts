@@ -204,8 +204,10 @@ export class VillageScene extends SimScene {
   private hovered: Mover | null = null;
   view?: View;
   private ui?: UI;
-  /** WASD no longer steers (right-click does): the player reads keys that are never down */
+  /** the four that walk the head, read straight off the window and handed to the player */
   private wasd = { W: { isDown: false }, A: { isDown: false }, S: { isDown: false }, D: { isDown: false } };
+  /** Shift: a sprint while it is held */
+  sprinting = false;
   /** (the 2D camera follow; the 3D view does its own following) */
   following = false;
 
@@ -906,7 +908,7 @@ export class VillageScene extends SimScene {
       else this.togglePause();
     };
     kb.on('keydown-ESC', closePanel);
-    for (const k of ['Q', 'W', 'E'] as const) kb.on(`keydown-${k}`, (e: KeyboardEvent) => { if (!e.repeat) this.ability(k); });
+    kb.on('keydown-Q', (e: KeyboardEvent) => { if (!e.repeat) this.ability('Q'); }); // W and E walk now
     kb.on('keyup-R', () => this.releaseMeal());
     kb.on('keydown-B', () => this.ui?.toggleBag());
     kb.on('keydown-V', () => this.openArmory(this.armoryFor ? null : this.player));
@@ -917,9 +919,9 @@ export class VillageScene extends SimScene {
     kb.on('keydown-H', (e: KeyboardEvent) => { if (!e.repeat && !this.regimentKey('H')) this.summonGnomes(); });
 
     super.create(); // creates gfx + hud, then calls reset() -> setup()
-    kb.removeAllListeners('keydown-SPACE'); // Esc handles pause; Space brings the camera back to the head
-    kb.on('keydown-SPACE', () => this.view?.recentre());
-    kb.on('keydown-Y', () => this.view?.toggleLock());
+    kb.removeAllListeners('keydown-SPACE'); // Esc handles pause; Space is the dodge
+    kb.on('keydown-SPACE', (e: KeyboardEvent) => { if (!e.repeat) this.ability('E'); });
+    this.bindWalk();
     kb.on('keydown-U', (e: KeyboardEvent) => { if (!e.repeat && this.screen === 'playing') this.useBandage(); });
     kb.on('keydown-G', () => { if (!this.regimentKey('G')) this.tossLoad(); });
     kb.on('keydown-T', () => { if (this.regimentKey('T')) return; if (this.screen === 'playing' && !this.paused) this.eat(); });
@@ -2076,6 +2078,28 @@ export class VillageScene extends SimScene {
     if (this.forcedAim) return this.forcedAim;
     if (!this.hoverPoint) return null;
     return this.view?.aimPoint() ?? null;
+  }
+
+  /**
+   * WASD off the window rather than through Phaser's keyboard plugin: the command bar already reads the
+   * window directly, and holding a key must survive whatever has focus. Shift sprints.
+   */
+  private bindWalk(): void {
+    const set = (e: KeyboardEvent, down: boolean) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      const k = e.code;
+      if (k === 'KeyW') this.wasd.W.isDown = down;
+      else if (k === 'KeyA') this.wasd.A.isDown = down;
+      else if (k === 'KeyS') this.wasd.S.isDown = down;
+      else if (k === 'KeyD') this.wasd.D.isDown = down;
+      else if (k === 'ShiftLeft' || k === 'ShiftRight') this.sprinting = down;
+    };
+    window.addEventListener('keydown', (e) => set(e, true));
+    window.addEventListener('keyup', (e) => set(e, false));
+    // a key held while the tab goes away would stay held for ever
+    const letGo = () => { this.wasd.W.isDown = this.wasd.A.isDown = this.wasd.S.isDown = this.wasd.D.isDown = false; this.sprinting = false; };
+    window.addEventListener('blur', letGo);
+    document.addEventListener('visibilitychange', () => { if (document.hidden) letGo(); });
   }
 
   onPointerMove(ptr: Ptr): void {

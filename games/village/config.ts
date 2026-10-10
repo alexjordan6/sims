@@ -35,6 +35,9 @@ type UnionToIntersection<U> = (U extends unknown ? (k: U) => void : never) exten
 export const p = live(
   params({
     cameraZoom: [D.cameraZoom, 0.5, 4, 0.25, 'Camera closeness multiplier: 1 is the original view, 2 is twice as close. Applies immediately; Z cycles zoom presets.'],
+    lookSpeed: [D.lookSpeed, 0.2, 4, 0.1, 'How far the camera swings for a given push of the mouse.'],
+    lookInvert: [D.lookInvert, 'Push the mouse away to look down instead of up.'],
+    sprintMul: [D.sprintMul, 1, 3, 0.05, 'How much faster the head runs with Shift held.'],
     shadows: [D.shadows, 'Sun and moon shadows (costs some frame time).'],
   }, 'camera'),
   params({

@@ -1669,7 +1669,8 @@ export class Player extends Mover {
     if (mx) this.dir = mx < 0 ? -1 : 1;
     // swinging plants your feet; the swing itself steps you forward
     const slow = this.swing ? 0.25 : this.recover > 0 ? 0.6 : 1;
-    const sp = this.speed * slow * this.armorSpeed * s.world.slowAt(this.x, this.y) * s.buffMul('speed');
+    const run = s.sprinting && (mx || my) && !this.swing ? p.sprintMul : 1; // Shift, while there is somewhere to be
+    const sp = this.speed * slow * run * this.armorSpeed * s.world.slowAt(this.x, this.y) * s.buffMul('speed');
     this.vx = mx * sp; this.vy = my * sp;
     this.moveWithCollision(dt, s.world);
     // wading through long grass stirs it, the same tell a moving boar gives away

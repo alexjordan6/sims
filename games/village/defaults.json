@@ -1,5 +1,8 @@
 {
   "cameraZoom": 2,
+  "lookSpeed": 1,
+  "lookInvert": false,
+  "sprintMul": 1.55,
   "shadows": true,
   "dayLength": 120,
   "bossDay": 21,
