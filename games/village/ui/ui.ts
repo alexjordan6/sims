@@ -260,46 +260,53 @@ export class UI {
    * Open by default for new players; remembers the last state.
    */
   private mountControls(): void {
+    // Every binding in the game, read off main.ts's keyboard map and view.ts's pointer handlers. It is
+    // the reference you test by, so when a binding moves, it moves here in the same commit.
     const rows: [string, string][] = [
-      ['right click', 'walk there · attack an enemy · use a plant, pot, gate or door · open a chest'],
-      ['Q W E', 'strike · shoot · roll — toward the cursor'],
-      ['hold R', 'aim a meal (wheel picks which) — let go to lob it; everyone in the splash eats'],
-      ['G', 'throw the largest supply stack'],
-      ['T', 'eat a meal — your pack first, then the granary'],
-      ['click · C', 'walk over and use the held tool there (with a weapon: look things over)'],
-      ['X', 'check a villager'],
-      ['1 – 9', 'pick a tool'],
-      ['Tab', 'next tool'],
-      ['screen edge · ← → ↑ ↓ · middle-drag', 'pan the camera'],
-      ['Space · Y', 'camera back to you · lock it on you'],
+      ['click the view', 'take the mouse — Alt or Esc hands it back for the menus'],
+      ['W A S D', 'walk, relative to wherever you are looking'],
+      ['Shift · Space', 'run, which spends wind · dodge roll'],
+      ['hold LMB, move the mouse', 'wind a blow and choose it — up overhead · down thrust · left or right a swing — let go to strike'],
+      ['hold RMB, move the mouse', 'guard, the same four ways: only the side you hold turns the blow'],
+      ['their blow, thrown back', 'a chamber — start the same blow during their wind-up and theirs never lands'],
+      ['Q', 'kick: goes through a guard, and through whatever was being wound up behind it'],
+      ['hold middle mouse', 'look about without moving your wind-up or your guard'],
       ['wheel · Z', 'camera distance'],
-      ['H', 'call the gnomes to your heels / send them foraging'],
-      ['F1-F4', 'command your formations: Movement, Facing, Form, Fire (then F1-F7 the order); 1-8 pick a group, Alt+1-8 move banners into it'],
-      ['U', 'bind a wound with a bandage from your pack'],
-      ['Esc', 'menu'],
-      ['- · =', 'game speed'],
-      ['K', 'this panel'],
-      ['M', 'sound on / off'],
+      ['C', 'use the tool in hand at the crosshair'],
+      ['X', 'check a villager'],
+      ['1 – 8 · Tab', 'pick a tool — with the hammer out, pick what to build (0: the hammer again)'],
+      ['F', 'which food the basket throws · which order the wand gives'],
+      ['hold R', 'aim a meal (the wheel picks which) — let go to lob it'],
+      ['T · G · U', 'eat a meal · throw the largest supply stack · bind a wound'],
+      ['H', 'call the gnomes to your heels'],
+      ['F1 – F5', 'order the banners: Movement · Facing · Form · Fire · Work — then F1-F7 picks the order'],
+      ['1 – 8 with the bar open', 'pick a group · Alt+1-8 moves the picked banners into one'],
+      ['G · T · H with the wand out', 'the picked banners instead: hold · advance · follow'],
+      ['B · V', 'your bag · the armory'],
       ['J · L · I', 'journal · army and villagers · inspector'],
-      ['- · =', 'game speed'],
-      ['1-8', 'pick a tool — with the hammer out, pick what to build (0 or Esc: the hammer again)'],
-      ['?', 'how to play'],
+      ['K · ? · M', 'this panel · how to play · sound on and off'],
+      ['Esc · − =', 'menu · game speed'],
     ];
     const panel = h(`<div class="ctrl-panel">
       <button class="ctrl-tab" title="Controls (K)">${spr('town', TOWN.iconKey, 16)} CONTROLS <span class="arrow">▴</span></button>
       <div class="ctrl-card panel">
         <div class="ph">${spr('town', TOWN.iconKey, 24)}<h2>Controls</h2><button class="btn small ctrl-close">×</button></div>
         <div class="ctrl-rows">${rows.map(([k, d]) => `<kbd>${esc(k)}</kbd><span>${esc(d)}</span>`).join('')}</div>
-        <div class="ctrl-foot">Click the view to take the mouse (Alt or Esc gives it back). W A S D walks where you are looking, Shift runs, Space dodges. Hold the left button and move the mouse to position your weapon (hold middle mouse to look around) — up for an overhead, down to thrust, left or right to swing — and let go to strike. A settled wind-up hits harder than a tap. Hold the right button to guard, the same four ways. Q kicks through a guard. F1-F4 still command the banners.</div>
+        <div class="ctrl-foot">The mouse is the weapon: it is taken by the page while you fight, so the cursor vanishes. Alt or Esc gives it back for the armory, the roster and the build menus. A settled wind-up hits harder than a tap.</div>
         <div class="ctrl-foot"><button class="btn small mute">SOUND</button></div>
       </div>
     </div>`);
-    let open = false; // shut: K or the menu opens it
+    // open unless it was shut last time: it is the control reference, and a control reference nobody can
+    // find is no reference at all. (The stored state was written here but never read until now.)
+    let open = true;
+    // a fresh key: anyone who shut the old MOBA card years of commits ago should still be shown this one
+    try { open = localStorage.getItem('village.controls.v2') !== 'closed'; } catch { /* no storage: show it */ }
     const set = (v: boolean) => {
       open = v;
       panel.classList.toggle('open', open);
-      try { localStorage.setItem('village.controls', open ? 'open' : 'closed'); } catch { /* ignore */ }
+      try { localStorage.setItem('village.controls.v2', open ? 'open' : 'closed'); } catch { /* ignore */ }
     };
+    panel.classList.toggle('open', open);
     panel.querySelector('.ctrl-tab')!.addEventListener('click', () => set(!open));
     this.setControls = set; this.controlsOpen = () => open;
     panel.querySelector('.ctrl-close')!.addEventListener('click', () => set(false));

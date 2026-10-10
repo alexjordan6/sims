@@ -356,13 +356,14 @@ kbd { font-family: var(--font-head); font-size: 8px; background: #0009; padding:
 .ctrl-tab:hover { filter: brightness(1.1); }
 .ctrl-tab .arrow { color: var(--ink-dim); transition: transform .15s; }
 .ctrl-panel.open .ctrl-tab .arrow { transform: rotate(180deg); }
-.ctrl-card { display: none; width: 300px; padding-top: 4px; animation: slidein-up .18s ease-out; }
-.ctrl-panel.open .ctrl-card { display: block; }
+.ctrl-card { display: none; width: 380px; padding-top: 4px; animation: slidein-up .18s ease-out; }
+/* the full reference is taller than a short screen: cap it and let the rows scroll, so it never runs off the top */
+.ctrl-panel.open .ctrl-card { display: flex; flex-direction: column; max-height: calc(100vh - 110px); }
 @keyframes slidein-up { from { transform: translateY(8px); opacity: 0; } }
 .ctrl-card .ph .ctrl-close { margin-left: auto; }
-.ctrl-rows { display: grid; grid-template-columns: auto 1fr; gap: 5px 10px; align-items: center; font-size: 13px; }
-.ctrl-rows kbd { justify-self: start; white-space: nowrap; }
-.ctrl-foot { margin-top: 8px; font-size: 12px; color: var(--ink-dim); border-top: 1px solid #ffffff14; padding-top: 6px; }
+.ctrl-rows { display: grid; grid-template-columns: minmax(0, 134px) 1fr; gap: 5px 10px; align-items: center; font-size: 12px; overflow-y: auto; min-height: 0; }
+.ctrl-rows kbd { justify-self: start; white-space: normal; line-height: 1.25; }
+.ctrl-foot { flex: none; margin-top: 8px; font-size: 12px; color: var(--ink-dim); border-top: 1px solid #ffffff14; padding-top: 6px; }
 
 /* stockpile caps next to the numbers */
 .topbar .num small { font-size: 10px; font-weight: 400; opacity: 0.7; margin-left: 1px; }

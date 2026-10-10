@@ -142,6 +142,7 @@
   "mealSplash": 1.75,
   "mealCd": 1,
   "campCount": 8,
+  "warbandsPerPlain": 3,
   "campAggro": 6,
   "campLeash": 10,
   "campRespawnDays": 3,

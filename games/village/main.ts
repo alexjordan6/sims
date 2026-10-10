@@ -391,12 +391,21 @@ export class VillageScene extends SimScene {
     this.campRng = new Rng(this.seed ^ 0xca3b5);
     this.lootRng = new Rng(this.seed ^ 0x100750);
     for (let k = 0; k < Math.round(p.campCount * MAP_AREA); k++) this.foundCamp();
-    // a war band on every open plain: the large map's set-piece battles, a block of raiders on open ground
+    // war bands on every open plain: the large map's set-piece battles, blocks of raiders on open ground.
+    // One band sits in the middle as it always did; more than one stand apart around it, so walking onto
+    // a plain is a battle to fight rather than a camp to clear.
     if (p.campCount > 0) for (const pl of this.world.plains) {
-      const c = World.center(pl.tx, pl.ty);
-      const camp = { x: c.x, y: c.y, members: [] as Raider[], cleared: null as number | null, born: this.day, war: true };
-      this.camps.push(camp);
-      this.manCamp(camp);
+      const bands = Math.max(1, Math.round(p.warbandsPerPlain));
+      const phase = this.campRng.range(0, Math.PI * 2);
+      for (let k = 0; k < bands; k++) {
+        const a = phase + (k / bands) * Math.PI * 2, far = bands === 1 ? 0 : 0.55;
+        const tx = Math.round(pl.tx + Math.cos(a) * pl.rx * far), ty = Math.round(pl.ty + Math.sin(a) * pl.ry * far);
+        if (!this.world.inBounds(tx, ty) || this.world.isBlocked(tx, ty, true)) continue;
+        const c = World.center(tx, ty);
+        const camp = { x: c.x, y: c.y, members: [] as Raider[], cleared: null as number | null, born: this.day, war: true };
+        this.camps.push(camp);
+        this.manCamp(camp);
+      }
     }
   }
   /** Pick open, reachable ground in the wild for a new camp — outside the thorn ring, off the trails, clear of the lair, the gnome glade and other camps, and out of everyone's sight. */

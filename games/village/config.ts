@@ -56,6 +56,7 @@ export const p = live(
     mealSplash: [D.mealSplash, 0.5, 5, 0.25, 'Tiles round where a lobbed meal lands: every ally inside eats it (gnomes get its mood, you its heal and buff).'],
     mealCd: [D.mealCd, 0, 10, 0.25, 'Seconds between lobbed meals.'],
     campCount: [D.campCount, 0, 30, 1, 'Raider camps out in the wild at the start of a run (outside the thorn ring). Camps guard their ground and never come for the village.'],
+    warbandsPerPlain: [D.warbandsPerPlain, 1, 6, 1, 'War bands standing on each open plain at the start. 1 puts one in the middle, as it always was; more spread them around it, so an open field is a battle rather than a skirmish.'],
     campAggro: [D.campAggro, 2, 16, 1, 'Tiles from a camp raider at which it notices you (or a villager) and attacks.'],
     campLeash: [D.campLeash, 4, 30, 1, 'Tiles from its camp a raider will chase before it gives up, walks home and heals.'],
     campRespawnDays: [D.campRespawnDays, 1, 10, 1, 'Days a cleared camp stays empty before raiders move back in. Every few days a new camp also grows out of sight.'],
