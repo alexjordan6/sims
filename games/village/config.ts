@@ -681,6 +681,27 @@ export const DUEL = {
   draw: 0.75, snapSpread: 0.22,
 } as const;
 
+/**
+ * How well a foe duels. This is the difficulty dial for the whole bestiary: every raider, brute and
+ * troll reads your blow through these numbers. Nothing here gives them a rule you do not have --
+ * they guard with the same Mover.turns you do, pay the same wind for it, and are beaten by the same
+ * feint, kick, bash and chamber. What these decide is only how sharp they are about it.
+ */
+export const FOE = {
+  /** seconds between seeing a blow wound up and the guard going up: their whole reaction time */
+  react: 0.26,
+  /** how often they read the right side. The rest of the time they commit to the wrong one. */
+  read: 0.72,
+  /** seconds a guard stays on the side it was put, before they will look again: what a feint beats */
+  grip: 0.55,
+  /** how often a blow is aimed away from the side the target is guarding: standing on one guard is no answer */
+  probe: 0.7,
+  /** how far out they bother to read a blow at all, as a multiple of their reach */
+  watch: 1.8,
+  /** they will not spend their last wind on a guard: below this much, the shield comes down */
+  spare: 26,
+} as const;
+
 export const FOUND_TIER = 4;
 
 // ---- unit tiers ----------------------------------------------------------------------------

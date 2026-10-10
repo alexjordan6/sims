@@ -76,7 +76,9 @@ export function lookFor(m: Mover): Look | null {
   }
   if (m instanceof Raider) {
     const body = m.boss ? 'boss' : m.kind === 'ogre' ? 'ogre' : m.kind === 'brute' ? 'brute' : m.kind === 'rat' ? 'rat' : m.kind === 'boar' ? 'boar' : m.kind === 'troll' ? 'troll' : m.kind === 'skulk' ? 'skulk' : m.kind === 'snatcher' ? 'imp' : m.kind === 'shaman' ? 'shaman' : 'orc';
-    return { ...base, body, outfit: 'none', held: body === 'orc' || body === 'boss' ? 'sword' : body === 'brute' ? 'axe' : 'none', armor: { helmet: 0, chest: 0, legs: 0, shield: 0 } };
+    // the shield is real -- it turns blows and it breaks -- so it is drawn. The rest of the slots stay
+    // bare: a raider wears no mail, and the art should not promise armour the body does not have.
+    return { ...base, body, outfit: 'none', held: body === 'orc' || body === 'boss' ? 'sword' : body === 'brute' ? 'axe' : 'none', armor: { helmet: 0, chest: 0, legs: 0, shield: m.armor.shield } };
   }
   return null;
 }

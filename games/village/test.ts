@@ -12,7 +12,8 @@ const clearBulk = (s: VillageScene) => s.player.pack.slots.forEach((b,i)=>{if(b 
 import type { VillageScene } from './main';
 import { World, WILD_FOOD, doorstep, buildingCenter, hearthCost, BUILDINGS, type BuildingKind, type Chest } from './world';
 import { Rng } from '../../src/shared/rng';
-import { Villager, Arrow, Raider, BELT, BUILDS, TOOLS, DIRS, ATTACK, type AttackDir, type Swing } from './agents';
+import { Villager, Arrow, Raider, BELT, BUILDS, TOOLS, DIRS, ATTACK, OPPOSITE, type AttackDir, type Swing } from './agents';
+import { lookFor } from './look';
 import { Brute, Rat, Ogre, Wrecker, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm } from './wildlife';
 import { ORDER_MENUS, SLOT_GAP, Warband, Regiment, SHAPES, SHAPE_GAP, SHAPE_PACE, layout } from './regiment';
@@ -22,7 +23,7 @@ import { Caravan } from './caravan';
 import { Meta, REMOVED_NODES, nodesOf } from './meta';
 import { armorStats, knockMul, reloadMul } from './characters';
 const BATTLE_BIG_TEST = 20;
-import { WARREN, DUEL, SOLDIER_CAP_PER_LEVEL, PLAINS, BANDAGE } from './config';
+import { WARREN, DUEL, FOE, SOLDIER_CAP_PER_LEVEL, PLAINS, BANDAGE } from './config';
 import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_PACK, RECIPES, DISHES, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS, YARD, CALLINGS, TREE_RESERVE, MOODS, SERVE_RANGE, POT_INGREDIENTS, BODY } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
@@ -154,8 +155,9 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       const stam = foe.stam, full = foe.hp;
       foe.hit(20, true, pl, 'left');
       assert(foe.hp === full && foe.blocked && foe.stam < stam, `a guard on the blow's own side turns it, and spends the wind (${(stam - foe.stam).toFixed(0)})`);
-      foe.hit(20, true, pl, 'up');
-      assert(foe.hp < full && !foe.blocked, 'a guard on the wrong side turns nothing');
+      // a shield covers its own side and the two across it, so the wrong side is the one straight opposite
+      foe.hit(20, true, pl, OPPOSITE[foe.guard?.dir ?? 'left']);
+      assert(foe.hp < full && !foe.blocked, 'a guard on the side straight opposite turns nothing');
 
       // from behind, a guard is no guard at all
       const back = s.spawn(new Raider(foe.x + 30, foe.y)); back.hp = back.maxHp = 50; // the far side: behind it
@@ -345,6 +347,119 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(pl.swing!.t === held, 'and the swing does not advance while it is held: the blade stays in the body');
       pl.freeze = 0; pl.update(1 / 60, s);
       assert(pl.swing!.t > held, 'then carries on from where it was, rather than having slid through');
+    }
+
+    // ---- enemies who fight it ----------------------------------------------------------------------
+    // They had the whole system and no idea when to use it: a raider's combat brain was try-to-swing,
+    // otherwise walk at them. It reads your wind-up now -- late, sometimes wrong, and committed to
+    // whatever it read. Everything below is also a check that it stays beatable, by the tools you have.
+    {
+      const s = fresh(); clearing(s); s.agents = [s.player];
+      const pl = s.player; Object.assign(pl, World.center(125, 100));
+      pl.swing = null; pl.wind = null; pl.recover = 0; pl.dropGuard(); pl.weapons.melee = 2;
+
+      const raider = () => {
+        const r = s.spawn(new Raider(pl.x + 11, pl.y));
+        r.hp = r.maxHp = 400; r.stam = DUEL.stamMax; r.attack = null; r.attackCd = 0; r.freeze = 0;
+        r.dropGuard(); r.huntPlayer = true;
+        s.grid.rebuild(s.agents);
+        return r;
+      };
+      const clear = () => { for (const a of s.agents) if (a !== pl) (a as Raider).dead = true; s.removeDead(); s.agents = [pl]; s.grid.rebuild(s.agents); };
+
+      // they carry shields, and the art is allowed to show them
+      const r0 = raider();
+      assert(r0.armor.shield > 0 && !!r0.shield, `a raider holds the shield loot.ts always said it fought with (${r0.shield?.name})`);
+      assert(lookFor(r0)!.armor.shield === r0.armor.shield, 'and the look carries it, so you can see which ones are the hard targets');
+      clear();
+
+      // the guard goes up against a wind-up -- but not instantly, and not for nothing
+      const foe = raider();
+      pl.stam = DUEL.stamMax; pl.beginWind(DIRS); pl.aimWind(-48, 0);
+      assert(pl.wind!.dir === 'left', 'a blow is held back on the left');
+      foe.readBlow(FOE.react * 0.5, pl, 13);
+      assert(!foe.guard, `no guard before its own reaction is up (${FOE.react}s)`);
+      foe.readBlow(FOE.react, pl, 13);
+      assert(!!foe.guard, 'and up once it is');
+      const side = foe.guard!.dir;
+
+      // committed: it keeps the guard where it put it, which is the hole a feint goes through
+      pl.aimWind(96, 0); // flick across, late
+      assert(pl.wind!.dir === 'right', 'the held blow is flicked across at the last moment');
+      foe.readBlow(1 / 60, pl, 13);
+      assert(foe.guard!.dir === side, 'the guard stays where it was put: a late feint is not read');
+
+      // and it comes down when there is nothing to guard against
+      pl.wind = null;
+      foe.readBlow(1 / 60, pl, 13);
+      assert(!foe.guard, 'with no blow held back the shield comes down');
+
+      // nor will it spend its last wind holding one up
+      pl.beginWind(['left']); foe.stam = FOE.spare - 1;
+      foe.readBlow(FOE.react + 0.1, pl, 13);
+      assert(!foe.guard, 'a raider down to its last wind keeps it rather than holding the shield up');
+      foe.stam = DUEL.stamMax;
+
+      // over many bodies it mostly reads right, and sometimes does not: that is the whole fight
+      let correct = 0, tries = 0;
+      for (let i = 0; i < 60; i++) {
+        const r = s.spawn(new Raider(pl.x + 11, pl.y));
+        r.stam = DUEL.stamMax; r.dropGuard();
+        r.readBlow(FOE.react + 0.01, pl, 13);
+        if (r.guard) { tries++; if (r.guard.dir === pl.wind!.dir) correct++; }
+        r.dead = true;
+      }
+      s.removeDead(); s.agents = [pl, foe]; s.grid.rebuild(s.agents);
+      assert(tries > 50 && correct > tries * 0.4 && correct < tries, `they read the side right most of the time and not always (${correct} of ${tries})`);
+
+      // their own blow is aimed away from whatever you are guarding
+      pl.wind = null; pl.raiseGuard('left'); pl.faceToward(foe);
+      let away = 0;
+      for (let i = 0; i < 40; i++) away += foe.probeDir(pl) === 'left' ? 0 : 1;
+      assert(away > 30, `a blow is aimed away from the side you are holding (${away} of 40): standing on one guard is no answer`);
+      pl.dropGuard();
+
+      // beatable, by every tool you have. First: the chamber still catches a wind-up.
+      foe.dropGuard(); foe.attack = null; foe.attackCd = 0; foe.freeze = 0;
+      assert(foe.startAttack(s, pl, 10, 13, 0.3, 0.5), 'the raider throws one');
+      assert(pl.chamber(s, foe.attack!.dir) === 1 && !foe.attack, 'a chamber still beats a wind-up');
+
+      // the kick still goes through a guard it is actually holding
+      foe.attack = null; foe.attackCd = 0; foe.freeze = 0; foe.stam = DUEL.stamMax;
+      foe.faceToward(pl); foe.raiseGuard('left');
+      assert(!!foe.guard, 'the raider has its shield up');
+      pl.stam = DUEL.stamMax; pl.swing = null; pl.recover = 0; pl.freeze = 0;
+      pl.faceToward(foe);
+      s.hoverPoint = { x: foe.x, y: foe.y }; // the kick goes where the crosshair points
+      s.paused = false; s.kick(); s.paused = true;
+      assert(foe.freeze > 0.3, `a kick goes through a held guard and leaves them open (${foe.freeze.toFixed(2)}s)`);
+
+      // and so does the bash, which is the shield's version of the same answer
+      foe.freeze = 0; foe.attack = null; foe.attackCd = 0; foe.stam = DUEL.stamMax;
+      foe.faceToward(pl); foe.raiseGuard('left');
+      pl.armor.shield = 2; pl.refitShield(); pl.stam = DUEL.stamMax; pl.swing = null; pl.recover = 0;
+      pl.faceToward(foe); pl.dropGuard(); pl.raiseGuard('right');
+      assert(pl.bash(s) === 1 && foe.freeze > 0.3, 'and a shield bash does the same, for a shield');
+
+      // it is not only the player's blows they read. A telegraphed blow is what every other body in
+      // the game throws, so a guard that only answered a held wind-up was a guard that only answered
+      // the head -- two lines of raiders walked into each other with their shields on their backs.
+      pl.dropGuard(); pl.wind = null;
+      const gnome = s.spawn(new Villager(foe.x + 10, foe.y, home0(s), 'soldier', 20, 'Shieldy', s.mods));
+      gnome.applyRole(s.mods); gnome.weapon = 'sword'; gnome.armor = { ...gnome.armor, shield: 2 };
+      gnome.hp = gnome.maxHp = 400; gnome.stam = DUEL.stamMax; gnome.update = () => {};
+      s.grid.rebuild(s.agents);
+      foe.dropGuard(); foe.attack = null; foe.attackCd = 0; foe.freeze = 0; foe.stam = DUEL.stamMax;
+      assert(foe.startAttack(s, gnome, 8, 13, 0.4, 0.5), 'a raider telegraphs a blow at a gnome');
+      gnome.readBlow(FOE.react + 0.01, foe, 13);
+      assert(!!gnome.guard, 'and the gnome reads the telegraph and gets its shield up');
+      // and the guard it got up turns the blow when it read the side right
+      gnome.dropGuard(); gnome.faceToward(foe); gnome.raiseGuard(foe.attack!.dir);
+      const whole = gnome.hp;
+      for (let i = 0; i < 120 && foe.attack; i++) foe.attackTick(1 / 60, s);
+      assert(gnome.hp === whole && gnome.blocked, 'a gnome who read it right takes nothing: your line guards by the same rules theirs does');
+      gnome.dead = true; s.removeDead();
+      clear();
     }
     {
       const rig = new THREE.Group(); const k = PERSON / buildFigure(rig, FIGURES.head);
@@ -2035,6 +2150,10 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       w.beginTick(2);
       const many = [118, 119, 120, 121, 122].map((x) => w.route({ tx: x, ty: 96 }, goal));
       assert(many.every((p) => p !== null && p.length > 0) && w.pathBudget === 0, `five walkers to one goal: two A* searches, then the rest walk a shared field (budget left ${w.pathBudget})`);
+      // a tick of its own with nothing in it, rather than leaning on the five above having spent it:
+      // route() refills a spent budget by itself after 20 ms of wall clock (so a caller that never ticks
+      // the scene still gets paths), which made this depend on how fast the checks above happened to run.
+      w.beginTick(0);
       assert(w.route({ tx: 118, ty: 104 }, { tx: 125, ty: 92 }) === null, 'a lone walker over the budget is told to ask again next tick');
       w.beginTick();
       assert((w.route({ tx: 118, ty: 104 }, { tx: 125, ty: 92 }) ?? []).length > 0, 'and gets its path once the budget refills');
@@ -2431,7 +2550,8 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       const marching = r.shape === 'column' && r.afterColumn === 'line';
       for (let i = 0; i < 600 && r.shape === 'column'; i++) r.tick(1 / 60, s.world, head, none);
       assert(marching && r.shape === 'line' && Math.hypot(r.x - (400 + 6 * TILE), r.y - 400) < TILE, `a column marches in its narrow order and forms its line again on arrival (${r.shape})`);
-      // the shield wall: a front-rank shield turns more blows from the front, none more from behind
+      // the shield wall: overlapped shields turn blows on their own. Out of the wall they do not --
+      // a shield outside one is turned by hand, on the side its holder reads (Mover.turns).
       const v = s.spawn(new Villager(s.player.x + 40, s.player.y, home0(s), 'soldier', 20, 'Holly', s.mods)); v.applyRole(s.mods);
       v.armor = { ...v.armor, shield: 2 }; v.update = () => {};
       const wall = new Regiment(98, '#fff', v.x, v.y - 5); wall.add(v); wall.fx = 0; wall.fy = 1; v.slot = { x: v.x, y: v.y };
@@ -2441,8 +2561,14 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
         return blocked / 3000;
       };
       const lineFront = rate('line', 10), wallFront = rate('shieldwall', 10), wallBack = rate('shieldwall', -10);
-      assert(Math.abs(wallFront - 0.375) < 0.04 && Math.abs(lineFront - 0.25) < 0.04 && Math.abs(wallBack - 0.25) < 0.04,
-        `an iron-rimmed shield blocks ${(lineFront * 100).toFixed(0)}% in a line, ${(wallFront * 100).toFixed(0)}% in the front of a shield wall, ${(wallBack * 100).toFixed(0)}% from behind`);
+      assert(Math.abs(wallFront - 0.375) < 0.04 && lineFront === 0 && wallBack === 0,
+        `an iron-rimmed shield turns ${(wallFront * 100).toFixed(0)}% in the front of a shield wall and nothing on its own (${(lineFront * 100).toFixed(0)}% in a line, ${(wallBack * 100).toFixed(0)}% from the rear rank): out of a wall it is held up by hand`);
+      // and that is not a nerf to carrying one: held up on the blow's own side it turns it outright
+      v.stam = DUEL.stamMax; v.hp = v.maxHp = 1e9; wall.shape = 'line';
+      v.facing = { x: 0, y: 1 }; v.raiseGuard('left');
+      v.hit(5, true, { x: v.x, y: v.y + 10 } as unknown as Raider, 'left');
+      assert(v.blocked, 'a shield held up on the blow\'s own side turns it every time, wall or no wall');
+      v.dropGuard();
       wall.members = []; v.block = null; v.dead = true; s.removeDead();
     }
 

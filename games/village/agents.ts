@@ -1,6 +1,6 @@
 import type { Agent } from '@shared/index';
 import { World, WILD_FOOD, doorstep, buildingCenter, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
-import { DUEL, ARMOR, type ArmorTier, p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, GNOME_CALLING, MOODS, type Mood, type DishKind, ORDER, YARD, GNOME_PACK, ITEM, MASS, BODY, FOODS, FOOD_KINDS, DIET_CAP, zeroFood, BOAR, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat, UNIT, PERK, unitName, type UnitLine, type UnitBranch } from './config';
+import { DUEL, FOE, ARMOR, type ArmorTier, p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, GNOME_CALLING, MOODS, type Mood, type DishKind, ORDER, YARD, GNOME_PACK, ITEM, MASS, BODY, FOODS, FOOD_KINDS, DIET_CAP, zeroFood, BOAR, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat, UNIT, PERK, unitName, type UnitLine, type UnitBranch } from './config';
 import type { Mods } from './meta';
 import { SHIELD_WALL, ADVANCE_SIGHT } from './regiment';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle, knockMul, reloadMul } from './characters';
@@ -421,6 +421,70 @@ export abstract class Mover implements Agent {
   /** Whether the wind is coming back this tick. A bow at full draw holds it; nothing else does. */
   protected get windBack(): boolean { return true; }
 
+  /** seconds this body has been watching the blow now being wound at it, and how long its grip has held */
+  private sawWind = 0;
+  private gripT = 0;
+
+  /**
+   * Read the blow coming and decide what to do with the shield. Called by a body that fights for
+   * itself, every tick it has a foe in front of it.
+   *
+   * It is deliberately not clairvoyant. The guard goes up a reaction late, on the side it *thinks*
+   * the blow is on -- and then it stays there for FOE.grip, whatever the blow does afterwards. That
+   * is the hole a feint goes through: flick late and the guard is already committed to the wrong
+   * side. Read it right and it is a wall; which is why the kick and the bash exist.
+   */
+  readBlow(dt: number, foe: Mover, reach: number): void {
+    if (this.attack || this.freeze > 0) { this.dropGuard(); this.sawWind = 0; return; }
+    // A blow is coming when they are holding one back -- which is the player -- or when they have one
+    // telegraphed at this body and not yet landed, which is everyone else. Reading only the first meant
+    // "everyone guards well" quietly meant "against the player", and two lines of raiders walked into
+    // each other with their shields on their backs.
+    const a = foe.attack;
+    const coming = foe.wind?.dir ?? (a && !a.struck && a.target === this && a.t <= a.windup ? a.dir : null);
+    const close = this.dist(foe) <= reach * FOE.watch;
+    if (!coming || !close || this.stam < FOE.spare) {
+      this.dropGuard();
+      this.sawWind = 0;
+      return;
+    }
+    this.sawWind += dt;
+    if (this.sawWind < FOE.react) return; // they are not quicker than their own reaction
+    this.gripT -= dt;
+    if (this.guard && this.gripT > 0) { this.faceToward(foe); return; } // committed: this is what a feint beats
+    const right = this.rng01() < FOE.read;
+    const side = right ? coming : DIRS[(this.id + Math.floor(this.sawWind * 13)) & 3];
+    this.dropGuard();
+    this.faceToward(foe);
+    this.raiseGuard(side);
+    this.gripT = FOE.grip;
+  }
+
+  /**
+   * Which blow to throw at `foe`: the usual rotation, but turned away from whatever they are
+   * guarding, so holding one side is not a defence by itself.
+   */
+  probeDir(foe: Mover): AttackDir {
+    const held = foe.guard?.dir;
+    const want = this.nextAttackDir();
+    if (!held || want !== held || this.rng01() > FOE.probe) return want;
+    return OPPOSITE[held]; // the one side a shield there cannot cover
+  }
+
+  /**
+   * A per-body roll that does not touch the scene's seeded rng: duelling judgement is not world
+   * state, and a raider deciding to misread a blow should not shift what the next raid is made of.
+   * It is a hash of (this body, its nth decision), so it is spread but the same every run.
+   */
+  private rngN = 0;
+  protected rng01(): number {
+    let h = (Math.imul(this.id + 1, 0x9e3779b1) ^ Math.imul(++this.rngN, 0x85ebca6b)) >>> 0;
+    h ^= h >>> 16; h = Math.imul(h, 0x7feb352d) >>> 0;
+    h ^= h >>> 15; h = Math.imul(h, 0x846ca68b) >>> 0;
+    h = (h ^ (h >>> 16)) >>> 0; // the xor resigns it; without this every roll came out negative
+    return h / 4294967296;
+  }
+
   /** Take a blow. Chest armor shaves it; a shield can turn a melee hit away entirely (`melee` = not an arrow/bolt). */
   /** Take a blow. `by` is whoever struck (a wild boar turns on them); arrows pass their archer, towers nobody. */
   hit(dmg: number, melee = true, by?: Mover, dir?: AttackDir | null): void {
@@ -431,7 +495,7 @@ export abstract class Mover implements Agent {
     this.blocked = false;
     // a shield wall: its bonus grows with the block's drill, and a Shieldbearer counts double in it
     const own = st.block > 0 ? st.block + this.blockBonus : 0;
-    const block = own > 0 && by && this.inShieldWall(by) ? Math.min(SHIELD_WALL.cap, own * (1 + (SHIELD_WALL.mul - 1 + PERK.wall * this.block!.drill) * this.wallWeight)) : own;
+    const block = own > 0 && by && this.inShieldWall(by) ? Math.min(SHIELD_WALL.cap, own * (1 + (SHIELD_WALL.mul - 1 + PERK.wall * this.block!.drill) * this.wallWeight)) : 0;
     if (melee && block > 0 && Math.random() < block) { this.blocked = true; this.hurtT = 0.2; return; }
     const before = this.hp;
     this.hp -= Math.max(1, Math.round(dmg * st.dmgMul));
@@ -468,7 +532,7 @@ export abstract class Mover implements Agent {
     if (this.attack || this.attackCd > 0 || this.dist(target) > reach + 4 || this.elevated !== target.elevated || !s.world.lineClear(this, target, this.elevated)) return false;
     this.dir = target.x < this.x ? -1 : 1;
     this.faceToward(target);
-    const dir = this.nextAttackDir();
+    const dir = this.probeDir(target);
     this.attack = { target, t: 0, windup, recover, dmg, reach, struck: false, dir };
     this.vx = this.vy = 0;
     s.fx.push({ kind: 'telegraph', who: this, ms: windup * 1000, dir });
@@ -1345,6 +1409,8 @@ export class Villager extends Mover {
       }
       if (this.post) { this.setGoal(s, this.post.tx, this.post.ty); this.followPath(dt); this.task = 'holding wall post'; return; }
       if (this.weapon === 'pike') { this.pikeTick(dt, s, dmg); return; }
+      this.readBlow(dt, this.target, 13);
+      if (this.guard) { this.vx = this.vy = 0; this.task = 'shield up'; return; }
       if (this.startAttack(s, this.target, Math.round(dmg), 13, 0.15, 0.45)) return;
       this.setGoal(s, this.target.tile.tx, this.target.tile.ty);
       this.followPath(dt);
@@ -1402,7 +1468,11 @@ export class Villager extends Mover {
       if (d <= reach && s.world.lineClear(this, foe, this.elevated)) { this.vx = this.vy = 0; if (!this.regiment!.holdFire && this.attackCd <= 0) { s.shoot(this, foe.x - this.x, foe.y - this.y, Math.round(dmg)); this.attackCd = 0.9 * reloadMul(this.weapons) * this.reloadPerk; } return true; }
     } else if (pike) {
       if (d <= this.pikeReach + foe.radius) { this.pikeTick(dt, s, dmg); return true; }
-    } else if (this.startAttack(s, foe, Math.round(dmg), 13, 0.15, 0.45)) return true;
+    } else {
+      this.readBlow(dt, foe, 13);
+      if (this.guard) { this.vx = this.vy = 0; this.task = 'shield up in the charge'; return true; }
+      if (this.startAttack(s, foe, Math.round(dmg), 13, 0.15, 0.45)) return true;
+    }
     const pace = this.speed; this.speed *= this.chargeMul; // a Berserker goes in faster
     this.stepToward(dt, s, foe.x, foe.y);
     this.speed = pace;
@@ -1439,6 +1509,8 @@ export class Villager extends Mover {
       } else if (pike) {
         if (d <= this.pikeReach + foe.radius + lunge) { this.pikeTick(dt, s, dmg); return; }
       } else {
+        this.readBlow(dt, foe, reach);
+        if (this.guard) { this.vx = this.vy = 0; this.task = 'shield up in the ranks'; return; }
         if (this.startAttack(s, foe, Math.round(dmg), 13, 0.15, 0.45)) return;
         if (d <= reach + foe.radius + lunge) { this.stepToward(dt, s, foe.x, foe.y); return; }
       }
@@ -1549,6 +1621,8 @@ export interface RaiderOpts {
   boss?: boolean;
   /** wave scaling on HP */
   hpMul?: number;
+  /** what is in its left hand: 0 nothing, 1 a buckler, up from there. Raiders drop shields; now they hold them. */
+  shield?: number;
   speedMul?: number;
   /** Bounty boons: snatchers need longer to get hold of a child, or can't at all; rats gnaw the granary slower */
   snatchDelayMul?: number;
@@ -1673,6 +1747,10 @@ export class Raider extends Mover {
     this.color = 0xd94a4a;
     this.name = this.boss ? 'The Warlord' : 'Hollow raider';
     this.task = this.boss ? 'leading the raid' : 'raiding';
+    // loot.ts has always said a raider fights with a blade and a shield and may drop either. It has
+    // simply never held one. The warlord's is better, as everything of his is.
+    this.armor.shield = opts.shield ?? (this.boss ? 3 : 1);
+    this.weapons.melee = this.boss ? 2 : 0;
   }
 
   /** the enemy warband this raider marches in, if any */
@@ -1701,6 +1779,8 @@ export class Raider extends Mover {
     const foe = this.target;
     if (foe && !foe.dead && (!slot || Math.hypot(this.x - slot.x, this.y - slot.y) < 2 * TILE)) {
       this.task = 'fighting in the warband';
+      this.readBlow(dt, foe, reach);
+      if (this.guard) { this.vx = this.vy = 0; this.task = 'shield up in the ranks'; return true; }
       if (this.rankStrike(dt, s, foe)) return true;
       if (this.dist(foe) <= reach + foe.radius + lunge) { this.stepToward(dt, s, foe.x, foe.y); return true; }
     } else this.target = null;
@@ -1728,6 +1808,9 @@ export class Raider extends Mover {
       return;
     }
     this.bored = 0;
+    // read what they are winding before deciding to throw anything: the shield comes first
+    this.readBlow(dt, this.target, this.boss ? 16 : 13);
+    if (this.guard) { this.vx = this.vy = 0; this.task = 'shield up'; return; }
     if (this.startAttack(s, this.target, this.dmg, this.boss ? 16 : 13, this.boss ? 0.35 : 0.25, this.boss ? 0.7 : 0.55)) return;
     this.setGoal(s, this.target.tile.tx, this.target.tile.ty);
     if (!this.path.length && (this.dist(this.target) > 14 || !s.world.lineClear(this, this.target) || this.target.elevated) && this.breach(dt, s)) return;
