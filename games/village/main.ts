@@ -1,4 +1,4 @@
-import { STACK, SKULK, STASH_SLOTS, FOUND_TIER, BANDAGE, UNIT, type BulkKind, type UnitBranch } from './config';
+import { DUEL, STACK, SKULK, STASH_SLOTS, FOUND_TIER, BANDAGE, UNIT, type BulkKind, type UnitBranch } from './config';
 import { enemyDrop, rollLoot, danger } from './loot';
 import { Caravan } from './caravan';
 import { isImplement, IMPLEMENTS, START_TOOLS, LOST_TOOLS, type Implement, TOOL_NAME, Pack, type Gear, type EquipmentSlot, isBulk, slotName } from './pack';
@@ -6,7 +6,7 @@ import Phaser from 'phaser';
 import { SimScene, launch, button, getGui, Rng } from '@shared/index';
 import { launch as throwItem, type Item } from './items';
 import { World, WILD_FOOD, doorstep, buildingCenter, buildingMaxHp, hasHearth, hearthCost, BUILDINGS, MAX_LEVEL, BUILDABLE, type DefenseKind, type Building, type BuildingKind, type Tile, type TilePos, type Hive, type Chest, type Ruin, isGearChest } from './world';
-import { Villager, Raider, Player, Mover, Arrow, TOOLS, BELT, BUILDS, SWING, type Role, type Tool, type Order } from './agents';
+import { Villager, Raider, Player, Mover, Arrow, TOOLS, BELT, BUILDS, SWING, MOVES, type AttackDir, type Role, type Tool, type Order } from './agents';
 import { DEFENSE_COST, WALL_HEIGHT, WARREN, SOLDIER_CAP_PER_LEVEL, MAP_AREA, PLAINS } from './config';
 import { Interior } from './interior';
 import { Rat, Snatcher, Brute, Shaman, Ogre, Wrecker, Bolt, Troll, Skulk } from './enemies';
@@ -2100,6 +2100,54 @@ export class VillageScene extends SimScene {
     const letGo = () => { this.wasd.W.isDown = this.wasd.A.isDown = this.wasd.S.isDown = this.wasd.D.isDown = false; this.sprinting = false; };
     window.addEventListener('blur', letGo);
     document.addEventListener('visibilitychange', () => { if (document.hidden) letGo(); });
+  }
+
+  // ---- the weapon on the mouse: hold to wind a blow or draw a string, let go to loose it ----------
+
+  /** What the weapon in hand can do: a forged blade thrusts, a club has no point to it. */
+  private moveSet(): readonly AttackDir[] { return this.player.weapons.melee > 0 ? MOVES.blade : MOVES.club; }
+
+  /** Can the head fight at all this moment? */
+  private canFight(): boolean {
+    const pl = this.player;
+    return this.screen === 'playing' && !this.paused && !this.interior.active && !pl.dead && !pl.hidden && pl.busy <= 0;
+  }
+
+  /** The left button went down. True when the weapon took it, so the click is not also a tool use. */
+  beginAttack(): boolean {
+    if (!this.canFight()) return false;
+    const pl = this.player;
+    if (pl.tool === 'bow') {
+      if (pl.weapons.bow < 0 || this.arrows <= 0) return false;
+      pl.draw = 0; // the string comes back; how far decides the spread
+      return true;
+    }
+    if (pl.tool !== 'sword') return false;
+    if (pl.weapons.melee < 0) { this.event('info', 'No blade to swing — forge one at the barracks.', true); return true; }
+    if (pl.winded) { this.event('info', 'Out of wind.', true); return true; }
+    return pl.beginWind(this.moveSet());
+  }
+
+  /** The left button came up: the blow goes where the crosshair is pointing, or the arrow does. */
+  releaseAttack(): boolean {
+    const pl = this.player, aim = this.aimAt();
+    if (pl.draw >= 0) {
+      const drawn = Math.min(1, pl.draw / DUEL.draw);
+      pl.draw = -1;
+      if (!this.canFight()) return true;
+      // a snap shot sprays; a full draw goes where it is pointed
+      const spread = DUEL.snapSpread * (1 - drawn);
+      const a = Math.atan2(aim.y - pl.y, aim.x - pl.x) + this.rng.range(-spread, spread);
+      this.faceTo(aim.x, aim.y);
+      this.shoot(pl, Math.cos(a) * 100, Math.sin(a) * 100, Math.round(p.playerDmg * weaponMul(pl.weapons, 'bow') * this.mods.playerDmgMul * this.buffMul('dmg')));
+      return true;
+    }
+    if (!pl.wind) return false;
+    if (!this.canFight()) { pl.wind = null; return true; }
+    this.faceTo(aim.x, aim.y);
+    const dir = pl.releaseWind(aim);
+    if (dir) this.fx.push({ kind: 'swing', who: pl, dx: pl.facing.x, dy: pl.facing.y, stage: dir === 'up' ? 2 : dir === 'down' ? 1 : 0 });
+    return true;
   }
 
   onPointerMove(ptr: Ptr): void {

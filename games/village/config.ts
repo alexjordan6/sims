@@ -647,6 +647,24 @@ export const ARMOR_SLOTS: readonly ArmorSlot[] = ['helmet', 'chest', 'legs', 'sh
 /** barracks level needed to forge each tier (armor and weapons alike) */
 export const ARMOR_BARRACKS_LEVEL = [0, 1, 2, 3] as const;
 /** the loot-only tier: the tower shield, the warhammer and the crossbow are found, never forged */
+/**
+ * Duelling: what a blow, a sprint and a block cost, and how fast the wind comes back. Stamina is the
+ * governor on all of it — swing wildly and you have nothing left to turn the answer with.
+ */
+export const DUEL = {
+  stamMax: 100,
+  /** per second, once nothing has been spent for `regenDelay` */
+  regen: 24, regenDelay: 0.5,
+  /** per second, while Shift is held and there is somewhere to be */
+  sprint: 13,
+  /** per blow turned on a held guard, and per kick */
+  block: 17, kick: 22,
+  /** how far the mouse must travel to choose a blow, in device pixels */
+  flick: 16,
+  /** a bow at full draw, in seconds, and the spread of a snap shot in radians */
+  draw: 0.75, snapSpread: 0.22,
+} as const;
+
 export const FOUND_TIER = 4;
 
 // ---- unit tiers ----------------------------------------------------------------------------

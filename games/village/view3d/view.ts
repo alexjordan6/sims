@@ -173,6 +173,8 @@ export class View {
 
   /** Turn the camera by a mouse movement, in raw device pixels. */
   private turn(dx: number, dy: number): void {
+    // a blow held back reads the same mouse: whichever way it travels picks which blow it is
+    this.scene.player?.aimWind(dx, dy);
     const k = p.lookSpeed * 0.0022;
     // the camera sits at +sin(yaw), +cos(yaw) and looks inward, so a rightward push wants yaw to fall
     this.yaw -= dx * k;
@@ -245,9 +247,14 @@ export class View {
       if (!this.looking) { this.grabPointer(); if (!this.noLock) return; }
       if (this.noLock) { this.dragLook = true; try { canvas.setPointerCapture(e.pointerId); } catch { /* already gone */ } }
       if (e.button === 2) return; // the right button is the block, once there is a block to hold
+      if (e.button === 0 && s.beginAttack()) return; // a blade winds up, a bow draws
       s.onPointerDown(this.crosshairPtr());
     });
-    canvas.addEventListener('pointerup', (e) => { if (this.looking && e.button !== 2) s.wandUp(this.crosshairPtr()); this.dragLook = false; });
+    canvas.addEventListener('pointerup', (e) => {
+      if (e.button === 0 && s.releaseAttack()) { this.dragLook = false; return; } // the blow goes
+      if (this.looking && e.button !== 2) s.wandUp(this.crosshairPtr());
+      this.dragLook = false;
+    });
     canvas.addEventListener('pointerleave', () => { if (!this.looking) { this.mouse = null; s.onPointerOut(); } });
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
