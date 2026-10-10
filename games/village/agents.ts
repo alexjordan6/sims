@@ -1725,6 +1725,7 @@ export class Player extends Mover {
     this.sinceSwing += dt;
     this.sinceRoll += dt;
     this.recover = Math.max(0, this.recover - dt);
+    this.tickWeapon(dt);
     if (this.wind) this.wind.t += dt;
     this.guardT = Math.max(0, this.guardT - dt);
     if (this.draw >= 0) this.draw += dt;
@@ -1737,6 +1738,7 @@ export class Player extends Mover {
     const { mx, my } = this.moveAxis();
     if (mx || my) this.facing = Math.abs(mx) >= Math.abs(my) ? { x: Math.sign(mx), y: 0 } : { x: 0, y: Math.sign(my) };
     if (mx) this.dir = mx < 0 ? -1 : 1;
+    if (this.wind || this.guard) this.facing = { x: -Math.sin(this.camYaw), y: -Math.cos(this.camYaw) };
     // swinging plants your feet; the swing itself steps you forward
     const slow = this.swing ? 0.25 : this.wind ? 0.55 : this.guard ? 0.5 : this.recover > 0 ? 0.6 : 1;
     // Shift, while there is somewhere to be, a blow is not being held, and there is wind to spend
@@ -1746,7 +1748,10 @@ export class Player extends Mover {
       this.stam = Math.max(0, this.stam - DUEL.sprint * dt); this.stamIdle = 0;
     }
     const sp = this.speed * slow * run * this.armorSpeed * s.world.slowAt(this.x, this.y) * s.buffMul('speed');
-    this.vx = mx * sp; this.vy = my * sp;
+    const blend = 1 - Math.exp(-(!(mx || my) ? 18 : this.guard ? 9 : 11) * dt);
+    this.vx += (mx * sp - this.vx) * blend;
+    this.vy += (my * sp - this.vy) * blend;
+    if (!(mx || my) && Math.hypot(this.vx, this.vy) < 0.5) this.vx = this.vy = 0;
     this.moveWithCollision(dt, s.world);
     // wading through long grass stirs it, the same tell a moving boar gives away
     this.rustleT -= dt;
@@ -1854,6 +1859,20 @@ export class Player extends Mover {
 
   /** a blow being wound up: how long it has been held, which way it is aimed, and the mouse so far */
   wind: { t: number; dir: AttackDir; moves: readonly AttackDir[]; dx: number; dy: number } | null = null;
+  /** Damped hand offsets, shared by the wind-up and guard poses. */
+  weaponMotion = { x: 0, y: 0, vx: 0, vy: 0 };
+  private tickWeapon(dt: number): void {
+    const pose = this.wind ?? this.guard, w = this.weaponMotion;
+    const tx = pose ? pose.dx / (DUEL.flick * 3) : 0;
+    const ty = pose ? pose.dy / (DUEL.flick * 3) : 0;
+    const steps = Math.max(1, Math.ceil(Math.min(dt, 0.1) / 0.008));
+    const h = Math.min(dt, 0.1) / steps;
+    for (let i = 0; i < steps; i++) {
+      w.vx += ((tx - w.x) * 130 - w.vx * 21) * h;
+      w.vy += ((ty - w.y) * 130 - w.vy * 21) * h;
+      w.x += w.vx * h; w.y += w.vy * h;
+    }
+  }
   /** seconds a bow has been drawn, or -1 when it is not */
   draw = -1;
   /** wind, in the old sense: a blow, a sprint and a guard that turns one all spend it */
@@ -1923,7 +1942,9 @@ export class Player extends Mover {
     if (!this.spend(ATTACK[w.dir].stam)) return null;
     const dx = aim.x - this.x, dy = aim.y - this.y, len = Math.hypot(dx, dy) || 1;
     this.beginSwing(0, w.dir, dx / len, dy / len);
-    this.chambered = 0;
+    const weight = 0.8 + 0.35 * Math.min(1, w.t / 0.45);
+    this.swing!.dmgMul *= weight;
+    this.swing!.push *= weight;
     return w.dir;
   }
 
@@ -1933,11 +1954,12 @@ export class Player extends Mover {
     if (!sw) return;
     const wasActive = sw.t >= sw.from && sw.t <= sw.to;
     sw.t += dt;
-    const active = sw.t >= sw.from && sw.t <= sw.to;
+    const active = sw.t >= sw.from && sw.t - dt <= sw.to;
     if (active && !wasActive) this.mow(s, sw.dx, sw.dy, sw.spin, sw.reach, sw.cos);
     // step into the swing
     if (active && !sw.spin) {
-      const nx = this.x + sw.dx * SWING.stepIn * (dt / (sw.to - sw.from)), ny = this.y + sw.dy * SWING.stepIn * (dt / (sw.to - sw.from));
+      const step = SWING.stepIn * Math.max(0, Math.min(sw.t, sw.to) - Math.max(sw.t - dt, sw.from)) / (sw.to - sw.from);
+      const nx = this.x + sw.dx * step, ny = this.y + sw.dy * step;
       if (this.fits(nx, ny, s.world)) { this.x = nx; this.y = ny; }
     }
     if (active || wasActive) {

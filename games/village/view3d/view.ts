@@ -85,6 +85,8 @@ export class View {
     this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace; // the post pass used to do this by hand
     this.renderer.shadowMap.enabled = true;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.16;
     this.renderer.shadowMap.type = THREE.PCFShadowMap; // (three r186 removed PCFSoftShadowMap and silently falls back to this)
     const canvas = this.renderer.domElement;
     canvas.className = 'view3d';
@@ -100,7 +102,8 @@ export class View {
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
     const sc = this.sun.shadow.camera; sc.left = -24; sc.right = 24; sc.top = 24; sc.bottom = -24; sc.near = 1; sc.far = 90;
-    this.sun.shadow.bias = -0.002;
+    this.sun.shadow.bias = -0.0004;
+    this.sun.shadow.normalBias = 0.035;
     this.world.add(this.hemi, this.sun, this.sun.target, this.torch, this.dome.mesh);
     for (let i = 0; i < 6; i++) { const l = new THREE.PointLight(0xff9a50, 0, 10, 1.3); this.lamps.push(l); this.world.add(l); }
     this.terrain = new Terrain(scene);
@@ -165,6 +168,7 @@ export class View {
   /** true once a lock request has been refused: this document will never get the pointer */
   private noLock = false;
   private dragLook = false;
+  private freeLook = false;
 
   /** Take the pointer, or learn that we cannot. */
   private grabPointer(): void {
@@ -178,6 +182,7 @@ export class View {
     // a blow held back, or a guard held up, reads the same mouse: whichever way it travels picks the side
     this.scene.player?.aimWind(dx, dy);
     this.scene.player?.aimGuard(dx, dy);
+    if ((this.scene.player?.wind || this.scene.player?.guard) && !this.freeLook) return;
     const k = p.lookSpeed * 0.0022;
     // the camera sits at +sin(yaw), +cos(yaw) and looks inward, so a rightward push wants yaw to fall
     this.yaw -= dx * k;
@@ -245,6 +250,7 @@ export class View {
       s.onPointerMove(this.ptrAt(e));
     });
     canvas.addEventListener('pointerdown', (e) => {
+      if (e.button === 1) { e.preventDefault(); this.freeLook = true; return; }
       if (s.interior.active) { const q = this.room.floorAt(e.clientX, e.clientY, canvas); if (q) s.interior.tap(q.x, q.y, false); return; }
       // the first click takes the pointer; after that the mouse is the look and the clicks are the fight
       if (!this.looking) { this.grabPointer(); if (!this.noLock) return; }
@@ -254,11 +260,19 @@ export class View {
       s.onPointerDown(this.crosshairPtr());
     });
     canvas.addEventListener('pointerup', (e) => {
+      if (e.button === 1) { this.freeLook = false; return; }
       if (e.button === 2) { s.dropGuard(); this.dragLook = false; return; }
       if (e.button === 0 && s.releaseAttack()) { this.dragLook = false; return; } // the blow goes
       if (this.looking && e.button !== 2) s.wandUp(this.crosshairPtr());
       this.dragLook = false;
     });
+    const cancelHands = () => {
+      this.freeLook = false; this.dragLook = false;
+      if (s.player) { s.player.wind = null; s.player.draw = -1; s.player.dropGuard(); }
+    };
+    window.addEventListener('blur', cancelHands);
+    canvas.addEventListener('pointercancel', cancelHands);
+    document.addEventListener('pointerlockchange', () => { if (!document.pointerLockElement) cancelHands(); });
     canvas.addEventListener('pointerleave', () => { if (!this.looking) { this.mouse = null; s.onPointerOut(); } });
     canvas.addEventListener('wheel', (e) => {
       e.preventDefault();
@@ -364,7 +378,7 @@ export class View {
     if (pl) pl.camYaw = this.yaw;
     if (pl) this.pan.set(pl.x * U, groundHeight(pl.x * U, pl.y * U) + standHeight(pl) + EYE, pl.y * U);
     // tight: at this range a slow follow reads as the world swimming under the head
-    this.focus.lerp(this.pan, Math.min(1, dt * 18));
+    this.focus.lerp(this.pan, 1 - Math.exp(-dt * 18));
     this.bumpT += dt * 1000;
     const bump = this.bumpT < this.bumpMs ? this.bumpAmt * Math.sin((this.bumpT / this.bumpMs) * Math.PI) : 0;
     // a jolt pulls the camera in by a fixed amount rather than scaling the distance: at duelling range

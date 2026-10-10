@@ -22,8 +22,10 @@ const POSES: { clip: string; at: number }[] = [
   { clip: 'walk', at: 0 }, { clip: 'walk', at: 0.25 }, { clip: 'walk', at: 0.5 }, { clip: 'walk', at: 0.75 },
   { clip: 'attack-melee-right', at: 0.3 }, { clip: 'attack-melee-right', at: 0.6 },
   { clip: 'die', at: 1 },
+  { clip: 'walk', at: 0.125 }, { clip: 'walk', at: 0.375 },
+  { clip: 'walk', at: 0.625 }, { clip: 'walk', at: 0.875 },
 ];
-const IDLE = [0, 1], WALK = [2, 3, 4, 5], STRIKE = [6, 7], FALLEN = 8;
+const IDLE = [0, 1], WALK = [2, 9, 3, 10, 4, 11, 5, 12], STRIKE = [6, 7], FALLEN = 8;
 const CAPACITY0 = 64;
 /**
  * How many distinct looks the crowd will bake. Each one is nine baked poses kept for the session, so
@@ -128,7 +130,7 @@ export class Crowd {
   private poseOf(m: Mover, k: Kick | undefined): number {
     if (k && k.attack > 0) return STRIKE[k.attack > 0.2 ? 0 : 1];
     const moving = Math.abs(m.vx) + Math.abs(m.vy) > 1;
-    if (moving) return WALK[Math.floor(this.t * 8 * Math.min(1.6, Math.max(0.6, Math.hypot(m.vx, m.vy) / 40)) + m.id) % 4];
+    if (moving) return WALK[Math.floor(this.t * 16 * Math.min(1.6, Math.max(0.6, Math.hypot(m.vx, m.vy) / 40)) + m.id) % WALK.length];
     return IDLE[Math.floor(this.t * 1.5 + m.id * 0.37) % 2];
   }
 

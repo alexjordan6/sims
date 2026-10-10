@@ -92,6 +92,34 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
     p.adaptiveSpawns = false; // Legacy timed scenarios isolate their own enemies.
     assert(COLS * ROWS > 80 * 44 * 10, 'world is over ten times the old area');
     runPackChecks(scene(), assert);
+    {
+      const s = fresh(); clearing(s); s.agents = [s.player];
+      const keysOff = () => ({ W: { isDown: false }, A: { isDown: false }, S: { isDown: false }, D: { isDown: false } });
+      const pl = s.player; Object.assign(pl, World.center(125, 100));
+      pl.keys = { ...keysOff(), D: { isDown: true } };
+      pl.update(1 / 60, s);
+      assert(pl.vx > 0 && pl.vx < pl.speed * 0.5, 'footwork accelerates rather than snapping to full speed');
+      pl.keys = keysOff(); const before = pl.vx; pl.update(1 / 60, s);
+      assert(pl.vx > 0 && pl.vx < before, 'released movement brakes progressively');
+      for (let i = 0; i < 60; i++) pl.update(1 / 60, s);
+      assert(pl.vx === 0 && pl.vy === 0, 'footwork settles completely without drift');
+      assert(pl.beginWind(['left', 'right', 'up', 'down']), 'a free weapon can wind up');
+      pl.aimWind(48, 0); pl.update(1 / 60, s);
+      assert(pl.weaponMotion.x > 0 && pl.weaponMotion.x < 1, 'weapon follows mouse with bounded lag');
+      pl.update(0.5, s);
+      assert(Number.isFinite(pl.weaponMotion.x) && Math.abs(pl.weaponMotion.x) <= 1.05, 'weapon spring stays stable on a long frame');
+      pl.releaseWind({ x: pl.x + 30, y: pl.y });
+      assert(pl.chambered === -1, 'an unopposed attack does not claim a chamber');
+      const charged = pl.swing!.dmgMul; pl.swing = null; pl.recover = 0;
+      pl.beginWind(['right']); pl.releaseWind({ x: pl.x + 30, y: pl.y });
+      assert(pl.swing!.dmgMul < charged, 'a settled wind-up carries more force than a tap');
+      pl.swing = null; pl.recover = 0; pl.vx = pl.vy = 0;
+      pl.facing = { x: 1, y: 0 }; pl.pressAttack();
+      const foe = s.spawn(new Raider(pl.x + 15, pl.y)); foe.hp = foe.maxHp = 100;
+      s.grid.rebuild(s.agents); const hp = foe.hp;
+      pl.update(0.25, s);
+      assert(foe.hp < hp, 'a slow frame crossing the whole active window still lands a blow');
+    }
     let dense = 0;
     for (let seed = 1; seed <= 20; seed++) {
       const w = new World(); w.generate(new Rng(seed)); if (w.denseForests) dense++;
@@ -867,7 +895,7 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(![...raw.find((t, tx, ty) => !!t.tall && tx >= hx - 11 && tx <= hx + 10 && ty >= hy - 7 && ty <= hy + 4)].length, 'the village clearing starts mown');
       const l = raw.lair!; assert(!raw.get(l.tx + 2, l.ty + BUILDINGS.lair.h)!.tall, 'so does the Ogre\'s doorstep');
       clearing(s); s.agents = [s.player];
-      const walk = (x: number, y: number) => { Object.assign(s.player, World.center(x, y)); const x0 = s.player.x; const keys = s.player.keys; s.player.keys = { W: { isDown: false }, A: { isDown: false }, S: { isDown: false }, D: { isDown: true } }; step(s, 0.3); s.player.keys = keys; return s.player.x - x0; };
+      const walk = (x: number, y: number) => { Object.assign(s.player, World.center(x, y), { vx: 0, vy: 0 }); const x0 = s.player.x; const keys = s.player.keys; s.player.keys = { W: { isDown: false }, A: { isDown: false }, S: { isDown: false }, D: { isDown: true } }; step(s, 0.3); s.player.keys = keys; return s.player.x - x0; };
       const short = walk(120, 100);
       for (let x = 120; x <= 126; x++) s.world.get(x, 100)!.tall = true;
       const slow = walk(120, 100);

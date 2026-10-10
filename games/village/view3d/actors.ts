@@ -119,7 +119,7 @@ interface Actor {
   anim?: Anim;
 }
 
-interface Anim { mixer: THREE.AnimationMixer; actions: Map<string, THREE.AnimationAction>; current: string }
+interface Anim { mixer: THREE.AnimationMixer; actions: Map<string, THREE.AnimationAction>; current: string; rig: THREE.Object3D }
 
 /** how tall a grown person stands, in units */
 export const PERSON = 1.25;
@@ -161,7 +161,7 @@ function makeCharacter(m: Mover, md: { key: string }): { body: THREE.Group; anim
   for (const one of ['die', 'attack-melee-right', 'interact-right', 'pick-up']) { const a = actions.get(one); if (a) { a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; } }
   const idle = actions.get('idle'); idle?.play();
   mixer.update(Math.random() * 2); // not everyone breathes in step
-  return { body, anim: { mixer, actions, current: 'idle' } };
+  return { body, anim: { mixer, actions, current: 'idle', rig } };
 }
 
 /** Cross-fade an actor to an animation (one-shots restart). */
@@ -344,24 +344,38 @@ export class Actors {
         const sp = Math.hypot(m.vx, m.vy);
         if (k && k.attack > 0) { if (a.anim.current !== 'attack-melee-right') play(a.anim, 'attack-melee-right', 0.05); }
         else play(a.anim, sp > 70 ? 'sprint' : moving ? 'walk' : 'idle');
-        a.anim.mixer.update(dt * (moving ? Math.max(0.6, Math.min(1.6, sp / 45)) : 1));
+        a.anim.mixer.update(dt * (k && k.attack > 0 ? 1 : moving ? Math.max(0.25, Math.min(1.8, sp / 45)) : 1));
+        if (m instanceof Player) this.posePlayer(a.anim, m);
       }
       a.group.position.set(x + (k?.recoilX ?? 0), groundHeight(x, z) + standHeight(m) + bob, z + (k?.recoilZ ?? 0));
       // facing: arrows along their flight, the head along its aim or facing, everyone else the way they walk
       let fx = 0, fz = 0;
       if (m instanceof Arrow || m instanceof Bolt) { fx = (m as Arrow).ux; fz = (m as Arrow).uy; }
-      else if (m instanceof Player) { const bow = m.tool === 'bow'; fx = bow ? m.aim.x : m.facing.x; fz = bow ? m.aim.y : m.facing.y; if (moving && !bow) { fx = m.vx; fz = m.vy; } }
+      else if (m instanceof Player) {
+        const fighting = !!(m.wind || m.guard || m.swing || m.draw >= 0);
+        fx = fighting ? -Math.sin(m.camYaw) : m.facing.x;
+        fz = fighting ? -Math.cos(m.camYaw) : m.facing.y;
+        if (m.swing) { fx = m.swing.dx; fz = m.swing.dy; }
+        if (moving && !fighting) { fx = m.vx; fz = m.vy; }
+      }
       else if (moving) { fx = m.vx; fz = m.vy; }
       else { fx = m.dir; fz = 0.0001; }
       const want = Math.atan2(fx, fz);
       let dy = want - a.yaw;
       while (dy > Math.PI) dy -= Math.PI * 2;
       while (dy < -Math.PI) dy += Math.PI * 2;
-      a.yaw += m instanceof Arrow || m instanceof Bolt ? dy : dy * Math.min(1, dt * 12);
+      a.yaw += m instanceof Arrow || m instanceof Bolt ? dy : dy * (1 - Math.exp(-dt * 12));
       a.group.rotation.y = a.yaw;
       const sc = scaleOf(m), sq = k?.squash ?? 0;
       a.body.scale.set(sc * (1 + sq * 0.5), sc * (1 - sq), sc * (1 + sq * 0.5));
       a.body.rotation.z = k?.spin ?? 0;
+      if (!(m instanceof Arrow) && !(m instanceof Bolt) && !(m instanceof Swarm)) {
+        const forward = (m.vx * Math.sin(a.yaw) + m.vy * Math.cos(a.yaw)) / 80;
+        const side = (m.vx * Math.cos(a.yaw) - m.vy * Math.sin(a.yaw)) / 80;
+        a.body.rotation.x = Math.max(-0.13, Math.min(0.13, forward * 0.1));
+        a.body.rotation.z -= Math.max(-0.1, Math.min(0.1, side * 0.08));
+        if (m instanceof Player && m.roll) a.body.rotation.x = m.roll.t / Math.max(0.01, p.rollTime) * Math.PI * 2;
+      }
       if (m instanceof Swarm) a.body.children.forEach((c, i) => { c.position.x = Math.sin(this.t * 9 + i * 1.7) * 0.3; c.position.z = Math.cos(this.t * 7 + i * 2.1) * 0.3; });
       const hostileUnseen = m.hostile && fog && fog.visibleAt(m.x, m.y) <= 0.35;
       a.group.visible = !m.hidden && !(m instanceof Raider && m.lurking) && !hostileUnseen;
@@ -387,7 +401,7 @@ export class Actors {
       if (a.anim) { if (a.anim.current !== 'die') play(a.anim, 'die', 0.05); a.anim.mixer.update(dt); }
       else a.body.rotation.x = -f * Math.PI / 2;
       a.group.position.y -= dt * 0.25 * f;
-      for (const mt of a.mats) { mt.transparent = true; mt.opacity = 1 - f; }
+      for (const mt of a.mats) { mt.transparent = true; mt.opacity = 1 - Math.max(0, (f - 0.65) / 0.35); }
       if (f >= 1) { this.group.remove(a.group); return false; }
       return true;
     });
@@ -402,6 +416,33 @@ export class Actors {
 
   /** every hp bar this frame: one batch of camera-facing quads (two draws for all of them) */
   private hpBars = new Bars(10);
+  /** Override the upper body after the walking mixer: feet remain free to strafe. */
+  private posePlayer(an: Anim, m: Player): void {
+    const right = an.rig.getObjectByName('arm-right'), left = an.rig.getObjectByName('arm-left');
+    const torso = an.rig.getObjectByName('torso');
+    if (!right || !left || !torso) return;
+    const w = m.weaponMotion;
+    if (m.wind || m.guard) {
+      right.rotation.set(-1.15 + w.y * 0.85, -w.x * 0.7, -0.25 - w.x * 0.8);
+      left.rotation.set(m.guard ? -1.35 : -0.5, 0.2, 0.35);
+      torso.rotation.y = -w.x * 0.24;
+    } else if (m.swing?.dir) {
+      const sw = m.swing, t = sw.t;
+      const u = Math.max(0, Math.min(1, (t - sw.from) / (sw.to - sw.from)));
+      const sweep = u * u * (3 - 2 * u);
+      const settle = 1 - Math.max(0, (t - sw.to) / Math.max(0.01, sw.dur - sw.to));
+      const side = sw.dir === 'left' ? -1 : 1;
+      if (sw.dir === 'up') right.rotation.set((-2.6 + sweep * 2.2) * settle, 0, -0.15);
+      else if (sw.dir === 'down') right.rotation.set((-0.8 - Math.sin(u * Math.PI) * 0.9) * settle, -0.15, -0.15);
+      else right.rotation.set(-1.1 * settle, side * (1.2 - sweep * 2.4) * settle, side * (0.9 - sweep * 1.8) * settle);
+      torso.rotation.y = side * (0.3 - sweep * 0.6) * settle;
+      left.rotation.set(-0.65 * settle, 0.1, 0.3);
+    } else if (m.draw >= 0) {
+      right.rotation.set(-1.25, -0.7, -0.2);
+      left.rotation.set(-1.5, 0.2, 0.2);
+    }
+  }
+
   private bar(m: Mover, show: boolean): void {
     if (!show) return;
     const huge = m instanceof Raider && (m.huge || m.boss);
