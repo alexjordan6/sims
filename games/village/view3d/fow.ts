@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { COLS, ROWS } from '../config';
 
 // The fog of war, as a patch every lit surface carries: each one is multiplied by how well its tile is
-// seen, so the unexplored is black and the remembered is dim.
+// seen. Unexplored landscape stays visible at a subdued brightness; hostile visibility is separate.
 //
 // This file used to be the PS1 "pixel horror" pass as well — vertices snapped to a coarse screen grid so
 // every edge crawled, then a full-screen dither to a short palette with grain and a vignette over it.
@@ -17,10 +17,10 @@ const fowUniforms = { fowTex: { value: FOW }, fowSize: { value: new THREE.Vector
 /** Switch the fog of war off for a frame (a room indoors has no fog; its floor is not the map). */
 export function setFowOn(on: boolean): void { fowUniforms.fowOn.value = on ? 1 : 0; }
 
-/** Refresh the fog texture: black where never seen, dim where remembered, full light where seen now. */
+/** Refresh the landscape tint: subdued beyond sight, full light where seen now. */
 export function updateFow(explored: Uint8Array | null, vis: Float32Array | null): void {
   if (!explored || !vis) { fowData.fill(255); FOW.needsUpdate = true; return; }
-  for (let i = 0; i < fowData.length; i++) fowData[i] = explored[i] ? 95 + Math.round(160 * vis[i]) : 0;
+  for (let i = 0; i < fowData.length; i++) fowData[i] = explored[i] ? 190 + Math.round(65 * vis[i]) : 175;
   FOW.needsUpdate = true;
 }
 

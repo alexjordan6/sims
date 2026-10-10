@@ -173,12 +173,8 @@ export class Fx3d {
         sfx.swing(0); break;
       }
       case 'swing': {
-        const sw = ev.who instanceof Player ? ev.who.swing : null;
-        if (sw?.dir === 'up' || sw?.dir === 'down') {
-          const start = this.at(ev.who.x, ev.who.y, sw.dir === 'up' ? 1.6 : 0.7);
-          const end = this.at(ev.who.x + sw.dx * sw.reach, ev.who.y + sw.dy * sw.reach, 0.65);
-          this.streak(start, end, 0xf2e6c8, 0.16);
-        } else this.arc(ev.who, sw?.dx ?? ev.dx, sw?.dy ?? ev.dy, 0.18, sw?.spin ?? ev.stage === 2);
+        // The player's trail is sampled from the moving weapon in Actors.
+        if (!(ev.who instanceof Player)) this.arc(ev.who, ev.dx, ev.dy, 0.18, ev.stage === 2);
         this.actors.kick(ev.who.id).attack = 0.4;
         sfx.swing(ev.stage); break;
       }

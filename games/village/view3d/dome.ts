@@ -13,18 +13,35 @@ import * as THREE from 'three';
  */
 const VERT = `
 varying float vUp;
+varying vec3 vDirection;
 void main() {
   vUp = normalize(position).y;
+  vDirection = normalize(position);
   gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0);
 }`;
 const FRAG = `
 uniform vec3 horizon;
 uniform vec3 zenith;
+uniform float skyTime;
+uniform float night;
 varying float vUp;
+varying vec3 vDirection;
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+float noise(vec2 p) {
+  vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+  return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);
+}
 void main() {
   // the horizon colour holds over a wide band low down and only deepens well up: it is the fog colour
   // too, so anything fading out at distance has to meet a sky the same shade as itself
-  gl_FragColor = vec4(mix(horizon, zenith, pow(clamp(vUp, 0.0, 1.0), 1.6)), 1.0);
+  vec3 colour = mix(horizon, zenith, pow(clamp(vUp, 0.0, 1.0), 0.6));
+  vec2 uv = vDirection.xz / max(0.16, vDirection.y) * 1.8 + vec2(skyTime * 0.008, 0.0);
+  float clouds = noise(uv)*0.6 + noise(uv*2.1)*0.28 + noise(uv*4.3)*0.12;
+  float cover = smoothstep(0.5,0.76,clouds) * smoothstep(0.04,0.25,vUp);
+  colour = mix(colour, mix(vec3(0.92,0.94,0.95),horizon,night*0.9), cover*(0.8-night*0.5));
+  gl_FragColor = vec4(colour, 1.0);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
 }`;
 
 export class Dome {
@@ -36,7 +53,7 @@ export class Dome {
   constructor() {
     this.mat = new THREE.ShaderMaterial({
       vertexShader: VERT, fragmentShader: FRAG,
-      uniforms: { horizon: { value: new THREE.Color() }, zenith: { value: new THREE.Color() } },
+      uniforms: { horizon: { value: new THREE.Color() }, zenith: { value: new THREE.Color() }, skyTime: { value: 0 }, night: { value: 0 } },
       side: THREE.BackSide, depthWrite: false, fog: false,
     });
     this.mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), this.mat);
@@ -45,7 +62,9 @@ export class Dome {
   }
 
   /** Keep it round the camera, inside the far plane, and coloured for the hour. */
-  sync(camera: THREE.Camera, sky: number, far: number): void {
+  sync(camera: THREE.Camera, sky: number, far: number, time = 0, night = 0): void {
+    this.mat.uniforms.skyTime.value = time;
+    this.mat.uniforms.night.value = night;
     this.mesh.position.copy(camera.position);
     // always inside the far plane: a dome bigger than the view's reach gets sliced by it, and the cut
     // shows as a hard edge across the sky

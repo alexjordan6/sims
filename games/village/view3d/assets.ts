@@ -107,11 +107,12 @@ export function bake(scene: THREE.Object3D, only?: (m: THREE.Mesh) => boolean): 
       const out = new THREE.BufferGeometry();
       out.setAttribute('position', g.getAttribute('position'));
       out.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      if (g.getAttribute('normal')) out.setAttribute('normal', g.getAttribute('normal'));
       parts.push(out);
     }
   });
   const merged = mergeGeometries(parts, false)!;
-  merged.computeVertexNormals(); // flat: the geometry is non-indexed, so each face gets its own normal
+  if (!merged.getAttribute('normal')) merged.computeVertexNormals();
   merged.computeBoundingBox();
   return merged;
 }

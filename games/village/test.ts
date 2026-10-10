@@ -1,4 +1,8 @@
 import './main';
+import * as THREE from 'three';
+import { buildFigure, FIGURES } from './view3d/figure';
+import { poseFigure } from './view3d/motion';
+import { heldMesh, grip, PERSON } from './view3d/actors';
 import { runPackChecks } from './pack-test';
 import { IMPLEMENTS } from './pack';
 import { STACK, UNIT, PERK, unitName } from './config';
@@ -106,6 +110,13 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       assert(pl.beginWind(['left', 'right', 'up', 'down']), 'a free weapon can wind up');
       pl.aimWind(48, 0); pl.update(1 / 60, s);
       assert(pl.weaponMotion.x > 0 && pl.weaponMotion.x < 1, 'weapon follows mouse with bounded lag');
+      const controls = s.view! as unknown as { turn(dx: number, dy: number): void; freeLook: boolean; yaw: number };
+      const yaw = controls.yaw;
+      controls.turn(-12, 0);
+      assert(controls.yaw === yaw && pl.wind!.dx === 36, 'winding moves the weapon without turning the camera');
+      controls.freeLook = true; controls.turn(12, 0); controls.freeLook = false;
+      assert(controls.yaw !== yaw && pl.wind!.dx === 36, 'freelook turns the camera without changing the held blow');
+      controls.yaw = yaw;
       pl.update(0.5, s);
       assert(Number.isFinite(pl.weaponMotion.x) && Math.abs(pl.weaponMotion.x) <= 1.05, 'weapon spring stays stable on a long frame');
       pl.releaseWind({ x: pl.x + 30, y: pl.y });
@@ -119,6 +130,28 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       s.grid.rebuild(s.agents); const hp = foe.hp;
       pl.update(0.25, s);
       assert(foe.hp < hp, 'a slow frame crossing the whole active window still lands a blow');
+    }
+    {
+      const rig = new THREE.Group(); const k = PERSON / buildFigure(rig, FIGURES.head);
+      rig.scale.setScalar(k); const blade = heldMesh('sword', 2)!; blade.scale.setScalar(1/k); grip(blade,k,FIGURES.head);
+      rig.getObjectByName('hand-right')!.add(blade);
+      rig.userData.held = 'sword';
+      assert(!!rig.getObjectByName('elbow-right') && !!rig.getObjectByName('knee-left'), 'figures have explicit elbows and knees without loading a model');
+      for (const dir of ['left','right','up','down']) {
+        const points: THREE.Vector3[] = [];
+        for (const progress of [0,0.25,0.5,0.75,1]) {
+          poseFigure(rig,{phase:0,pace:0,time:0,strike:{dir,progress,recovery:0}}); rig.updateMatrixWorld(true);
+          points.push(blade.getObjectByName('weapon-tip')!.getWorldPosition(new THREE.Vector3()));
+        }
+        const travel = points.slice(1).reduce((n,v,i)=>n+v.distanceTo(points[i]),0);
+        assert(travel > 0.5, dir + ' moves the rendered sword tip through a visible arc (' + travel.toFixed(2) + ')');
+      }
+      poseFigure(rig,{phase:Math.PI*1.5,pace:1,time:0});
+      assert(rig.getObjectByName('knee-left')!.rotation.x > 0.5, 'the trailing knee bends during a stride');
+      poseFigure(rig,{phase:0,pace:0,time:0});
+      assert(rig.getObjectByName('arm-right')!.rotation.y === 0, 'idle clears the previous strike pose');
+      rig.updateMatrixWorld(true);
+      assert(blade.getObjectByName('weapon-tip')!.getWorldPosition(new THREE.Vector3()).y > 0, 'the resting sword stays above the ground');
     }
     let dense = 0;
     for (let seed = 1; seed <= 20; seed++) {
@@ -1793,10 +1826,15 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       g.weapon = 'pike'; g.applyRole(s.mods); g.update = () => {};
       v.snapCamera(); s.draw(); s.draw();
       const actorOf = (id: number) => (v as unknown as { actors: { actors: Map<number, unknown> } }).actors.actors.has(id);
-      assert(v.crowd.drawn.has(g.id) && !actorOf(g.id), 'a gnome is drawn by the crowd, not as a rig of its own');
+      assert(!v.crowd.drawn.has(g.id) && actorOf(g.id), 'nearby gnomes use continuously articulated rigs');
       assert(!v.crowd.drawn.has(s.player.id) && actorOf(s.player.id), 'the head stays a full actor');
       const at = v.projectWorld(g.x, g.y, 0.4);
-      assert(v.pickAt(at.x, at.y).agent === g, 'pointing at a crowd body picks that gnome');
+      assert(v.pickAt(at.x, at.y).agent === g, 'pointing at an articulated body picks that gnome');
+      g.x += 12 * TILE; s.draw();
+      assert(v.crowd.drawn.has(g.id) && !actorOf(g.id), 'distant gnomes switch to instancing without duplicate actors');
+      g.x -= 12 * TILE; s.draw();
+      assert(!v.crowd.drawn.has(g.id) && actorOf(g.id), 'returning gnomes regain continuous animation');
+      assert(v.camera.far >= 110, 'the landscape remains visible beyond 100 tiles');
       g.dead = true; s.removeDead(); s.draw();
       assert(!v.crowd.drawn.has(g.id), 'a dead one leaves the crowd (it lies down and sinks)');
     }
@@ -2771,3 +2809,38 @@ document.querySelectorAll<HTMLButtonElement>('[data-preview]').forEach(btn => bt
   s.dayTime = 0.82; s.draw();
   summary.textContent = `${kind} preview · wall height ${WALL_HEIGHT}px`;
 }));
+
+// Reproducible visual checks use the live renderer and normal attack entry points.
+document.getElementById('motion-scene')!.addEventListener('click', () => {
+  const s = fresh(); clearing(s); s.agents = [s.player];
+  Object.assign(s.player, World.center(125, 100)); s.player.facing = { x: 0, y: -1 };
+  s.player.tool = 'sword'; s.player.weapons.melee = 2; s.player.armor.chest = 2;
+  s.dayTime = 0.48; s.view!.yaw = 0; s.view!.pitch = 0.2; s.view!.dist = 5.5; s.view!.snapCamera();
+  s.hoverPoint = { x: s.player.x, y: s.player.y - 70 };
+  for (const offset of [-32, 32]) { const v = s.spawn(new Villager(s.player.x + offset, s.player.y - 44, home0(s), 'soldier', 20, 'Motion guard', s.mods)); v.weapon = 'sword'; v.weapons.melee = 2; }
+  s.draw(); summary.textContent = 'Motion scene · iron sword · continuous joint animation';
+});
+const previewSwing = (freeze: boolean) => {
+  const s = scene(), pl = s.player; s.paused = false;
+  pl.swing = null; pl.recover = 0; pl.wind = null; pl.stam = 100;
+  pl.tool = 'sword'; pl.weapons.melee = 2;
+  s.hoverPoint = { x: pl.x, y: pl.y - 70 };
+  if (s.beginAttack()) { pl.aimWind(48, 0); pl.wind!.t = 0.45; s.releaseAttack(); }
+  if (freeze && s.player.swing) { s.player.swing.t = (s.player.swing.from + s.player.swing.to) / 2; s.paused = true; }
+  s.draw(); summary.textContent = freeze ? 'Live renderer · sword halfway through active slash' : 'Live renderer · released sword attack';
+};
+document.getElementById('motion-swing')!.addEventListener('click', () => previewSwing(false));
+document.getElementById('motion-mid')!.addEventListener('click', () => previewSwing(true));
+document.getElementById('motion-horizon')!.addEventListener('click', () => {
+  const s = scene(); s.view!.pitch = 0.1; s.view!.dist = 7; s.draw();
+  summary.textContent = 'Landscape draw distance: ' + Math.round(s.view!.camera.far) + ' tiles';
+});
+
+document.getElementById('measure-scene')!.addEventListener('click', () => {
+  let frames = 0; const start = performance.now();
+  const measure = () => {
+    if (++frames < 90) { requestAnimationFrame(measure); return; }
+    const info = scene().view!.renderer.info;
+    summary.textContent = Math.round(frames * 1000 / (performance.now() - start)) + ' FPS · ' + info.render.calls + ' draw calls · ' + Math.round(info.render.triangles / 1000) + 'k triangles · ' + info.memory.geometries + ' geometries';
+  }; requestAnimationFrame(measure);
+});

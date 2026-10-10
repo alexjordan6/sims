@@ -71,7 +71,7 @@ export function lookFor(m: Mover): Look | null {
   if (m instanceof Player) return { ...base, skin: 1, hair: 0, hairStyle: 0, body: 'adult', outfit: 'head', held: m.tool === 'sword' ? blade : m.tool === 'bow' && m.weapons.bow >= 0 ? 'bow' : m.tool === 'axe' ? 'axe' : m.tool === 'wand' ? 'wand' : 'none' };
   if (m instanceof Villager) {
     // every villager is a gnome: a little person in a red cap, whatever its calling
-    const held = !m.isAdult ? 'none' : m.role === 'soldier' ? (m.weapon === 'pike' ? 'pike' : m.weapon === 'bow' ? 'bow' : 'club') : m.role === 'woodcutter' ? 'axe' : 'none';
+    const held = !m.isAdult ? 'none' : m.role === 'soldier' ? (m.weapon === 'pike' ? 'pike' : m.weapon === 'bow' ? 'bow' : blade) : m.role === 'woodcutter' ? 'axe' : 'none';
     return { ...base, body: m.isChild ? 'gnomekid' : 'gnome', outfit: 'gnome', held };
   }
   if (m instanceof Raider) {

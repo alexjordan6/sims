@@ -16,7 +16,21 @@ const flat = (colour = 0xffffff, extra: THREE.MeshLambertMaterialParameters = {}
 /** the material every instanced prop shares: vertex colours (a model's own, or white on a placeholder) times the instance colour */
 export const PROP_MAT = flat(0xffffff, { vertexColors: true });
 /** vertex-coloured, for the ground */
-export const GROUND_MAT = lambert({ vertexColors: true });
+const groundGrain = new Uint8Array(64 * 64 * 4);
+for (let i = 0; i < 64 * 64; i++) {
+  const x = i % 64, y = Math.floor(i / 64);
+  const n = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+  const value = 216 + Math.floor((n - Math.floor(n)) * 39);
+  groundGrain.set([value, value, value, 255], i * 4);
+}
+const groundTexture = new THREE.DataTexture(groundGrain, 64, 64, THREE.RGBAFormat);
+groundTexture.wrapS = groundTexture.wrapT = THREE.RepeatWrapping;
+groundTexture.magFilter = THREE.LinearFilter;
+groundTexture.minFilter = THREE.LinearMipmapLinearFilter;
+groundTexture.generateMipmaps = true;
+groundTexture.anisotropy = 4;
+groundTexture.needsUpdate = true;
+export const GROUND_MAT = lambert({ vertexColors: true, flatShading: false, map: groundTexture });
 
 const cache = new Map<number, THREE.MeshLambertMaterial>();
 /** a shared flat material of one colour */
