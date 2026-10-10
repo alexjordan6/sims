@@ -718,3 +718,21 @@ body::after {
 .bar.stam.low i { background: #e05a4a; }
 /* the wind sits with the other two, a little shorter: it is spent and refilled far more often */
 #overlay .vitals .bar.stam { width: 80px; }
+
+/* The shield, as an arc round the reticle: it empties as the shield wears and reddens near the end,
+   because a shield about to come apart changes how you want to fight the next few seconds. */
+.reticle .shield {
+  position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px 0 0 -23px;
+  border-radius: 50%; pointer-events: none;
+  background: conic-gradient(from 180deg, #8fd0ff var(--s, 0%), transparent var(--s, 0%));
+  mask: radial-gradient(circle, transparent 18px, #000 18px, #000 21px, transparent 21px);
+  -webkit-mask: radial-gradient(circle, transparent 18px, #000 18px, #000 21px, transparent 21px);
+  opacity: 0.75;
+}
+.reticle .shield.worn { background: conic-gradient(from 180deg, #ff9a4a var(--s, 0%), transparent var(--s, 0%)); opacity: 0.95; }
+.reticle.broke .shield { display: none; }
+.reticle.broke .dot { animation: shield-gone 0.5s ease-out 2; }
+@keyframes shield-gone {
+  from { box-shadow: 0 0 0 2px #ffb04a, 0 0 14px 6px rgba(255, 150, 60, 0.65); }
+  to { box-shadow: none; }
+}

@@ -238,7 +238,7 @@ export class UI {
     this.tooltipEl = h('<div class="tooltip" hidden></div>');
     this.overlay.append(this.tooltipEl);
     // the crosshair, and round it the dial that says which way the blow or the guard is set
-    this.reticle = h(`<div class="reticle" hidden><i class="dot"></i>${['up', 'down', 'left', 'right'].map((d) => `<i class="arm ${d}"></i>`).join('')}<span class="draw"></span></div>`);
+    this.reticle = h(`<div class="reticle" hidden><i class="dot"></i>${['up', 'down', 'left', 'right'].map((d) => `<i class="arm ${d}"></i>`).join('')}<span class="draw"></span><span class="shield" title="What is left of the shield. Every blow it turns takes something out of it; at nothing left it comes apart."></span></div>`);
     this.overlay.append(this.reticle);
 
     this.mountControls();
@@ -425,7 +425,7 @@ export class UI {
     if (this.reticle.hidden === show) this.reticle.hidden = !show;
     if (!show) return;
     const d = s.duelState();
-    const key = `${d.wind}|${d.guard}|${d.incoming}|${Math.round(d.stam)}|${Math.round(d.draw * 20)}|${d.chambered}`;
+    const key = `${d.wind}|${d.guard}|${d.incoming}|${Math.round(d.stam)}|${Math.round(d.draw * 20)}|${d.chambered}|${Math.round(d.shield * 20)}|${d.shieldBroke}`;
     if (key === this.lastDuel) return;
     this.lastDuel = key;
     const set = d.wind ?? d.guard;
@@ -441,6 +441,15 @@ export class UI {
     if (d.draw >= 0) draw.style.setProperty('--d', `${Math.round(d.draw * 100)}%`);
     const bar = this.hotbar.querySelector<HTMLElement>('.bar.stam i');
     if (bar) { bar.style.width = `${Math.round((d.stam / d.stamMax) * 100)}%`; bar.parentElement!.classList.toggle('low', d.stam < 25); }
+    // the shield, as an arc round the reticle that empties as it wears
+    const sh = this.reticle.querySelector<HTMLElement>('.shield')!;
+    sh.hidden = d.shield < 0;
+    if (d.shield >= 0) {
+      sh.style.setProperty('--s', `${Math.round(d.shield * 100)}%`);
+      sh.title = `${d.shieldName}: ${Math.round(d.shield * 100)}% left. Every blow it turns takes something out of it; at nothing left it comes apart.`;
+    }
+    sh.classList.toggle('worn', d.shield >= 0 && d.shield < 0.34);
+    this.reticle.classList.toggle('broke', d.shieldBroke);
   }
 
   private renderHotbar(): void {
