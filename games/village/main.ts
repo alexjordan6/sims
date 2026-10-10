@@ -3582,6 +3582,37 @@ export class VillageScene extends SimScene {
   }
   clearSquad(): void { this.squad = []; }
   private giveOrder(v: Villager, order: Order | null): void { v.order = order; v.post = null; v.clearGoal(); }
+
+  /** Everyone under these banners who is out foraging. */
+  foragers(regs: Regiment[]): Villager[] {
+    const out: Villager[] = [];
+    for (const r of regs) for (const v of r.members) if (!v.dead && v.order?.kind === 'forage') out.push(v);
+    return out;
+  }
+
+  /**
+   * FORAGE: the banner puts down its formation and works the wild — the same job a forager does all day,
+   * pouches and granary trips and all. They stay at it until they are called back to the ranks, or until
+   * the banner is given somewhere to be (see commandItem: a movement order forms the party up first).
+   * Returns how many went out, or came back.
+   */
+  forageOrder(regs: Regiment[], out: boolean, announce = true): number {
+    let n = 0;
+    for (const r of regs) for (const v of r.members) {
+      if (v.dead || v.hidden || !v.isAdult) continue;
+      if (out ? v.order?.kind === 'forage' : v.order?.kind !== 'forage') continue;
+      // a gnome soldier trails the head by default, and a follower only picks what grows within a few tiles
+      // of where you stand. A forage party works the whole wild, so it is let off the leash first.
+      if (out) v.followPlayer(this, false);
+      this.giveOrder(v, out ? { kind: 'forage' } : null);
+      n++;
+    }
+    if (!announce) return n;
+    if (n) this.event('info', out ? `${n} gnome${n === 1 ? '' : 's'} put down the line and went foraging.` : `${n} forager${n === 1 ? '' : 's'} back in the ranks.`, true);
+    else if (regs.length) this.event('info', out ? 'Nobody under that banner to send.' : 'Nobody out foraging.', true);
+    if (n && regs.length) this.wandFx(regs[0].x, regs[0].y - 12, out ? 'FORAGE' : 'FALL IN');
+    return n;
+  }
   private wandFx(x: number, y: number, text: string): void {
     this.fx.push({ kind: 'deposit', x, y, text, colour: '#78d8f0' });
     this.fx.push({ kind: 'cast', who: this.player });
@@ -4102,10 +4133,14 @@ export class VillageScene extends SimScene {
     if (!regs.length) return false;
     const def = ORDER_MENUS[menu - 1];
     if (!def || item < 1 || item > def.items.length) return false;
+    // somewhere to be forms the party up first: a banner told to charge should not leave half of itself
+    // out picking berries. Facing, forming and firing are details of a line already standing, so they don't.
+    if (menu === 1) this.forageOrder(regs, false, false);
     if (menu === 1) [() => this.moveTo(regs, aim.x, aim.y), () => this.setStance(regs, 'follow'), () => this.charge(regs), () => this.setStance(regs, 'advance'), () => this.setStance(regs, 'hold'), () => this.retreat(regs)][item - 1]();
     else if (menu === 2) this.faceOrder(regs, item === 1 ? 'enemy' : 'point', aim.x, aim.y);
     else if (menu === 3) this.formOrder(regs, SHAPES[item - 1]);
     else if (menu === 4) this.fireOrder(regs, item === 2);
+    else if (menu === 5) this.forageOrder(regs, item === 1);
     // an order given: back to the top, and shut altogether when an F-key opened the bar
     this.cmdMenu = this.cmdByKey ? null : 0;
     return true;
@@ -4118,7 +4153,7 @@ export class VillageScene extends SimScene {
     const f = /^F([1-7])$/.exec(e.key);
     if (f) {
       const n = Number(f[1]);
-      if (n <= 4 && this.commandMenu() === 0 && this.openCommand(n)) { e.preventDefault(); e.stopPropagation(); return; }
+      if (n <= ORDER_MENUS.length && this.commandMenu() === 0 && this.openCommand(n)) { e.preventDefault(); e.stopPropagation(); return; }
       if (this.commandOpen() && this.commandMenu() > 0) { e.preventDefault(); e.stopPropagation(); this.commandItem(this.commandMenu(), n); }
       return;
     }

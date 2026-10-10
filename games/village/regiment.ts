@@ -23,6 +23,7 @@ export const ORDER_MENUS: { name: string; items: string[] }[] = [
   { name: 'Facing', items: ['Face the enemy', 'Face this direction'] },
   { name: 'Form', items: ['Line', 'Shield wall', 'Loose', 'Circle', 'Square', 'Wedge', 'Column'] },
   { name: 'Fire', items: ['Fire at will', 'Hold fire'] },
+  { name: 'Work', items: ['Forage', 'Back to the ranks'] },
 ];
 /** The group a gnome with this weapon falls in under. */
 export function weaponGroup(weapon: 'sword' | 'pike' | 'bow'): number { return weapon === 'pike' ? 2 : weapon === 'bow' ? 3 : 1; }

@@ -978,7 +978,8 @@ export class UI {
       const regs = s.regiments.filter((r) => r.group === g);
       if (!regs.length) continue;
       const n = regs.reduce((a, r) => a + r.members.length, 0), sel = regs.some((r) => picked.has(r)), r0 = regs[0];
-      cards += `<button class="fcard${sel ? ' sel' : ''}" data-group="${g}" title="${g}: pick · Shift+${g}: add · Alt+${g}: move the picked banners here"><b>${g}</b><span class="gname">${GROUP_NAME[g]}</span>${regs.map((r) => `<i class="sw" style="background:${r.colour}"></i>`).join('')}<span class="gn">${n}</span><small>${SHAPE_NAME[r0.shape]} · ${r0.stance}${r0.holdFire ? ' · hold fire' : ''} · T${(regs.reduce((a, r) => a + r.avgTier * r.members.length, 0) / Math.max(1, n)).toFixed(1)}</small></button>`;
+      const out = s.foragers(regs).length; // a party out in the wild is invisible in the line: say so on the card
+      cards += `<button class="fcard${sel ? ' sel' : ''}" data-group="${g}" title="${g}: pick · Shift+${g}: add · Alt+${g}: move the picked banners here"><b>${g}</b><span class="gname">${GROUP_NAME[g]}</span>${regs.map((r) => `<i class="sw" style="background:${r.colour}"></i>`).join('')}<span class="gn">${n}</span><small>${SHAPE_NAME[r0.shape]} · ${r0.stance}${r0.holdFire ? ' · hold fire' : ''} · T${(regs.reduce((a, r) => a + r.avgTier * r.members.length, 0) / Math.max(1, n)).toFixed(1)}${out ? ` · ${out} foraging` : ''}</small></button>`;
     }
     const items = menu === 0
       ? ORDER_MENUS.map((m, i) => `<button class="oitem" data-menu="${i + 1}"><kbd>F${i + 1}</kbd>${m.name}</button>`).join('') + `<span class="ohint">${picked.size ? '' : 'all formations · '}1-8 pick · 0 all · right-drag places</span>`

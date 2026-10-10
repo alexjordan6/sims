@@ -354,7 +354,13 @@ export abstract class Mover implements Agent {
 export type Role = 'infant' | 'kid' | Calling;
 
 /** A standing order from the shaman wand: hold a spot (fight what comes within ORDER.leash of it), hunt one enemy, or shadow the head. A wall post is the other stance; the two never coexist. */
-export type Order = { kind: 'hold'; tx: number; ty: number } | { kind: 'attack'; target: Mover } | { kind: 'follow' };
+/**
+ * What one gnome has been told to do. `forage` is the odd one out: the other three are things a soldier
+ * does as a soldier, while a foraging soldier puts down the formation and works the wild like any
+ * forager until it is called back. A banner's `active()` skips anyone carrying an order, so a forage
+ * party drops out of the ranks on its own and the rest close up over the gap.
+ */
+export type Order = { kind: 'hold'; tx: number; ty: number } | { kind: 'attack'; target: Mover } | { kind: 'follow' } | { kind: 'forage' };
 
 export class Villager extends Mover {
   /** a FETCH order: the piece this soldier is off to take from a chest (VillageScene.orderFetch) */
@@ -660,7 +666,8 @@ export class Villager extends Mover {
       case 'kid': this.kidUpdate(dt, s); break;
       case 'farmer': if (this.moodNow?.bold) { this.soldierUpdate(dt, s); break; } this.civilUpdate(dt, s, 'forage'); break; // no fields: the wild is the foragers' field
       case 'woodcutter': if (this.moodNow?.bold) { this.soldierUpdate(dt, s); break; } this.civilUpdate(dt, s, this.helpingForage(s) ? 'forage' : 'wood'); break;
-      case 'soldier': this.soldierUpdate(dt, s); break;
+      // sent foraging, a soldier works the wild exactly as a forager does: pouch, granary trips and all
+      case 'soldier': if (this.order?.kind === 'forage') this.civilUpdate(dt, s, 'forage'); else this.soldierUpdate(dt, s); break;
     }
   }
 

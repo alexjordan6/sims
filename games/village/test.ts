@@ -9,7 +9,7 @@ import { Rng } from '../../src/shared/rng';
 import { Villager, Arrow, Raider, BELT, BUILDS, TOOLS } from './agents';
 import { Brute, Rat, Ogre, Wrecker, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm } from './wildlife';
-import { SLOT_GAP, Warband, Regiment, SHAPES, SHAPE_GAP, SHAPE_PACE, layout } from './regiment';
+import { ORDER_MENUS, SLOT_GAP, Warband, Regiment, SHAPES, SHAPE_GAP, SHAPE_PACE, layout } from './regiment';
 import { hostSize, hostCounts } from './host';
 import { rollLoot, lootTier, danger, enemyDrop } from './loot';
 import { Caravan } from './caravan';
@@ -2222,9 +2222,64 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       s.player.tool = 'wand'; ui.render(0.2);
       const bar = document.querySelector<HTMLElement>('#overlay .orders')!, cards = bar.querySelectorAll('.fcard').length;
       const groups = new Set(s.regiments.map((r) => r.group)).size;
-      assert(s.commandOpen() && !bar.hidden && cards === groups && bar.querySelectorAll('.omenu [data-menu]').length === 4, `with the wand out the command bar shows a card a group (${cards}) and the four menus`);
+      assert(s.commandOpen() && !bar.hidden && cards === groups && bar.querySelectorAll('.omenu [data-menu]').length === ORDER_MENUS.length, `with the wand out the command bar shows a card a group (${cards}) and every order menu`);
       s.player.tool = 'sword'; ui.render(0.2);
       assert(bar.hidden, 'and puts it away with the wand');
+    }
+
+    // ---- FORAGE: a banner puts down the line and works the wild until it is called back -------------
+    {
+      const run = (secs: number) => { for (let i = 0; i < Math.ceil(secs * 60); i++) { s.grid.rebuild(s.agents); s.tick(1 / 60); } };
+      s = fresh(false, false, false, false, false, true); s.dayTime = 0.35; s.paused = false;
+      run(1); // the muster runs on the tick: the banners are raised there, not at setup
+      const band = s.villagers().filter((v) => v.isAdult && v.role === 'soldier' && !!v.regiment);
+      assert(band.length > 0 && !!band[0].regiment, `the founding band musters under a banner (${band.length} under ${band[0]?.regiment ? 'one' : 'none'})`);
+      const reg = band[0].regiment!;
+      const out = () => s.foragers([reg]).length;
+      assert(out() === 0 && reg.active().length > 0, 'nobody is out foraging to begin with, and the line is full');
+
+      const sent = s.forageOrder([reg], true);
+      const under = reg.members.filter((v) => !v.dead && !v.hidden && v.isAdult);
+      assert(sent === under.length && out() === sent && under.every((v) => v.order?.kind === 'forage'),
+        `FORAGE sends every gnome under the banner (${sent} of ${under.length}, the other banner left alone)`);
+      assert(s.foragers(s.regiments).length === sent, 'and only that banner: the other is still in its ranks');
+      assert(reg.active().length === 0, 'and the banner lays out nobody: a forage party is out of the ranks');
+
+      // they actually pick: one ripe plant by the cottage, and the pantry climbs
+      for (const q of [...s.world.find((t) => !!WILD_FOOD[t.kind])]) s.world.set(q.tx, q.ty, 'grass'); // a bare map but for ours
+      const home = home0(s), near = World.center(home.tx + 2, home.ty + 2);
+      for (const v of band) Object.assign(v, { x: near.x, y: near.y });
+      for (let i = 0; i < 6; i++) { const q = s.world.set(home.tx + 3 + (i % 3), home.ty + 2 + ((i / 3) | 0), 'hazel'); q.stage = 99; } // enough to keep a party busy
+      const nuts = s.pantry.hazelnut; s.food = 0;
+      run(6);
+      const atWork = reg.members.filter((v) => /forag|granary/i.test(v.task)).length;
+      assert(atWork > 0, `the party says what it is at (${atWork} of ${reg.members.length}: ${reg.members[0].task})`);
+      run(20);
+      const carried = reg.members.reduce((n, v) => n + v.carriedOf('food', 'hazelnut'), 0);
+      assert(s.pantry.hazelnut > nuts || carried > 0, `a foraging banner picks the wild (${s.pantry.hazelnut - nuts} in the granary, ${carried} in hand)`);
+
+      // called back: the order clears and they fall in again
+      const backIn = s.forageOrder([reg], false);
+      assert(backIn > 0 && out() === 0 && under.every((v) => !v.order), `BACK TO THE RANKS calls them in (${backIn})`);
+      run(1);
+      assert(reg.active().length > 0, 'and the banner lays them out once more');
+
+      // a movement order forms the party up on its own: a banner told to charge leaves nobody picking berries
+      s.forageOrder([reg], true);
+      assert(out() > 0, 'sent out again');
+      s.selectRegiment(reg); s.commandItem(1, 3); // Movement > Charge
+      assert(out() === 0, 'an order to move forms the foragers up first');
+      // while facing, forming and firing leave a working party alone
+      s.forageOrder([reg], true);
+      const before = out();
+      s.commandItem(3, 1); s.commandItem(4, 1);
+      assert(out() === before && before > 0, `forming and firing do not call a party in (${out()} of ${before})`);
+      s.forageOrder([reg], false);
+
+      // the menu is where the order lives
+      const work = ORDER_MENUS[ORDER_MENUS.length - 1];
+      assert(work.name === 'Work' && work.items[0] === 'Forage' && work.items.length === 2, `the last order menu is Work (${work.name}: ${work.items.join(', ')})`);
+      s.clearSquad();
     }
 
     // ---- ox caravans: supplies up the south road every few days ------------------------------------
