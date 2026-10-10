@@ -1,34 +1,29 @@
 import * as THREE from 'three';
-import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
+import { poseFigure } from './motion';
 import { Mover, Villager, Raider } from '../agents';
 import { lookFor } from '../look';
 import type { VillageScene } from '../main';
-import { MODELS, bake } from './assets';
-import { RIG } from './registry';
+import { bake } from './assets';
 import { heldMesh, grip, rankOf, kitOf, weaponTier, modelFor, scaleOf, standHeight, PERSON, type Kick } from './actors';
 import { buildFigure, FIGURES, wearing, NO_KIT, type Spec, type Kit } from './figure';
 import { lambert } from './fow';
 import { U } from './models';
 import { groundHeight } from './terrain';
 
-// The crowd: gnomes and rank-and-file raiders by the hundred. Instead of a skinned rig per body (eight
-// meshes and a mixer each), every look is baked once into a handful of still poses — idle, a walk cycle,
-// a strike, fallen — and each pose is one InstancedMesh. A body is an instance of whichever pose its clock
-// is on: a flipbook, which is how a PS1 crowd moved anyway. A thousand bodies are a few dozen draws.
+// Distant characters share baked poses from the live joint solver. Nearby characters use
+// continuous articulation; instancing keeps the distant army inexpensive.
 
 /** the poses baked for every look: [clip, fraction of the clip] */
-const POSES: { clip: string; at: number }[] = [
-  { clip: 'idle', at: 0 }, { clip: 'idle', at: 0.5 },
-  { clip: 'walk', at: 0 }, { clip: 'walk', at: 0.25 }, { clip: 'walk', at: 0.5 }, { clip: 'walk', at: 0.75 },
-  { clip: 'attack-melee-right', at: 0.3 }, { clip: 'attack-melee-right', at: 0.6 },
+const POSES = [
+  ...Array.from({ length: 2 }, (_, i) => ({ clip: 'idle', at: i / 2 })),
+  ...Array.from({ length: 8 }, (_, i) => ({ clip: 'walk', at: i / 8 })),
+  ...Array.from({ length: 4 }, (_, i) => ({ clip: 'attack', at: i / 3 })),
   { clip: 'die', at: 1 },
-  { clip: 'walk', at: 0.125 }, { clip: 'walk', at: 0.375 },
-  { clip: 'walk', at: 0.625 }, { clip: 'walk', at: 0.875 },
 ];
-const IDLE = [0, 1], WALK = [2, 9, 3, 10, 4, 11, 5, 12], STRIKE = [6, 7], FALLEN = 8;
+const IDLE = [0, 1], WALK = Array.from({length:8}, (_,i)=>i+2), STRIKE = [10,11,12,13], FALLEN = 14;
 const CAPACITY0 = 64;
 /**
- * How many distinct looks the crowd will bake. Each one is nine baked poses kept for the session, so
+ * How many distinct looks the crowd will bake. Each one is fifteen baked poses kept for the session, so
  * geometry is the scarce thing here while per-instance colour is free. A village's soldiers share
  * their kit, so the real count sits far below this; the cap is only there so that a village forever
  * re-arming one piece at a time cannot pile up looks without end. Past it, gear stops being baked.
@@ -36,12 +31,11 @@ const CAPACITY0 = 64;
 const LOOK_CAP = 72;
 
 interface Look { poses: THREE.InstancedMesh[]; /** the mover drawn by each instance of each pose, for picking */ who: Mover[][]; /** instances set this frame, per pose */ n: Int32Array }
-type Warm = NonNullable<ReturnType<typeof crowdModel>>;
 interface Fallen { look: Look; x: number; y: number; z: number; yaw: number; scale: number; colour: THREE.Color; t: number }
 
 /**
  * Is this mover drawn by the crowd (once its look has baked)? Bosses, the head and people stay full actors.
- * Every body is now built from boxes on one shared rig, so what a look costs is its figure, its tool,
+ * Every body uses the shared articulated figure, so what a look costs is its figure, its tool,
  * its hat and its rank — not which of a dozen faces it was given.
  */
 export function crowdModel(m: Mover): { figure: string; held: string; weapon: number; kit: Kit; hat: boolean; rank: number; tint: number } | null {
@@ -85,13 +79,14 @@ export class Crowd {
   private yaw = new Map<number, number>();
   private fallen: Fallen[] = [];
   private t = 0;
+  private strides = new Map<number, number>();
   private col = new THREE.Color();
   /** the movers drawn last frame (the actor path skips them) */
   readonly drawn = new FrameSet();
 
   constructor(private scene: VillageScene, private kicks: Map<number, Kick>) {}
 
-  clear(): void { this.fallen = []; this.yaw.clear(); this.drawn.next(); this.drawn.next(); this.picks.clear(); }
+  clear(): void { this.fallen = []; this.yaw.clear(); this.strides.clear(); this.drawn.next(); this.drawn.next(); this.picks.clear(); }
 
   /** Bake a look's poses (once). Null when the rig has not loaded (the actor path draws it meanwhile). */
   private look(cm: NonNullable<ReturnType<typeof crowdModel>>): Look | null {
@@ -99,20 +94,21 @@ export class Crowd {
     let id = lookId(cm);
     if (this.looks.has(id)) return this.looks.get(id)!;
     if (this.looks.size >= LOOK_CAP) { kit = NO_KIT; id = lookId({ ...cm, kit }); if (this.looks.has(id)) return this.looks.get(id)!; }
-    const ch = MODELS.characters.get(RIG);
     const spec: Spec | undefined = FIGURES[cm.figure];
-    if (!ch || !spec) return null;
-    const rig = SkeletonUtils.clone(ch.scene);
-    const k = PERSON / (buildFigure(rig, spec, { cap: cm.hat ? cm.rank : 0, kit }) || ch.height);
+    if (!spec) return null;
+    const rig = new THREE.Group();
+    const k = PERSON / (buildFigure(rig, spec, { cap: cm.hat ? cm.rank : 0, kit }));
     rig.scale.setScalar(k);
-    const hand = rig.getObjectByName('arm-right');
+    const hand = rig.getObjectByName('hand-right');
     const tool = heldMesh(cm.held, cm.weapon);
+    rig.userData.held = cm.held;
     if (tool && hand) { tool.scale.setScalar(1 / k); grip(tool, k, spec); hand.add(tool); }
-    const mixer = new THREE.AnimationMixer(rig), mat = lambert({ vertexColors: true });
+    const mat = lambert({ vertexColors: true, flatShading: false });
     const poses = POSES.map(({ clip, at }) => {
-      const c = ch.clips.find((x) => x.name === clip) ?? ch.clips.find((x) => x.name === 'idle') ?? ch.clips[0];
-      mixer.stopAllAction();
-      if (c) { const a = mixer.clipAction(c); a.reset().play(); mixer.setTime(Math.min(c.duration - 1e-3, c.duration * at)); }
+      poseFigure(rig, { phase: at * Math.PI * 2, pace: clip === 'walk' ? 0.85 : 0, time: at * 3,
+        strike: clip === 'attack' ? { dir: cm.held === 'pike' ? 'down' : 'right', progress: at, recovery: Math.max(0, (at - 0.8) * 5) } : undefined,
+        bow: clip === 'attack' && cm.held === 'bow' ? 1 - at : undefined,
+        death: clip === 'die' ? 1 : undefined });
       rig.updateMatrixWorld(true);
       const g = bake(rig);
       const mesh = new THREE.InstancedMesh(g, mat, CAPACITY0);
@@ -127,34 +123,19 @@ export class Crowd {
   }
 
   /** The pose a body is in now: struck mid-blow, walking, or at rest, on a slow flipbook clock. */
-  private poseOf(m: Mover, k: Kick | undefined): number {
-    if (k && k.attack > 0) return STRIKE[k.attack > 0.2 ? 0 : 1];
+  private poseOf(m: Mover, k: Kick | undefined, dt: number): number {
+    const phase = (this.strides.get(m.id) ?? m.id) + Math.hypot(m.vx,m.vy) * U * dt * 9;
+    this.strides.set(m.id,phase);
+    if (k && k.attack > 0) return STRIKE[Math.min(3, Math.floor((0.4 - Math.min(0.4, k.attack)) / 0.4 * 4))];
     const moving = Math.abs(m.vx) + Math.abs(m.vy) > 1;
-    if (moving) return WALK[Math.floor(this.t * 16 * Math.min(1.6, Math.max(0.6, Math.hypot(m.vx, m.vy) / 40)) + m.id) % WALK.length];
-    return IDLE[Math.floor(this.t * 1.5 + m.id * 0.37) % 2];
+    if (moving) return WALK[Math.floor(phase / (Math.PI * 2) * WALK.length) % WALK.length];
+    return IDLE[Math.floor(this.t * 1.5 + m.id * 0.37) % IDLE.length];
   }
 
   /**
    * Draw everyone the crowd handles this frame. Returns nothing; `drawn` lists who it took, so the
    * actor path leaves them alone. Bodies that died since last frame lie fallen and sink away.
    */
-  /** looks still to bake ahead of need, one a frame, so no fight stalls on a first sight of something */
-  private warmList: Warm[] | null = null;
-  private warmRev = -1;
-  private warm(): void {
-    if (this.warmRev !== MODELS.revision) {
-      this.warmRev = MODELS.revision;
-      const list: Warm[] = [];
-      for (const held of ['pike', 'club', 'bow', 'axe', 'none']) list.push({ figure: 'gnome', held, weapon: 0, kit: NO_KIT, hat: true, rank: 1, tint: 0xffffff });
-      for (const f of ['raider', 'brute', 'snatcher', 'shaman', 'wrecker', 'skulk']) for (const held of ['sword', 'axe', 'none']) list.push({ figure: f, held, weapon: 0, kit: NO_KIT, hat: false, rank: 1, tint: 0xffffff });
-      this.warmList = list.filter((w) => !this.looks.has(lookId(w)));
-    }
-    const next = this.warmList?.find(() => MODELS.characters.has(RIG));
-    if (!next) return;
-    this.warmList = this.warmList!.filter((x) => x !== next);
-    this.look(next);
-  }
-
   /** what the camera can see: bodies further than this from its focus are not posed or drawn */
   private cullX = 0;
   private cullZ = 0;
@@ -168,7 +149,7 @@ export class Crowd {
 
   sync(dt: number): void {
     this.t += dt;
-    this.warm();
+
     const s = this.scene, fog = s.fog;
     if (this.picks.size > s.agents.length * 2 + 64) { const live = new Set(s.agents.map((a) => (a as Mover).id)); for (const id of this.picks.keys()) if (!live.has(id)) this.picks.delete(id); } // the long-dead
     this.drawn.next();
@@ -188,8 +169,14 @@ export class Crowd {
       if (m) look.who[pose][n] = m;
       look.n[pose] = n + 1;
     };
+    // Full articulation around the player; instancing keeps the distant army inexpensive.
+    const close = s.agents.filter(a => !a.dead && !(a as Mover).hidden && modelFor(a as Mover) &&
+      Math.hypot(a.x - s.player.x, a.y - s.player.y) * U < 9)
+      .sort((a,b) => Math.hypot(a.x-s.player.x,a.y-s.player.y)-Math.hypot(b.x-s.player.x,b.y-s.player.y)).slice(0, 25);
+    const detailed = new Set(close.map(a=>a.id));
     for (const ag of s.agents) {
       const m = ag as Mover;
+      if (detailed.has(m.id)) continue;
       if (m.dead) continue;
       const pick = this.pickFor(m), cm = pick.cm, look = pick.look;
       if (!cm || !look) continue;
@@ -203,19 +190,19 @@ export class Crowd {
       // facing: turn toward the way it walks, smoothly
       let yaw = this.yaw.get(m.id) ?? 0;
       const moving = Math.abs(m.vx) + Math.abs(m.vy) > 1;
-      if (moving) { let d = Math.atan2(m.vx, m.vy) - yaw; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; yaw += d * Math.min(1, dt * 10); }
+      if (moving) { let d = Math.atan2(m.vx, m.vy) - yaw; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; yaw += d * (1 - Math.exp(-dt * 10)); }
       else if (m.dir) { const want = m.dir < 0 ? -Math.PI / 2 : Math.PI / 2; if (Math.abs(want - yaw) > 2.5) yaw = want; }
       this.yaw.set(m.id, yaw);
       const flash = m.hurtT < 0.15 && !m.blocked ? 1 : k && k.flash > 0 ? Math.min(1, k.flash * 6) : 0;
       this.col.setHex(cm.tint);
       if (flash) this.col.lerp(Crowd.FLASH, flash * 0.8);
-      put(look, this.poseOf(m, k), m, x, y, z, yaw, scaleOf(m), this.col, k?.squash ?? 0);
+      put(look, this.poseOf(m, k, dt), m, x, y, z, yaw, scaleOf(m), this.col, k?.squash ?? 0);
     }
     // the dead: whoever the crowd drew last frame and is now gone lies down where it fell, and sinks
     this.drawn.gone((m) => {
       const pk = this.picks.get(m.id), cm = pk?.cm ?? null, look = pk?.look ?? null;
       if (look && cm && m.dead) this.fallen.push({ look, x: m.x * U, y: groundHeight(m.x * U, m.y * U), z: m.y * U, yaw: this.yaw.get(m.id) ?? 0, scale: scaleOf(m), colour: new THREE.Color(cm.tint), t: 0 });
-      this.yaw.delete(m.id); this.picks.delete(m.id);
+      this.yaw.delete(m.id); this.strides.delete(m.id); this.picks.delete(m.id);
     });
     let kept = 0;
     for (const f of this.fallen) {

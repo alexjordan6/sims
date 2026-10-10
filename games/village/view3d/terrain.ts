@@ -7,7 +7,7 @@ import { MODELS } from './assets';
 import { FLORA_MODEL, pickModel } from './registry';
 
 // The ground and everything rooted in it, cut into chunks of CH x CH tiles. A chunk is rebuilt only
-// when one of its tiles changes (world.dirty) or is first explored, so a still world costs nothing.
+// when one of its tiles changes (world.dirty), so exploration cannot expose a missing landscape.
 // Flora is instanced per shape per chunk: twelve thousand trees are a few hundred draw calls at most,
 // and the camera's frustum skips whole chunks.
 
@@ -74,7 +74,11 @@ export class Terrain {
 
   markTile(i: number): void {
     const tx = i % COLS, ty = (i / COLS) | 0;
-    this.dirty.add(((ty / CH) | 0) * CX + ((tx / CH) | 0));
+    // Shared corner colours also change in neighbouring chunks along a border.
+    for (const dz of [-1, 0, 1]) for (const dx of [-1, 0, 1]) {
+      const x = tx + dx, z = ty + dz;
+      if (x >= 0 && z >= 0 && x < COLS && z < ROWS) this.dirty.add(Math.floor(z / CH) * CX + Math.floor(x / CH));
+    }
   }
 
   /** Rebuild whatever changed since last frame. Returns true if anything did (the minimap repaints then). */
@@ -83,7 +87,7 @@ export class Terrain {
     for (const i of w.dirty) this.markTile(i);
     const changed = w.dirty.size > 0;
     w.dirty.clear();
-    if (fog) { for (const i of fog.fresh) this.markTile(i); fog.fresh.length = 0; }
+    if (fog) fog.fresh.length = 0; // Exploration changes the minimap, not landscape geometry.
     if (!this.dirty.size) return changed;
     // a few chunks a frame at most, nearest the camera first is not worth the bookkeeping: there are only 40
     for (const c of this.dirty) this.build(c);
@@ -91,12 +95,7 @@ export class Terrain {
     return true;
   }
 
-  private seen(i: number): boolean {
-    const fog = this.scene.fog;
-    return !fog || !fog.enabled || fog.explored[i] === 1;
-  }
-
-  private groundColour(t: Tile, tx: number, ty: number): number {
+  private groundColour(t: Tile): number {
     switch (t.kind as TileKind) {
       case 'thicket': return COL.thicketGround;
       case 'wall': case 'gate': case 'stairs': return COL.dirt;
@@ -104,7 +103,7 @@ export class Terrain {
         if (t.building) return COL.building;
         if (t.trail) return COL.trail;
         if (t.tall) return COL.tall;
-        return hash(tx, ty) < 0.5 ? COL.grass : COL.grass2;
+        return COL.grass;
     }
   }
 
@@ -115,28 +114,39 @@ export class Terrain {
     // ---- ground: two flat-shaded triangles a tile, coloured by what the tile is ----
     const n = (x1 - x0) * (y1 - y0);
     const pos = new Float32Array(n * 18), col = new Float32Array(n * 18);
+    const normals = new Float32Array(n * 18);
+    const uv = new Float32Array(n * 12);
+    const shade = new Map<number, THREE.Color>();
     let o = 0;
-    const put = (x: number, z: number, r: number, g: number, b: number) => {
-      pos[o] = x; pos[o + 1] = groundHeight(x, z); pos[o + 2] = z;
-      col[o] = r; col[o + 1] = g; col[o + 2] = b; o += 3;
-    };
-    for (let ty = y0; ty < y1; ty++) for (let tx = x0; tx < x1; tx++) {
-      const i = ty * COLS + tx, t = w.tiles[i];
-      c3.setHex(this.seen(i) ? this.groundColour(t, tx, ty) : COL.unseen);
-      const { r, g, b } = c3;
-      // alternate the diagonal so the facets do not all lean one way
-      if ((tx + ty) & 1) {
-        put(tx, ty, r, g, b); put(tx, ty + 1, r, g, b); put(tx + 1, ty, r, g, b);
-        put(tx + 1, ty, r, g, b); put(tx, ty + 1, r, g, b); put(tx + 1, ty + 1, r, g, b);
-      } else {
-        put(tx, ty, r, g, b); put(tx, ty + 1, r, g, b); put(tx + 1, ty + 1, r, g, b);
-        put(tx, ty, r, g, b); put(tx + 1, ty + 1, r, g, b); put(tx + 1, ty, r, g, b);
+    const put = (x: number, z: number) => {
+      const key = z * (COLS + 1) + x;
+      let colour = shade.get(key);
+      if (!colour) {
+        colour = new THREE.Color(0,0,0);
+        for (const dz of [-1,0]) for (const dx of [-1,0]) {
+          const tile = w.get(Math.max(0,Math.min(COLS-1,x+dx)), Math.max(0,Math.min(ROWS-1,z+dz)))!;
+          colour.add(c3.setHex(this.groundColour(tile)));
+        }
+        colour.multiplyScalar(0.25 * (0.96 + Math.sin(x * 0.41 + z * 0.23) * 0.035 + Math.sin(z * 0.17 - x * 0.13) * 0.035));
+        shade.set(key,colour);
       }
+      pos[o] = x; pos[o+1] = groundHeight(x,z); pos[o+2] = z;
+      col[o] = colour.r; col[o+1] = colour.g; col[o+2] = colour.b;
+      const nx = (groundHeight(x-0.01,z)-groundHeight(x+0.01,z))/0.02;
+      const nz = (groundHeight(x,z-0.01)-groundHeight(x,z+0.01))/0.02;
+      const length = Math.hypot(nx,1,nz);
+      normals[o]=nx/length; normals[o+1]=1/length; normals[o+2]=nz/length;
+      uv[o / 3 * 2] = x / 2; uv[o / 3 * 2 + 1] = z / 2; o+=3;
+    };
+    for (let ty=y0;ty<y1;ty++) for(let tx=x0;tx<x1;tx++) {
+      put(tx,ty);put(tx,ty+1);put(tx+1,ty+1);
+      put(tx,ty);put(tx+1,ty+1);put(tx+1,ty);
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    geo.computeVertexNormals();
+    geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+    geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     geo.computeBoundingSphere();
     ch.ground.geometry.dispose();
     ch.ground.geometry = geo;
@@ -150,9 +160,7 @@ export class Terrain {
       l.push({ m: m4.clone().compose(v, q, sc), c: colour });
     };
     for (let ty = y0; ty < y1; ty++) for (let tx = x0; tx < x1; tx++) {
-      const i = ty * COLS + tx;
-      if (!this.seen(i)) continue;
-      const t = w.tiles[i], cx2 = tx + 0.5, cz = ty + 0.5;
+      const t = w.tiles[ty * COLS + tx], cx2 = tx + 0.5, cz = ty + 0.5;
       const r = hash(tx, ty, 1), turn = hash(tx, ty, 2) * Math.PI * 2;
       const jx = cx2 + (hash(tx, ty, 3) - 0.5) * 0.3, jz = cz + (hash(tx, ty, 4) - 0.5) * 0.3;
       // a model if it has landed (white: its own colours), else the placeholder in its flat colour

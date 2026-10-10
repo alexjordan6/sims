@@ -2,23 +2,12 @@ import * as THREE from 'three';
 import { lambert } from './fow';
 import { Mover, Villager, Player, Raider, type EnemyKind } from '../agents';
 
-/**
- * Bodies in the old RuneScape manner: a handful of flat-shaded boxes on long rigid limbs, a small head,
- * and a silhouette you can read across a field.
- *
- * The packs' own characters are chibi — three heads tall, the head 60% of the body. What they do have is
- * a skeleton worth keeping: `root -> (leg-left, leg-right, torso)` and `torso -> (arm-left, arm-right,
- * head)`, seven nodes, shared by every folk and grave character. Every one of its 32 clips animates
- * rotation only (plus the root's step), so the rest positions are ours to rewrite: push the hips down,
- * the shoulders up and the head where a head belongs, and all 32 clips still play. One joint per limb is
- * rigid-segment articulation, which is how those old models moved anyway.
- *
- * So: keep the rigs and the animations, hide the geometry, hang boxes off the bones.
- */
+// Rounded, articulated figures shared by the live actors and instanced distant crowd.
+// Elbows, wrists and knees are explicit joints; no character asset is needed at startup.
 
 /** Every length is a fraction of the figure's own standing height; `buildFigure` returns what that came to. */
 export interface Spec {
-  /** the head cube's height (its width is a little narrower) */
+  /** head height (its width is a little narrower) */
   head: number;
   torsoH: number; torsoW: number; torsoD: number;
   /** shoulder to fingertips, the hand included */
@@ -32,7 +21,8 @@ export interface Spec {
 
 /** the gap between the shoulders and the chin */
 const NECK = 0.02;
-const BOX = new THREE.BoxGeometry(1, 1, 1);
+const ROUND = new THREE.SphereGeometry(0.5, 12, 10);
+const LIMB = new THREE.CapsuleGeometry(0.5, 1, 4, 10).scale(1, 0.5, 1);
 const CONE = new THREE.ConeGeometry(0.5, 1, 6);
 const RING = new THREE.CylinderGeometry(0.5, 0.5, 1, 8);
 /**
@@ -53,12 +43,12 @@ export function wearing(k: Kit): boolean { return k.helmet > 0 || k.chest > 0 ||
 const RANK_BAND = [0, 0, 0xb0703a, 0xc8ccd4, 0xe3b341, 0xe3b341];
 
 /**
- * One flat-shaded box. `y` is its base rather than its centre, so a limb hangs from a joint at the
+ * One smooth, rounded body volume. `y` is its base rather than its centre, so a limb hangs from a joint at the
  * origin by giving a negative base. (actors.ts has its own `piece` for world-space art; this one keeps
  * figure units and casts a shadow.)
  */
-function slab(colour: number, w: number, h: number, d: number, x: number, y: number, z: number, g: THREE.BufferGeometry = BOX): THREE.Mesh {
-  const m = new THREE.Mesh(g, lambert({ color: colour }));
+function slab(colour: number, w: number, h: number, d: number, x: number, y: number, z: number, g: THREE.BufferGeometry = ROUND): THREE.Mesh {
+  const m = new THREE.Mesh(g, lambert({ color: colour, flatShading: false }));
   m.scale.set(w, h, d);
   m.position.set(x, y + h / 2, z);
   m.castShadow = true;
@@ -78,56 +68,61 @@ function cap(s: Spec, tier: number): THREE.Mesh[] {
 }
 
 /**
- * Rebuild `rig` as a figure of `s`: the pack's meshes step aside, the bones move to where this body's
- * joints belong, and boxes hang off them. Returns the standing height, in the same units — the caller
- * scales the rig by `PERSON / height`. Returns 0 if this is not one of the pack rigs, leaving it alone.
+ * Build rounded body volumes around a hierarchy of movable joints. Returns standing height;
+ * callers scale the rig by `PERSON / height` before attaching world-sized equipment.
  */
 export function buildFigure(rig: THREE.Object3D, s: Spec, wear: { cap?: number; circlet?: boolean; kit?: Kit } = {}): number {
-  const bone = (n: string) => rig.getObjectByName(n);
-  const torso = bone('torso'), head = bone('head');
-  const arms = [bone('arm-left'), bone('arm-right')], legs = [bone('leg-left'), bone('leg-right')];
-  if (!torso || !head || arms.some((b) => !b) || legs.some((b) => !b)) return 0;
-
-  // the pack's own body steps aside; `bake()` and the renderer both honour `visible`, so the crowd
-  // and the full actors drop it alike
-  rig.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.visible = false; });
-
-  const hip = s.legLen, shoulder = hip + s.torsoH, height = shoulder + NECK + s.head;
-  const hand = s.armLen * 0.26, sleeve = s.armLen - hand;
-  const boot = s.legLen * 0.17, shank = s.legLen - boot;
-
-  // ---- the joints, moved to where this body wants them (local to each bone's parent) ----
-  torso.position.set(0, hip, 0);
-  legs[0]!.position.set(s.legW * 0.85, hip, 0); // a stance wide enough to read two legs from overhead
-  legs[1]!.position.set(-s.legW * 0.85, hip, 0);
-  const armX = s.torsoW / 2 + s.armW / 2;
-  arms[0]!.position.set(armX, s.torsoH - s.armW * 0.6, 0);
-  arms[1]!.position.set(-armX, s.torsoH - s.armW * 0.6, 0);
-  head.position.set(0, s.torsoH + NECK, 0);
-
-  // ---- the body, hung off them ----
-  const chest = slab(s.coat, s.torsoW, s.torsoH, s.torsoD, 0, 0, 0);
-  if (s.hunch) chest.rotation.x = s.hunch; // on the mesh, not the bone: the clips drive the bone
-  torso.add(chest);
-  head.add(slab(s.skin, s.head * 0.86, s.head, s.head * 0.8, 0, 0, 0));
+  // A complete articulated rig is available immediately, even before any asset loads.
+  rig.clear();
+  delete rig.userData.joints;
+  const joint = (name: string, parent: THREE.Object3D, x=0, y=0, z=0) => {
+    const node = new THREE.Group(); node.name = name; node.position.set(x,y,z); parent.add(node); return node;
+  };
+  const root = joint('root', rig);
+  const hip = s.legLen, height = hip + s.torsoH + NECK + s.head;
+  const torso = joint('torso', root, 0, hip);
+  const head = joint('head', torso, 0, s.torsoH + NECK);
   const kit = wear.kit ?? NO_KIT;
-  // a helm takes the cap's place, the way a helmet does: you wear one or the other
+  torso.add(slab(s.coat, s.torsoW, s.torsoH * 1.16, s.torsoD * 1.22, 0, -s.torsoH * 0.05, 0));
+  torso.add(slab(s.coat, s.torsoW * 0.85, s.torsoH * 0.35, s.torsoD * 1.08, 0, -s.torsoH * 0.2, 0));
+  torso.add(slab(0x483528, s.torsoW * 0.89, 0.035, s.torsoD * 1.13, 0, 0.025, 0, RING));
+  torso.add(slab(0xc7a46b, 0.036, 0.038, 0.015, 0, 0.023, s.torsoD * 0.57));
+  torso.add(slab(s.skin, s.head * 0.4, NECK * 2, s.head * 0.42, 0, s.torsoH - NECK, 0));
+  head.add(slab(s.skin, s.head * 0.86, s.head, s.head * 0.85, 0, 0, 0));
+  head.add(slab(s.skin, s.head * 0.22, s.head * 0.24, s.head * 0.27, 0, s.head * 0.35, s.head * 0.4));
+  for (const sign of [-1, 1]) {
+    head.add(slab(s.skin, s.head * 0.17, s.head * 0.28, s.head * 0.18, sign * s.head * 0.42, s.head * 0.35, 0));
+    head.add(slab(0x201c19, s.head * 0.085, s.head * 0.07, s.head * 0.045, sign * s.head * 0.19, s.head * 0.57, s.head * 0.385));
+    head.add(slab(0x493322, s.head * 0.23, s.head * 0.045, s.head * 0.07, sign * s.head * 0.19, s.head * 0.68, s.head * 0.35));
+  }
+  head.add(slab(0x584332, s.head * 0.88, s.head * 0.4, s.head * 0.87, 0, s.head * 0.68, -s.head * 0.035));
+  if (wear.cap) head.add(slab(0xc9baa0, s.head * 0.74, s.head * 0.53, s.head * 0.5, 0, -s.head * 0.06, s.head * 0.25));
   if (kit.helmet > 0) head.add(...helm(s, kit.helmet, wear.cap ?? 1));
   else if (wear.cap) head.add(...cap(s, wear.cap));
-  if (wear.circlet) head.add(slab(0xc8a040, s.head * 0.95, s.head * 0.11, s.head * 0.9, 0, s.head * 0.8, 0));
+  if (wear.circlet) head.add(slab(0xc8a040, s.head * 0.96, s.head * 0.1, s.head * 0.94, 0, s.head * 0.76, 0, RING));
   if (kit.chest > 0) torso.add(...plate(s, kit.chest));
-  for (const a of arms) {
-    a!.add(slab(s.coat, s.armW, sleeve, s.armW, 0, -sleeve, 0));
-    a!.add(slab(s.skin, s.armW * 1.1, hand, s.armW * 1.1, 0, -s.armLen, 0)); // a mitten, as they all were
-    if (kit.chest > 0) a!.add(slab(ARMOUR_METAL[kit.chest], s.armW * 1.3, s.armW * 1.1, s.armW * 1.3, 0, -s.armW * 0.5, 0)); // a pauldron
+  for (const [side, sign] of [['left', 1], ['right', -1]] as const) {
+    const upper = s.armLen * 0.51, lower = s.armLen * 0.49;
+    const arm = joint('arm-' + side, torso, sign * (s.torsoW * 0.48 + s.armW * 0.28), s.torsoH * 0.88);
+    arm.add(slab(s.coat, s.armW * 1.18, upper * 1.06, s.armW * 1.18, 0, -upper, 0, LIMB));
+    const elbow = joint('elbow-' + side, arm, 0, -upper);
+    elbow.add(slab(s.coat, s.armW * 0.84, s.armW * 0.84, s.armW * 0.84, 0, -s.armW * 0.42, 0));
+    elbow.add(slab(s.coat, s.armW, lower * 0.8, s.armW, 0, -lower * 0.8, 0, LIMB));
+    elbow.add(slab(0x493728, s.armW * 1.04, lower * 0.25, s.armW * 1.04, 0, -lower * 0.83, 0));
+    const hand = joint('hand-' + side, elbow, 0, -lower * 0.94);
+    hand.add(slab(s.skin, s.armW * 0.9, s.armW * 1.2, s.armW * 0.75, 0, -s.armW * 0.4, 0));
+    if (kit.chest > 0) arm.add(slab(ARMOUR_METAL[kit.chest], s.armW * 1.65, s.armW * 1.2, s.armW * 1.5, 0, -s.armW * 0.55, 0));
+    const thigh = s.legLen * 0.5, shin = s.legLen * 0.5;
+    const leg = joint('leg-' + side, root, sign * s.legW * 0.78, hip);
+    leg.add(slab(s.trouser, s.legW * 1.13, thigh * 1.05, s.legW * 1.15, 0, -thigh, 0, LIMB));
+    const knee = joint('knee-' + side, leg, 0, -thigh);
+    knee.add(slab(s.trouser, s.legW * 0.86, s.legW * 0.86, s.legW * 0.86, 0, -s.legW * 0.43, 0));
+    knee.add(slab(s.trouser, s.legW * 0.9, shin * 0.78, s.legW * 0.92, 0, -shin * 0.78, 0, LIMB));
+    knee.add(slab(s.boot, s.legW * 1.05, shin * 0.42, s.legW * 1.75, 0, -shin, s.legW * 0.3));
+    if (kit.legs > 0) knee.add(slab(ARMOUR_METAL[kit.legs], s.legW * 1.12, shin * 0.7, s.legW * 1.12, 0, -shin * 0.68, s.legW * 0.1));
   }
-  for (const l of legs) {
-    l!.add(slab(s.trouser, s.legW, shank, s.legW, 0, -shank, 0));
-    l!.add(slab(s.boot, s.legW * 1.1, boot, s.legW * 1.75, 0, -s.legLen, s.legW * 0.35)); // a flat foot, forward
-    if (kit.legs > 0) l!.add(slab(ARMOUR_METAL[kit.legs], s.legW * 1.16, shank * 0.62, s.legW * 1.16, 0, -shank * 0.62, 0)); // a greave
-  }
-  // the shield rides on the off hand
-  if (kit.shield > 0) arms[0]!.add(...shieldOn(s, kit.shield));
+  if (kit.shield > 0) rig.getObjectByName('elbow-left')!.add(...shieldOn({ ...s, armLen: s.armLen * 0.48 }, kit.shield));
+  rig.userData.spec = s;
   return height;
 }
 
@@ -163,7 +158,7 @@ function shieldOn(s: Spec, tier: number): THREE.Mesh[] {
 
 // ---- who is built how -------------------------------------------------------------------------------
 
-const HUMAN: Spec = { head: 0.17, torsoH: 0.3, torsoW: 0.32, torsoD: 0.18, armLen: 0.36, armW: 0.09, legLen: 0.48, legW: 0.11, skin: 0xe0a878, coat: 0x3a5a9a, trouser: 0x4a3a2a, boot: 0x33261c };
+const HUMAN: Spec = { head: 0.16, torsoH: 0.32, torsoW: 0.27, torsoD: 0.15, armLen: 0.39, armW: 0.075, legLen: 0.5, legW: 0.095, skin: 0xe0a878, coat: 0x3a5a9a, trouser: 0x4a3a2a, boot: 0x33261c };
 /** a gnome is small folk, not a shrunk human: more head, less leg */
 const GNOME: Spec = { ...HUMAN, head: 0.22, torsoH: 0.3, torsoW: 0.3, armLen: 0.3, legLen: 0.38, legW: 0.1, skin: 0xe8b888, coat: 0x4a7a3a, trouser: 0x6a4a2a };
 

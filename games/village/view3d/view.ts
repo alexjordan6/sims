@@ -14,7 +14,7 @@ import { updateFow, setFowOn } from './fow';
 import { Room3d } from './room';
 import { Dome } from './dome';
 import { MODELS, loadModels } from './assets';
-import { propKeys, characterKeys } from './registry';
+import { propKeys } from './registry';
 import { KIT_PIECES, KIT_PROPS } from './kit';
 import { U, WALL_UNITS } from './models';
 
@@ -124,7 +124,7 @@ export class View {
     this.resize();
     this.bindInput(canvas);
     // the packs load in the background; the placeholders stand in until they land
-    void loadModels([...propKeys(), ...KIT_PROPS].map((key) => ({ key, centre: true })).concat(KIT_PIECES.map((key) => ({ key, centre: false }))), characterKeys());
+    void loadModels([...propKeys(), ...KIT_PROPS].map((key) => ({ key, centre: true })).concat(KIT_PIECES.map((key) => ({ key, centre: false }))), []);
   }
 
   private resize(): void {
@@ -180,8 +180,10 @@ export class View {
   /** Turn the camera by a mouse movement, in raw device pixels. */
   private turn(dx: number, dy: number): void {
     // a blow held back, or a guard held up, reads the same mouse: whichever way it travels picks the side
-    this.scene.player?.aimWind(dx, dy);
-    this.scene.player?.aimGuard(dx, dy);
+    if (!this.freeLook) {
+      this.scene.player?.aimWind(dx, dy);
+      this.scene.player?.aimGuard(dx, dy);
+    }
     if ((this.scene.player?.wind || this.scene.player?.guard) && !this.freeLook) return;
     const k = p.lookSpeed * 0.0022;
     // the camera sits at +sin(yaw), +cos(yaw) and looks inward, so a rightward push wants yaw to fall
@@ -250,7 +252,14 @@ export class View {
       s.onPointerMove(this.ptrAt(e));
     });
     canvas.addEventListener('pointerdown', (e) => {
-      if (e.button === 1) { e.preventDefault(); this.freeLook = true; return; }
+      if (e.button === 1) {
+        e.preventDefault(); this.freeLook = true;
+        if (!this.looking) {
+          this.dragLook = true;
+          try { canvas.setPointerCapture(e.pointerId); } catch { /* pointer already released */ }
+        }
+        return;
+      }
       if (s.interior.active) { const q = this.room.floorAt(e.clientX, e.clientY, canvas); if (q) s.interior.tap(q.x, q.y, false); return; }
       // the first click takes the pointer; after that the mouse is the look and the clicks are the fight
       if (!this.looking) { this.grabPointer(); if (!this.noLock) return; }
@@ -260,7 +269,7 @@ export class View {
       s.onPointerDown(this.crosshairPtr());
     });
     canvas.addEventListener('pointerup', (e) => {
-      if (e.button === 1) { this.freeLook = false; return; }
+      if (e.button === 1) { this.freeLook = false; this.dragLook = e.buttons !== 0; return; }
       if (e.button === 2) { s.dropGuard(); this.dragLook = false; return; }
       if (e.button === 0 && s.releaseAttack()) { this.dragLook = false; return; } // the blow goes
       if (this.looking && e.button !== 2) s.wandUp(this.crosshairPtr());
@@ -406,11 +415,11 @@ export class View {
     // how far the eye reaches is the hour's business, not the zoom's: close behind the head the old
     // dist-relative fog shut the world down to six tiles, and closed it further the more you zoomed in
     const fog = this.world.fog as THREE.Fog;
-    fog.color.setHex(sky.sky); fog.near = sky.fogD * 0.5; fog.far = sky.fogD + 6;
+    fog.color.setHex(sky.sky); fog.near = 38 + (1 - sky.night) * 32; fog.far = 110 + (1 - sky.night) * 70;
     // nothing past the fog is drawn at all
     if (Math.abs(this.camera.far - (fog.far + 4)) > 0.5) { this.camera.far = fog.far + 4; this.camera.updateProjectionMatrix(); }
     this.renderer.setClearColor(sky.sky);
-    this.dome.sync(this.camera, sky.sky, this.camera.far);
+    this.dome.sync(this.camera, sky.sky, this.camera.far, this.t, sky.night);
     this.hemi.color.setHex(sky.amb); this.hemi.intensity = sky.ambI * 2.2;
     this.sun.color.setHex(sky.sun); this.sun.intensity = sky.sunI * 1.6;
     const arc = sky.arc;
@@ -433,7 +442,7 @@ export class View {
     // only what the camera can reach is posed. A low view looks down a long wedge rather than at a disc
     // under it, so the circle is sized by how far the eye actually sees and pushed out ahead of the head -
     // otherwise an army you walk toward pops into being halfway there
-    const reach = fog.far * 0.8 + 16, ahead = reach * 0.35;
+    const reach = fog.far + 12, ahead = 0;
     const cullX = this.focus.x - Math.sin(this.yaw) * ahead, cullZ = this.focus.z - Math.cos(this.yaw) * ahead;
     this.camera.updateMatrixWorld();
     this.frustum.setFromProjectionMatrix(this.projView.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse));

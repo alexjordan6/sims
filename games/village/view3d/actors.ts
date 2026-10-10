@@ -9,21 +9,25 @@ import { BOAR, FOODS, ITEM, p } from '../config';
 import type { Item } from '../items';
 import type { VillageScene } from '../main';
 import { mat, U, WALL_UNITS } from './models';
-import { lambert, fogify } from './fow';
+import { lambert } from './fow';
 import { buildFigure, specFor, WEAPON_METAL, NO_KIT, type Spec, type Kit } from './figure';
-import * as SkeletonUtils from 'three/addons/utils/SkeletonUtils.js';
-import { MODELS } from './assets';
+import { poseFigure } from './motion';
+import { WeaponTrail } from './weapon-trail';
 import { RIG } from './registry';
 import { groundHeight } from './terrain';
 
-// Everyone who moves, and everything lying on the ground. Placeholder people are a few boxes —
-// legs, body, head, and what they hold — until the character packs land; the look comes from the
-// same lookFor() the inspector portraits use, so a role, a weapon or a gnome hat shows the same here.
+// Live articulated characters, animals, projectiles and dropped equipment.
+// Equipment is shared with the distant crowd and follows the same lookFor() as the inspector.
 
 const box = new THREE.BoxGeometry(1, 1, 1);
 const cone = new THREE.ConeGeometry(0.5, 1, 6);
 const ico = new THREE.IcosahedronGeometry(0.5, 0);
 const ring = new THREE.CylinderGeometry(0.5, 0.5, 1, 8);
+const bladeOutline = new THREE.Shape();
+bladeOutline.moveTo(-0.045, 0.14); bladeOutline.lineTo(0.045, 0.14);
+bladeOutline.lineTo(0.033, 0.69); bladeOutline.lineTo(0, 0.83);
+bladeOutline.lineTo(-0.033, 0.69); bladeOutline.closePath();
+const bladeGeometry = new THREE.ExtrudeGeometry(bladeOutline, { depth: 0.022, bevelEnabled: true, bevelSegments: 1, steps: 1, bevelSize: 0.006, bevelThickness: 0.005 }).translate(0, 0, -0.011);
 /** a soldier's rank on its red cap: none for a Recruit, then a band of bronze, silver, gold, and gold with a white plume at Elite */
 const RANK_BAND = [0, 0, 0xb0703a, 0xc8ccd4, 0xe3b341, 0xe3b341];
 export function rankOf(m: Mover): number { return m instanceof Villager && m.role === 'soldier' && m.isAdult ? m.tier : 1; }
@@ -40,7 +44,7 @@ export function rankPieces(tier: number, k: number, brim: number): THREE.Mesh[] 
  */
 export function grip(held: THREE.Object3D, k: number, s?: Spec): void {
   // the idle pose splays the arm about 32 degrees out; the tool is stood back up out of the fist
-  if (s) { held.position.set(0, -(s.armLen - s.armW * 0.9), s.armW * 0.6); held.rotation.set(-0.1, 0, -0.56); return; }
+  if (s) { held.position.set(0, 0, 0); held.rotation.set(held.userData.kind === 'pike' ? 0 : Math.PI, 0, 0); return; }
   held.position.set(-0.05 / k, -0.32 / k, 0.06 / k);
   held.rotation.x = Math.PI / 2;
 }
@@ -73,13 +77,18 @@ const FOE: Record<EnemyKind, { body: number; head: number; eyes: number }> = {
  */
 export function heldMesh(held: string, tier = 0): THREE.Object3D | null {
   const g = new THREE.Group();
+  g.userData.kind = held;
   const m = WEAPON_METAL[Math.max(0, Math.min(WEAPON_METAL.length - 1, tier))];
   const wood = 0x6a4a2a, grip = 0x3a2a1c;
   switch (held) {
-    case 'sword': // a grip, a crossguard, and a blade that widens a little off the hilt
-      g.add(piece(grip, 0.05, 0.1, 0.05, 0, 0, 0), piece(m, 0.2, 0.04, 0.06, 0, 0.1, 0),
-        piece(m, 0.09, 0.46, 0.035, 0, 0.14, 0), piece(m, 0.05, 0.08, 0.03, 0, 0.6, 0, cone));
+    case 'sword': {
+      const steel = tier === 1 ? 0xc7a16b : 0xc6d5e0;
+      const blade = new THREE.Mesh(bladeGeometry, lambert({ color: steel, flatShading: false }));
+      g.add(piece(grip, 0.045, 0.12, 0.045, 0, 0, 0, cyl), piece(steel, 0.23, 0.035, 0.06, 0, 0.11, 0), blade,
+        piece(steel, 0.075, 0.06, 0.06, 0, -0.055, 0, ico));
+      const tip = new THREE.Object3D(); tip.name = 'weapon-tip'; tip.position.y = 0.83; g.add(tip);
       break;
+    }
     case 'club': g.add(piece(wood, 0.07, 0.38, 0.07, 0, 0, 0), piece(wood, 0.12, 0.16, 0.12, 0, 0.36, 0)); break;
     case 'axe': g.add(piece(wood, 0.05, 0.6, 0.05, 0, 0, 0), piece(m, 0.06, 0.2, 0.05, 0.07, 0.4, 0), piece(m, 0.1, 0.14, 0.04, 0.12, 0.43, 0)); break;
     case 'hoe': g.add(piece(wood, 0.05, 0.75, 0.05, 0, 0, 0), piece(m, 0.18, 0.05, 0.06, 0.06, 0.7, 0)); break;
@@ -115,11 +124,11 @@ interface Actor {
   carry?: THREE.Mesh;
   /** death animation clock, once the agent is gone */
   dying?: number;
-  /** a pack character's animation, when it has one */
+  /** continuous joint animation for humanoids */
   anim?: Anim;
 }
 
-interface Anim { mixer: THREE.AnimationMixer; actions: Map<string, THREE.AnimationAction>; current: string; rig: THREE.Object3D }
+interface Anim { rig: THREE.Object3D; phase: number }
 
 /** how tall a grown person stands, in units */
 export const PERSON = 1.25;
@@ -131,48 +140,20 @@ export function modelFor(m: Mover): { key: string } | null {
   return null;
 }
 
-/** Build a figure for a mover on its own copy of the rig: its own materials, a mixer, its tool in hand. */
+/** Build the mover's rig, materials and hand-held equipment. */
 function makeCharacter(m: Mover, md: { key: string }): { body: THREE.Group; anim: Anim } | null {
-  const ch = MODELS.characters.get(md.key);
-  if (!ch) return null;
-  const body = new THREE.Group();
-  const rig = SkeletonUtils.clone(ch.scene);
+  void md;
+  const body = new THREE.Group(), rig = new THREE.Group();
   const fig = specFor(m);
-  // the cap and the circlet go on with the body: the figure knows the head it has to fit them to
-  const wear = { cap: m instanceof Villager ? rankOf(m) : 0, circlet: m instanceof Player, kit: kitOf(m) };
-  const built = fig ? buildFigure(rig, fig.spec, wear) : 0; // 0: a rig we can't dress, so the pack's own body stands
-  const k = PERSON / (built || ch.height);
-  rig.scale.setScalar(k);
-  rig.traverse((o) => {
-    if (!(o instanceof THREE.Mesh)) return;
-    const mt = (o.material as THREE.MeshLambertMaterial).clone(); // every actor flashes on its own
-    if (m instanceof Villager && m.elder) mt.color.multiplyScalar(0.85);
-    fogify(mt); // a clone keeps the shader hook but not its defines
-    o.material = mt;
-  });
-  body.add(rig);
-  const hand = rig.getObjectByName('arm-right');
+  if (!fig) return null;
+  const built = buildFigure(rig, fig.spec, { cap: m instanceof Villager ? rankOf(m) : 0, circlet: m instanceof Player, kit: kitOf(m) });
+  const k = PERSON / built; rig.scale.setScalar(k); body.add(rig);
+  const hand = rig.getObjectByName('hand-right');
   const look = lookFor(m), held = look ? heldMesh(look.held, weaponTier(m, look.held)) : null;
-  if (held && hand) { held.scale.setScalar(1 / k); grip(held, k, fig?.spec); hand.add(held); }
-  else if (held) { held.position.set(0.3, 0.42, 0.12); held.rotation.x = 0.5; body.add(held); }
-  const mixer = new THREE.AnimationMixer(rig);
-  const actions = new Map<string, THREE.AnimationAction>();
-  for (const clip of ch.clips) actions.set(clip.name, mixer.clipAction(clip));
-  for (const one of ['die', 'attack-melee-right', 'interact-right', 'pick-up']) { const a = actions.get(one); if (a) { a.setLoop(THREE.LoopOnce, 1); a.clampWhenFinished = true; } }
-  const idle = actions.get('idle'); idle?.play();
-  mixer.update(Math.random() * 2); // not everyone breathes in step
-  return { body, anim: { mixer, actions, current: 'idle', rig } };
-}
-
-/** Cross-fade an actor to an animation (one-shots restart). */
-function play(an: Anim, name: string, fade = 0.15): void {
-  const next = an.actions.get(name);
-  if (!next) return;
-  if (an.current === name && next.loop !== THREE.LoopOnce) return;
-  const prev = an.actions.get(an.current);
-  next.reset().setEffectiveWeight(1).play();
-  if (prev && prev !== next) prev.crossFadeTo(next, fade, false);
-  an.current = name;
+  rig.userData.held = look?.held;
+  if (held && hand) { held.name = 'held-weapon'; held.scale.setScalar(1 / k); grip(held, k, fig.spec); hand.add(held); }
+  poseFigure(rig, { phase: m.id, pace: 0, time: m.id });
+  return { body, anim: { rig, phase: m.id } };
 }
 
 /** Build the placeholder for one mover. Front faces +z. */
@@ -234,7 +215,7 @@ function actorKey(m: Mover): string {
   const look = lookFor(m), md = modelFor(m), a = m.armor;
   // the gear is part of the key: a body that re-arms is rebuilt wearing what it just picked up
   const gear = `${a.helmet}${a.chest}${a.legs}${a.shield}|${m.weapons.melee},${m.weapons.bow}`;
-  return `${md && MODELS.characters.has(md.key) ? md.key : 'box'}|${m.constructor.name}|${look?.held ?? ''}|${look?.body ?? ''}|${gear}|${m instanceof Villager ? m.role + m.elder + rankOf(m) : ''}|${m instanceof Raider ? m.kind + m.boss : ''}`;
+  return `${md ? 'articulated' : 'animal'}|${m.constructor.name}|${look?.held ?? ''}|${look?.body ?? ''}|${gear}|${m instanceof Villager ? m.role + m.elder + rankOf(m) : ''}|${m instanceof Raider ? m.kind + m.boss : ''}`;
 }
 
 export function scaleOf(m: Mover): number {
@@ -266,14 +247,23 @@ export class Actors {
   /** body meshes a pointer can land on, rebuilt as agents come and go */
   readonly pickable: THREE.Object3D[] = [];
   private t = 0;
+  private weaponTrail = new WeaponTrail();
 
-  constructor(private scene: VillageScene) { this.group.add(this.hpBars.group); }
+  constructor(private scene: VillageScene) { this.group.add(this.hpBars.group, this.weaponTrail.mesh); }
 
   clear(): void {
-    for (const a of this.actors.values()) this.group.remove(a.group);
-    for (const a of this.dying) this.group.remove(a.group);
+    this.weaponTrail.clear();
+    for (const a of this.actors.values()) this.retire(a);
+    for (const a of this.dying) this.retire(a);
     for (const i of this.items.values()) this.group.remove(i);
     this.actors.clear(); this.dying = []; this.items.clear(); this.kicks.clear(); this.pickable.length = 0;
+  }
+
+  private retire(a: Actor): void {
+    this.group.remove(a.group);
+    const materials = new Set<THREE.Material>();
+    a.body.traverse(o => { if (o instanceof THREE.Mesh) for (const m of Array.isArray(o.material) ? o.material : [o.material]) materials.add(m); });
+    materials.forEach(m => m.dispose());
   }
 
   kick(id: number): Kick {
@@ -312,7 +302,7 @@ export class Actors {
         // drawn by the crowd: drop any actor it had before its look baked, and only keep its hp bar
         // (on raiders, and on the one gnome you are looking at — a thousand bars would be noise)
         const old = this.actors.get(m.id);
-        if (old) { this.group.remove(old.group); this.actors.delete(m.id); pickDirty = true; }
+        if (old) { this.retire(old); this.actors.delete(m.id); pickDirty = true; }
         const seenHere = !m.hidden && !(m.hostile && fog && fog.visibleAt(m.x, m.y) <= 0.35);
         this.bar(m, seenHere && m.hp < m.maxHp && (m.hostile || s.selected === m));
         continue;
@@ -326,7 +316,7 @@ export class Actors {
       }
       let a = this.actors.get(m.id);
       const key = actorKey(m);
-      if (a && a.key !== key) { this.group.remove(a.group); a = undefined; pickDirty = true; }
+      if (a && a.key !== key) { this.retire(a); a = undefined; pickDirty = true; }
       if (!a) {
         const { body, anim } = makeActor(m);
         const group = new THREE.Group();
@@ -342,11 +332,28 @@ export class Actors {
       const bob = !a.anim && moving && !(m instanceof Arrow) && !(m instanceof Bolt) ? Math.abs(Math.sin(this.t * 12 + m.id)) * 0.06 : 0;
       if (a.anim) {
         const sp = Math.hypot(m.vx, m.vy);
-        if (k && k.attack > 0) { if (a.anim.current !== 'attack-melee-right') play(a.anim, 'attack-melee-right', 0.05); }
-        else play(a.anim, sp > 70 ? 'sprint' : moving ? 'walk' : 'idle');
-        a.anim.mixer.update(dt * (k && k.attack > 0 ? 1 : moving ? Math.max(0.25, Math.min(1.8, sp / 45)) : 1));
-        if (m instanceof Player) this.posePlayer(a.anim, m);
+        a.anim.phase += sp * U * dt * 9;
+        const sw = m instanceof Player ? m.swing : null;
+        const attack = m instanceof Raider ? m.attack : null;
+        const strike = sw ? {
+          dir: sw.dir ?? (sw.stage === 1 ? 'left' : 'right'),
+          progress: Math.max(0, Math.min(1, (sw.t - sw.from) / (sw.to - sw.from))),
+          recovery: Math.max(0, (sw.t - sw.to) / Math.max(0.01, sw.dur - sw.to)),
+          preparation: Math.min(1, sw.t / Math.max(0.01, sw.from)),
+        } : attack ? { dir: attack.dir ?? 'right', progress: Math.max(0, (attack.t - attack.windup) / 0.2), recovery: 0 }
+          : k && k.attack > 0 ? { dir: 'right', progress: (0.4 - k.attack) / 0.24, recovery: Math.max(0, (0.16 - k.attack) / 0.16) } : undefined;
+        poseFigure(a.anim.rig, {
+          phase: a.anim.phase, pace: Math.min(1, sp / 48), time: this.t + m.id,
+          side: (m.vx * Math.cos(a.yaw) - m.vy * Math.sin(a.yaw)) / 70,
+          backwards: m.vx * Math.sin(a.yaw) + m.vy * Math.cos(a.yaw) < -1,
+          wind: m instanceof Player && (m.wind || m.guard || (sw && sw.t < sw.from)) ? m.weaponMotion : undefined,
+          guard: m instanceof Player && !!m.guard,
+          bow: m instanceof Player ? m.draw : a.anim.rig.userData.held === 'bow' && strike ? Math.max(0, 1 - strike.progress) : undefined,
+          strike: a.anim.rig.userData.held === 'pike' && strike ? { ...strike, dir: 'down' } : strike,
+          hurt: m.hurtT < 0.18 ? 1 - m.hurtT / 0.18 : 0,
+        });
       }
+
       a.group.position.set(x + (k?.recoilX ?? 0), groundHeight(x, z) + standHeight(m) + bob, z + (k?.recoilZ ?? 0));
       // facing: arrows along their flight, the head along its aim or facing, everyone else the way they walk
       let fx = 0, fz = 0;
@@ -377,6 +384,10 @@ export class Actors {
         if (m instanceof Player && m.roll) a.body.rotation.x = m.roll.t / Math.max(0.01, p.rollTime) * Math.PI * 2;
       }
       if (m instanceof Swarm) a.body.children.forEach((c, i) => { c.position.x = Math.sin(this.t * 9 + i * 1.7) * 0.3; c.position.z = Math.cos(this.t * 7 + i * 2.1) * 0.3; });
+      if (m instanceof Player) {
+        const sw = m.swing;
+        this.weaponTrail.update(a.anim?.rig.getObjectByName('held-weapon'), !!sw && sw.t >= sw.from && sw.t <= sw.to, dt);
+      }
       const hostileUnseen = m.hostile && fog && fog.visibleAt(m.x, m.y) <= 0.35;
       a.group.visible = !m.hidden && !(m instanceof Raider && m.lurking) && !hostileUnseen;
       // the hit flash, a telegraph's glow, or nothing
@@ -398,11 +409,11 @@ export class Actors {
     this.dying = this.dying.filter((a) => {
       a.dying! += dt;
       const f = Math.min(1, a.dying! / (a.anim ? 1.2 : 0.6));
-      if (a.anim) { if (a.anim.current !== 'die') play(a.anim, 'die', 0.05); a.anim.mixer.update(dt); }
+      if (a.anim) poseFigure(a.anim.rig, { phase: 0, pace: 0, time: this.t, death: f });
       else a.body.rotation.x = -f * Math.PI / 2;
       a.group.position.y -= dt * 0.25 * f;
       for (const mt of a.mats) { mt.transparent = true; mt.opacity = 1 - Math.max(0, (f - 0.65) / 0.35); }
-      if (f >= 1) { this.group.remove(a.group); return false; }
+      if (f >= 1) { this.retire(a); return false; }
       return true;
     });
     // kicks fade
@@ -416,33 +427,6 @@ export class Actors {
 
   /** every hp bar this frame: one batch of camera-facing quads (two draws for all of them) */
   private hpBars = new Bars(10);
-  /** Override the upper body after the walking mixer: feet remain free to strafe. */
-  private posePlayer(an: Anim, m: Player): void {
-    const right = an.rig.getObjectByName('arm-right'), left = an.rig.getObjectByName('arm-left');
-    const torso = an.rig.getObjectByName('torso');
-    if (!right || !left || !torso) return;
-    const w = m.weaponMotion;
-    if (m.wind || m.guard) {
-      right.rotation.set(-1.15 + w.y * 0.85, -w.x * 0.7, -0.25 - w.x * 0.8);
-      left.rotation.set(m.guard ? -1.35 : -0.5, 0.2, 0.35);
-      torso.rotation.y = -w.x * 0.24;
-    } else if (m.swing?.dir) {
-      const sw = m.swing, t = sw.t;
-      const u = Math.max(0, Math.min(1, (t - sw.from) / (sw.to - sw.from)));
-      const sweep = u * u * (3 - 2 * u);
-      const settle = 1 - Math.max(0, (t - sw.to) / Math.max(0.01, sw.dur - sw.to));
-      const side = sw.dir === 'left' ? -1 : 1;
-      if (sw.dir === 'up') right.rotation.set((-2.6 + sweep * 2.2) * settle, 0, -0.15);
-      else if (sw.dir === 'down') right.rotation.set((-0.8 - Math.sin(u * Math.PI) * 0.9) * settle, -0.15, -0.15);
-      else right.rotation.set(-1.1 * settle, side * (1.2 - sweep * 2.4) * settle, side * (0.9 - sweep * 1.8) * settle);
-      torso.rotation.y = side * (0.3 - sweep * 0.6) * settle;
-      left.rotation.set(-0.65 * settle, 0.1, 0.3);
-    } else if (m.draw >= 0) {
-      right.rotation.set(-1.25, -0.7, -0.2);
-      left.rotation.set(-1.5, 0.2, 0.2);
-    }
-  }
-
   private bar(m: Mover, show: boolean): void {
     if (!show) return;
     const huge = m instanceof Raider && (m.huge || m.boss);
