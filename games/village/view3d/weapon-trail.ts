@@ -7,17 +7,19 @@ export class WeaponTrail {
   private geometry = new THREE.BufferGeometry();
   readonly mesh: THREE.Mesh;
   private samples: { base: THREE.Vector3; tip: THREE.Vector3; age: number }[] = [];
+  /** how long a sample hangs about: longer than the window it was taken in, so the arc reads as one stroke */
+  private static readonly LIFE = 0.2;
   constructor() {
     this.geometry.setAttribute('position', new THREE.BufferAttribute(this.positions, 3).setUsage(THREE.DynamicDrawUsage));
     this.geometry.setAttribute('color', new THREE.BufferAttribute(this.colours, 3).setUsage(THREE.DynamicDrawUsage));
-    this.mesh = new THREE.Mesh(this.geometry, new THREE.MeshBasicMaterial({ color: 0xd2e5ff, vertexColors: true, transparent: true, opacity: 0.28, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+    this.mesh = new THREE.Mesh(this.geometry, new THREE.MeshBasicMaterial({ color: 0xd2e5ff, vertexColors: true, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
     this.mesh.frustumCulled = false;
     this.mesh.visible = false;
   }
   clear(): void { this.samples = []; this.mesh.visible = false; }
   update(weapon: THREE.Object3D | undefined, active: boolean, dt: number): void {
     this.samples.forEach(s => s.age += dt);
-    this.samples = this.samples.filter(s => s.age < 0.12);
+    this.samples = this.samples.filter(s => s.age < WeaponTrail.LIFE);
     if (weapon && active) {
       weapon.updateWorldMatrix(true, false);
       const tip = weapon.getObjectByName('weapon-tip');
@@ -30,7 +32,7 @@ export class WeaponTrail {
       this.colours.fill(fade, offset, offset+3); offset += 3;
     };
     for (let i=1;i<this.samples.length;i++) {
-      const a=this.samples[i-1], b=this.samples[i], fa=1-a.age/0.12, fb=1-b.age/0.12;
+      const a=this.samples[i-1], b=this.samples[i], fa=1-a.age/WeaponTrail.LIFE, fb=1-b.age/WeaponTrail.LIFE;
       put(a.base,fa);put(a.tip,fa);put(b.tip,fb);put(a.base,fa);put(b.tip,fb);put(b.base,fb);
     }
     this.geometry.setDrawRange(0,offset/3);

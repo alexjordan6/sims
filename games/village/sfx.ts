@@ -192,9 +192,13 @@ export class Sfx {
   }
 
   swing(stage = 0): void { this.noise(0.14, stage === 2 ? 600 : 1400, stage === 2 ? 2400 : 400, 0.2, 0.8); }
-  hit(crit = false): void {
-    this.noise(0.08, 300, 80, 0.35, 0.6);
+  /** A blow landing. `heft` is what it weighed: an ordinary swing is 1, an overhead well over it. */
+  hit(crit = false, heft = 1): void {
+    const h = Math.max(0.4, Math.min(2.2, heft));
+    this.noise(0.08 * h, 300, 80, 0.35, 0.6);
     this.tone('square', crit ? 520 : 240, crit ? 130 : 60, crit ? 0.14 : 0.08, 0.25);
+    // the bottom end is what makes it weigh anything; a heavy blow gets more of it, and lower
+    this.tone('sine', 78 / h, 40, 0.1 + 0.07 * h, 0.14 * h);
     if (crit) this.tone('triangle', 900, 1400, 0.12, 0.2, 0.03);
   }
   hurt(): void { this.tone('sawtooth', 180, 70, 0.16, 0.25); this.noise(0.1, 200, 60, 0.2); }

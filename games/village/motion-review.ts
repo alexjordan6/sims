@@ -4,6 +4,7 @@ import { heldMesh, grip, PERSON } from './view3d/actors';
 import { poseFigure } from './view3d/motion';
 import { setFowOn } from './view3d/fow';
 import { triangles } from './view3d/lowpoly';
+import { ATTACK } from './agents';
 
 // Uses the same geometry, grip and pose solver as the actual game, with deterministic controls.
 setFowOn(false);
@@ -54,13 +55,28 @@ document.getElementById('check')!.onclick=()=>{
   const travel=positions.slice(1).reduce((n,v,i)=>n+v.distanceTo(positions[i]),0);
   document.getElementById('result')!.textContent=travel>1?`PASS · weapon tip travels ${travel.toFixed(2)} m through slash`:`FAIL · weapon tip travel ${travel}`;
 };
+document.getElementById('step')!.onclick=()=>{paused=true;time+=0.02;}; // one frame of a blow at a time
 function resize(){renderer.setSize(innerWidth,innerHeight);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();}
 addEventListener('resize',resize);resize();
+/** One blow's real clock, from ATTACK: the sweep over the whole blow, the edge live from `from` to `to`. */
+function strikeAt(dir:'left'|'right'|'up'|'down',t:number){
+  const a=ATTACK[dir];
+  return {pose:{dir,progress:Math.min(1,t/a.to),recovery:Math.max(0,(t-a.to)/Math.max(0.01,a.dur-a.to)),preparation:1},
+    live:t>=a.from&&t<=a.to,dur:a.dur+a.after};
+}
+const clock=document.getElementById('clock');
 function frame(now:number){
   const dt=Math.min(0.05,(now-last)/1000);last=now;if(!paused)time+=dt;
-  const strike=['left','right','up','down'].includes(mode),cycle=(time%1.6)/1.6;
+  const strike=['left','right','up','down'].includes(mode);
+  let pose:ReturnType<typeof strikeAt>|null=null;
+  if(strike){
+    const a=ATTACK[mode as 'left'];
+    pose=strikeAt(mode as 'left',time%(a.dur+a.after+0.35)); // a beat of nothing between blows, to see where one ends
+  }
+  if(clock)clock.textContent=pose?`${mode} · ${(time%pose.dur).toFixed(3)}s of ${ATTACK[mode as 'left'].dur.toFixed(2)}s${pose.live?' · EDGE LIVE':''}`:mode;
+  const cycle=(time%1.6)/1.6;
   for(const rig of figures)poseFigure(rig,{phase:time*(mode==='run'?12:7),pace:mode==='walk'?0.65:mode==='run'?1:0,time,
-    strike:strike?{dir:mode,progress:Math.max(0,Math.min(1,(cycle-0.15)/0.5)),recovery:Math.max(0,(cycle-0.65)/0.35)}:undefined,
+    strike:pose?pose.pose:undefined,
     wind:mode==='guard'?{x:Math.sin(time)*0.5,y:0}:undefined,guard:mode==='guard',bow:mode==='bow'?1:undefined,death:mode==='die'?cycle:undefined});
   renderer.render(scene,camera);requestAnimationFrame(frame);
 }requestAnimationFrame(frame);

@@ -259,18 +259,42 @@ export class Fx3d {
   private hit(ev: Extract<FxEvent, { kind: 'hit' }>): void {
     const { attacker, target, dmg, crit, killed } = ev, sfx = this.sfx;
     const head = this.actors.headOf(target).add(new THREE.Vector3(0, -0.4, 0));
-    if (target.blocked) { this.burst(head, 6, [0xfff2b0, 0xffd060], 2.5, 1.5, 0.3); sfx.hit(false); return; }
+    if (target.blocked) {
+      // sparks off the shield, the body rocked back on its heels, and a shorter, sharper jolt than a
+      // wound: you felt that, and it cost them, but nothing got through.
+      const b = this.actors.kick(target.id);
+      const bx = target.x - attacker.x, by = target.y - attacker.y, bd = Math.hypot(bx, by) || 1;
+      b.squash = 0.12; b.recoilX = (bx / bd) * 0.1; b.recoilZ = (by / bd) * 0.1;
+      b.flash = Math.max(b.flash, 0.12); b.flashColour = 0xffe79a;
+      this.burst(head, 10, [0xfff2b0, 0xffd060], 3, 1.5, 0.3);
+      if (target.shieldBroke >= 0 && target.shieldBroke < 0.1) {
+        this.word('SHIELD!', head.clone().add(new THREE.Vector3(0, 0.7, 0)), '#ffb04a', 18, 1.1);
+        this.burst(head, 14, [0x9a7a52, 0x6a4f33], 3.5, 1.4, 0.5); // splinters
+        this.host.shake(0.16);
+        sfx.thud(1);
+      } else if (attacker instanceof Player || target instanceof Player) this.host.shake(0.06);
+      sfx.hit(false, 0.8);
+      return;
+    }
     const dx = target.x - attacker.x, dy = target.y - attacker.y, d = Math.hypot(dx, dy) || 1;
     const ux = ev.ux ?? dx / d, uy = ev.uy ?? dy / d;
     const heavy = target instanceof Raider && target.heavy, toRaider = target instanceof Raider, byPlayer = attacker instanceof Player;
     const k = this.actors.kick(target.id);
-    k.squash = heavy ? 0.15 : crit ? 0.5 : 0.35; k.recoilX = ux * (heavy ? 0.06 : 0.18); k.recoilZ = uy * (heavy ? 0.06 : 0.18);
+    // how much the blow weighed, as the event already knows it: an ordinary swing is about 1, a
+    // thrust well under it, an overhead or the spin finisher far over.
+    const heft = Math.min(2.2, (ev.push ?? 16) / 17);
+    const take = heavy ? 0.28 : 1; // a brute barely moves, but it does move
+    k.squash = Math.min(0.6, (crit ? 0.5 : 0.3) * heft) * take;
+    k.recoilX = ux * 0.17 * heft * take; k.recoilZ = uy * 0.17 * heft * take;
     this.burst(head, toRaider ? (crit ? 16 : 8) : 6, toRaider ? [0xfff2b0, 0xff9a3c] : [0x8a0a0a, 0x5a0606], crit ? 3.5 : 2.2, 1.6, 0.45);
     this.word(String(dmg), head.clone().add(new THREE.Vector3(ux * 0.2, 0.7, uy * 0.2)), toRaider ? (crit ? '#ff9a3c' : '#ffe066') : '#ff5a5a', crit ? 20 : 14, 0.9);
     if (byPlayer) {
       this.lastBlow.set(target.id, { ux, uy, crit });
-      sfx.hit(crit);
-      if (crit) this.host.shake(0.12);
+      sfx.hit(crit, heft);
+      // every landed blow moves the camera now, by what it weighed. The scale to keep it against:
+      // 0.08 is the Ogre's footstep, 0.2 a small smash, 0.4 a big one.
+      this.host.shake(crit ? 0.14 : Math.min(0.13, 0.05 * heft));
+      if (heft > 1.3) this.host.bump(0.02 * heft, 170); // a heavy blow pulls the view in with it
       if (killed && (ev.streak ?? 0) >= 2) window.setTimeout(() => sfx.streak(ev.streak!), 120);
     } else if (target instanceof Player) { sfx.hurt(); this.host.shake(0.15); }
     else if (attacker instanceof Villager) sfx.hit(false);

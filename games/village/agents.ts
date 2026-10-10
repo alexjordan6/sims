@@ -271,7 +271,10 @@ export abstract class Mover implements Agent {
   drain(n: number): void { this.stam = Math.max(0, this.stam - n); this.stamIdle = 0; }
 
   /** Raise the guard. It starts where a blow would and follows the mouse the same way. */
-  raiseGuard(dir: AttackDir = 'right'): void { if (!this.guard) this.guard = { dir, dx: 0, dy: 0 }; }
+  /** Raise the guard, if the body is not still recovering out of something it threw. */
+  raiseGuard(dir: AttackDir = 'right'): void { if (!this.guard && !this.guarded()) this.guard = { dir, dx: 0, dy: 0 }; }
+  /** Whether something is in the way of a guard going up. The player's recovery is; nothing else's yet. */
+  protected guarded(): boolean { return false; }
   dropGuard(): void { this.guard = null; }
   /** Turn to face a body: what a guard's front arc is measured from. */
   faceToward(o: { x: number; y: number }): void {
@@ -1794,11 +1797,18 @@ export interface Swing {
  * swing sweeps across. Held back until the mouse has chosen one, then let go.
  */
 export type AttackDir = 'up' | 'down' | 'left' | 'right';
-export const ATTACK: Record<AttackDir, { dur: number; from: number; to: number; dmgMul: number; push: number; reach: number; cos: number; stam: number }> = {
-  up: { dur: 0.46, from: 0.16, to: 0.28, dmgMul: 1.35, push: 20, reach: 26, cos: 0.5, stam: 15 },   // overhead: slow and heavy
-  down: { dur: 0.34, from: 0.10, to: 0.19, dmgMul: 1.05, push: 8, reach: 38, cos: 0.9, stam: 10 },  // thrust: long, narrow, quick
-  left: { dur: 0.36, from: 0.09, to: 0.21, dmgMul: 1, push: 16, reach: 26, cos: 0.1, stam: 11 },
-  right: { dur: 0.36, from: 0.09, to: 0.21, dmgMul: 1, push: 16, reach: 26, cos: 0.1, stam: 11 },
+/**
+ * What each blow weighs. `dur` is the whole thing and the arm sweeps across all of it; `from`/`to`
+ * is only the part where the edge is live. `after` is the recovery that follows the swing, in which
+ * the feet are slow and the guard cannot come up -- which is what makes a blow a commitment rather
+ * than a button. The overhead is the slowest and heaviest and the dearest to be wrong with; the
+ * thrust is quick, long and cheap; the swings sit between them.
+ */
+export const ATTACK: Record<AttackDir, { dur: number; from: number; to: number; after: number; dmgMul: number; push: number; reach: number; cos: number; stam: number }> = {
+  up:    { dur: 0.62, from: 0.30, to: 0.42, after: 0.34, dmgMul: 1.45, push: 26, reach: 26, cos: 0.5, stam: 16 }, // overhead: slow, heavy, and dear to be wrong with
+  down:  { dur: 0.40, from: 0.17, to: 0.26, after: 0.14, dmgMul: 1.05, push:  9, reach: 38, cos: 0.9, stam: 10 }, // thrust: long, narrow, quick
+  left:  { dur: 0.48, from: 0.21, to: 0.32, after: 0.22, dmgMul: 1.1,  push: 19, reach: 26, cos: 0.1, stam: 12 },
+  right: { dur: 0.48, from: 0.21, to: 0.32, after: 0.22, dmgMul: 1.1,  push: 19, reach: 26, cos: 0.1, stam: 12 },
 };
 /** what blows a weapon has in it: you cannot thrust with a club, nor with an axe */
 export const DIRS: readonly AttackDir[] = ['up', 'down', 'left', 'right'];
@@ -1842,8 +1852,9 @@ export class Player extends Mover {
   /** stage the next swing will be, and how long since the last swing ended */
   private nextStage = 0;
   private sinceSwing = 99;
-  /** recovery after the spin finisher */
+  /** recovery after a blow: the feet are slow and the guard will not come up */
   recover = 0;
+  protected override guarded(): boolean { return this.recover > 0 || !!this.swing; }
   /** kills within the last 1.2 s, for DOUBLE!/TRIPLE! pops */
   private recentKills: number[] = [];
   /** dodge roll in progress: seconds elapsed and the unit direction it commits to */
@@ -2073,10 +2084,13 @@ export class Player extends Mover {
         sw.hit.add(o.id);
         o.hit(dmg, true, this, sw.dir);
         o.shove(ux, uy, sw.push * knockMul(this.weapons));
+        // hitstop, by what the blow weighs. The freeze holds the swing where it is (update() returns
+        // before updateSwing), so the blade hangs in the body for a moment rather than sliding through it.
         const crit = sw.spin;
-        const stop = o.dead ? 0.1 : crit ? 0.12 : 0.06;
+        const heft = sw.dmgMul * (sw.dir ? 1 : 0.8);
+        const stop = Math.min(0.2, (o.dead ? 0.13 : crit ? 0.16 : 0.1) * heft);
         o.freeze = Math.max(o.freeze, stop);
-        this.freeze = Math.max(this.freeze, stop * 0.7);
+        this.freeze = Math.max(this.freeze, stop * 0.75);
         if (o.dead) {
           const now = s.simTime;
           this.recentKills = this.recentKills.filter((k) => now - k < 1.2);
@@ -2089,6 +2103,9 @@ export class Player extends Mover {
       const queued = sw.queued;
       this.swing = null;
       this.sinceSwing = 0;
+      // every aimed blow leaves you in it, heaviest first: a swing you have thrown is a swing you
+      // are committed to, and for as long as it lasts the guard will not come back up.
+      if (sw.dir) this.recover = Math.max(this.recover, ATTACK[sw.dir].after);
       if (sw.spin) { this.recover = SWING.recoverAfterSpin; this.nextStage = 0; }
       else if (queued) { const st = this.beginSwing(this.nextStage); s.fx.push({ kind: 'swing', who: this, dx: this.facing.x, dy: this.facing.y, stage: st }); }
     }

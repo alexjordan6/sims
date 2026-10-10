@@ -336,11 +336,14 @@ export class Actors {
         const sw = m instanceof Player ? m.swing : null;
         // every body telegraphs the same way now, your own soldiers included: the blow is Mover.attack
         const attack = m.attack;
+        // The sweep runs across the whole blow, not just the part where the edge is live. It used to be
+        // normalised over from..to, which crammed every degree of shoulder into a hundred milliseconds
+        // and left the rest of the swing as a lerp; now from/to only decides who gets cut.
         const strike = sw ? {
           dir: sw.dir ?? (sw.stage === 1 ? 'left' : 'right'),
-          progress: Math.max(0, Math.min(1, (sw.t - sw.from) / (sw.to - sw.from))),
+          progress: Math.max(0, Math.min(1, sw.t / Math.max(0.01, sw.to))),
           recovery: Math.max(0, (sw.t - sw.to) / Math.max(0.01, sw.dur - sw.to)),
-          preparation: Math.min(1, sw.t / Math.max(0.01, sw.from)),
+          preparation: 1, // the coil is the first part of the sweep now, so there is nothing to blend out of
         } : attack ? { dir: attack.dir ?? 'right', progress: Math.max(0, (attack.t - attack.windup) / 0.2), recovery: 0 }
           : k && k.attack > 0 ? { dir: 'right', progress: (0.4 - k.attack) / 0.24, recovery: Math.max(0, (0.16 - k.attack) / 0.16) } : undefined;
         poseFigure(a.anim.rig, {

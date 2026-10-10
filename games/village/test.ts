@@ -12,7 +12,7 @@ const clearBulk = (s: VillageScene) => s.player.pack.slots.forEach((b,i)=>{if(b 
 import type { VillageScene } from './main';
 import { World, WILD_FOOD, doorstep, buildingCenter, hearthCost, BUILDINGS, type BuildingKind, type Chest } from './world';
 import { Rng } from '../../src/shared/rng';
-import { Villager, Arrow, Raider, BELT, BUILDS, TOOLS, DIRS, type AttackDir } from './agents';
+import { Villager, Arrow, Raider, BELT, BUILDS, TOOLS, DIRS, ATTACK, type AttackDir, type Swing } from './agents';
 import { Brute, Rat, Ogre, Wrecker, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm } from './wildlife';
 import { ORDER_MENUS, SLOT_GAP, Warband, Regiment, SHAPES, SHAPE_GAP, SHAPE_PACE, layout } from './regiment';
@@ -278,6 +278,74 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       pl.armor.shield = 1; pl.refitShield(); pl.dropGuard();
       assert(pl.bash(s) === 0, 'nor with the shield down: it is the guard you shove with');
     }
+
+    // ---- weight: a blow you are committed to -------------------------------------------------------
+    // A side swing was 0.36 s of nothing in particular and a landed one bought 60 ms of stopped feet.
+    // Now the arm sweeps across the whole blow, the blow leaves you in a recovery, and the guard will
+    // not come up out of it -- which is the whole difference between a commitment and a button.
+    {
+      const s = fresh(); clearing(s); s.agents = [s.player];
+      const pl = s.player; Object.assign(pl, World.center(125, 100));
+      pl.swing = null; pl.wind = null; pl.recover = 0; pl.dropGuard();
+
+      // the blows weigh what they say they weigh, against each other
+      assert(ATTACK.up.dur > ATTACK.left.dur && ATTACK.left.dur > ATTACK.down.dur,
+        `the overhead is the slowest blow and the thrust the quickest (${ATTACK.up.dur} / ${ATTACK.left.dur} / ${ATTACK.down.dur})`);
+      assert(ATTACK.up.after > ATTACK.down.after && ATTACK.up.dmgMul > ATTACK.left.dmgMul,
+        'and the heaviest blow is the dearest to be wrong with: longest recovery, hardest hit');
+      for (const d of DIRS) assert(ATTACK[d].from > 0 && ATTACK[d].to > ATTACK[d].from && ATTACK[d].to <= ATTACK[d].dur,
+        d + "'s edge goes live inside the blow, not before it or after it");
+
+      // a thrown blow leaves you in it, and the guard will not come up until it is over
+      pl.weapons.melee = 2; pl.stam = DUEL.stamMax;
+      pl.beginWind(['up']); pl.releaseWind({ x: pl.x + 30, y: pl.y });
+      const thrown = pl.swing as Swing | null;
+      assert(!!thrown && thrown.dir === 'up', 'the overhead goes');
+      for (let i = 0; i < 120 && pl.swing; i++) pl.update(1 / 60, s);
+      assert(!pl.swing && pl.recover > 0, `and leaves you recovering out of it (${pl.recover.toFixed(2)}s)`);
+      pl.raiseGuard('left');
+      assert(!pl.guard, 'the guard will not come up out of a recovery: the blow was a commitment');
+      for (let i = 0; i < 120 && pl.recover > 0; i++) pl.update(1 / 60, s);
+      pl.raiseGuard('left');
+      assert(!!pl.guard, 'and comes up again once it is over');
+      pl.dropGuard();
+
+      // nor is swallowing a held blow to get the guard up free
+      pl.recover = 0; pl.swing = null; pl.stam = DUEL.stamMax;
+      pl.beginWind(['right']);
+      assert(!!pl.wind, 'a blow is held back');
+      s.paused = false; s.raiseGuard(); s.paused = true; // the scene's own door, which a paused game shuts
+      assert(!pl.wind && pl.recover > 0 && !pl.guard, `swallowing it costs the moment it takes (${pl.recover.toFixed(2)}s), so a cancel is not free`);
+
+      // hitstop by weight, and it holds the swing where it is rather than letting it slide through
+      const stopFor = (dir: AttackDir) => {
+        const foe = s.spawn(new Raider(pl.x + 16, pl.y));
+        foe.hp = foe.maxHp = 500; foe.freeze = 0;
+        s.grid.rebuild(s.agents);
+        pl.swing = null; pl.wind = null; pl.recover = 0; pl.freeze = 0; pl.stam = DUEL.stamMax;
+        pl.beginWind([dir]); pl.releaseWind({ x: foe.x, y: foe.y });
+        for (let i = 0; i < 200 && foe.freeze === 0 && pl.swing; i++) pl.update(1 / 60, s);
+        const stop = foe.freeze;
+        foe.dead = true; s.agents = s.agents.filter((a) => a !== foe);
+        return stop;
+      };
+      const heavy = stopFor('up'), light = stopFor('down');
+      assert(heavy > 0 && light > 0 && heavy > light, `a heavy blow stops harder than a light one (${heavy.toFixed(3)}s against ${light.toFixed(3)}s)`);
+      assert(light > 0.06, `and even the lightest stops longer than it used to (${light.toFixed(3)}s)`);
+
+      // the freeze suspends the blow rather than cancelling it: the blade hangs in the body
+      const foe2 = s.spawn(new Raider(pl.x + 16, pl.y)); foe2.hp = foe2.maxHp = 500;
+      s.grid.rebuild(s.agents);
+      pl.swing = null; pl.wind = null; pl.recover = 0; pl.freeze = 0; pl.stam = DUEL.stamMax;
+      pl.beginWind(['left']); pl.releaseWind({ x: foe2.x, y: foe2.y });
+      for (let i = 0; i < 200 && pl.freeze === 0; i++) pl.update(1 / 60, s);
+      assert(pl.freeze > 0 && !!pl.swing, 'the blow that lands freezes its own thrower mid-swing');
+      const held = pl.swing!.t;
+      pl.update(1 / 60, s);
+      assert(pl.swing!.t === held, 'and the swing does not advance while it is held: the blade stays in the body');
+      pl.freeze = 0; pl.update(1 / 60, s);
+      assert(pl.swing!.t > held, 'then carries on from where it was, rather than having slid through');
+    }
     {
       const rig = new THREE.Group(); const k = PERSON / buildFigure(rig, FIGURES.head);
       rig.scale.setScalar(k); const blade = heldMesh('sword', 2)!; blade.scale.setScalar(1/k); grip(blade,k,FIGURES.head);
@@ -297,6 +365,19 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
         }
         const travel = points.slice(1).reduce((n,v,i)=>n+v.distanceTo(points[i]),0);
         assert(travel > 0.5, dir + ' moves the rendered sword tip through a visible arc (' + travel.toFixed(2) + ')');
+        // and the blade is slowest where it coils and fastest where it lands. smoothstep used to ease
+        // *into* the contact, which is what made every blow read as a wave rather than a weight.
+        const tipAt = (q: number): THREE.Vector3 => {
+          poseFigure(rig,{phase:0,pace:0,time:0,strike:{dir,progress:q,recovery:0,preparation:1}}); rig.updateMatrixWorld(true);
+          return blade.getObjectByName('weapon-tip')!.getWorldPosition(new THREE.Vector3());
+        };
+        const arc = [0, 0.125, 0.25, 0.75, 0.875, 1].map(tipAt);
+        const coil = arc[0].distanceTo(arc[1]) + arc[1].distanceTo(arc[2]);
+        const land = arc[3].distanceTo(arc[4]) + arc[4].distanceTo(arc[5]);
+        // The swings and the overhead are arcs and should run away at the end; the thrust is a short
+        // straight push, so it accelerates too but has far less room to do it in.
+        const want = dir === 'down' ? 1.25 : 1.5;
+        assert(land > coil * want, dir + ' coils slowly and lands fast: the end of the sweep outruns the start (' + coil.toFixed(2) + ' then ' + land.toFixed(2) + ')');
       }
       poseFigure(rig,{phase:Math.PI*1.5,pace:1,time:0});
       assert(rig.getObjectByName('knee-left')!.rotation.x > 0.5, 'the trailing knee bends during a stride');

@@ -673,6 +673,8 @@ export const DUEL = {
   block: 17, kick: 22,
   /** a shield bash: the wind it costs, and how much more a turn costs when it only glances the shield */
   bash: 19, glance: 1.6,
+  /** swallowing a wound-up blow to get the guard up instead: it takes a moment, so a cancel is not free */
+  swallow: 0.18,
   /** how far the mouse must travel to choose a blow, in device pixels */
   flick: 16,
   /** a bow at full draw, in seconds, and the spread of a snap shot in radians */

@@ -59,7 +59,10 @@ export function poseFigure(rig: THREE.Object3D, p: MotionPose): void {
   if (p.strike) {
     const start = p.strike.preparation !== undefined && p.strike.preparation < 1
       ? [arm, elbow, off, bone('elbow-left'), torso, head].map(n => n.rotation.clone()) : null;
-    const u = THREE.MathUtils.smoothstep(p.strike.progress, 0, 1);
+    // The blade is slowest where it starts and fastest where it lands. smoothstep did the opposite at
+    // the end -- it eased *into* the contact, which is what made every blow feel like a wave rather
+    // than a weight. This coils slowly and then goes.
+    const u = Math.pow(THREE.MathUtils.clamp(p.strike.progress, 0, 1), 2.1);
     const settle = 1 - THREE.MathUtils.smoothstep(p.strike.recovery, 0, 1);
     const sign = p.strike.dir === 'left' ? -1 : 1;
     if (p.strike.dir === 'up') {

@@ -2211,7 +2211,9 @@ export class VillageScene extends SimScene {
   raiseGuard(): boolean {
     // a shield alone is enough to hold a guard; so is a blade. With neither there is nothing to hold up.
     if (!this.canFight() || this.player.tool !== 'sword' || (this.player.weapons.melee < 0 && !this.player.shield)) return false;
-    this.player.wind = null; // you cannot wind a blow and hold a guard at once
+    // you cannot wind a blow and hold a guard at once, and swallowing a wound-up blow to get the
+    // guard up costs you the moment it takes to do it: a free cancel is not a commitment.
+    if (this.player.wind) { this.player.wind = null; this.player.recover = Math.max(this.player.recover, DUEL.swallow); }
     this.player.raiseGuard();
     return true;
   }
