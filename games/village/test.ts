@@ -12,7 +12,7 @@ const clearBulk = (s: VillageScene) => s.player.pack.slots.forEach((b,i)=>{if(b 
 import type { VillageScene } from './main';
 import { World, WILD_FOOD, doorstep, buildingCenter, hearthCost, BUILDINGS, type BuildingKind, type Chest } from './world';
 import { Rng } from '../../src/shared/rng';
-import { Villager, Arrow, Raider, BELT, BUILDS, TOOLS, DIRS } from './agents';
+import { Villager, Arrow, Raider, BELT, BUILDS, TOOLS, DIRS, type AttackDir } from './agents';
 import { Brute, Rat, Ogre, Wrecker, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm } from './wildlife';
 import { ORDER_MENUS, SLOT_GAP, Warband, Regiment, SHAPES, SHAPE_GAP, SHAPE_PACE, layout } from './regiment';
@@ -22,7 +22,7 @@ import { Caravan } from './caravan';
 import { Meta, REMOVED_NODES, nodesOf } from './meta';
 import { armorStats, knockMul, reloadMul } from './characters';
 const BATTLE_BIG_TEST = 20;
-import { WARREN, SOLDIER_CAP_PER_LEVEL, PLAINS, BANDAGE } from './config';
+import { WARREN, DUEL, SOLDIER_CAP_PER_LEVEL, PLAINS, BANDAGE } from './config';
 import { TILE, COLS, ROWS, WALL_HEIGHT, HAUL, TOWER, ORDER, p, BUILDING_HP, WRECKER, DISMANTLE, DEFENSE_COST, COST, FOODS, FOOD_KINDS, DIET_CAP, ITEM, BOAR, GNOME_PACK, RECIPES, DISHES, zeroFood, TROLL, HIVE, SKULK, STASH_SLOTS, WEAPONS, YARD, CALLINGS, TREE_RESERVE, MOODS, SERVE_RANGE, POT_INGREDIENTS, BODY } from './config';
 
 const scene = () => (window as unknown as { game: { scene: { scenes: VillageScene[] } } }).game.scene.scenes[0];
@@ -208,6 +208,75 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       foe.attack = null; foe.guard = null; foe.wind = null; foe.stam = 10; foe.freeze = 0;
       for (let i = 0; i < 90; i++) foe.update(1 / 60, s);
       assert(foe.stam > 10, `a raider's wind comes back when it is not spending any (${foe.stam.toFixed(0)})`);
+    }
+
+    // ---- shields: block, bash, break ---------------------------------------------------------------
+    // The shield used to be a flat chance in hit() that the player did not even own. It is the thing in
+    // the left hand now: how wide the guard is, what it costs, how long it lasts, and what it shoves with.
+    {
+      const s = fresh(); clearing(s); s.agents = [s.player];
+      const pl = s.player; Object.assign(pl, World.center(125, 100));
+      pl.swing = null; pl.wind = null; pl.recover = 0; pl.dropGuard();
+      assert(pl.armor.shield === 1 && pl.shield?.name === 'Wooden buckler', `you start with something in your left hand (${pl.shield?.name ?? 'nothing'})`);
+
+      const foe = s.spawn(new Raider(pl.x + 10, pl.y)); foe.hp = foe.maxHp = 400;
+      s.grid.rebuild(s.agents);
+
+      // a shield is cheaper than a blade, and covers more
+      const turnCost = (shield: number, guard: AttackDir, blow: AttackDir) => {
+        pl.armor.shield = shield; pl.refitShield();
+        pl.dropGuard(); pl.raiseGuard(guard); pl.faceToward(foe);
+        pl.stam = DUEL.stamMax; pl.hp = pl.maxHp;
+        pl.hit(20, true, foe, blow);
+        return pl.blocked ? DUEL.stamMax - pl.stam : -1;
+      };
+      const buckler = turnCost(1, 'left', 'left'), blade = turnCost(0, 'left', 'left');
+      assert(buckler > 0 && blade > 0 && buckler < blade, `a shield turns a blow for less wind than a blade does (${buckler.toFixed(0)} against ${blade.toFixed(0)})`);
+      const tower = turnCost(4, 'left', 'left');
+      assert(tower > 0 && tower < buckler, `and a better shield for less again (${tower.toFixed(0)})`);
+
+      // the arc: a shield covers its side and the two across it, a blade only its own
+      assert(turnCost(1, 'left', 'up') > 0, 'a shield held on one side still turns the blow that comes across it');
+      assert(turnCost(1, 'left', 'right') === -1, 'but not the one straight opposite: hold it left and the right swing comes round it');
+      assert(turnCost(0, 'left', 'up') === -1, 'a bare blade has no arc at all: it parries the one side it is held on');
+      assert(turnCost(1, 'left', 'up') > turnCost(1, 'left', 'left'), 'and a turn that only glanced the shield costs more wind than one read right');
+
+      // durability: it wears out doing this, and comes apart
+      pl.armor.shield = 1; pl.refitShield();
+      assert(pl.shieldLeft === 1, 'a fresh shield has turned nothing yet');
+      pl.dropGuard(); pl.raiseGuard('left'); pl.faceToward(foe); pl.stam = DUEL.stamMax; pl.hp = pl.maxHp;
+      pl.hit(5, true, foe, 'left');
+      const chipped = pl.shieldLeft;
+      assert(chipped < 1 && chipped > 0, `every blow turned takes something out of it (${(chipped * 100).toFixed(0)}% left)`);
+      pl.armor.shield = 1; pl.refitShield();
+      pl.shieldBroke = -1;
+      let turned = 0;
+      for (let i = 0; i < 40 && pl.armor.shield > 0; i++) {
+        pl.dropGuard(); pl.raiseGuard('left'); pl.faceToward(foe); pl.stam = DUEL.stamMax; pl.hp = pl.maxHp;
+        pl.hit(5, true, foe, 'left');
+        if (pl.blocked) turned++;
+      }
+      assert(pl.armor.shield === 0 && turned > 3 && turned < 30, `a buckler comes apart after a handful of blows, not one and not forty (${turned})`);
+      assert(pl.shieldBroke >= 0 && !pl.guard && !pl.shield, 'and when it does the guard drops with it, and the view is told');
+      pl.hp = pl.maxHp; pl.stam = DUEL.stamMax;
+      pl.raiseGuard('left'); pl.faceToward(foe); pl.hit(20, true, foe, 'left');
+      assert(pl.blocked && DUEL.stamMax - pl.stam === DUEL.block, 'with the shield gone the blade parries on, narrowly and dearly');
+
+      // the bash: the shield's answer to a guard that never comes down
+      pl.armor.shield = 2; pl.refitShield();
+      pl.hp = pl.maxHp; pl.stam = DUEL.stamMax; pl.swing = null; pl.recover = 0;
+      Object.assign(foe, { x: pl.x + 12, y: pl.y }); foe.freeze = 0; foe.attackCd = 0; foe.hp = foe.maxHp;
+      s.grid.rebuild(s.agents);
+      pl.faceToward(foe); pl.dropGuard(); pl.raiseGuard('left');
+      foe.startAttack(s, pl, 10, 13, 0.4, 0.5);
+      assert(!!foe.attack, 'the raider is winding one up');
+      const bashed = pl.bash(s);
+      assert(bashed === 1 && !foe.attack && foe.freeze > 0.3, `a bash lands, staggers, and takes the blow it was winding with it (${bashed})`);
+      assert(pl.stam === DUEL.stamMax - DUEL.bash, `and it costs the wind to do (${(DUEL.stamMax - pl.stam).toFixed(0)})`);
+      pl.stam = DUEL.stamMax; pl.armor.shield = 0;
+      assert(pl.bash(s) === 0 && pl.stam === DUEL.stamMax, 'there is no bashing with an empty hand, and no wind spent trying');
+      pl.armor.shield = 1; pl.refitShield(); pl.dropGuard();
+      assert(pl.bash(s) === 0, 'nor with the shield down: it is the guard you shove with');
     }
     {
       const rig = new THREE.Group(); const k = PERSON / buildFigure(rig, FIGURES.head);

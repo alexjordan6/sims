@@ -1,6 +1,6 @@
 import type { Agent } from '@shared/index';
 import { World, WILD_FOOD, doorstep, buildingCenter, BUILDINGS, type House, type Building, type TilePos, type Defense, type BuildingKind } from './world';
-import { DUEL, p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, GNOME_CALLING, MOODS, type Mood, type DishKind, ORDER, YARD, GNOME_PACK, ITEM, MASS, BODY, FOODS, FOOD_KINDS, DIET_CAP, zeroFood, BOAR, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat, UNIT, PERK, unitName, type UnitLine, type UnitBranch } from './config';
+import { DUEL, ARMOR, type ArmorTier, p, TREE_RESERVE, STAR_BONUS, BEDTIME, TRAITS, HAUL, TILE, ELDER_MUL, GNOME_CALLING, MOODS, type Mood, type DishKind, ORDER, YARD, GNOME_PACK, ITEM, MASS, BODY, FOODS, FOOD_KINDS, DIET_CAP, zeroFood, BOAR, type Calling, type Trait, type LoadKind, type FoodKind, type DietStat, UNIT, PERK, unitName, type UnitLine, type UnitBranch } from './config';
 import type { Mods } from './meta';
 import { SHIELD_WALL, ADVANCE_SIGHT } from './regiment';
 import { NO_ARMOR, NO_WEAPONS, armorStats, weaponMul, type Armor, type Weapons, type HelmetStyle, knockMul, reloadMul } from './characters';
@@ -248,6 +248,22 @@ export abstract class Mover implements Agent {
   guardT = 0;
   /** seconds since the last chamber, -1 if there has not been one (the view pops a word for it) */
   chambered = -1;
+  /** blows this shield has turned, against its tier's dura; it comes apart when they meet */
+  shieldWear = 0;
+  /** seconds since the shield came apart, -1 if it has not (the view cracks, the journal says so) */
+  shieldBroke = -1;
+  /** the shield in the left hand, or null when there is nothing there to hold up */
+  get shield(): ArmorTier | null {
+    const t = ARMOR.shield.tiers[this.armor.shield];
+    return t && (t.guard ?? 0) > 0 ? t : null;
+  }
+  /** what is left of the shield, 0..1, or -1 with nothing in the hand */
+  get shieldLeft(): number {
+    const sh = this.shield, d = sh?.dura ?? 0;
+    return d > 0 ? Math.max(0, 1 - this.shieldWear / d) : -1;
+  }
+  /** A fresh shield in the hand: it has turned nothing yet. */
+  refitShield(): void { this.shieldWear = 0; }
   get winded(): boolean { return this.stam < 1; }
   /** Spend stamina, if there is that much. */
   spend(n: number): boolean { if (this.stam < n) return false; this.stam -= n; this.stamIdle = 0; return true; }
@@ -295,10 +311,60 @@ export abstract class Mover implements Agent {
    */
   protected turns(by: Mover | undefined, dir: AttackDir | null | undefined): boolean {
     const g = this.guard;
-    if (!g || !dir || g.dir !== dir || !by) return false;
+    if (!g || !dir || !by) return false;
+    const sh = this.shield;
+    // A shield covers the side it is held on and the two across from it; only the side straight
+    // opposite gets past -- hold it high and the thrust goes under, hold it left and the right swing
+    // comes round it. A bare blade has no arc at all: it parries the one side and nothing else.
+    const exact = g.dir === dir;
+    if (!exact && !(sh && dir !== OPPOSITE[g.dir])) return false;
     const dx = by.x - this.x, dy = by.y - this.y, d = Math.hypot(dx, dy) || 1;
     if ((dx / d) * this.facing.x + (dy / d) * this.facing.y < 0.1) return false; // not from behind
-    return this.spend(DUEL.block);
+    if (!this.spend(sh ? sh.guard! * (exact ? 1 : DUEL.glance) : DUEL.block)) return false;
+    if (sh) this.chipShield(dir, exact ? 1 : 2);
+    return true;
+  }
+
+  /**
+   * A blow turned takes it out of the shield, by the weight of the blow -- an overhead costs it more
+   * than a thrust, and a turn that only glanced it costs double. At nothing left the shield comes
+   * apart in your hand and the guard drops: you are parrying with the blade until you find another.
+   */
+  private chipShield(dir: AttackDir, mul: number): void {
+    const sh = this.shield, d = sh?.dura ?? 0;
+    if (!sh || d <= 0) return;
+    this.shieldWear += mul * ATTACK[dir].dmgMul;
+    if (this.shieldWear < d) return;
+    this.armor.shield = 0;
+    this.shieldWear = 0;
+    this.shieldBroke = 0;
+    this.guard = null;
+  }
+
+  /**
+   * A shield bash: the whole weight of it put through whoever is in front, which staggers them and
+   * takes with it whatever they were winding up. It is what the shield answers a held guard with,
+   * the way the kick answers one bare-handed -- and it needs a shield, not a blade.
+   */
+  bash(s: VillageScene): number {
+    if (!this.shield || !this.guard || !this.spend(DUEL.bash)) return 0;
+    const fx = this.facing.x, fy = this.facing.y;
+    let landed = 0;
+    s.grid.forEachInRadius(this.x, this.y, 20, (o, d2) => {
+      const m = o as Mover;
+      if (m === this || m.dead || m.hidden || m.hostile === this.hostile || m.elevated !== this.elevated) return;
+      const d = Math.sqrt(d2) || 1, ux = (m.x - this.x) / d, uy = (m.y - this.y) / d;
+      if (ux * fx + uy * fy < 0.35) return;
+      m.attack = null; // through the guard, and through whatever was behind it
+      m.wind = null;
+      m.freeze = Math.max(m.freeze, 0.45);
+      m.shove(ux, uy, 11);
+      m.hit(2, true, this);
+      landed++;
+    });
+    s.fx.push({ kind: 'swing', who: this, dx: fx, dy: fy, stage: 0 });
+    if (landed) s.fx.push({ kind: 'impact', x: this.x + fx * 13, y: this.y + fy * 13 });
+    return landed;
   }
 
   /**
@@ -345,6 +411,7 @@ export abstract class Mover implements Agent {
     if (this.wind) this.wind.t += dt;
     this.guardT = Math.max(0, this.guardT - dt);
     if (this.chambered >= 0) this.chambered += dt;
+    if (this.shieldBroke >= 0) this.shieldBroke += dt;
     this.stamIdle += dt;
     if (this.windBack && !this.wind && !this.guard && this.stamIdle > DUEL.regenDelay) this.stam = Math.min(DUEL.stamMax, this.stam + DUEL.regen * dt);
   }
@@ -1735,6 +1802,8 @@ export const ATTACK: Record<AttackDir, { dur: number; from: number; to: number; 
 };
 /** what blows a weapon has in it: you cannot thrust with a club, nor with an axe */
 export const DIRS: readonly AttackDir[] = ['up', 'down', 'left', 'right'];
+/** the one side a shield cannot cover from where it is held: straight across from it */
+export const OPPOSITE: Record<AttackDir, AttackDir> = { up: 'down', down: 'up', left: 'right', right: 'left' };
 export const MOVES: Record<'blade' | 'club', readonly AttackDir[]> = {
   blade: ['up', 'down', 'left', 'right'],
   club: ['up', 'left', 'right'],

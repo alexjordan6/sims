@@ -321,6 +321,7 @@ export class VillageScene extends SimScene {
     const door = doorstep(home);
     const c = World.center(door.tx, door.ty);
     this.player = this.spawn(new Player(c.x, c.y + TILE));
+    this.player.armor.shield = 1; // a wooden buckler, like the club: what you have before you earn better
     this.player.keys = this.wasd;
     this.player.maxHp += this.mods.playerHpBonus;
     this.player.hp = this.player.maxHp;
@@ -1337,8 +1338,10 @@ export class VillageScene extends SimScene {
     return pl.armor[slot]===0?null:{kind:'armor',slot,tier:pl.armor[slot]};
   }
   private wear(slot: EquipmentSlot, gear: Gear | null): void {
+    const shield = this.player.armor.shield;
     if(slot==='melee'||slot==='bow') this.player.weapons[slot]=gear && gear.kind==='weapon'?gear.tier:-1;
     else this.player.armor[slot]=gear && gear.kind==='armor'?gear.tier:0;
+    if (slot === 'shield' && this.player.armor.shield !== shield) this.player.refitShield();
     this.refitArmor(this.player); this.validateTool();
   }
   swapEquipment(index: number, slot: EquipmentSlot): boolean {
@@ -2132,6 +2135,8 @@ export class VillageScene extends SimScene {
       return true;
     }
     if (pl.tool !== 'sword') return false;
+    // the guard is already up: the left button shoves with the shield rather than winding a blow
+    if (pl.guard && pl.shield) { this.bash(); return true; }
     if (pl.weapons.melee < 0) { this.event('info', 'No blade to swing — forge one at the barracks.', true); return true; }
     if (pl.winded) { this.event('info', 'Out of wind.', true); return true; }
     return pl.beginWind(this.moveSet());
@@ -2167,7 +2172,7 @@ export class VillageScene extends SimScene {
    * What the duel looks like this instant, for the HUD: the blow being held back or the guard being
    * held up, how much wind is left, and the nearest blow coming the other way.
    */
-  duelState(): { wind: AttackDir | null; guard: AttackDir | null; stam: number; stamMax: number; draw: number; incoming: AttackDir | null; chambered: boolean } {
+  duelState(): { wind: AttackDir | null; guard: AttackDir | null; stam: number; stamMax: number; draw: number; incoming: AttackDir | null; chambered: boolean; shield: number; shieldName: string; shieldBroke: boolean } {
     const pl = this.player;
     let incoming: AttackDir | null = null, near = Infinity;
     for (const a of this.agents) {
@@ -2182,12 +2187,30 @@ export class VillageScene extends SimScene {
       stam: pl.stam, stamMax: DUEL.stamMax,
       draw: pl.draw >= 0 ? Math.min(1, pl.draw / DUEL.draw) : -1,
       incoming, chambered: pl.chambered >= 0 && pl.chambered < 0.8,
+      shield: pl.shieldLeft, shieldName: pl.shield?.name ?? '',
+      shieldBroke: pl.shieldBroke >= 0 && pl.shieldBroke < 1.2,
     };
+  }
+
+  /**
+   * A shield bash: it staggers whoever is in front and takes whatever they were winding with it. The
+   * shield's answer to a guard that never comes down, where bare hands have only the kick.
+   */
+  bash(): void {
+    const pl = this.player;
+    if (!this.canFight() || pl.swing || pl.roll) return;
+    if (!pl.shield) { this.event('info', 'Nothing in your left hand to shove with.', true); return; }
+    if (pl.stam < DUEL.bash) { this.event('info', 'Out of wind.', true); return; }
+    const aim = this.aimAt();
+    this.faceTo(aim.x, aim.y);
+    pl.recover = Math.max(pl.recover, 0.26);
+    if (pl.bash(this)) this.event('soldier', 'Shield bash!', true);
   }
 
   /** The right button: the guard goes up, and the mouse picks the side it is held. */
   raiseGuard(): boolean {
-    if (!this.canFight() || this.player.tool !== 'sword' || this.player.weapons.melee < 0) return false;
+    // a shield alone is enough to hold a guard; so is a blade. With neither there is nothing to hold up.
+    if (!this.canFight() || this.player.tool !== 'sword' || (this.player.weapons.melee < 0 && !this.player.shield)) return false;
     this.player.wind = null; // you cannot wind a blow and hold a guard at once
     this.player.raiseGuard();
     return true;
@@ -2284,6 +2307,7 @@ export class VillageScene extends SimScene {
 
 
     this.mealCd = Math.max(0, this.mealCd - dt);
+    this.tickShield();
     this.tickLobs(dt);
     this.driveCommand(dt);
     // At 120 ticks a second (the game loop: see tickRate) the heavy work is shared between two ticks, so
@@ -2527,6 +2551,17 @@ export class VillageScene extends SimScene {
    * directly rather than through hit(), which floors at 1 (60 HP/s at this cadence), lets armor turn
    * the blow, and would have a hearty dish make you starve slower.
    */
+  /** The shield that just came apart, said once. */
+  private shieldSaid = false;
+  private tickShield(): void {
+    const broke = this.player.shieldBroke >= 0 && this.player.shieldBroke < 0.2;
+    if (broke && !this.shieldSaid) {
+      this.event('raid', 'Your shield splinters — the blade is all you have to turn a blow with now.', true);
+      this.fx.push({ kind: 'impact', x: this.player.x, y: this.player.y });
+    }
+    this.shieldSaid = broke;
+  }
+
   tickHunger(dt: number): void {
     const pl = this.player;
     if (!p.hunger) { pl.hunger = p.hungerMax; this.hungerWarned = 0; return; } // off: the belly stays full

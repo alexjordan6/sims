@@ -615,7 +615,15 @@ export const HIVE = {
 
 // ---- armor ----------------------------------------------------------------------------------
 export type ArmorSlot = 'helmet' | 'chest' | 'legs' | 'shield';
-export interface ArmorTier { name: string; wood: number; scrap: number; hp: number; reduce: number; speed: number; block: number }
+export interface ArmorTier {
+  name: string; wood: number; scrap: number; hp: number; reduce: number; speed: number;
+  /** a shield's chance to turn a melee blow with no guard held up at all (shield walls, and every body not duelling) */
+  block: number;
+  /** wind to turn a blow on a held guard. 0 means there is no shield there and the blade parries instead. */
+  guard?: number;
+  /** blows this shield turns before it comes apart; a glancing turn costs it double */
+  dura?: number;
+}
 /** Four slots, three tiers (leather / iron / steel). Index 0 is "nothing". Iron needs barracks Lv2, steel Lv3. */
 export const ARMOR: Record<ArmorSlot, { name: string; tiers: readonly ArmorTier[] }> = {
   helmet: { name: 'Helmet', tiers: [
@@ -636,12 +644,15 @@ export const ARMOR: Record<ArmorSlot, { name: string; tiers: readonly ArmorTier[
     { name: 'Iron greaves', wood: 10, scrap: 3, hp: 0, reduce: 0, speed: 0.08, block: 0 },
     { name: 'Steel greaves', wood: 14, scrap: 8, hp: 5, reduce: 0, speed: 0.12, block: 0 },
   ] },
+  // A shield turns a blow for less wind than a blade can, and over a wider arc -- but it wears out
+  // doing it. Better shields are cheaper to hold up and last longer; the tower shield is cheapest
+  // of all and nearly unbreakable, and slows you down for it.
   shield: { name: 'Shield', tiers: [
-    { name: '—', wood: 0, scrap: 0, hp: 0, reduce: 0, speed: 0, block: 0 },
-    { name: 'Wooden buckler', wood: 10, scrap: 0, hp: 0, reduce: 0, speed: 0, block: 0.15 },
-    { name: 'Iron-rimmed shield', wood: 12, scrap: 3, hp: 0, reduce: 0, speed: 0, block: 0.25 },
-    { name: 'Steel kite shield', wood: 16, scrap: 8, hp: 0, reduce: 0, speed: 0, block: 0.35 },
-    { name: 'Tower shield', wood: 22, scrap: 12, hp: 0, reduce: 0, speed: -0.06, block: 0.45 }, // found, never forged: heavy
+    { name: '—', wood: 0, scrap: 0, hp: 0, reduce: 0, speed: 0, block: 0, guard: 0, dura: 0 },
+    { name: 'Wooden buckler', wood: 10, scrap: 0, hp: 0, reduce: 0, speed: 0, block: 0.15, guard: 11, dura: 10 },
+    { name: 'Iron-rimmed shield', wood: 12, scrap: 3, hp: 0, reduce: 0, speed: 0, block: 0.25, guard: 9, dura: 22 },
+    { name: 'Steel kite shield', wood: 16, scrap: 8, hp: 0, reduce: 0, speed: 0, block: 0.35, guard: 7, dura: 36 },
+    { name: 'Tower shield', wood: 22, scrap: 12, hp: 0, reduce: 0, speed: -0.06, block: 0.45, guard: 6, dura: 60 }, // found, never forged: heavy
   ] },
 };
 export const ARMOR_SLOTS: readonly ArmorSlot[] = ['helmet', 'chest', 'legs', 'shield'];
@@ -658,8 +669,10 @@ export const DUEL = {
   regen: 24, regenDelay: 0.5,
   /** per second, while Shift is held and there is somewhere to be */
   sprint: 13,
-  /** per blow turned on a held guard, and per kick */
+  /** per blow turned on a bare blade (a shield has its own, cheaper cost), and per kick */
   block: 17, kick: 22,
+  /** a shield bash: the wind it costs, and how much more a turn costs when it only glances the shield */
+  bash: 19, glance: 1.6,
   /** how far the mouse must travel to choose a blow, in device pixels */
   flick: 16,
   /** a bow at full draw, in seconds, and the spread of a snap shot in radians */
