@@ -226,10 +226,137 @@ export abstract class Mover implements Agent {
   /** The next blow this body will throw: varied by body and by swing, and the same every run. */
   protected nextAttackDir(): AttackDir { return DIRS[(this.id * 3 + this.attackSeq++) & 3]; }
 
+  // ---- the duel: a blow held back, a guard held up, and the wind that pays for both -----------
+  //
+  // This lived on Player alone, and the enemy walked into your sword with nothing to answer it.
+  // It is on Mover now, so one system serves the player, the raiders, and your own soldiers: the
+  // player decides with the mouse, a raider decides with its policy, and neither gets a rule the
+  // other does not. The view poses it the same way for all of them (actors.ts).
+
+  /** which way this body is turned, in sim axes: the front arc a guard covers */
+  facing = { x: 0, y: 1 };
+  /** a blow being wound up: how long it has been held, which way it is aimed, and the mouse so far */
+  wind: { t: number; dir: AttackDir; moves: readonly AttackDir[]; dx: number; dy: number } | null = null;
+  /** the guard, while it is held: which way, and the mouse that chose it */
+  guard: { dir: AttackDir; dx: number; dy: number } | null = null;
+  /** Damped hand offsets, shared by the wind-up and guard poses. */
+  weaponMotion = { x: 0, y: 0, vx: 0, vy: 0 };
+  /** wind, in the old sense: a blow, a sprint and a guard that turns one all spend it */
+  stam: number = DUEL.stamMax;
+  private stamIdle = 0;
+  /** seconds left on the flash of a blow turned, for the view */
+  guardT = 0;
+  /** seconds since the last chamber, -1 if there has not been one (the view pops a word for it) */
+  chambered = -1;
+  get winded(): boolean { return this.stam < 1; }
+  /** Spend stamina, if there is that much. */
+  spend(n: number): boolean { if (this.stam < n) return false; this.stam -= n; this.stamIdle = 0; return true; }
+  /** Spend wind continuously (a sprint), taking whatever is left: there is no all-or-nothing about it. */
+  drain(n: number): void { this.stam = Math.max(0, this.stam - n); this.stamIdle = 0; }
+
+  /** Raise the guard. It starts where a blow would and follows the mouse the same way. */
+  raiseGuard(dir: AttackDir = 'right'): void { if (!this.guard) this.guard = { dir, dx: 0, dy: 0 }; }
+  dropGuard(): void { this.guard = null; }
+  /** Turn to face a body: what a guard's front arc is measured from. */
+  faceToward(o: { x: number; y: number }): void {
+    const dx = o.x - this.x, dy = o.y - this.y, d = Math.hypot(dx, dy);
+    if (d > 0.01) this.facing = { x: dx / d, y: dy / d };
+  }
+
+  /**
+   * The mouse while a blow is held back: whichever way it has travelled furthest chooses the blow,
+   * and it keeps choosing until the blow is let go -- so a swing can be feinted into an overhead.
+   */
+  aimWind(dx: number, dy: number): void {
+    const w = this.wind;
+    if (!w) return;
+    const cap = DUEL.flick * 3;
+    w.dx = Math.max(-cap, Math.min(cap, w.dx + dx));
+    w.dy = Math.max(-cap, Math.min(cap, w.dy + dy));
+    if (Math.abs(w.dx) < DUEL.flick && Math.abs(w.dy) < DUEL.flick) return;
+    const want: AttackDir = Math.abs(w.dx) >= Math.abs(w.dy) ? (w.dx < 0 ? 'left' : 'right') : (w.dy < 0 ? 'up' : 'down');
+    if (w.moves.includes(want)) w.dir = want;
+  }
+  /** The mouse while the guard is up: it picks the side the same way a blow is picked. */
+  aimGuard(dx: number, dy: number): void {
+    const g = this.guard;
+    if (!g) return;
+    const cap = DUEL.flick * 3;
+    g.dx = Math.max(-cap, Math.min(cap, g.dx + dx));
+    g.dy = Math.max(-cap, Math.min(cap, g.dy + dy));
+    if (Math.abs(g.dx) < DUEL.flick && Math.abs(g.dy) < DUEL.flick) return;
+    g.dir = Math.abs(g.dx) >= Math.abs(g.dy) ? (g.dx < 0 ? 'left' : 'right') : (g.dy < 0 ? 'up' : 'down');
+  }
+
+  /**
+   * A blow turned: the guard has to be up, held the way the blow comes in, the striker has to be in
+   * front, and there has to be the wind to take it. Nothing random about it -- unlike the shield's
+   * own chance, which still runs underneath it for a body that is not holding a guard at all.
+   */
+  protected turns(by: Mover | undefined, dir: AttackDir | null | undefined): boolean {
+    const g = this.guard;
+    if (!g || !dir || g.dir !== dir || !by) return false;
+    const dx = by.x - this.x, dy = by.y - this.y, d = Math.hypot(dx, dy) || 1;
+    if ((dx / d) * this.facing.x + (dy / d) * this.facing.y < 0.1) return false; // not from behind
+    return this.spend(DUEL.block);
+  }
+
+  /**
+   * A chamber: throwing the same blow as the one already coming at you catches it on the way in.
+   * Theirs never lands and the striker is left open; yours carries on. The window is their whole
+   * wind-up, which is why reading the telegraph is the whole game. Anyone whose blow is aimed at
+   * this body is a foe of it, so there is no need to ask which side either of them is on.
+   */
+  chamber(s: VillageScene, dir: AttackDir): number {
+    let caught = 0;
+    s.grid.forEachInRadius(this.x, this.y, 60, (o) => {
+      const a = (o as Mover).attack;
+      if (o.dead || !a || a.struck || a.target !== this || a.dir !== dir || a.t > a.windup) return;
+      (o as Mover).attack = null;
+      (o as Mover).freeze = Math.max((o as Mover).freeze, 0.45); // caught flat: wide open
+      const d = Math.hypot(o.x - this.x, o.y - this.y) || 1;
+      (o as Mover).shove((o.x - this.x) / d, (o.y - this.y) / d, 5);
+      caught++;
+    });
+    if (caught) this.chambered = 0;
+    return caught;
+  }
+
+  /** The weapon hand, as a spring chasing wherever the wind or the guard is pointed. */
+  protected tickWeapon(dt: number): void {
+    const pose = this.wind ?? this.guard, w = this.weaponMotion;
+    const tx = pose ? pose.dx / (DUEL.flick * 3) : 0;
+    const ty = pose ? pose.dy / (DUEL.flick * 3) : 0;
+    const steps = Math.max(1, Math.ceil(Math.min(dt, 0.1) / 0.008));
+    const h = Math.min(dt, 0.1) / steps;
+    for (let i = 0; i < steps; i++) {
+      w.vx += ((tx - w.x) * 130 - w.vx * 21) * h;
+      w.vy += ((ty - w.y) * 130 - w.vy * 21) * h;
+      w.x += w.vx * h; w.y += w.vy * h;
+    }
+  }
+
+  /**
+   * The duel's own clock: the hand spring, how long the blow has been held, and the wind coming
+   * back once nothing has been spent for a moment. Every body that duels ticks this.
+   */
+  protected tickDuel(dt: number): void {
+    this.tickWeapon(dt);
+    if (this.wind) this.wind.t += dt;
+    this.guardT = Math.max(0, this.guardT - dt);
+    if (this.chambered >= 0) this.chambered += dt;
+    this.stamIdle += dt;
+    if (this.windBack && !this.wind && !this.guard && this.stamIdle > DUEL.regenDelay) this.stam = Math.min(DUEL.stamMax, this.stam + DUEL.regen * dt);
+  }
+  /** Whether the wind is coming back this tick. A bow at full draw holds it; nothing else does. */
+  protected get windBack(): boolean { return true; }
+
   /** Take a blow. Chest armor shaves it; a shield can turn a melee hit away entirely (`melee` = not an arrow/bolt). */
   /** Take a blow. `by` is whoever struck (a wild boar turns on them); arrows pass their archer, towers nobody. */
   hit(dmg: number, melee = true, by?: Mover, dir?: AttackDir | null): void {
-    void dir; // read by whoever can hold a guard against it (see Player.hit)
+    // a guard held the way the blow comes in turns it, and costs the wind to do so: deterministic,
+    // and the same whoever is holding it. The shield's own chance runs below, for a body with no guard.
+    if (melee && this.turns(by, dir)) { this.blocked = true; this.hurtT = 0.2; this.guardT = 0.18; return; }
     const st = armorStats(this.armor);
     this.blocked = false;
     // a shield wall: its bonus grows with the block's drill, and a Shieldbearer counts double in it
@@ -270,6 +397,7 @@ export abstract class Mover implements Agent {
   startAttack(s: VillageScene, target: Mover, dmg: number, reach: number, windup: number, recover: number): boolean {
     if (this.attack || this.attackCd > 0 || this.dist(target) > reach + 4 || this.elevated !== target.elevated || !s.world.lineClear(this, target, this.elevated)) return false;
     this.dir = target.x < this.x ? -1 : 1;
+    this.faceToward(target);
     const dir = this.nextAttackDir();
     this.attack = { target, t: 0, windup, recover, dmg, reach, struck: false, dir };
     this.vx = this.vy = 0;
@@ -320,6 +448,7 @@ export abstract class Mover implements Agent {
   protected tickTimers(dt: number): void {
     this.attackCd = Math.max(0, this.attackCd - dt);
     this.hurtT += dt;
+    this.tickDuel(dt);
     if (this.pushX || this.pushY) {
       const nx = this.x + this.pushX * dt, ny = this.y + this.pushY * dt;
       const t = World.toTile(nx, ny);
@@ -532,11 +661,11 @@ export class Villager extends Mover {
    * one shrugs half of it off, and a sporeburst answers it (the burst itself fires from `tickMood`,
    * which has the scene to find raiders with).
    */
-  override hit(dmg: number, melee = true, by?: Mover): void {
+  override hit(dmg: number, melee = true, by?: Mover, dir?: AttackDir | null): void {
     const m = this.moodNow;
     if (m?.evade && melee && Math.random() < m.evade) { this.blocked = true; this.hurtT = 0.2; return; }
     const before = this.hp;
-    super.hit(m?.bulk ? dmg * m.bulk.dmgMul : dmg, melee, by);
+    super.hit(m?.bulk ? dmg * m.bulk.dmgMul : dmg, melee, by, dir);
     if (m?.spores && this.hp < before) this.sporePending = true;
   }
   /** struck while full of toadstool stew: the cloud goes up on the next tick */
@@ -1629,7 +1758,6 @@ export class Player extends Mover {
   override canCarry(kind: BulkKind, food?: FoodKind): boolean { return this.roomFor(kind, food) > 0; }
   override get mass(): number { return MASS.player; }
   override get space(): number { return Math.max(this.radius, BODY.player); }
-  facing = { x: 0, y: 1 };
   tool: Tool = 'sword'; // the club you always have: there is no empty-handed tool, the right button is your hands
   /** which food the basket takes */
   basketKind: FoodKind = 'wheat';
@@ -1689,33 +1817,7 @@ export class Player extends Mover {
   /** incoming damage scale from the last meal (a hearty dish softens blows); hit() has no scene to ask */
   damageMul = 1;
   override hit(dmg: number, melee = true, by?: Mover, dir?: AttackDir | null): void {
-    if (melee && this.turns(by, dir)) { this.blocked = true; this.hurtT = 0.2; this.guardT = 0.18; return; }
-    super.hit(dmg * this.damageMul, melee, by, dir);
-  }
-  /** seconds left on the flash of a blow turned, for the view */
-  guardT = 0;
-  /** seconds since the last chamber, -1 if there has not been one (the view pops a word for it) */
-  chambered = -1;
-
-  /**
-   * A chamber: throwing the same blow as the one already coming at you catches it on the way in. Theirs
-   * never lands and the striker is left open; yours carries on. The window is their whole wind-up, which
-   * is why reading the telegraph is the whole game.
-   */
-  chamber(s: VillageScene, dir: AttackDir): number {
-    let caught = 0;
-    s.grid.forEachInRadius(this.x, this.y, 60, (o) => {
-      if (!(o instanceof Raider) || o.dead) return;
-      const a = o.attack;
-      if (!a || a.struck || a.target !== this || a.dir !== dir || a.t > a.windup) return;
-      o.attack = null;
-      o.freeze = Math.max(o.freeze, 0.45); // caught flat: wide open
-      const d = Math.hypot(o.x - this.x, o.y - this.y) || 1;
-      o.shove((o.x - this.x) / d, (o.y - this.y) / d, 5);
-      caught++;
-    });
-    if (caught) this.chambered = 0;
-    return caught;
+    super.hit(dmg * this.damageMul, melee, by, dir); // the guard that turns it is Mover's, and everyone's
   }
 
   update(dt: number, s: VillageScene): void {
@@ -1725,13 +1827,7 @@ export class Player extends Mover {
     this.sinceSwing += dt;
     this.sinceRoll += dt;
     this.recover = Math.max(0, this.recover - dt);
-    this.tickWeapon(dt);
-    if (this.wind) this.wind.t += dt;
-    this.guardT = Math.max(0, this.guardT - dt);
     if (this.draw >= 0) this.draw += dt;
-    if (this.chambered >= 0) this.chambered += dt;
-    this.stamIdle += dt;
-    if (!this.wind && !this.guard && this.draw < 0 && this.stamIdle > DUEL.regenDelay) this.stam = Math.min(DUEL.stamMax, this.stam + DUEL.regen * dt);
     if (this.frozen(dt)) return;
     if (this.busy > 0) { this.busy -= dt; this.vx = this.vy = 0; return; }
     if (this.roll) { this.updateRoll(dt, s); return; }
@@ -1745,7 +1841,7 @@ export class Player extends Mover {
     let run = 1;
     if (s.sprinting && (mx || my) && !this.swing && !this.wind && this.stam > 0) {
       run = p.sprintMul;
-      this.stam = Math.max(0, this.stam - DUEL.sprint * dt); this.stamIdle = 0;
+      this.drain(DUEL.sprint * dt);
     }
     const sp = this.speed * slow * run * this.armorSpeed * s.world.slowAt(this.x, this.y) * s.buffMul('speed');
     const blend = 1 - Math.exp(-(!(mx || my) ? 18 : this.guard ? 9 : 11) * dt);
@@ -1857,30 +1953,9 @@ export class Player extends Mover {
 
   // ---- the wind: a blow held back while the mouse picks which one it is -------------------------
 
-  /** a blow being wound up: how long it has been held, which way it is aimed, and the mouse so far */
-  wind: { t: number; dir: AttackDir; moves: readonly AttackDir[]; dx: number; dy: number } | null = null;
-  /** Damped hand offsets, shared by the wind-up and guard poses. */
-  weaponMotion = { x: 0, y: 0, vx: 0, vy: 0 };
-  private tickWeapon(dt: number): void {
-    const pose = this.wind ?? this.guard, w = this.weaponMotion;
-    const tx = pose ? pose.dx / (DUEL.flick * 3) : 0;
-    const ty = pose ? pose.dy / (DUEL.flick * 3) : 0;
-    const steps = Math.max(1, Math.ceil(Math.min(dt, 0.1) / 0.008));
-    const h = Math.min(dt, 0.1) / steps;
-    for (let i = 0; i < steps; i++) {
-      w.vx += ((tx - w.x) * 130 - w.vx * 21) * h;
-      w.vy += ((ty - w.y) * 130 - w.vy * 21) * h;
-      w.x += w.vx * h; w.y += w.vy * h;
-    }
-  }
   /** seconds a bow has been drawn, or -1 when it is not */
   draw = -1;
-  /** wind, in the old sense: a blow, a sprint and a guard that turns one all spend it */
-  stam: number = DUEL.stamMax;
-  private stamIdle = 0;
-  get winded(): boolean { return this.stam < 1; }
-  /** Spend stamina, if there is that much. */
-  spend(n: number): boolean { if (this.stam < n) return false; this.stam -= n; this.stamIdle = 0; return true; }
+  protected override get windBack(): boolean { return this.draw < 0; } // a string held back costs too
 
   /** Hold a blow back. It starts as a side swing and follows the mouse from there. */
   beginWind(moves: readonly AttackDir[]): boolean {
@@ -1889,50 +1964,6 @@ export class Player extends Mover {
     return true;
   }
 
-  /**
-   * The mouse while a blow is held back: whichever way it has travelled furthest chooses the blow, and
-   * it keeps choosing until the blow is let go — so a swing can be feinted into an overhead.
-   */
-  aimWind(dx: number, dy: number): void {
-    const w = this.wind;
-    if (!w) return;
-    const cap = DUEL.flick * 3;
-    w.dx = Math.max(-cap, Math.min(cap, w.dx + dx));
-    w.dy = Math.max(-cap, Math.min(cap, w.dy + dy));
-    if (Math.abs(w.dx) < DUEL.flick && Math.abs(w.dy) < DUEL.flick) return;
-    const want: AttackDir = Math.abs(w.dx) >= Math.abs(w.dy) ? (w.dx < 0 ? 'left' : 'right') : (w.dy < 0 ? 'up' : 'down');
-    if (w.moves.includes(want)) w.dir = want;
-  }
-
-  /** the guard, while the right button is held: which way it is held, and the mouse that chose it */
-  guard: { dir: AttackDir; dx: number; dy: number } | null = null;
-
-  /** Raise the guard. It starts where a blow would and follows the mouse the same way. */
-  raiseGuard(): void { if (!this.guard) this.guard = { dir: 'right', dx: 0, dy: 0 }; }
-  dropGuard(): void { this.guard = null; }
-  /** The mouse while the guard is up: it picks the side the same way a blow is picked. */
-  aimGuard(dx: number, dy: number): void {
-    const g = this.guard;
-    if (!g) return;
-    const cap = DUEL.flick * 3;
-    g.dx = Math.max(-cap, Math.min(cap, g.dx + dx));
-    g.dy = Math.max(-cap, Math.min(cap, g.dy + dy));
-    if (Math.abs(g.dx) < DUEL.flick && Math.abs(g.dy) < DUEL.flick) return;
-    g.dir = Math.abs(g.dx) >= Math.abs(g.dy) ? (g.dx < 0 ? 'left' : 'right') : (g.dy < 0 ? 'up' : 'down');
-  }
-
-  /**
-   * A blow turned: the guard has to be up, held the way the blow comes in, the striker has to be in
-   * front, and there has to be the wind to take it. Nothing random about it — unlike the shield's own
-   * chance, which every other body still lives by.
-   */
-  private turns(by: Mover | undefined, dir: AttackDir | null | undefined): boolean {
-    const g = this.guard;
-    if (!g || !dir || g.dir !== dir || !by) return false;
-    const dx = by.x - this.x, dy = by.y - this.y, d = Math.hypot(dx, dy) || 1;
-    if ((dx / d) * this.facing.x + (dy / d) * this.facing.y < 0.1) return false; // not from behind
-    return this.spend(DUEL.block);
-  }
 
   /** Let the blow go, toward `aim`. Returns the blow struck, or null if there was nothing to spend. */
   releaseWind(aim: { x: number; y: number }): AttackDir | null {

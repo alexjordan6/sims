@@ -14,8 +14,8 @@ import { MODELS, bake } from './assets';
 
 const box = new THREE.BoxGeometry(1, 1, 1);
 const roof4 = new THREE.ConeGeometry(Math.SQRT1_2, 1, 4, 1).rotateY(Math.PI / 4); // a square pyramid of unit footprint
-const cyl = new THREE.CylinderGeometry(0.5, 0.5, 1, 8);
-const ico = new THREE.IcosahedronGeometry(0.5, 1);
+const cyl = new THREE.CylinderGeometry(0.5, 0.5, 1, 6);
+const ico = new THREE.IcosahedronGeometry(0.5, 0);
 
 function part(g: THREE.BufferGeometry, colour: number, sx: number, sy: number, sz: number, x: number, y: number, z: number, m?: THREE.Material): THREE.Mesh {
   const mesh = new THREE.Mesh(g, m ?? mat(colour));
@@ -88,7 +88,7 @@ function makeBuilding(b: Building): Built {
     case 'gnomehouse': {
       // a toadstool: pale stem, spotted red cap
       g.add(part(cyl, wallC, 1.1, h, 1.1, cx, 0, cz));
-      g.add(part(new THREE.SphereGeometry(0.5, 8, 4, 0, Math.PI * 2, 0, Math.PI / 2), roofC, 2.1, 1.3, 2.1, cx, h - 0.05, cz));
+      g.add(part(new THREE.SphereGeometry(0.5, 6, 3, 0, Math.PI * 2, 0, Math.PI / 2), roofC, 2.1, 1.3, 2.1, cx, h - 0.05, cz));
       if (!ruined) for (let k = 0; k < 5; k++) { const a = k * 1.3; g.add(part(box, 0xf0e8d8, 0.16, 0.08, 0.16, cx + Math.cos(a) * 0.65, h + 0.35, cz + Math.sin(a) * 0.65)); }
       g.add(part(box, 0x2a1a14, 0.35, 0.55, 0.06, doorX, 0, cz + 0.55));
       g.add(part(box, 0x1a1410, 0.22, 0.22, 0.06, cx + 0.35, 0.45, cz + 0.55, windows));
@@ -96,7 +96,7 @@ function makeBuilding(b: Building): Built {
     }
     case 'warren': {
       // a gnome warren: a long grassy mound, round doors along its face, toadstools for chimneys
-      const dome = new THREE.SphereGeometry(0.5, 10, 5, 0, Math.PI * 2, 0, Math.PI / 2);
+      const dome = new THREE.SphereGeometry(0.5, 6, 3, 0, Math.PI * 2, 0, Math.PI / 2);
       g.add(part(dome, wallC, w * 0.98, h * 1.6, d * 0.95, cx, 0, cz));
       g.add(part(dome, ruined ? CHARRED : 0x5c7a38, w * 0.55, h * 1.1, d * 0.6, cx - 0.6, 0.35, cz - 0.3));
       for (const dx of [-1.2, 0, 1.2]) {

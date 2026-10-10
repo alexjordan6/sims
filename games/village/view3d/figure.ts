@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { lambert } from './fow';
 import { Mover, Villager, Player, Raider, type EnemyKind } from '../agents';
 
-// Rounded, articulated figures shared by the live actors and instanced distant crowd.
+// Faceted, articulated figures shared by the live actors and instanced distant crowd.
 // Elbows, wrists and knees are explicit joints; no character asset is needed at startup.
 
 /** Every length is a fraction of the figure's own standing height; `buildFigure` returns what that came to. */
@@ -21,10 +21,10 @@ export interface Spec {
 
 /** the gap between the shoulders and the chin */
 const NECK = 0.02;
-const ROUND = new THREE.SphereGeometry(0.5, 12, 10);
-const LIMB = new THREE.CapsuleGeometry(0.5, 1, 4, 10).scale(1, 0.5, 1);
+const ROUND = new THREE.SphereGeometry(0.5, 6, 4);
+const LIMB = new THREE.CylinderGeometry(0.43, 0.5, 1, 6);
 const CONE = new THREE.ConeGeometry(0.5, 1, 6);
-const RING = new THREE.CylinderGeometry(0.5, 0.5, 1, 8);
+const RING = new THREE.CylinderGeometry(0.5, 0.5, 1, 6);
 /**
  * The metal ladder, read off the gear's own names: leather and bronze, iron, steel, and the blue stuff
  * that is only ever found. Index is the forged tier, so a piece's colour is its tier — which is the
@@ -43,12 +43,12 @@ export function wearing(k: Kit): boolean { return k.helmet > 0 || k.chest > 0 ||
 const RANK_BAND = [0, 0, 0xb0703a, 0xc8ccd4, 0xe3b341, 0xe3b341];
 
 /**
- * One smooth, rounded body volume. `y` is its base rather than its centre, so a limb hangs from a joint at the
+ * One faceted body volume. `y` is its base rather than its centre, so a limb hangs from a joint at the
  * origin by giving a negative base. (actors.ts has its own `piece` for world-space art; this one keeps
  * figure units and casts a shadow.)
  */
 function slab(colour: number, w: number, h: number, d: number, x: number, y: number, z: number, g: THREE.BufferGeometry = ROUND): THREE.Mesh {
-  const m = new THREE.Mesh(g, lambert({ color: colour, flatShading: false }));
+  const m = new THREE.Mesh(g, lambert({ color: colour, flatShading: true }));
   m.scale.set(w, h, d);
   m.position.set(x, y + h / 2, z);
   m.castShadow = true;
@@ -68,7 +68,7 @@ function cap(s: Spec, tier: number): THREE.Mesh[] {
 }
 
 /**
- * Build rounded body volumes around a hierarchy of movable joints. Returns standing height;
+ * Build low-poly body volumes around a hierarchy of movable joints. Returns standing height;
  * callers scale the rig by `PERSON / height` before attaching world-sized equipment.
  */
 export function buildFigure(rig: THREE.Object3D, s: Spec, wear: { cap?: number; circlet?: boolean; kit?: Kit } = {}): number {

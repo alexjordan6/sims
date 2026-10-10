@@ -3,6 +3,7 @@ import { buildFigure, FIGURES } from './view3d/figure';
 import { heldMesh, grip, PERSON } from './view3d/actors';
 import { poseFigure } from './view3d/motion';
 import { setFowOn } from './view3d/fow';
+import { triangles } from './view3d/lowpoly';
 
 // Uses the same geometry, grip and pose solver as the actual game, with deterministic controls.
 setFowOn(false);
@@ -27,6 +28,8 @@ const figures = ['head','gnome','raider'].map((name,i)=>{
   rig.getObjectByName('hand-right')!.add(weapon);rig.traverse(o=>{if(o instanceof THREE.Mesh){o.castShadow=true;o.receiveShadow=true;}});scene.add(rig);return rig;
 });
 let mode='idle',time=0,paused=false,last=performance.now();
+const counts = figures.map(rig => { let n=0; rig.traverse(o=>{if(o instanceof THREE.Mesh)n+=triangles(o.geometry);}); return n; });
+document.querySelector('header p')!.textContent='Faceted production meshes · human / gnome / raider · '+counts.join(' / ')+' triangles';
 document.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(b=>b.onclick=()=>{
   mode=b.dataset.mode!;time=0;document.getElementById('pose-label')!.textContent=b.textContent;
   for (const rig of figures) {

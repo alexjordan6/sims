@@ -2,6 +2,8 @@ import './main';
 import * as THREE from 'three';
 import { buildFigure, FIGURES } from './view3d/figure';
 import { poseFigure } from './view3d/motion';
+import { MODELS } from './view3d/assets';
+import { triangles } from './view3d/lowpoly';
 import { heldMesh, grip, PERSON } from './view3d/actors';
 import { runPackChecks } from './pack-test';
 import { IMPLEMENTS } from './pack';
@@ -10,7 +12,7 @@ const clearBulk = (s: VillageScene) => s.player.pack.slots.forEach((b,i)=>{if(b 
 import type { VillageScene } from './main';
 import { World, WILD_FOOD, doorstep, buildingCenter, hearthCost, BUILDINGS, type BuildingKind, type Chest } from './world';
 import { Rng } from '../../src/shared/rng';
-import { Villager, Arrow, Raider, BELT, BUILDS, TOOLS } from './agents';
+import { Villager, Arrow, Raider, BELT, BUILDS, TOOLS, DIRS } from './agents';
 import { Brute, Rat, Ogre, Wrecker, Troll, Skulk, waveComposition } from './enemies';
 import { Boar, Swarm } from './wildlife';
 import { ORDER_MENUS, SLOT_GAP, Warband, Regiment, SHAPES, SHAPE_GAP, SHAPE_PACE, layout } from './regiment';
@@ -131,12 +133,93 @@ document.getElementById('run-checks')!.addEventListener('click', () => {
       pl.update(0.25, s);
       assert(foe.hp < hp, 'a slow frame crossing the whole active window still lands a blow');
     }
+
+    // ---- the duel is every body's, not the player's ------------------------------------------------
+    // The guard, the wind it costs, the chamber and the telegraph all used to live on Player alone, so
+    // an enemy walked into your sword with nothing to answer it. These checks are the proof that a
+    // raider now fights by the same rules -- and that none of them is a rule only the player gets.
+    {
+      const s = fresh(); clearing(s); s.agents = [s.player];
+      const pl = s.player; Object.assign(pl, World.center(125, 100));
+      pl.swing = null; pl.wind = null; pl.recover = 0; pl.dropGuard();
+
+      // a guard, held by a raider, and the blow it turns
+      const foe = s.spawn(new Raider(pl.x + 10, pl.y));
+      foe.hp = foe.maxHp = 200; foe.stam = 100;
+      s.grid.rebuild(s.agents);
+      assert('guard' in foe && 'stam' in foe && 'wind' in foe, 'a raider carries the same duel state the player does');
+
+      foe.raiseGuard('left'); foe.faceToward(pl);
+      assert(foe.guard!.dir === 'left', 'a raider can hold a guard, and on the side it chose');
+      const stam = foe.stam, full = foe.hp;
+      foe.hit(20, true, pl, 'left');
+      assert(foe.hp === full && foe.blocked && foe.stam < stam, `a guard on the blow's own side turns it, and spends the wind (${(stam - foe.stam).toFixed(0)})`);
+      foe.hit(20, true, pl, 'up');
+      assert(foe.hp < full && !foe.blocked, 'a guard on the wrong side turns nothing');
+
+      // from behind, a guard is no guard at all
+      const back = s.spawn(new Raider(foe.x + 30, foe.y)); back.hp = back.maxHp = 50; // the far side: behind it
+      const was = foe.hp; foe.raiseGuard('left'); foe.faceToward(pl); // facing the player, struck from the other side
+      foe.hit(20, true, back, 'left');
+      assert(foe.hp < was, 'a blow from behind goes through the guard whichever way it is held');
+
+      // winded: there is no guard without the wind to pay for it
+      foe.raiseGuard('left'); foe.faceToward(pl); foe.stam = 0;
+      const winded = foe.hp;
+      foe.hit(20, true, pl, 'left');
+      assert(foe.winded && foe.hp < winded, 'a winded body cannot hold its guard up: the blow lands');
+      foe.dropGuard(); back.dead = true;
+
+      // the mouse picks the side the same way for a guard as for a blow
+      pl.raiseGuard(); pl.aimGuard(-48, 0);
+      assert(pl.guard!.dir === 'left', 'the mouse swings the guard across to the side it travels');
+      pl.aimGuard(48, -48); // back across and up: the furthest travel is now vertical
+      assert(pl.guard!.dir === 'up', 'and keeps choosing while it is held');
+      pl.dropGuard();
+
+      // a chamber: their blow, thrown back on the same side, caught on its way in
+      foe.stam = 100; foe.attack = null; foe.attackCd = 0; foe.hp = foe.maxHp;
+      Object.assign(foe, { x: pl.x + 10, y: pl.y });
+      s.grid.rebuild(s.agents);
+      assert(foe.startAttack(s, pl, 10, 13, 0.3, 0.5), 'a raider winds up a blow at the player');
+      const coming = foe.attack!.dir;
+      assert(s.fx.some((e) => e.kind === 'telegraph' && e.dir === coming), 'and the telegraph says which blow it is: the side is there to read');
+      pl.chambered = -1;
+      const caught = pl.chamber(s, coming);
+      assert(caught === 1 && !foe.attack && foe.freeze > 0.3 && pl.chambered === 0, `the same blow back catches theirs on the way in and leaves them open (${caught})`);
+
+      // the wrong blow catches nothing
+      foe.attack = null; foe.attackCd = 0; foe.freeze = 0; pl.chambered = -1;
+      foe.startAttack(s, pl, 10, 13, 0.3, 0.5);
+      const other = DIRS.find((d) => d !== foe.attack!.dir)!;
+      assert(pl.chamber(s, other) === 0 && !!foe.attack, 'the wrong blow catches nothing, which is what makes reading it the game');
+
+      // a raider chambers too: nothing about it is the player's alone
+      foe.attack = null; foe.attackCd = 0; foe.freeze = 0; foe.chambered = -1;
+      pl.swing = null; pl.wind = null; pl.recover = 0;
+      pl.beginWind(['right']); pl.aimWind(48, 0);
+      const mine = pl.wind!.dir;
+      pl.releaseWind({ x: foe.x, y: foe.y });
+      pl.swing = null; // the swing itself is not what is being caught: the wind-up is
+      foe.attack = { target: pl, t: 0, windup: 0.3, recover: 0.5, dmg: 10, reach: 13, struck: false, dir: mine };
+      assert(pl.chamber(s, mine) === 1, 'and the chamber is a Mover\'s, so it works whoever throws it');
+
+      // the wind comes back on its own, for anyone
+      foe.attack = null; foe.guard = null; foe.wind = null; foe.stam = 10; foe.freeze = 0;
+      for (let i = 0; i < 90; i++) foe.update(1 / 60, s);
+      assert(foe.stam > 10, `a raider's wind comes back when it is not spending any (${foe.stam.toFixed(0)})`);
+    }
     {
       const rig = new THREE.Group(); const k = PERSON / buildFigure(rig, FIGURES.head);
       rig.scale.setScalar(k); const blade = heldMesh('sword', 2)!; blade.scale.setScalar(1/k); grip(blade,k,FIGURES.head);
       rig.getObjectByName('hand-right')!.add(blade);
       rig.userData.held = 'sword';
       assert(!!rig.getObjectByName('elbow-right') && !!rig.getObjectByName('knee-left'), 'figures have explicit elbows and knees without loading a model');
+      let faceCount = 0, faceted = true;
+      rig.traverse(o => { if (o instanceof THREE.Mesh) { faceCount += triangles(o.geometry); faceted &&= (o.material as THREE.MeshLambertMaterial).flatShading; } });
+      assert(faceCount < 3000 && faceted, `live characters use a faceted low-poly mesh (${faceCount} triangles)`);
+      const props = [...MODELS.props.values()];
+      assert(props.length > 20 && props.every(g => triangles(g) > 0 && triangles(g) <= (g.userData.sourceTriangles ?? triangles(g))), 'loaded scenery keeps valid meshes within its original triangle budget');
       for (const dir of ['left','right','up','down']) {
         const points: THREE.Vector3[] = [];
         for (const progress of [0,0.25,0.5,0.75,1]) {
@@ -2841,6 +2924,9 @@ document.getElementById('measure-scene')!.addEventListener('click', () => {
   const measure = () => {
     if (++frames < 90) { requestAnimationFrame(measure); return; }
     const info = scene().view!.renderer.info;
-    summary.textContent = Math.round(frames * 1000 / (performance.now() - start)) + ' FPS · ' + info.render.calls + ' draw calls · ' + Math.round(info.render.triangles / 1000) + 'k triangles · ' + info.memory.geometries + ' geometries';
+    const props = [...MODELS.props.values()];
+    const before = props.reduce((n,g) => n + (g.userData.sourceTriangles ?? triangles(g)), 0);
+    const after = props.reduce((n,g) => n + triangles(g), 0);
+    summary.textContent = Math.round(frames * 1000 / (performance.now() - start)) + ' FPS · ' + info.render.calls + ' draw calls · ' + Math.round(info.render.triangles / 1000) + 'k triangles · loaded models ' + before + ' → ' + after + ' triangles';
   }; requestAnimationFrame(measure);
 });

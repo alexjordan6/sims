@@ -1,4 +1,4 @@
-import { Mover, Raider, Villager, Player, type RaiderOpts } from './agents';
+import { Mover, Raider, Villager, Player, type RaiderOpts, type AttackDir } from './agents';
 import { World, BUILDINGS, type TilePos, type Building } from './world';
 import { COLS, ROWS, TILE, OGRE, BEDTIME, WRECKER, TROLL, SKULK, p, MASS } from './config';
 import type { VillageScene } from './main';
@@ -175,7 +175,7 @@ const prey = (o: unknown): o is Mover => o instanceof Player || (o instanceof Vi
 
 /** One of the Ogre's three attacks in progress. Replaces Mover.attack, which only ever hits one body. */
 type OgreMove =
-  | { kind: 'swing'; t: number; ux: number; uy: number; struck: boolean }
+  | { kind: 'swing'; t: number; ux: number; uy: number; struck: boolean; dir: AttackDir }
   | { kind: 'smash'; t: number; struck: boolean }
   | { kind: 'charge'; t: number; phase: 'windup' | 'rush' | 'recover' | 'stunned'; ux: number; uy: number; travelled: number; maxDist: number; hit: Set<number> };
 
@@ -347,9 +347,11 @@ export class Ogre extends Raider {
 
   private beginSwing(s: VillageScene, t: Mover): void {
     const { ux, uy } = this.face(t);
-    this.move = { kind: 'swing', t: 0, ux, uy, struck: false };
+    // a side of its own, telegraphed and read by hit(): his sweep is a blow you can turn, not weather
+    const dir = this.nextAttackDir();
+    this.move = { kind: 'swing', t: 0, ux, uy, struck: false, dir };
     this.vx = this.vy = 0; this.task = 'winding up a swing';
-    s.fx.push({ kind: 'telegraph', who: this, ms: OGRE.swing.windup * 1000 });
+    s.fx.push({ kind: 'telegraph', who: this, ms: OGRE.swing.windup * 1000, dir });
   }
 
   private beginSmash(s: VillageScene): void {
@@ -386,7 +388,7 @@ export class Ogre extends Raider {
             if (dd > 8 && ox * m.ux + oy * m.uy < W.halfAngleCos) return; // behind him
             if (!s.world.lineClear(this, o, this.elevated)) return;
             hits++;
-            this.strike(s, o, W.dmg, ox, oy, W.push, W.freeze, true);
+            this.strike(s, o, W.dmg, ox, oy, W.push, W.freeze, true, m.dir);
           });
           if (!hits) s.fx.push({ kind: 'miss', who: this });
         }
@@ -454,8 +456,8 @@ export class Ogre extends Raider {
     this.move = null; this.lastMove = kind; this.cd[kind] = cooldown; this.attackCd = 0.05;
   }
 
-  private strike(s: VillageScene, o: Mover, dmg: number, ux: number, uy: number, push: number, freeze: number, melee: boolean): void {
-    o.hit(dmg, melee, this);
+  private strike(s: VillageScene, o: Mover, dmg: number, ux: number, uy: number, push: number, freeze: number, melee: boolean, dir?: AttackDir): void {
+    o.hit(dmg, melee, this, dir);
     o.shove(ux, uy, push);
     o.freeze = Math.max(o.freeze, freeze);
     s.fx.push({ kind: 'hit', attacker: this, target: o, dmg, crit: false, killed: !!o.dead, ux, uy, push });

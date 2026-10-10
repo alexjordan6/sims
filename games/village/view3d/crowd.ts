@@ -18,9 +18,10 @@ const POSES = [
   ...Array.from({ length: 2 }, (_, i) => ({ clip: 'idle', at: i / 2 })),
   ...Array.from({ length: 8 }, (_, i) => ({ clip: 'walk', at: i / 8 })),
   ...Array.from({ length: 4 }, (_, i) => ({ clip: 'attack', at: i / 3 })),
+  { clip: 'guard', at: 0 },
   { clip: 'die', at: 1 },
 ];
-const IDLE = [0, 1], WALK = Array.from({length:8}, (_,i)=>i+2), STRIKE = [10,11,12,13], FALLEN = 14;
+const IDLE = [0, 1], WALK = Array.from({length:8}, (_,i)=>i+2), STRIKE = [10,11,12,13], GUARD = 14, FALLEN = 15;
 const CAPACITY0 = 64;
 /**
  * How many distinct looks the crowd will bake. Each one is fifteen baked poses kept for the session, so
@@ -103,10 +104,12 @@ export class Crowd {
     const tool = heldMesh(cm.held, cm.weapon);
     rig.userData.held = cm.held;
     if (tool && hand) { tool.scale.setScalar(1 / k); grip(tool, k, spec); hand.add(tool); }
-    const mat = lambert({ vertexColors: true, flatShading: false });
+    const mat = lambert({ vertexColors: true, flatShading: true });
     const poses = POSES.map(({ clip, at }) => {
       poseFigure(rig, { phase: at * Math.PI * 2, pace: clip === 'walk' ? 0.85 : 0, time: at * 3,
         strike: clip === 'attack' ? { dir: cm.held === 'pike' ? 'down' : 'right', progress: at, recovery: Math.max(0, (at - 0.8) * 5) } : undefined,
+        guard: clip === 'guard',
+        wind: clip === 'guard' ? { x: 0, y: 0 } : undefined,
         bow: clip === 'attack' && cm.held === 'bow' ? 1 - at : undefined,
         death: clip === 'die' ? 1 : undefined });
       rig.updateMatrixWorld(true);
@@ -127,6 +130,7 @@ export class Crowd {
     const phase = (this.strides.get(m.id) ?? m.id) + Math.hypot(m.vx,m.vy) * U * dt * 9;
     this.strides.set(m.id,phase);
     if (k && k.attack > 0) return STRIKE[Math.min(3, Math.floor((0.4 - Math.min(0.4, k.attack)) / 0.4 * 4))];
+    if (m.guard) return GUARD; // a shield up outranks walking: it is what the body is doing
     const moving = Math.abs(m.vx) + Math.abs(m.vy) > 1;
     if (moving) return WALK[Math.floor(phase / (Math.PI * 2) * WALK.length) % WALK.length];
     return IDLE[Math.floor(this.t * 1.5 + m.id * 0.37) % IDLE.length];

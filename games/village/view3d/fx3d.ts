@@ -35,6 +35,8 @@ interface Line { ax: number; ay: number; az: number; bx: number; by: number; bz:
 const ARC = new THREE.RingGeometry(0.76, 0.85, 24, 1, 0, 2.4).rotateX(-Math.PI / 2);
 const SPIN = new THREE.RingGeometry(0.55, 0.85, 14, 1, 0, Math.PI * 2).rotateX(-Math.PI / 2);
 const SHOCK = new THREE.RingGeometry(0.85, 1, 32).rotateX(-Math.PI / 2);
+/** the glyph for an incoming blow: the way the guard has to go to meet it */
+const TELL: Record<string, string> = { up: '\u25B2', down: '\u25BC', left: '\u25C0', right: '\u25B6' };
 /** at most this many arcs and shocks at once: in a battle of thousands the oldest give way */
 const ARCS_MAX = 160;
 /** room for this many fading lines (a pike's thrust, an arrow's flight) at once */
@@ -180,7 +182,10 @@ export class Fx3d {
       }
       case 'telegraph': {
         const k = this.actors.kick(ev.who.id); k.flash = Math.max(k.flash, ev.ms / 1000); k.flashColour = 0xffc040;
-        this.word('!', this.actors.headOf(ev.who).add(new THREE.Vector3(0, 0.3, 0)), '#ffe066', 18, 0.9);
+        // the side to hold, as the arrow you would move the mouse along to meet it. A blow with no side
+        // (a pike's thrust, the Ogre's smash) keeps the old '!': there is nothing to turn, only to leave.
+        const tell = ev.dir ? TELL[ev.dir] : '!';
+        this.word(tell, this.actors.headOf(ev.who).add(new THREE.Vector3(0, 0.3, 0)), '#ffe066', ev.dir ? 26 : 18, Math.max(0.9, ev.ms / 1000));
         if (ev.who instanceof Raider) sfx.grunt();
         break;
       }

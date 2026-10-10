@@ -22,12 +22,12 @@ import { groundHeight } from './terrain';
 const box = new THREE.BoxGeometry(1, 1, 1);
 const cone = new THREE.ConeGeometry(0.5, 1, 6);
 const ico = new THREE.IcosahedronGeometry(0.5, 0);
-const ring = new THREE.CylinderGeometry(0.5, 0.5, 1, 8);
+const ring = new THREE.CylinderGeometry(0.5, 0.5, 1, 6);
 const bladeOutline = new THREE.Shape();
 bladeOutline.moveTo(-0.045, 0.14); bladeOutline.lineTo(0.045, 0.14);
 bladeOutline.lineTo(0.033, 0.69); bladeOutline.lineTo(0, 0.83);
 bladeOutline.lineTo(-0.033, 0.69); bladeOutline.closePath();
-const bladeGeometry = new THREE.ExtrudeGeometry(bladeOutline, { depth: 0.022, bevelEnabled: true, bevelSegments: 1, steps: 1, bevelSize: 0.006, bevelThickness: 0.005 }).translate(0, 0, -0.011);
+const bladeGeometry = new THREE.ExtrudeGeometry(bladeOutline, { depth: 0.022, bevelEnabled: false, steps: 1 }).translate(0, 0, -0.011);
 /** a soldier's rank on its red cap: none for a Recruit, then a band of bronze, silver, gold, and gold with a white plume at Elite */
 const RANK_BAND = [0, 0, 0xb0703a, 0xc8ccd4, 0xe3b341, 0xe3b341];
 export function rankOf(m: Mover): number { return m instanceof Villager && m.role === 'soldier' && m.isAdult ? m.tier : 1; }
@@ -48,7 +48,7 @@ export function grip(held: THREE.Object3D, k: number, s?: Spec): void {
   held.position.set(-0.05 / k, -0.32 / k, 0.06 / k);
   held.rotation.x = Math.PI / 2;
 }
-const cyl = new THREE.CylinderGeometry(0.5, 0.5, 1, 10);
+const cyl = new THREE.CylinderGeometry(0.5, 0.5, 1, 6);
 
 export function piece(colour: number, sx: number, sy: number, sz: number, x: number, y: number, z: number, g: THREE.BufferGeometry = box): THREE.Mesh {
   const m = new THREE.Mesh(g, lambert({ color: colour }));
@@ -83,7 +83,7 @@ export function heldMesh(held: string, tier = 0): THREE.Object3D | null {
   switch (held) {
     case 'sword': {
       const steel = tier === 1 ? 0xc7a16b : 0xc6d5e0;
-      const blade = new THREE.Mesh(bladeGeometry, lambert({ color: steel, flatShading: false }));
+      const blade = new THREE.Mesh(bladeGeometry, lambert({ color: steel, flatShading: true }));
       g.add(piece(grip, 0.045, 0.12, 0.045, 0, 0, 0, cyl), piece(steel, 0.23, 0.035, 0.06, 0, 0.11, 0), blade,
         piece(steel, 0.075, 0.06, 0.06, 0, -0.055, 0, ico));
       const tip = new THREE.Object3D(); tip.name = 'weapon-tip'; tip.position.y = 0.83; g.add(tip);
@@ -334,7 +334,8 @@ export class Actors {
         const sp = Math.hypot(m.vx, m.vy);
         a.anim.phase += sp * U * dt * 9;
         const sw = m instanceof Player ? m.swing : null;
-        const attack = m instanceof Raider ? m.attack : null;
+        // every body telegraphs the same way now, your own soldiers included: the blow is Mover.attack
+        const attack = m.attack;
         const strike = sw ? {
           dir: sw.dir ?? (sw.stage === 1 ? 'left' : 'right'),
           progress: Math.max(0, Math.min(1, (sw.t - sw.from) / (sw.to - sw.from))),
@@ -346,8 +347,9 @@ export class Actors {
           phase: a.anim.phase, pace: Math.min(1, sp / 48), time: this.t + m.id,
           side: (m.vx * Math.cos(a.yaw) - m.vy * Math.sin(a.yaw)) / 70,
           backwards: m.vx * Math.sin(a.yaw) + m.vy * Math.cos(a.yaw) < -1,
-          wind: m instanceof Player && (m.wind || m.guard || (sw && sw.t < sw.from)) ? m.weaponMotion : undefined,
-          guard: m instanceof Player && !!m.guard,
+          // the wind and the guard belong to any body that duels, not to the player alone
+          wind: m.wind || m.guard || (sw && sw.t < sw.from) ? m.weaponMotion : undefined,
+          guard: !!m.guard,
           bow: m instanceof Player ? m.draw : a.anim.rig.userData.held === 'bow' && strike ? Math.max(0, 1 - strike.progress) : undefined,
           strike: a.anim.rig.userData.held === 'pike' && strike ? { ...strike, dir: 'down' } : strike,
           hurt: m.hurtT < 0.18 ? 1 - m.hurtT / 0.18 : 0,

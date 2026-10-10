@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { fogify, palette } from './fow';
+import { downsampleModel } from './lowpoly';
 
 // The model packs (Kenney, CC0: see assets/CREDITS.md). Everything loads in the background at start;
 // until it lands, the world is drawn with the code-built placeholders, and anything that never loads
@@ -147,9 +148,9 @@ export async function loadModels(props: { key: string; centre: boolean }[], char
   const jobs: Promise<void>[] = [];
   for (const { key, centre } of props) {
     if (MODELS.props.has(key)) continue;
-    jobs.push(load(key).then((gltf) => {
+    jobs.push(load(key).then(async (gltf) => {
       if (!gltf) return;
-      MODELS.props.set(key, standUp(bake(gltf.scene), centre));
+      MODELS.props.set(key, standUp(await downsampleModel(bake(gltf.scene)), centre));
       MODELS.revision++;
     }));
   }
