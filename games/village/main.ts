@@ -2154,6 +2154,28 @@ export class VillageScene extends SimScene {
     return true;
   }
 
+  /**
+   * What the duel looks like this instant, for the HUD: the blow being held back or the guard being
+   * held up, how much wind is left, and the nearest blow coming the other way.
+   */
+  duelState(): { wind: AttackDir | null; guard: AttackDir | null; stam: number; stamMax: number; draw: number; incoming: AttackDir | null; chambered: boolean } {
+    const pl = this.player;
+    let incoming: AttackDir | null = null, near = Infinity;
+    for (const a of this.agents) {
+      if (!(a instanceof Raider) || a.dead) continue;
+      const at = a.attack;
+      if (!at || at.struck || at.target !== pl || at.t > at.windup) continue;
+      const d = a.dist(pl);
+      if (d < near) { near = d; incoming = at.dir; }
+    }
+    return {
+      wind: pl.wind?.dir ?? null, guard: pl.guard?.dir ?? null,
+      stam: pl.stam, stamMax: DUEL.stamMax,
+      draw: pl.draw >= 0 ? Math.min(1, pl.draw / DUEL.draw) : -1,
+      incoming, chambered: pl.chambered >= 0 && pl.chambered < 0.8,
+    };
+  }
+
   /** The right button: the guard goes up, and the mouse picks the side it is held. */
   raiseGuard(): boolean {
     if (!this.canFight() || this.player.tool !== 'sword' || this.player.weapons.melee < 0) return false;

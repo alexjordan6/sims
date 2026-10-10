@@ -121,6 +121,8 @@ export class UI {
   private inspT = 0;
   private lastInspector = '';
   private rosterT = 0;
+  private reticle!: HTMLElement;
+  private lastDuel = '';
   private topT = 0;
   private feedSeen = 0;
   private lastBuilding: import('../world').Building | null = null;
@@ -152,6 +154,7 @@ export class UI {
         <div class="t-hp" title="Your HP. You heal overnight — not on an empty belly. If you die the run ends"><span class="bar hp"><i></i></span></div>
         <div class="t-hunger" title="Your belly. Empty, you lose HP and stop mending. T eats (your pack first, then the granary). Click to eat"><span class="bar belly"><i></i></span><span class="belly-num"></span></div>
         <div class="abilities">${(["Q", "W", "E", "R"] as const).map((k) => `<div class="ability" data-ab="${k}"><kbd>${k}</kbd><span class="ab-name"></span><span class="ab-cd"></span><span class="ab-count"></span></div>`).join("")}</div>
+        <div class="t-stam" title="Wind. A blow, a sprint and a guard that turns one all spend it; it comes back when you leave off"><span class="bar stam"><i></i></span></div>
         <div class="t-buff" hidden title="The dish you last ate, and how long it keeps working"><span class="buff"></span></div>
       </div>
       <div class="orders" data-panel="orders" hidden></div>
@@ -234,6 +237,9 @@ export class UI {
 
     this.tooltipEl = h('<div class="tooltip" hidden></div>');
     this.overlay.append(this.tooltipEl);
+    // the crosshair, and round it the dial that says which way the blow or the guard is set
+    this.reticle = h(`<div class="reticle" hidden><i class="dot"></i>${['up', 'down', 'left', 'right'].map((d) => `<i class="arm ${d}"></i>`).join('')}<span class="draw"></span></div>`);
+    this.overlay.append(this.reticle);
 
     this.mountControls();
 
@@ -284,7 +290,7 @@ export class UI {
       <div class="ctrl-card panel">
         <div class="ph">${spr('town', TOWN.iconKey, 24)}<h2>Controls</h2><button class="btn small ctrl-close">×</button></div>
         <div class="ctrl-rows">${rows.map(([k, d]) => `<kbd>${esc(k)}</kbd><span>${esc(d)}</span>`).join('')}</div>
-        <div class="ctrl-foot">Right-click to walk, fight and use things; Q W E R for abilities. The bar above the belt says what a click will do.</div>
+        <div class="ctrl-foot">Click the view to take the mouse (Alt or Esc gives it back). W A S D walks where you are looking, Shift runs, Space dodges. Hold the left button to wind a blow and flick the mouse to choose it — up for an overhead, down to thrust, left or right to swing — and let go to strike. Hold the right button to guard, the same four ways. Q kicks through a guard. F1-F4 still command the banners.</div>
         <div class="ctrl-foot"><button class="btn small mute">SOUND</button></div>
       </div>
     </div>`);
@@ -336,6 +342,7 @@ export class UI {
       this.inspT += 0.1; if (this.inspT >= 0.25 && showInspector) { this.inspT = 0; this.renderInspector(); } // cards rebuild their DOM: a few times a second is plenty
     }
     if (this.rosterT > 0.5 && !this.roster.hidden) { this.rosterT = 0; this.renderRoster(); }
+    this.renderDuel();
     this.renderFeed();
     this.inventory.render();
     if(this.scene.armoryFor)this.renderArmory();
@@ -397,6 +404,35 @@ export class UI {
       (bar.firstElementChild as HTMLElement).style.width = `${Math.round(share * 100)}%`;
       belly.classList.toggle('empty', left <= 0);
     }
+  }
+
+  /**
+   * The duel, drawn every frame because a blow is chosen and let go inside a handful of them: the
+   * crosshair, the arm of the dial that says which way the blow or the guard is set, the arm that says
+   * which way one is coming at you, and the wind left to pay for any of it.
+   */
+  private renderDuel(): void {
+    const s = this.scene;
+    const show = s.screen === 'playing' && !s.interior.active;
+    if (this.reticle.hidden === show) this.reticle.hidden = !show;
+    if (!show) return;
+    const d = s.duelState();
+    const key = `${d.wind}|${d.guard}|${d.incoming}|${Math.round(d.stam)}|${Math.round(d.draw * 20)}|${d.chambered}`;
+    if (key === this.lastDuel) return;
+    this.lastDuel = key;
+    const set = d.wind ?? d.guard;
+    this.reticle.classList.toggle('guarding', !!d.guard && !d.wind);
+    this.reticle.classList.toggle('chambered', d.chambered);
+    for (const arm of this.reticle.querySelectorAll<HTMLElement>('.arm')) {
+      const dir = arm.className.split(' ')[1];
+      arm.classList.toggle('set', set === dir);
+      arm.classList.toggle('coming', d.incoming === dir);
+    }
+    const draw = this.reticle.querySelector<HTMLElement>('.draw')!;
+    draw.hidden = d.draw < 0;
+    if (d.draw >= 0) draw.style.setProperty('--d', `${Math.round(d.draw * 100)}%`);
+    const bar = this.hotbar.querySelector<HTMLElement>('.bar.stam i');
+    if (bar) { bar.style.width = `${Math.round((d.stam / d.stamMax) * 100)}%`; bar.parentElement!.classList.toggle('low', d.stam < 25); }
   }
 
   private renderHotbar(): void {
