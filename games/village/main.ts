@@ -33,7 +33,7 @@ export interface GameEvent { kind: EventKind; text: string; toast: boolean; day:
 /** Things the sim reports for the renderer to animate; drained every frame. */
 export type FxEvent =
   | { kind: 'hit'; attacker: Mover; target: Mover; dmg: number; crit: boolean; killed: boolean; streak?: number; ux?: number; uy?: number; push?: number }
-  | { kind: 'telegraph'; who: Mover; ms: number }
+  | { kind: 'telegraph'; who: Mover; ms: number; /** which way the blow comes in, so it can be read and answered */ dir?: AttackDir }
   | { kind: 'miss'; who: Mover }
   | { kind: 'slowmo' }
   | { kind: 'tool'; tool: 'axe' | 'seed' | 'hammer'; tx: number; ty: number; who?: Mover }
@@ -908,7 +908,7 @@ export class VillageScene extends SimScene {
       else this.togglePause();
     };
     kb.on('keydown-ESC', closePanel);
-    kb.on('keydown-Q', (e: KeyboardEvent) => { if (!e.repeat) this.ability('Q'); }); // W and E walk now
+    kb.on('keydown-Q', (e: KeyboardEvent) => { if (!e.repeat) this.kick(); }); // the blade is on the mouse; W and E walk
     kb.on('keyup-R', () => this.releaseMeal());
     kb.on('keydown-B', () => this.ui?.toggleBag());
     kb.on('keydown-V', () => this.openArmory(this.armoryFor ? null : this.player));
@@ -2146,8 +2146,48 @@ export class VillageScene extends SimScene {
     if (!this.canFight()) { pl.wind = null; return true; }
     this.faceTo(aim.x, aim.y);
     const dir = pl.releaseWind(aim);
-    if (dir) this.fx.push({ kind: 'swing', who: pl, dx: pl.facing.x, dy: pl.facing.y, stage: dir === 'up' ? 2 : dir === 'down' ? 1 : 0 });
+    if (dir) {
+      this.fx.push({ kind: 'swing', who: pl, dx: pl.facing.x, dy: pl.facing.y, stage: dir === 'up' ? 2 : dir === 'down' ? 1 : 0 });
+      // the same blow as the one already coming in catches it on the way
+      if (pl.chamber(this, dir)) this.event('soldier', 'Chambered!', true);
+    }
     return true;
+  }
+
+  /** The right button: the guard goes up, and the mouse picks the side it is held. */
+  raiseGuard(): boolean {
+    if (!this.canFight() || this.player.tool !== 'sword' || this.player.weapons.melee < 0) return false;
+    this.player.wind = null; // you cannot wind a blow and hold a guard at once
+    this.player.raiseGuard();
+    return true;
+  }
+  dropGuard(): void { this.player.dropGuard(); }
+
+  /**
+   * A kick: no damage worth the name, but it goes through a guard and leaves whoever was behind it wide
+   * open — which is the only answer to someone who simply never drops theirs.
+   */
+  kick(): void {
+    const pl = this.player;
+    if (!this.canFight() || pl.swing || pl.roll) return;
+    if (!pl.spend(DUEL.kick)) { this.event('info', 'Out of wind.', true); return; }
+    const aim = this.aimAt();
+    this.faceTo(aim.x, aim.y);
+    const fx = pl.facing.x, fy = pl.facing.y;
+    pl.recover = Math.max(pl.recover, 0.3);
+    this.fx.push({ kind: 'swing', who: pl, dx: fx, dy: fy, stage: 0 });
+    let landed = 0;
+    this.grid.forEachInRadius(pl.x, pl.y, 22, (o, d2) => {
+      if (!(o instanceof Raider) || o.dead || o.elevated !== pl.elevated) return;
+      const d = Math.sqrt(d2) || 1, ux = (o.x - pl.x) / d, uy = (o.y - pl.y) / d;
+      if (ux * fx + uy * fy < 0.3) return;
+      o.attack = null; // through the guard, and through whatever was being wound up behind it
+      o.freeze = Math.max(o.freeze, 0.5);
+      o.shove(ux, uy, 9);
+      o.hit(2, true, pl);
+      landed++;
+    });
+    if (landed) this.fx.push({ kind: 'impact', x: pl.x + fx * 14, y: pl.y + fy * 14 });
   }
 
   onPointerMove(ptr: Ptr): void {

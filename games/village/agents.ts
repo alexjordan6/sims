@@ -220,7 +220,11 @@ export abstract class Mover implements Agent {
   /** hitstop: seconds this body stays frozen after a big hit lands */
   freeze = 0;
   /** telegraphed melee attack in progress (raiders, soldiers) */
-  attack: { target: Mover; t: number; windup: number; recover: number; dmg: number; reach: number; struck: boolean } | null = null;
+  attack: { target: Mover; t: number; windup: number; recover: number; dmg: number; reach: number; struck: boolean; dir: AttackDir } | null = null;
+  /** which blow this body throws next, so a run of them is varied but not random */
+  private attackSeq = 0;
+  /** The next blow this body will throw: varied by body and by swing, and the same every run. */
+  protected nextAttackDir(): AttackDir { return DIRS[(this.id * 3 + this.attackSeq++) & 3]; }
 
   /** Take a blow. Chest armor shaves it; a shield can turn a melee hit away entirely (`melee` = not an arrow/bolt). */
   /** Take a blow. `by` is whoever struck (a wild boar turns on them); arrows pass their archer, towers nobody. */
@@ -266,9 +270,10 @@ export abstract class Mover implements Agent {
   startAttack(s: VillageScene, target: Mover, dmg: number, reach: number, windup: number, recover: number): boolean {
     if (this.attack || this.attackCd > 0 || this.dist(target) > reach + 4 || this.elevated !== target.elevated || !s.world.lineClear(this, target, this.elevated)) return false;
     this.dir = target.x < this.x ? -1 : 1;
-    this.attack = { target, t: 0, windup, recover, dmg, reach, struck: false };
+    const dir = this.nextAttackDir();
+    this.attack = { target, t: 0, windup, recover, dmg, reach, struck: false, dir };
     this.vx = this.vy = 0;
-    s.fx.push({ kind: 'telegraph', who: this, ms: windup * 1000 });
+    s.fx.push({ kind: 'telegraph', who: this, ms: windup * 1000, dir });
     return true;
   }
 
@@ -283,7 +288,7 @@ export abstract class Mover implements Agent {
       s.fx.push({ kind: 'melee', who: this, x: t.x, y: t.y });
       if (!t.dead && !t.hidden && this.elevated === t.elevated && this.dist(t) <= a.reach && s.world.lineClear(this, t, this.elevated)) {
         this.dir = t.x < this.x ? -1 : 1;
-        t.hit(a.dmg, true, this);
+        t.hit(a.dmg, true, this, a.dir);
         const d = this.dist(t) || 1;
         t.shove((t.x - this.x) / d, (t.y - this.y) / d, this.blowPush);
         s.fx.push({ kind: 'hit', attacker: this, target: t, dmg: a.dmg, crit: false, killed: !!t.dead });
@@ -1593,6 +1598,7 @@ export const ATTACK: Record<AttackDir, { dur: number; from: number; to: number; 
   right: { dur: 0.36, from: 0.09, to: 0.21, dmgMul: 1, push: 16, reach: 26, cos: 0.1, stam: 11 },
 };
 /** what blows a weapon has in it: you cannot thrust with a club, nor with an axe */
+export const DIRS: readonly AttackDir[] = ['up', 'down', 'left', 'right'];
 export const MOVES: Record<'blade' | 'club', readonly AttackDir[]> = {
   blade: ['up', 'down', 'left', 'right'],
   club: ['up', 'left', 'right'],
@@ -1675,7 +1681,35 @@ export class Player extends Mover {
   hunger = p.hungerMax;
   /** incoming damage scale from the last meal (a hearty dish softens blows); hit() has no scene to ask */
   damageMul = 1;
-  override hit(dmg: number, melee = true, by?: Mover, dir?: AttackDir | null): void { super.hit(dmg * this.damageMul, melee, by, dir); }
+  override hit(dmg: number, melee = true, by?: Mover, dir?: AttackDir | null): void {
+    if (melee && this.turns(by, dir)) { this.blocked = true; this.hurtT = 0.2; this.guardT = 0.18; return; }
+    super.hit(dmg * this.damageMul, melee, by, dir);
+  }
+  /** seconds left on the flash of a blow turned, for the view */
+  guardT = 0;
+  /** seconds since the last chamber, -1 if there has not been one (the view pops a word for it) */
+  chambered = -1;
+
+  /**
+   * A chamber: throwing the same blow as the one already coming at you catches it on the way in. Theirs
+   * never lands and the striker is left open; yours carries on. The window is their whole wind-up, which
+   * is why reading the telegraph is the whole game.
+   */
+  chamber(s: VillageScene, dir: AttackDir): number {
+    let caught = 0;
+    s.grid.forEachInRadius(this.x, this.y, 60, (o) => {
+      if (!(o instanceof Raider) || o.dead) return;
+      const a = o.attack;
+      if (!a || a.struck || a.target !== this || a.dir !== dir || a.t > a.windup) return;
+      o.attack = null;
+      o.freeze = Math.max(o.freeze, 0.45); // caught flat: wide open
+      const d = Math.hypot(o.x - this.x, o.y - this.y) || 1;
+      o.shove((o.x - this.x) / d, (o.y - this.y) / d, 5);
+      caught++;
+    });
+    if (caught) this.chambered = 0;
+    return caught;
+  }
 
   update(dt: number, s: VillageScene): void {
     this.damageMul = 1 / s.buffMul('hp');
@@ -1685,9 +1719,11 @@ export class Player extends Mover {
     this.sinceRoll += dt;
     this.recover = Math.max(0, this.recover - dt);
     if (this.wind) this.wind.t += dt;
+    this.guardT = Math.max(0, this.guardT - dt);
     if (this.draw >= 0) this.draw += dt;
+    if (this.chambered >= 0) this.chambered += dt;
     this.stamIdle += dt;
-    if (!this.wind && this.draw < 0 && this.stamIdle > DUEL.regenDelay) this.stam = Math.min(DUEL.stamMax, this.stam + DUEL.regen * dt);
+    if (!this.wind && !this.guard && this.draw < 0 && this.stamIdle > DUEL.regenDelay) this.stam = Math.min(DUEL.stamMax, this.stam + DUEL.regen * dt);
     if (this.frozen(dt)) return;
     if (this.busy > 0) { this.busy -= dt; this.vx = this.vy = 0; return; }
     if (this.roll) { this.updateRoll(dt, s); return; }
@@ -1695,7 +1731,7 @@ export class Player extends Mover {
     if (mx || my) this.facing = Math.abs(mx) >= Math.abs(my) ? { x: Math.sign(mx), y: 0 } : { x: 0, y: Math.sign(my) };
     if (mx) this.dir = mx < 0 ? -1 : 1;
     // swinging plants your feet; the swing itself steps you forward
-    const slow = this.swing ? 0.25 : this.wind ? 0.55 : this.recover > 0 ? 0.6 : 1;
+    const slow = this.swing ? 0.25 : this.wind ? 0.55 : this.guard ? 0.5 : this.recover > 0 ? 0.6 : 1;
     // Shift, while there is somewhere to be, a blow is not being held, and there is wind to spend
     let run = 1;
     if (s.sprinting && (mx || my) && !this.swing && !this.wind && this.stam > 0) {
@@ -1842,6 +1878,36 @@ export class Player extends Mover {
     if (w.moves.includes(want)) w.dir = want;
   }
 
+  /** the guard, while the right button is held: which way it is held, and the mouse that chose it */
+  guard: { dir: AttackDir; dx: number; dy: number } | null = null;
+
+  /** Raise the guard. It starts where a blow would and follows the mouse the same way. */
+  raiseGuard(): void { if (!this.guard) this.guard = { dir: 'right', dx: 0, dy: 0 }; }
+  dropGuard(): void { this.guard = null; }
+  /** The mouse while the guard is up: it picks the side the same way a blow is picked. */
+  aimGuard(dx: number, dy: number): void {
+    const g = this.guard;
+    if (!g) return;
+    const cap = DUEL.flick * 3;
+    g.dx = Math.max(-cap, Math.min(cap, g.dx + dx));
+    g.dy = Math.max(-cap, Math.min(cap, g.dy + dy));
+    if (Math.abs(g.dx) < DUEL.flick && Math.abs(g.dy) < DUEL.flick) return;
+    g.dir = Math.abs(g.dx) >= Math.abs(g.dy) ? (g.dx < 0 ? 'left' : 'right') : (g.dy < 0 ? 'up' : 'down');
+  }
+
+  /**
+   * A blow turned: the guard has to be up, held the way the blow comes in, the striker has to be in
+   * front, and there has to be the wind to take it. Nothing random about it — unlike the shield's own
+   * chance, which every other body still lives by.
+   */
+  private turns(by: Mover | undefined, dir: AttackDir | null | undefined): boolean {
+    const g = this.guard;
+    if (!g || !dir || g.dir !== dir || !by) return false;
+    const dx = by.x - this.x, dy = by.y - this.y, d = Math.hypot(dx, dy) || 1;
+    if ((dx / d) * this.facing.x + (dy / d) * this.facing.y < 0.1) return false; // not from behind
+    return this.spend(DUEL.block);
+  }
+
   /** Let the blow go, toward `aim`. Returns the blow struck, or null if there was nothing to spend. */
   releaseWind(aim: { x: number; y: number }): AttackDir | null {
     const w = this.wind;
@@ -1850,6 +1916,7 @@ export class Player extends Mover {
     if (!this.spend(ATTACK[w.dir].stam)) return null;
     const dx = aim.x - this.x, dy = aim.y - this.y, len = Math.hypot(dx, dy) || 1;
     this.beginSwing(0, w.dir, dx / len, dy / len);
+    this.chambered = 0;
     return w.dir;
   }
 
