@@ -12,6 +12,7 @@ import { Fx3d } from './fx3d';
 import { skyAt } from './sky';
 import { updateFow, setFowOn } from './fow';
 import { Room3d } from './room';
+import { Dome } from './dome';
 import { MODELS, loadModels } from './assets';
 import { propKeys, characterKeys } from './registry';
 import { KIT_PIECES, KIT_PROPS } from './kit';
@@ -51,6 +52,7 @@ export class View {
   /** a few lamps lent to whichever hearths, pots and fires are nearest the camera */
   private lamps: THREE.PointLight[] = [];
   private room: Room3d;
+  private dome = new Dome();
   private fowRevision = -1;
   private fowEnabled: boolean | null = null;
   /** the model revision the world was last built with, and when it last changed (rebuilds wait for a quiet moment) */
@@ -99,7 +101,7 @@ export class View {
     this.sun.shadow.mapSize.set(2048, 2048);
     const sc = this.sun.shadow.camera; sc.left = -24; sc.right = 24; sc.top = 24; sc.bottom = -24; sc.near = 1; sc.far = 90;
     this.sun.shadow.bias = -0.002;
-    this.world.add(this.hemi, this.sun, this.sun.target, this.torch);
+    this.world.add(this.hemi, this.sun, this.sun.target, this.torch, this.dome.mesh);
     for (let i = 0; i < 6; i++) { const l = new THREE.PointLight(0xff9a50, 0, 10, 1.3); this.lamps.push(l); this.world.add(l); }
     this.terrain = new Terrain(scene);
     this.room = new Room3d(scene);
@@ -394,6 +396,7 @@ export class View {
     // nothing past the fog is drawn at all
     if (Math.abs(this.camera.far - (fog.far + 4)) > 0.5) { this.camera.far = fog.far + 4; this.camera.updateProjectionMatrix(); }
     this.renderer.setClearColor(sky.sky);
+    this.dome.sync(this.camera, sky.sky, this.camera.far);
     this.hemi.color.setHex(sky.amb); this.hemi.intensity = sky.ambI * 2.2;
     this.sun.color.setHex(sky.sun); this.sun.intensity = sky.sunI * 1.6;
     const arc = sky.arc;
